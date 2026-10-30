@@ -1,0 +1,40 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*
+
+# Tauri
+*/target/*
+*/gen/schemas
+
+# Allow the release executable to be synced.
+# Git will not re-include a file inside a directory ignored with a trailing slash,
+# so the release directory stays visible and only this binary is kept.
+!src-tauri/target/release/
+src-tauri/target/release/*
+!src-tauri/target/release/ce-browser.exe

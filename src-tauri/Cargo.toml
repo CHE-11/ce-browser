@@ -1,0 +1,45 @@
+[package]
+name = "ce-browser"
+version = "0.1.0"
+description = "Tabbed WebView2 browser"
+authors = ["you"]
+edition = "2024"
+
+[lib]
+name = "ce_browser_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.22"
+image = { version = "0.25.9", default-features = false, features = ["png", "jpeg", "gif", "bmp", "ico"] }
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+serde_json = "1"
+tauri = { version = "2", features = ["image-ico", "image-png", "devtools", "unstable"] }
+tauri-plugin-dialog = "2"
+url = "2"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+# webview2-com and windows must match the versions wry is built against, or the
+# WebView2 interface types will not line up with `PlatformWebview::controller()`.
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+windows-core = "0.61"
+
+[profile.release]
+panic = "abort"
+strip = true

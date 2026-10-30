@@ -1,0 +1,27 @@
+---
+description: ce-browser product map, stack, and the frontend-to-Rust IPC boundary.
+alwaysApply: true
+---
+
+# Project
+
+Windows-only desktop browser built on Tauri 2 and WebView2. One native window (`main`) holds several webviews:
+
+- `ui`: the React browser UI (tab strip, address bar, bookmarks bar). It fills the window behind the page views.
+- `tab-<id>`: one child webview per tab. Remote sites match no capability and cannot call `invoke`.
+- `popup`: a short-lived webview for menus, the downloads panel, the bookmark editor, omnibox suggestions and extension popups. Native webviews draw above `ui`, so anything that overlaps page content must be a popup.
+- `ce://` pages (`newtab`, `bookmarks`, `downloads`, `settings`, `extensions`) are the React app loaded in a tab at `#/<page>`.
+
+All webviews share one WebView2 data directory so cookies, logins and extensions are shared.
+
+- Frontend: `frontend/` — React 19, TypeScript, Tailwind 4, Vite 8. The `@` alias is `frontend/src`.
+- Backend: `src-tauri/` — Rust edition 2024, Tauri 2 with the `unstable` multi-webview feature. Commands are registered in `src-tauri/src/lib.rs`. WebView2 COM calls go through `webview2-com` inside `with_webview`, which runs on the main thread.
+- Shared IPC types: `types/browser.ts`. Do not put bridge types under `frontend/src` or inside the Rust crate.
+- Frontend wrappers: `frontend/src/lib/browser-client.ts`. Components call those functions, not `invoke` or `listen` directly.
+
+```ts
+// frontend/src/lib/browser-client.ts
+export function createTab(url?: string, background = false) {
+  return invoke<number>("create_tab", { url, background });
+}
+```

@@ -1,0 +1,13 @@
+---
+description: ce-browser is a native Tauri app. Do not open or verify it in a browser.
+alwaysApply: true
+---
+
+# Native runtime
+
+ce-browser is a Tauri 2 + Vite desktop app. The webviews load `http://localhost:1420`, but that URL is not a usable app. `@tauri-apps/api` (`invoke`, events, dialog) only exists inside the native window.
+
+- Run from the repo root with `pnpm tauri dev` (VS Code task **Run Dev**).
+- `pnpm dev` only starts the Vite server. Use it when Tauri is already launching the frontend. It does not open the app.
+- Do not open the Vite URL, use browser tools, or run `vite preview` to view or verify the UI.
+- Package manager is pnpm. Windows build: `pnpm build:exe`. There is no macOS build: tabs, downloads and extensions use WebView2 APIs.

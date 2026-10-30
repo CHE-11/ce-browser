@@ -1,0 +1,25 @@
+---
+description: React and TypeScript conventions for the ce-browser frontend.
+globs: frontend/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Frontend
+
+- Components live in `frontend/src/components/[ComponentName].tsx`.
+- Pages live in `frontend/src/pages/[PageName].page.tsx` and set `document.title`. `main.tsx` picks the page from `location.hash`: no hash is the browser UI, `#/popup/<kind>` is a popup, `#/<page>` is a `ce://` page.
+- Every HTML element gets an `id` as its first attribute.
+- Style with Tailwind. Merge classes with `cn()` from `frontend/src/lib/cn.ts`.
+- The browser UI view sits behind the page views. Menus or panels that would overlap the page open through `openPopup` instead of rendering in place.
+
+```tsx
+export function DownloadsPage() {
+  useEffect(() => {
+    document.title = "Downloads";
+  }, []);
+
+  return <main id="downloads-page">...</main>;
+}
+```
+
+A new IPC call needs three pieces: a Rust command, a camelCase type in `types/browser.ts`, and a wrapper in `frontend/src/lib/browser-client.ts`.

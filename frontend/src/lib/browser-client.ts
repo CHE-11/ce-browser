@@ -1,0 +1,511 @@
+import { invoke } from "@tauri-apps/api/core";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import type {
+  BookmarkNode,
+  BookmarkTree,
+  BrowserCommand,
+  BrowserProfile,
+  BrowserSettings,
+  ProfileIconChoice,
+  DownloadItem,
+  HistoryItem,
+  SyncStatus,
+  ExtensionInfo,
+  OmniboxState,
+  OmniboxSuggestion,
+  PopupChange,
+  PopupRequest,
+  TabsSnapshot,
+  UserStyles,
+} from "../../../types/browser";
+
+// Tabs
+
+export function listTabs() {
+  return invoke<TabsSnapshot>("list_tabs");
+}
+
+export function createTab(url?: string, background = false, index?: number) {
+  return invoke<number>("create_tab", { url, background, index });
+}
+
+export function closeTab(id: number) {
+  return invoke<void>("close_tab", { id });
+}
+
+export function closeSelectedTabs() {
+  return invoke<void>("close_selected_tabs");
+}
+
+export function toggleTabSelection(id: number) {
+  return invoke<void>("toggle_tab_selection", { id });
+}
+
+export function selectTabRange(id: number) {
+  return invoke<void>("select_tab_range", { id });
+}
+
+export function closeOtherTabs(id: number) {
+  return invoke<void>("close_other_tabs", { id });
+}
+
+export function closeTabsToRight(id: number) {
+  return invoke<void>("close_tabs_to_right", { id });
+}
+
+export function activateTab(id: number) {
+  return invoke<void>("activate_tab", { id });
+}
+
+export function navigate(id: number, input: string) {
+  return invoke<void>("navigate", { id, input });
+}
+
+export function goBack(id: number) {
+  return invoke<void>("go_back", { id });
+}
+
+export function goForward(id: number) {
+  return invoke<void>("go_forward", { id });
+}
+
+export function reload(id: number) {
+  return invoke<void>("reload", { id });
+}
+
+export function clearSiteCache(id: number) {
+  return invoke<void>("clear_site_cache", { id });
+}
+
+export function stop(id: number) {
+  return invoke<void>("stop", { id });
+}
+
+export function moveTab(id: number, index: number) {
+  return invoke<void>("move_tab", { id, index });
+}
+
+export function pinTab(id: number) {
+  return invoke<void>("pin_tab", { id });
+}
+
+export function unpinTab(id: number) {
+  return invoke<void>("unpin_tab", { id });
+}
+
+export function duplicateTab(id: number) {
+  return invoke<number>("duplicate_tab", { id });
+}
+
+export function reopenClosedTab() {
+  return invoke<number | null>("reopen_closed_tab");
+}
+
+export function setUiHeight(height: number) {
+  return invoke<void>("set_ui_height", { height });
+}
+
+export function zoomTab(id: number, change: "in" | "out" | "reset") {
+  return invoke<number>("zoom_tab", { id, change });
+}
+
+export function findInPage(id: number, query: string, backwards = false) {
+  return invoke<boolean>("find_in_page", { id, query, backwards });
+}
+
+export function clearFind(id: number) {
+  return invoke<void>("clear_find", { id });
+}
+
+export function openDevtools(id: number) {
+  return invoke<void>("open_devtools", { id });
+}
+
+export function onTabsChanged(handler: (snapshot: TabsSnapshot) => void): Promise<UnlistenFn> {
+  return listen<TabsSnapshot>("tabs-changed", (event) => handler(event.payload));
+}
+
+export function onBrowserCommand(handler: (command: BrowserCommand) => void): Promise<UnlistenFn> {
+  return listen<BrowserCommand>("browser-command", (event) => handler(event.payload));
+}
+
+// Popups
+
+export function openPopup(request: PopupRequest) {
+  return invoke<boolean>("open_popup", { request: { focus: true, params: "", ...request } });
+}
+
+export function closePopup() {
+  return invoke<void>("close_popup");
+}
+
+export function resizePopup(height: number, width?: number) {
+  return invoke<void>("resize_popup", { height, width });
+}
+
+export function onPopupChanged(handler: (change: PopupChange) => void): Promise<UnlistenFn> {
+  return listen<PopupChange>("popup-changed", (event) => handler(event.payload));
+}
+
+/** Opens a popup anchored under `element`, right-aligned when `align` is `end`. */
+export function openPopupBelow(
+  element: HTMLElement,
+  request: Omit<PopupRequest, "x" | "y">,
+  align: "start" | "end" = "end",
+) {
+  const rect = element.getBoundingClientRect();
+  const x = align === "end" ? rect.right - request.width : rect.left;
+  return openPopup({ ...request, x, y: rect.bottom + 4 });
+}
+
+export function sendOmniboxState(state: OmniboxState) {
+  return emit("omnibox-state", state);
+}
+
+export function onOmniboxState(handler: (state: OmniboxState) => void): Promise<UnlistenFn> {
+  return listen<OmniboxState>("omnibox-state", (event) => handler(event.payload));
+}
+
+export function sendOmniboxReady() {
+  return emit("omnibox-ready");
+}
+
+export function onOmniboxReady(handler: () => void): Promise<UnlistenFn> {
+  return listen("omnibox-ready", () => handler());
+}
+
+export function sendOmniboxPick(suggestion: OmniboxSuggestion) {
+  return emit("omnibox-pick", suggestion);
+}
+
+export function onOmniboxPick(handler: (suggestion: OmniboxSuggestion) => void): Promise<UnlistenFn> {
+  return listen<OmniboxSuggestion>("omnibox-pick", (event) => handler(event.payload));
+}
+
+// Bookmarks
+
+export function listBookmarks() {
+  return invoke<BookmarkTree>("list_bookmarks");
+}
+
+export function addBookmark(
+  parentId: string,
+  title: string,
+  url: string | null,
+  index?: number,
+  separator = false,
+) {
+  return invoke<BookmarkNode>("add_bookmark", { parentId, title, url, index, separator });
+}
+
+/** Maps a click inside this webview to logical pixels in the browser window. */
+export async function windowPoint(clientX: number, clientY: number) {
+  try {
+    const webview = getCurrentWebview();
+    const appWindow = getCurrentWindow();
+    const [webviewPos, windowPos, scale] = await Promise.all([
+      webview.position(),
+      appWindow.innerPosition(),
+      appWindow.scaleFactor(),
+    ]);
+    return {
+      x: (webviewPos.x - windowPos.x) / scale + clientX,
+      y: (webviewPos.y - windowPos.y) / scale + clientY,
+    };
+  } catch {
+    return { x: clientX, y: clientY };
+  }
+}
+
+export function updateBookmark(id: string, title: string, url: string | null) {
+  return invoke<void>("update_bookmark", { id, title, url });
+}
+
+export function moveBookmark(id: string, parentId: string, index?: number) {
+  return invoke<void>("move_bookmark", { id, parentId, index });
+}
+
+export function deleteBookmark(id: string) {
+  return invoke<void>("delete_bookmark", { id });
+}
+
+export function findBookmark(url: string) {
+  return invoke<BookmarkNode | null>("find_bookmark", { url });
+}
+
+export async function importBookmarksHtml() {
+  const path = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Bookmark file", extensions: ["html", "htm"] }],
+  });
+  if (typeof path !== "string") {
+    return null;
+  }
+  return invoke<number>("import_bookmarks_html", { path });
+}
+
+export async function exportBookmarksHtml() {
+  const path = await save({
+    defaultPath: "bookmarks.html",
+    filters: [{ name: "Bookmark file", extensions: ["html"] }],
+  });
+  if (!path) {
+    return false;
+  }
+  await invoke<void>("export_bookmarks_html", { path });
+  return true;
+}
+
+export function onBookmarksChanged(handler: (tree: BookmarkTree) => void): Promise<UnlistenFn> {
+  return listen<BookmarkTree>("bookmarks-changed", (event) => handler(event.payload));
+}
+
+// Downloads
+
+export function listDownloads() {
+  return invoke<DownloadItem[]>("list_downloads");
+}
+
+export function pauseDownload(id: number) {
+  return invoke<void>("pause_download", { id });
+}
+
+export function resumeDownload(id: number) {
+  return invoke<void>("resume_download", { id });
+}
+
+export function cancelDownload(id: number) {
+  return invoke<void>("cancel_download", { id });
+}
+
+export function openDownload(id: number) {
+  return invoke<void>("open_download", { id });
+}
+
+export function showDownloadInFolder(id: number) {
+  return invoke<void>("show_download_in_folder", { id });
+}
+
+export function removeDownload(id: number) {
+  return invoke<void>("remove_download", { id });
+}
+
+export function clearDownloads() {
+  return invoke<void>("clear_downloads");
+}
+
+export function onDownloadsChanged(handler: (items: DownloadItem[]) => void): Promise<UnlistenFn> {
+  return listen<DownloadItem[]>("downloads-changed", (event) => handler(event.payload));
+}
+
+export function onDownloadStarted(handler: () => void): Promise<UnlistenFn> {
+  return listen("download-started", () => handler());
+}
+
+// History
+
+export function listHistory() {
+  return invoke<HistoryItem[]>("list_history");
+}
+
+export function removeHistory(id: number) {
+  return invoke<void>("remove_history", { id });
+}
+
+export function clearHistory() {
+  return invoke<void>("clear_history");
+}
+
+export function onHistoryChanged(handler: (items: HistoryItem[]) => void): Promise<UnlistenFn> {
+  return listen<HistoryItem[]>("history-changed", (event) => handler(event.payload));
+}
+
+// Extensions
+
+export function listExtensions() {
+  return invoke<ExtensionInfo[]>("list_extensions");
+}
+
+export async function installExtensionFolder() {
+  const path = await open({ directory: true, multiple: false, title: "Choose an unpacked extension folder" });
+  if (typeof path !== "string") {
+    return null;
+  }
+  return invoke<ExtensionInfo>("install_extension_folder", { path });
+}
+
+export async function installExtensionZip() {
+  const path = await open({
+    multiple: false,
+    directory: false,
+    title: "Choose an extension .zip or .crx",
+    filters: [{ name: "Extension package", extensions: ["zip", "crx"] }],
+  });
+  if (typeof path !== "string") {
+    return null;
+  }
+  return invoke<ExtensionInfo>("install_extension_zip", { path });
+}
+
+export function setExtensionEnabled(id: string, enabled: boolean) {
+  return invoke<void>("set_extension_enabled", { id, enabled });
+}
+
+export function removeExtension(id: string) {
+  return invoke<void>("remove_extension", { id });
+}
+
+export function openExtensionOptions(id: string) {
+  return invoke<number>("open_extension_options", { id });
+}
+
+export function onExtensionsChanged(handler: (extensions: ExtensionInfo[]) => void): Promise<UnlistenFn> {
+  return listen<ExtensionInfo[]>("extensions-changed", (event) => handler(event.payload));
+}
+
+// Settings
+
+export function getSettings() {
+  return invoke<BrowserSettings>("get_settings");
+}
+
+export function saveSettings(settings: BrowserSettings) {
+  return invoke<BrowserSettings>("save_settings", { settings });
+}
+
+export function defaultDownloadDir() {
+  return invoke<string>("default_download_dir");
+}
+
+export async function chooseFolder(title: string, defaultPath?: string) {
+  const path = await open({ directory: true, multiple: false, title, defaultPath });
+  return typeof path === "string" ? path : null;
+}
+
+export function onSettingsChanged(handler: (settings: BrowserSettings) => void): Promise<UnlistenFn> {
+  return listen<BrowserSettings>("settings-changed", (event) => handler(event.payload));
+}
+
+export function getUserStyles() {
+  return invoke<UserStyles>("get_user_styles");
+}
+
+export function saveUserStyles(css: string) {
+  return invoke<UserStyles>("save_user_styles", { css });
+}
+
+export function reloadUserStyles() {
+  return invoke<UserStyles>("reload_user_styles");
+}
+
+export function showUserStyles() {
+  return invoke<void>("show_user_styles");
+}
+
+export function showSyncFolder() {
+  return invoke<void>("show_sync_folder");
+}
+
+export function defaultUserStyles() {
+  return invoke<string>("default_user_styles");
+}
+
+export function onUserStylesChanged(handler: (styles: UserStyles) => void): Promise<UnlistenFn> {
+  return listen<UserStyles>("user-styles-changed", (event) => handler(event.payload));
+}
+
+export function syncStatus() {
+  return invoke<SyncStatus>("sync_status");
+}
+
+export function createSyncFolder(path: string) {
+  return invoke<SyncStatus>("create_sync_folder", { path });
+}
+
+export function selectSyncFolder(path: string) {
+  return invoke<SyncStatus>("select_sync_folder", { path });
+}
+
+export function clearSyncFolder() {
+  return invoke<SyncStatus>("clear_sync_folder");
+}
+
+export function onSyncStatus(handler: (status: SyncStatus) => void): Promise<UnlistenFn> {
+  return listen<SyncStatus>("sync-status", (event) => handler(event.payload));
+}
+
+export function pickSyncFolder(title: string) {
+  return chooseFolder(title);
+}
+
+export function listProfiles() {
+  return invoke<BrowserProfile[]>("list_profiles");
+}
+
+export function createProfile(name: string) {
+  return invoke<BrowserProfile[]>("create_profile", { name });
+}
+
+export function openProfile(id: string) {
+  return invoke<void>("open_profile", { id });
+}
+
+export function installProfileShortcut(id: string) {
+  return invoke<BrowserProfile[]>("install_profile_shortcut", { id });
+}
+
+export function deleteProfile(id: string) {
+  return invoke<BrowserProfile[]>("delete_profile", { id });
+}
+
+export function listProfileIcons() {
+  return invoke<ProfileIconChoice[]>("list_profile_icons");
+}
+
+export function setProfileIcon(id: string, iconId: string, path?: string) {
+  return invoke<BrowserProfile[]>("set_profile_icon", { id, iconId, path });
+}
+
+export function pinProfileTaskbar(id: string) {
+  return invoke<BrowserProfile[]>("pin_profile_taskbar", { id });
+}
+
+export function unpinProfileTaskbar(id: string) {
+  return invoke<BrowserProfile[]>("unpin_profile_taskbar", { id });
+}
+
+export async function pickProfileIcon() {
+  const path = await open({
+    title: "Choose an icon",
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Image", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "ico"] }],
+  });
+  return typeof path === "string" ? path : null;
+}
+
+// Window
+
+export function minimizeWindow() {
+  return getCurrentWindow().minimize();
+}
+
+export function toggleMaximizeWindow() {
+  return getCurrentWindow().toggleMaximize();
+}
+
+export function closeWindow() {
+  return getCurrentWindow().close();
+}
+
+export function isWindowMaximized() {
+  return getCurrentWindow().isMaximized();
+}
+
+export function onWindowResized(handler: () => void) {
+  return getCurrentWindow().onResized(() => handler());
+}

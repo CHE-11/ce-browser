@@ -1,0 +1,476 @@
+@import "tailwindcss";
+@import "./themes.css";
+
+@theme inline {
+  --color-zinc-50: var(--app-zinc-50);
+  --color-zinc-100: var(--app-zinc-100);
+  --color-zinc-200: var(--app-zinc-200);
+  --color-zinc-300: var(--app-zinc-300);
+  --color-zinc-400: var(--app-zinc-400);
+  --color-zinc-500: var(--app-zinc-500);
+  --color-zinc-600: var(--app-zinc-600);
+  --color-zinc-700: var(--app-zinc-700);
+  --color-zinc-800: var(--app-zinc-800);
+  --color-zinc-900: var(--app-zinc-900);
+  --color-zinc-950: var(--app-zinc-950);
+  --color-sky-300: var(--app-sky-300);
+  --color-sky-400: var(--app-sky-400);
+  --color-sky-500: var(--app-sky-500);
+  --color-sky-600: var(--app-sky-600);
+  --color-sky-800: var(--app-sky-800);
+  --color-sky-950: var(--app-sky-950);
+  --color-violet-100: var(--app-violet-100);
+  --color-violet-200: var(--app-violet-200);
+  --color-violet-300: var(--app-violet-300);
+  --color-violet-500: var(--app-violet-500);
+  --color-violet-600: var(--app-violet-600);
+  --color-violet-700: var(--app-violet-700);
+  --color-violet-800: var(--app-violet-800);
+  --color-violet-900: var(--app-violet-900);
+  --color-violet-950: var(--app-violet-950);
+  --color-emerald-300: var(--app-emerald-300);
+  --color-emerald-400: var(--app-emerald-400);
+  --color-emerald-500: var(--app-emerald-500);
+  --color-emerald-600: var(--app-emerald-600);
+  --color-emerald-950: var(--app-emerald-950);
+  --color-amber-200: var(--app-amber-200);
+  --color-amber-300: var(--app-amber-300);
+  --color-amber-400: var(--app-amber-400);
+  --color-amber-900: var(--app-amber-900);
+  --color-amber-950: var(--app-amber-950);
+  --color-red-300: var(--app-red-300);
+  --color-red-400: var(--app-red-400);
+  --color-red-500: var(--app-red-500);
+  --color-red-600: var(--app-red-600);
+  --color-red-900: var(--app-red-900);
+  --color-red-950: var(--app-red-950);
+}
+
+/* Zinc dark is the default and matches Tailwind's palette. Shade numbers are roles: 950 is the page, 100 is primary text. */
+:root {
+  color-scheme: dark;
+  --app-zinc-50: oklch(98.5% 0 none);
+  --app-zinc-100: oklch(96.7% 0.001 286.375);
+  --app-zinc-200: oklch(92% 0.004 286.32);
+  --app-zinc-300: oklch(87.1% 0.006 286.286);
+  --app-zinc-400: oklch(70.5% 0.015 286.067);
+  --app-zinc-500: oklch(55.2% 0.016 285.938);
+  --app-zinc-600: oklch(44.2% 0.017 285.786);
+  --app-zinc-700: oklch(37% 0.013 285.805);
+  --app-zinc-800: oklch(27.4% 0.006 286.033);
+  --app-zinc-900: oklch(21% 0.006 285.885);
+  --app-zinc-950: oklch(14.1% 0.005 285.823);
+  --app-sky-300: oklch(82.8% 0.111 230.318);
+  --app-sky-400: oklch(74.6% 0.16 232.661);
+  --app-sky-500: oklch(68.5% 0.169 237.323);
+  --app-sky-600: oklch(58.8% 0.158 241.966);
+  --app-sky-800: oklch(44.3% 0.11 240.79);
+  --app-sky-950: oklch(29.3% 0.066 243.157);
+  --app-violet-100: oklch(94.3% 0.029 294.588);
+  --app-violet-200: oklch(89.4% 0.057 293.283);
+  --app-violet-300: oklch(81.1% 0.111 293.571);
+  --app-violet-500: oklch(60.6% 0.25 292.717);
+  --app-violet-600: oklch(54.1% 0.281 293.009);
+  --app-violet-700: oklch(49.1% 0.27 292.581);
+  --app-violet-800: oklch(43.2% 0.232 292.759);
+  --app-violet-900: oklch(38% 0.189 293.745);
+  --app-violet-950: oklch(28.3% 0.141 291.089);
+  --app-emerald-300: oklch(84.5% 0.143 164.978);
+  --app-emerald-400: oklch(76.5% 0.177 163.223);
+  --app-emerald-500: oklch(69.6% 0.17 162.48);
+  --app-emerald-600: oklch(59.6% 0.145 163.225);
+  --app-emerald-950: oklch(26.2% 0.051 172.552);
+  --app-amber-200: oklch(92.4% 0.12 95.746);
+  --app-amber-300: oklch(87.9% 0.169 91.605);
+  --app-amber-400: oklch(82.8% 0.189 84.429);
+  --app-amber-900: oklch(41.4% 0.112 45.904);
+  --app-amber-950: oklch(27.9% 0.077 45.635);
+  --app-red-300: oklch(80.8% 0.114 19.571);
+  --app-red-400: oklch(70.4% 0.191 22.216);
+  --app-red-500: oklch(63.7% 0.237 25.331);
+  --app-red-600: oklch(57.7% 0.245 27.325);
+  --app-red-900: oklch(39.6% 0.141 25.723);
+  --app-red-950: oklch(25.8% 0.092 26.042);
+}
+
+html[data-mode="light"] {
+  color-scheme: light;
+}
+
+html[data-theme="zinc"][data-mode="light"] {
+  --app-zinc-50: oklch(14.1% 0.005 285.823);
+  --app-zinc-100: oklch(21% 0.006 285.885);
+  --app-zinc-200: oklch(27.4% 0.006 286.033);
+  --app-zinc-300: oklch(37% 0.013 285.805);
+  --app-zinc-400: oklch(44.2% 0.017 285.786);
+  --app-zinc-500: oklch(44.2% 0.017 285.786);
+  --app-zinc-600: oklch(55.2% 0.016 285.938);
+  --app-zinc-700: oklch(87.1% 0.006 286.286);
+  --app-zinc-800: oklch(92% 0.004 286.32);
+  --app-zinc-900: oklch(96.7% 0.001 286.375);
+  --app-zinc-950: oklch(98.5% 0 none);
+  --app-sky-300: oklch(44.3% 0.11 240.79);
+  --app-sky-400: oklch(50% 0.134 242.749);
+  --app-sky-800: oklch(82.8% 0.111 230.318);
+  --app-sky-950: oklch(95.1% 0.026 236.824);
+  --app-violet-100: oklch(38% 0.189 293.745);
+  --app-violet-200: oklch(43.2% 0.232 292.759);
+  --app-violet-300: oklch(49.1% 0.27 292.581);
+  --app-violet-700: oklch(70.2% 0.183 293.541);
+  --app-violet-800: oklch(81.1% 0.111 293.571);
+  --app-violet-900: oklch(89.4% 0.057 293.283);
+  --app-violet-950: oklch(94.3% 0.029 294.588);
+  --app-emerald-300: oklch(59.6% 0.145 163.225);
+  --app-emerald-400: oklch(50.8% 0.118 165.612);
+  --app-emerald-950: oklch(95% 0.052 163.051);
+  --app-amber-200: oklch(47.3% 0.137 46.201);
+  --app-amber-300: oklch(55.5% 0.163 48.998);
+  --app-amber-400: oklch(66.6% 0.179 58.318);
+  --app-amber-900: oklch(87.9% 0.169 91.605);
+  --app-amber-950: oklch(96.2% 0.059 95.617);
+  --app-red-300: oklch(44.4% 0.177 26.899);
+  --app-red-400: oklch(50.5% 0.213 27.518);
+  --app-red-900: oklch(80.8% 0.114 19.571);
+  --app-red-950: oklch(93.6% 0.032 17.717);
+}
+
+html[data-theme="nord"][data-mode="dark"] {
+  --app-zinc-50: #ffffff;
+  --app-zinc-100: #eceff4;
+  --app-zinc-200: #eceff4;
+  --app-zinc-300: #e5e9f0;
+  --app-zinc-400: #d8dee9;
+  --app-zinc-500: #8b97ab;
+  --app-zinc-600: #616e88;
+  --app-zinc-700: #4c566a;
+  --app-zinc-800: #434c5e;
+  --app-zinc-900: #3b4252;
+  --app-zinc-950: #2e3440;
+  --app-sky-300: #8fbcbb;
+  --app-sky-400: #88c0d0;
+  --app-sky-500: #6e90ba;
+  --app-sky-600: #5e81ac;
+  --app-sky-800: #5e81ac;
+  --app-sky-950: #2e3b50;
+  --app-violet-100: #e8d4e0;
+  --app-violet-200: #d4b8c8;
+  --app-violet-300: #b48ead;
+  --app-violet-500: #b48ead;
+  --app-violet-600: #7a5678;
+  --app-violet-700: #8a6e8c;
+  --app-violet-800: #6e5870;
+  --app-violet-900: #4a3c50;
+  --app-violet-950: #3b3040;
+  --app-emerald-300: #b5cba0;
+  --app-emerald-400: #a3be8c;
+  --app-emerald-500: #7a9a64;
+  --app-emerald-600: #5f7a4e;
+  --app-emerald-950: #2c3a2e;
+  --app-amber-200: #f0d9a8;
+  --app-amber-300: #ebcb8b;
+  --app-amber-400: #ebcb8b;
+  --app-amber-900: #6b5e3a;
+  --app-amber-950: #3d3828;
+  --app-red-300: #d08770;
+  --app-red-400: #bf616a;
+  --app-red-500: #bf616a;
+  --app-red-600: #a34e56;
+  --app-red-900: #7a4248;
+  --app-red-950: #3d2a2e;
+}
+
+html[data-theme="nord"][data-mode="light"] {
+  --app-zinc-50: #1c212b;
+  --app-zinc-100: #2e3440;
+  --app-zinc-200: #2e3440;
+  --app-zinc-300: #3b4252;
+  --app-zinc-400: #434c5e;
+  --app-zinc-500: #4c566a;
+  --app-zinc-600: #a7b3c6;
+  --app-zinc-700: #c5cedb;
+  --app-zinc-800: #d8dee9;
+  --app-zinc-900: #e5e9f0;
+  --app-zinc-950: #eceff4;
+  --app-sky-300: #4c6a94;
+  --app-sky-400: #5e81ac;
+  --app-sky-500: #4c6a94;
+  --app-sky-600: #5e81ac;
+  --app-sky-800: #81a1c1;
+  --app-sky-950: #d8e4f0;
+  --app-violet-100: #4a304e;
+  --app-violet-200: #5c4060;
+  --app-violet-300: #6e4e72;
+  --app-violet-500: #8f6b8a;
+  --app-violet-600: #7a5678;
+  --app-violet-700: #a888a8;
+  --app-violet-800: #c4a8c4;
+  --app-violet-900: #e0d4e6;
+  --app-violet-950: #ede4f0;
+  --app-emerald-300: #3e5530;
+  --app-emerald-400: #4e6a3e;
+  --app-emerald-500: #6e8b5a;
+  --app-emerald-600: #5f7a4e;
+  --app-emerald-950: #e4ede0;
+  --app-amber-200: #6a5018;
+  --app-amber-300: #7a5e20;
+  --app-amber-400: #8a6d2f;
+  --app-amber-900: #e4d09a;
+  --app-amber-950: #f5edd4;
+  --app-red-300: #7a323a;
+  --app-red-400: #8f3e46;
+  --app-red-500: #bf616a;
+  --app-red-600: #a34e56;
+  --app-red-900: #e4b8bc;
+  --app-red-950: #f3e4e6;
+}
+
+html[data-theme="catppuccin"][data-mode="dark"] {
+  --app-zinc-50: #f5e0dc;
+  --app-zinc-100: #cdd6f4;
+  --app-zinc-200: #cdd6f4;
+  --app-zinc-300: #bac2de;
+  --app-zinc-400: #a6adc8;
+  --app-zinc-500: #6c7086;
+  --app-zinc-600: #585b70;
+  --app-zinc-700: #45475a;
+  --app-zinc-800: #313244;
+  --app-zinc-900: #1e1e2e;
+  --app-zinc-950: #11111b;
+  --app-sky-300: #74c7ec;
+  --app-sky-400: #89b4fa;
+  --app-sky-500: #5c82c8;
+  --app-sky-600: #4a6fb5;
+  --app-sky-800: #3d5a8a;
+  --app-sky-950: #1e2a40;
+  --app-violet-100: #e8dcfc;
+  --app-violet-200: #dcc8fa;
+  --app-violet-300: #cba6f7;
+  --app-violet-500: #cba6f7;
+  --app-violet-600: #7c5cbf;
+  --app-violet-700: #8b74b0;
+  --app-violet-800: #6e5a90;
+  --app-violet-900: #3b3350;
+  --app-violet-950: #2a2438;
+  --app-emerald-300: #b8edb4;
+  --app-emerald-400: #a6e3a1;
+  --app-emerald-500: #6ba566;
+  --app-emerald-600: #5a8f55;
+  --app-emerald-950: #1e2e24;
+  --app-amber-200: #fbe8c4;
+  --app-amber-300: #f9e2af;
+  --app-amber-400: #f9e2af;
+  --app-amber-900: #6e6240;
+  --app-amber-950: #2e2a1e;
+  --app-red-300: #eba0ac;
+  --app-red-400: #f38ba8;
+  --app-red-500: #f38ba8;
+  --app-red-600: #c45a74;
+  --app-red-900: #7a4554;
+  --app-red-950: #2e1e24;
+}
+
+html[data-theme="catppuccin"][data-mode="light"] {
+  --app-zinc-50: #2a2c3a;
+  --app-zinc-100: #4c4f69;
+  --app-zinc-200: #4c4f69;
+  --app-zinc-300: #4c4f69;
+  --app-zinc-400: #5c5f77;
+  --app-zinc-500: #8c8fa1;
+  --app-zinc-600: #bcc0cc;
+  --app-zinc-700: #ccd0da;
+  --app-zinc-800: #dce0e8;
+  --app-zinc-900: #e6e9ef;
+  --app-zinc-950: #eff1f5;
+  --app-sky-300: #209fb5;
+  --app-sky-400: #1e66f5;
+  --app-sky-500: #1a58d6;
+  --app-sky-600: #1e66f5;
+  --app-sky-800: #7287fd;
+  --app-sky-950: #d6e3fb;
+  --app-violet-100: #4a188c;
+  --app-violet-200: #5c1eaa;
+  --app-violet-300: #7028c8;
+  --app-violet-500: #7b2fe0;
+  --app-violet-600: #8839ef;
+  --app-violet-700: #a878e4;
+  --app-violet-800: #c4a8ee;
+  --app-violet-900: #dccef4;
+  --app-violet-950: #e8ddf8;
+  --app-emerald-300: #246618;
+  --app-emerald-400: #2e7a1e;
+  --app-emerald-500: #348a22;
+  --app-emerald-600: #40a02b;
+  --app-emerald-950: #ddf3d8;
+  --app-amber-200: #7c4a08;
+  --app-amber-300: #9a5c0c;
+  --app-amber-400: #b86e10;
+  --app-amber-900: #f0d4a4;
+  --app-amber-950: #f8ebd4;
+  --app-red-300: #8a0a24;
+  --app-red-400: #a40c2c;
+  --app-red-500: #b80d32;
+  --app-red-600: #d20f39;
+  --app-red-900: #f0b8c2;
+  --app-red-950: #f8dde2;
+}
+
+html[data-theme="solarized"][data-mode="dark"] {
+  --app-zinc-50: #fdf6e3;
+  --app-zinc-100: #eee8d5;
+  --app-zinc-200: #c5d0d0;
+  --app-zinc-300: #93a1a1;
+  --app-zinc-400: #839496;
+  --app-zinc-500: #657b83;
+  --app-zinc-600: #586e75;
+  --app-zinc-700: #14535f;
+  --app-zinc-800: #0a4554;
+  --app-zinc-900: #073642;
+  --app-zinc-950: #002b36;
+  --app-sky-300: #4aa8e0;
+  --app-sky-400: #3a9fde;
+  --app-sky-500: #268bd2;
+  --app-sky-600: #1f74b0;
+  --app-sky-800: #1a6a9a;
+  --app-sky-950: #003848;
+  --app-violet-100: #c4c8ec;
+  --app-violet-200: #a8ace0;
+  --app-violet-300: #8a8ed4;
+  --app-violet-500: #6c71c4;
+  --app-violet-600: #565ba8;
+  --app-violet-700: #5c62a4;
+  --app-violet-800: #4a5088;
+  --app-violet-900: #2a3058;
+  --app-violet-950: #1a2040;
+  --app-emerald-300: #a8c010;
+  --app-emerald-400: #9bb300;
+  --app-emerald-500: #859900;
+  --app-emerald-600: #6a7a00;
+  --app-emerald-950: #1a2408;
+  --app-amber-200: #e0b84a;
+  --app-amber-300: #b58900;
+  --app-amber-400: #d4a017;
+  --app-amber-900: #6a5410;
+  --app-amber-950: #2a2208;
+  --app-red-300: #f08078;
+  --app-red-400: #e85a52;
+  --app-red-500: #dc322f;
+  --app-red-600: #c42c28;
+  --app-red-900: #7a2824;
+  --app-red-950: #2a1010;
+}
+
+html[data-theme="solarized"][data-mode="light"] {
+  --app-zinc-50: #00181d;
+  --app-zinc-100: #002b36;
+  --app-zinc-200: #002b36;
+  --app-zinc-300: #073642;
+  --app-zinc-400: #586e75;
+  --app-zinc-500: #657b83;
+  --app-zinc-600: #93a1a1;
+  --app-zinc-700: #d6cdb4;
+  --app-zinc-800: #e4dcc4;
+  --app-zinc-900: #eee8d5;
+  --app-zinc-950: #fdf6e3;
+  --app-sky-300: #1a5a84;
+  --app-sky-400: #1a6a9a;
+  --app-sky-500: #268bd2;
+  --app-sky-600: #1f74b0;
+  --app-sky-800: #268bd2;
+  --app-sky-950: #d6e8f2;
+  --app-violet-100: #2a2e58;
+  --app-violet-200: #3a3e78;
+  --app-violet-300: #4a4e98;
+  --app-violet-500: #6c71c4;
+  --app-violet-600: #565ba8;
+  --app-violet-700: #888ec8;
+  --app-violet-800: #b0b4dc;
+  --app-violet-900: #d4d4ec;
+  --app-violet-950: #e4e4f4;
+  --app-emerald-300: #4a5600;
+  --app-emerald-400: #5a6800;
+  --app-emerald-500: #859900;
+  --app-emerald-600: #6a7a00;
+  --app-emerald-950: #e8eec4;
+  --app-amber-200: #6a4c00;
+  --app-amber-300: #7a5a00;
+  --app-amber-400: #8a6800;
+  --app-amber-900: #e4d090;
+  --app-amber-950: #f4e8c4;
+  --app-red-300: #8c201c;
+  --app-red-400: #a82824;
+  --app-red-500: #dc322f;
+  --app-red-600: #c42c28;
+  --app-red-900: #e8c0b8;
+  --app-red-950: #f8e0dc;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  background: var(--app-zinc-950);
+  color: var(--app-zinc-100);
+}
+
+/* Popups are raised surfaces. The page color here would flash behind the menu while it mounts. */
+html[data-popup="true"],
+html[data-popup="true"] body {
+  background: var(--app-zinc-900);
+}
+
+#root {
+  height: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-zinc-500) transparent;
+  scrollbar-gutter: auto;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--app-zinc-500);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--app-zinc-400);
+}
+
+*::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

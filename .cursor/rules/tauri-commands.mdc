@@ -1,0 +1,21 @@
+---
+description: Rust Tauri command, serde, and WebView2 conventions.
+globs: src-tauri/**/*.rs
+alwaysApply: false
+---
+
+# Tauri commands
+
+- Command names are `snake_case`. Register each one in `generate_handler!` in `src-tauri/src/lib.rs`.
+- Structs that cross the bridge use `#[serde(rename_all = "camelCase")]`.
+- Return `Result<T, String>`.
+- Commands that create or move webviews are `async`. `Window::add_child` blocks on the main thread, and a synchronous command already runs there.
+- WebView2 COM objects are not `Send`. Touch them only inside `with_webview` or `run_on_main_thread`, and keep long-lived ones in a `thread_local!` on the main thread.
+- Browser state changes emit one event with the full snapshot (`tabs-changed`, `bookmarks-changed`, `downloads-changed`, `extensions-changed`, `settings-changed`).
+
+```rust
+#[tauri::command]
+async fn create_tab(app: AppHandle, url: Option<String>, background: bool) -> Result<u32, String> {
+    tabs::create_tab(&app, url, background, None)
+}
+```

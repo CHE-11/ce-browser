@@ -1,0 +1,24 @@
+---
+description: Persisted browser data must keep loading after schema changes and migrations.
+alwaysApply: true
+---
+
+# Settings compatibility
+
+Users already have a data folder (`%APPDATA%\com.ce.browser`). It holds `settings.json`, `session.json`, `bookmarks.json`, `downloads.json` and `extensions.json`. The WebView2 profile lives in `%LOCALAPPDATA%\com.ce.browser\profile`. A new build must open those files, keep every value the user already set, and apply defaults only for data the file does not contain.
+
+- Add a field with `#[serde(default)]` on the struct, plus a `Default` value. An older file that omits the key must still deserialize. Mirror the field in `types/browser.ts` and in the UI that reads it. Wire names stay `camelCase`.
+- Rename or move a field by still reading the old key (`#[serde(alias = "...")]` or an explicit load) and writing the new key. Do not make the user edit the file.
+- Change what a value means by mapping the old value on load. Retired or unknown values fall back to the current default (`BrowserSettings::normalize`). A bad value is not a reason to reject the file.
+- Removing a field must leave old files loadable. Do not add `deny_unknown_fields`.
+- Run a migration on read. The next save writes the current shape. Loading an already-current file must change nothing.
+- A file that fails to parse is copied to `<name>.json.bak` by `files::read_json` before defaults are used. Keep that behaviour for new stores.
+
+```rust
+#[derive(Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct BrowserSettings {
+    #[serde(alias = "searchProvider")]
+    pub search_engine: String,
+}
+```
