@@ -11,7 +11,11 @@ import type {
   BrowserSettings,
   ProfileIconChoice,
   DownloadItem,
+  ExtractedPage,
   HistoryItem,
+  PageCaptureResult,
+  PageToolRequest,
+  PdfOptions,
   SyncStatus,
   ExtensionInfo,
   OmniboxState,
@@ -86,6 +90,26 @@ export function stop(id: number) {
 
 export function moveTab(id: number, index: number) {
   return invoke<void>("move_tab", { id, index });
+}
+
+export function detachTab(id: number) {
+  return invoke<void>("detach_tab", { id });
+}
+
+/** Outer edge of this browser window in CSS pixels, for drag-out hit testing. */
+export async function windowOuterBounds() {
+  const appWindow = getCurrentWindow();
+  const [position, size, scale] = await Promise.all([
+    appWindow.outerPosition(),
+    appWindow.outerSize(),
+    appWindow.scaleFactor(),
+  ]);
+  return {
+    x: position.x / scale,
+    y: position.y / scale,
+    width: size.width / scale,
+    height: size.height / scale,
+  };
 }
 
 export function pinTab(id: number) {
@@ -183,6 +207,59 @@ export function sendOmniboxPick(suggestion: OmniboxSuggestion) {
 
 export function onOmniboxPick(handler: (suggestion: OmniboxSuggestion) => void): Promise<UnlistenFn> {
   return listen<OmniboxSuggestion>("omnibox-pick", (event) => handler(event.payload));
+}
+
+// Built-in page tools
+
+export function capturePagePng(id: number, fullPage: boolean, loadLazy: boolean, path: string) {
+  return invoke<PageCaptureResult>("capture_page_png", { id, fullPage, loadLazy, path });
+}
+
+export function copyPagePng(id: number, fullPage: boolean, loadLazy: boolean) {
+  return invoke<PageCaptureResult>("copy_page_png", { id, fullPage, loadLazy });
+}
+
+export function extractPage(id: number) {
+  return invoke<ExtractedPage>("extract_page", { id });
+}
+
+export function printTabToPdf(id: number, options: PdfOptions, path: string) {
+  return invoke<void>("print_tab_to_pdf", { id, options, path });
+}
+
+export function printHtmlToPdf(html: string, options: PdfOptions, path: string) {
+  return invoke<void>("print_html_to_pdf", { html, options, path });
+}
+
+export function printHtmlDialog(html: string) {
+  return invoke<void>("print_html_dialog", { html });
+}
+
+export function openSavedFile(path: string) {
+  return invoke<void>("open_saved_file", { path });
+}
+
+export function showSavedFile(path: string) {
+  return invoke<void>("show_saved_file", { path });
+}
+
+export function requestPageTool(request: PageToolRequest) {
+  return emit("page-tool-request", request);
+}
+
+export function onPageToolRequest(handler: (request: PageToolRequest) => void): Promise<UnlistenFn> {
+  return listen<PageToolRequest>("page-tool-request", (event) => handler(event.payload));
+}
+
+/** Label of the browser window this webview belongs to. */
+export function currentWindowLabel() {
+  return getCurrentWindow().label;
+}
+
+/** Asks where to save a file. Returns null when the dialog is cancelled. */
+export async function chooseSavePath(defaultPath: string, name: string, extensions: string[]) {
+  const path = await save({ defaultPath, filters: [{ name, extensions }] });
+  return path ?? null;
 }
 
 // Bookmarks

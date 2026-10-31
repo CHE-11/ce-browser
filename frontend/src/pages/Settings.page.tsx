@@ -22,11 +22,13 @@ import {
   pickProfileIcon,
   onSyncStatus,
   openProfile,
+  pinProfileTaskbar,
   pickSyncFolder,
   saveSettings,
   selectSyncFolder,
   setProfileIcon,
   syncStatus,
+  unpinProfileTaskbar,
 } from "../lib/browser-client";
 import { cn } from "../lib/cn";
 import { useSettings } from "../lib/use-browser";
@@ -38,6 +40,8 @@ const SEARCH_ENGINES: { id: SearchEngine; label: string }[] = [
   { id: "duckduckgo", label: "DuckDuckGo" },
   { id: "brave", label: "Brave Search" },
   { id: "startpage", label: "Startpage" },
+  { id: "kagi", label: "Kagi (no ads)" },
+  { id: "mojeek", label: "Mojeek (no ads)" },
   { id: "custom", label: "Custom" },
 ];
 
@@ -264,6 +268,25 @@ export function SettingsPage() {
                       Open
                     </Button>
                   ) : null}
+                  {profile.taskbar ? (
+                    <Button
+                      id={`settings-profile-${profile.id}-unpin`}
+                      size="sm"
+                      disabled={profileWorking}
+                      onClick={() => runProfiles(() => unpinProfileTaskbar(profile.id))}
+                    >
+                      Unpin
+                    </Button>
+                  ) : (
+                    <Button
+                      id={`settings-profile-${profile.id}-pin`}
+                      size="sm"
+                      disabled={profileWorking}
+                      onClick={() => runProfiles(() => pinProfileTaskbar(profile.id))}
+                    >
+                      Pin to taskbar
+                    </Button>
+                  )}
                   {!profile.startMenu ? (
                     <Button
                       id={`settings-profile-${profile.id}-shortcut`}
@@ -387,7 +410,11 @@ export function SettingsPage() {
         </Section>
 
         <Section id="settings-search" title="Search">
-          <Row id="settings-search-engine" label="Search engine" hint="Used when the address bar text is not a URL.">
+          <Row
+            id="settings-search-engine"
+            label="Search engine"
+            hint="Used when the address bar text is not a URL. Kagi and Mojeek do not show ads. Kagi needs an account."
+          >
             <select
               id="settings-search-engine-select"
               value={engine}
@@ -446,12 +473,12 @@ export function SettingsPage() {
               </option>
             </select>
           </Row>
-          <Row id="settings-home-page" label="Home page" hint="Leave empty for the new tab page.">
+          <Row id="settings-home-page" label="Home page" hint="Leave empty for the bookmarks page.">
             <input
               id="settings-home-page-input"
               value={homeDraft}
               spellCheck={false}
-              placeholder="ce://newtab"
+              placeholder="ce://bookmarks"
               className={inputClass}
               onChange={(event) => setHomeDraft(event.target.value)}
               onBlur={() => homeDraft !== settings.homePage && update({ homePage: homeDraft.trim() })}

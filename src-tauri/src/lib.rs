@@ -1,9 +1,11 @@
 mod bookmarks;
+mod capture;
 mod downloads;
 mod history;
 mod extensions;
 mod files;
 mod paths;
+mod print;
 mod profile_icons;
 mod profiles;
 mod session;
@@ -16,11 +18,11 @@ mod webview2;
 
 use std::path::PathBuf;
 
-use tauri::webview::Color;
-use tauri::window::WindowBuilder;
-use tauri::{AppHandle, LogicalPosition, Manager, WebviewUrl, WindowEvent};
+use tauri::{AppHandle, Manager, Window, WindowEvent};
 
 use bookmarks::{BookmarkNode, BookmarkTree};
+use capture::PageCaptureResult;
+use print::{ExtractedPage, PdfOptions};
 use downloads::DownloadItem;
 use history::HistoryItem;
 use extensions::ExtensionInfo;
@@ -47,11 +49,18 @@ async fn list_tabs(app: AppHandle) -> TabsSnapshot {
 #[tauri::command]
 async fn create_tab(
     app: AppHandle,
+    window: Window,
     url: Option<String>,
     background: Option<bool>,
     index: Option<usize>,
 ) -> Result<u32, String> {
-    tabs::create_tab(&app, url, background.unwrap_or(false), index)
+    tabs::create_tab_on(
+        &app,
+        window.label(),
+        url,
+        background.unwrap_or(false),
+        index,
+    )
 }
 
 #[tauri::command]
@@ -145,8 +154,8 @@ async fn reopen_closed_tab(app: AppHandle) -> Result<Option<u32>, String> {
 }
 
 #[tauri::command]
-async fn set_ui_height(app: AppHandle, height: f64) {
-    tabs::set_ui_height(&app, height);
+async fn set_ui_height(app: AppHandle, window: Window, height: f64) {
+    tabs::set_ui_height(&app, window.label(), height);
 }
 
 #[tauri::command]
@@ -175,18 +184,91 @@ async fn open_devtools(app: AppHandle, id: u32) {
 }
 
 #[tauri::command]
-async fn open_popup(app: AppHandle, request: PopupRequest) -> Result<bool, String> {
-    tabs::open_popup(&app, request)
+async fn open_popup(app: AppHandle, window: Window, request: PopupRequest) -> Result<bool, String> {
+    tabs::open_popup(&app, window.label(), request)
 }
 
 #[tauri::command]
-async fn close_popup(app: AppHandle) {
-    tabs::close_popup(&app);
+async fn close_popup(app: AppHandle, window: Window) {
+    tabs::close_window_popup(&app, window.label());
 }
 
 #[tauri::command]
-async fn resize_popup(app: AppHandle, width: Option<f64>, height: f64) -> Result<(), String> {
-    tabs::resize_popup(&app, width, height)
+async fn resize_popup(
+    app: AppHandle,
+    window: Window,
+    width: Option<f64>,
+    height: f64,
+) -> Result<(), String> {
+    tabs::resize_popup(&app, window.label(), width, height)
+}
+
+#[tauri::command]
+async fn detach_tab(app: AppHandle, id: u32) -> Result<(), String> {
+    tabs::detach_tab(&app, id)
+}
+
+// Built-in page tools. They wait on WebView2 on the main thread, so they run on the blocking pool.
+
+#[tauri::command]
+async fn capture_page_png(
+    app: AppHandle,
+    id: u32,
+    full_page: bool,
+    load_lazy: bool,
+    path: String,
+) -> Result<PageCaptureResult, String> {
+    blocking(move || capture::save_png(&app, id, full_page, load_lazy, &PathBuf::from(path))).await
+}
+
+#[tauri::command]
+async fn copy_page_png(
+    app: AppHandle,
+    id: u32,
+    full_page: bool,
+    load_lazy: bool,
+) -> Result<PageCaptureResult, String> {
+    blocking(move || capture::copy_png(&app, id, full_page, load_lazy)).await
+}
+
+#[tauri::command]
+async fn extract_page(app: AppHandle, id: u32) -> Result<ExtractedPage, String> {
+    blocking(move || print::extract_page(&app, id)).await
+}
+
+#[tauri::command]
+async fn print_tab_to_pdf(
+    app: AppHandle,
+    id: u32,
+    options: PdfOptions,
+    path: String,
+) -> Result<(), String> {
+    blocking(move || print::print_tab_to_pdf(&app, id, options, &PathBuf::from(path))).await
+}
+
+#[tauri::command]
+async fn print_html_to_pdf(
+    app: AppHandle,
+    html: String,
+    options: PdfOptions,
+    path: String,
+) -> Result<(), String> {
+    blocking(move || print::print_html_to_pdf(&app, &html, options, &PathBuf::from(path))).await
+}
+
+#[tauri::command]
+async fn print_html_dialog(app: AppHandle, html: String) -> Result<(), String> {
+    blocking(move || print::print_html_dialog(&app, &html)).await
+}
+
+#[tauri::command]
+async fn open_saved_file(path: String) -> Result<(), String> {
+    blocking(move || print::open_file(&path)).await
+}
+
+#[tauri::command]
+async fn show_saved_file(path: String) -> Result<(), String> {
+    blocking(move || print::show_file(&path)).await
 }
 
 // Bookmarks
@@ -473,31 +555,9 @@ fn unpin_profile_taskbar(app: AppHandle, id: String) -> Result<Vec<ProfileInfo>,
     profiles::unpin_taskbar(&app, &id)
 }
 
-fn build_window(app: &AppHandle) -> tauri::Result<()> {
-    let window = WindowBuilder::new(app, tabs::WINDOW)
-        .title(profiles::window_title(app))
-        .inner_size(1280.0, 840.0)
-        .min_inner_size(640.0, 420.0)
-        .decorations(false)
-        .shadow(true)
-        .build()?;
-    profiles::apply_window_icon(app, &window);
-
-    let size = window.inner_size()?;
-    let (r, g, b) = settings::page_surface(app);
-    let background = Color(r, g, b, 255);
-    let _ = window.set_background_color(Some(background));
-    let ui_app = app.clone();
-    let ui = window.add_child(
-        tabs::base_builder(app, tabs::UI, WebviewUrl::App("index.html".into()))
-            .background_color(background)
-            .initialization_script(tabs::page_background_script(app))
-            .on_new_window(move |url, features| tabs::new_window(&ui_app, None, url, features)),
-        LogicalPosition::new(0.0, 0.0),
-        size,
-    )?;
-    webview2::attach_ui_hooks(app, &ui);
-    Ok(())
+fn build_window(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    tabs::create_browser_window(app, tabs::WINDOW)
+        .map_err(|error| -> Box<dyn std::error::Error> { Box::new(std::io::Error::other(error)) })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -540,16 +600,23 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if window.label() != tabs::WINDOW {
+            let label = window.label().to_string();
+            if !tabs::is_browser_label(&label) {
                 return;
             }
             match event {
                 WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                     let app = window.app_handle().clone();
-                    tauri::async_runtime::spawn(async move { tabs::layout(&app) });
+                    let label = label.clone();
+                    tauri::async_runtime::spawn(async move { tabs::layout(&app, &label) });
                 }
                 WindowEvent::CloseRequested { api, .. } => {
                     let app = window.app_handle().clone();
+                    let others = tabs::browser_labels(&app).iter().any(|item| item != &label);
+                    if others {
+                        tabs::discard_window(&app, &label);
+                        return;
+                    }
                     if !sync::configured(&app) || sync::closing_allowed() {
                         session::shutdown(&app);
                         return;
@@ -559,13 +626,14 @@ pub fn run() {
                         return;
                     }
                     session::shutdown(&app);
+                    let closing = label.clone();
                     tauri::async_runtime::spawn(async move {
                         let flush_app = app.clone();
                         let _ =
                             tauri::async_runtime::spawn_blocking(move || sync::flush(&flush_app))
                                 .await;
                         sync::allow_close();
-                        if let Some(main) = app.get_webview_window(tabs::WINDOW) {
+                        if let Some(main) = app.get_webview_window(&closing) {
                             let _ = main.close();
                         }
                     });
@@ -590,6 +658,7 @@ pub fn run() {
             clear_site_cache,
             stop,
             move_tab,
+            detach_tab,
             pin_tab,
             unpin_tab,
             duplicate_tab,
@@ -602,6 +671,14 @@ pub fn run() {
             open_popup,
             close_popup,
             resize_popup,
+            capture_page_png,
+            copy_page_png,
+            extract_page,
+            print_tab_to_pdf,
+            print_html_to_pdf,
+            print_html_dialog,
+            open_saved_file,
+            show_saved_file,
             list_bookmarks,
             add_bookmark,
             update_bookmark,

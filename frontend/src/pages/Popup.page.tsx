@@ -7,6 +7,8 @@ import { BookmarksBarMenu } from "../components/BookmarksBar/BookmarksBarMenu";
 import { DownloadsPanel } from "../components/DownloadsPanel";
 import { OmniboxSuggestions } from "../components/OmniboxSuggestions";
 import { TabMenu } from "../components/TabMenu";
+import { PageCapturePopover } from "../extensions/page-capture/PageCapturePopover";
+import { PrintPdfPopover } from "../extensions/print-pdf/PrintPdfPopover";
 import { useAppearanceFromSettings } from "../lib/use-browser";
 
 type PopupPageProps = {
@@ -50,6 +52,10 @@ export function PopupPage({ popup, params }: PopupPageProps) {
       return <AppMenu />;
     case "omnibox":
       return <OmniboxSuggestions />;
+    case "print-pdf":
+      return <PrintPdfPopover params={params} />;
+    case "page-capture":
+      return <PageCapturePopover params={params} />;
     default:
       return (
         <div id="popup-unknown" className="p-3 text-sm text-zinc-500">

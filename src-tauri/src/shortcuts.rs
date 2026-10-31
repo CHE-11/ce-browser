@@ -114,6 +114,7 @@ pub fn dispatch(app: &AppHandle, action: Action) {
 
 pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
     let active = tabs::active_id(app);
+    let window = tabs::focused_window(app);
     match action {
         Action::NewTab => tabs::create_tab(app, None, false, None).map(|_| ()),
         Action::CloseTab => tabs::close_selected(app),
@@ -123,8 +124,8 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
         Action::SelectTab(index) => tabs::select_index(app, Some(index)),
         Action::LastTab => tabs::select_index(app, None),
         Action::FocusAddress => {
-            tabs::close_popup(app);
-            tabs::send_command(app, "focus-address");
+            tabs::close_window_popup(app, &window);
+            tabs::send_command(app, &window, "focus-address");
             Ok(())
         }
         Action::Reload => match active {
@@ -144,18 +145,18 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             Ok(())
         }
         Action::Bookmark => {
-            tabs::close_popup(app);
-            tabs::send_command(app, "bookmark");
+            tabs::close_window_popup(app, &window);
+            tabs::send_command(app, &window, "bookmark");
             Ok(())
         }
         Action::Downloads => {
-            tabs::close_popup(app);
-            tabs::send_command(app, "downloads");
+            tabs::close_window_popup(app, &window);
+            tabs::send_command(app, &window, "downloads");
             Ok(())
         }
         Action::Find => {
-            tabs::close_popup(app);
-            tabs::send_command(app, "find");
+            tabs::close_window_popup(app, &window);
+            tabs::send_command(app, &window, "find");
             Ok(())
         }
         Action::ToggleBookmarksBar => settings::update(app, |settings| {
@@ -180,7 +181,7 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             Ok(())
         }
         Action::ClosePopup => {
-            tabs::close_popup(app);
+            tabs::close_window_popup(app, &window);
             Ok(())
         }
     }

@@ -12,6 +12,7 @@ import { HistoryPage } from "./pages/History.page";
 import { ExtensionsPage } from "./pages/Extensions.page";
 import { NewTabPage } from "./pages/NewTab.page";
 import { PopupPage } from "./pages/Popup.page";
+import { PrintEditorPage } from "./pages/PrintEditor.page";
 import { SettingsPage } from "./pages/Settings.page";
 import "./index.css";
 
@@ -43,6 +44,8 @@ function App() {
       return <SettingsPage />;
     case "extensions":
       return <ExtensionsPage />;
+    case "print-editor":
+      return <PrintEditorPage params={route.params} />;
     default:
       return <NewTabPage />;
   }

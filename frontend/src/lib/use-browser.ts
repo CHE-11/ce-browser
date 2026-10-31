@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import type { BookmarkTree, BrowserSettings, TabsSnapshot } from "../../../types/browser";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { BookmarkNode, BookmarkTree, BrowserSettings, TabsSnapshot } from "../../../types/browser";
 import { publishAppearance } from "./appearance";
 import {
   getSettings,
@@ -50,14 +51,38 @@ function useLiveValue<T>(load: () => Promise<T>, subscribe: (handler: (value: T)
   return { value, error };
 }
 
-const EMPTY_TABS: TabsSnapshot = { tabs: [], activeId: null, selectedIds: [], canReopen: false, fullscreen: false };
+const EMPTY_TABS: TabsSnapshot = {
+  tabs: [],
+  activeId: null,
+  selectedIds: [],
+  canReopen: false,
+  fullscreen: false,
+  windows: [],
+};
+
+function currentWindowLabel() {
+  try {
+    return getCurrentWindow().label;
+  } catch {
+    return "main";
+  }
+}
 
 export function useTabs() {
   const snapshot = useLiveValue(listTabs, onTabsChanged).value ?? EMPTY_TABS;
-  if (snapshot.selectedIds) {
-    return snapshot;
-  }
-  return { ...snapshot, selectedIds: snapshot.activeId === null ? [] : [snapshot.activeId] };
+  const label = currentWindowLabel();
+  const tabs = snapshot.tabs.filter((tab) => (tab.window || "main") === label);
+  const mine = snapshot.windows?.find((item) => item.label === label);
+  const activeId = mine ? mine.activeId : label === "main" ? snapshot.activeId : null;
+  const fullscreen = mine ? mine.fullscreen : label === "main" && snapshot.fullscreen;
+  const selectedIds = (snapshot.selectedIds ?? []).filter((id) => tabs.some((tab) => tab.id === id));
+  return {
+    ...snapshot,
+    tabs,
+    activeId,
+    fullscreen,
+    selectedIds: selectedIds.length > 0 ? selectedIds : activeId === null ? [] : [activeId],
+  };
 }
 
 export function useBookmarks() {
@@ -109,6 +134,87 @@ export function flattenBookmarks(tree: BookmarkTree | null) {
     walk([tree.bar, tree.other]);
   }
   return links;
+}
+
+export const BOOKMARK_DRAG_TYPE = "application/x-ce-bookmark";
+
+export type BookmarkDropPlace = "before" | "into" | "after";
+
+const ROOT_FOLDERS = new Set(["bar", "other"]);
+
+/** Where a dragged bookmark lands on `node`. Roots only accept a drop inside. */
+export function bookmarkDropPlace(
+  event: { currentTarget: Element; clientX: number; clientY: number },
+  node: BookmarkNode,
+  axis: "x" | "y",
+): BookmarkDropPlace {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const size = axis === "x" ? rect.width : rect.height;
+  const offset = axis === "x" ? event.clientX - rect.left : event.clientY - rect.top;
+  const ratio = size <= 0 ? 0.5 : offset / size;
+  const folder = !node.url && !node.separator;
+  if (ROOT_FOLDERS.has(node.id) || !folder) {
+    if (ROOT_FOLDERS.has(node.id)) {
+      return "into";
+    }
+    return ratio > 0.5 ? "after" : "before";
+  }
+  if (ratio < 0.25) {
+    return "before";
+  }
+  if (ratio > 0.75) {
+    return "after";
+  }
+  return "into";
+}
+
+export function findBookmarkParent(tree: BookmarkTree | null, id: string): { parentId: string; index: number } | null {
+  if (!tree) {
+    return null;
+  }
+  const search = (node: BookmarkNode): { parentId: string; index: number } | null => {
+    const children = node.children ?? [];
+    const index = children.findIndex((child) => child.id === id);
+    if (index >= 0) {
+      return { parentId: node.id, index };
+    }
+    for (const child of children) {
+      const found = search(child);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  };
+  return search(tree.bar) ?? search(tree.other);
+}
+
+/** True when `id` is `ancestorId` or sits inside that folder. */
+export function bookmarkContains(tree: BookmarkTree | null, ancestorId: string, id: string): boolean {
+  const ancestor = findFolder(tree, ancestorId);
+  if (!ancestor) {
+    return false;
+  }
+  if (ancestor.id === id) {
+    return true;
+  }
+  const walk = (node: BookmarkNode): boolean => (node.children ?? []).some((child) => child.id === id || walk(child));
+  return walk(ancestor);
+}
+
+/** Drops selected descendants so deleting a folder does not also delete its children one by one. */
+export function bookmarkRootsOf(tree: BookmarkTree | null, ids: string[]) {
+  const selected = new Set(ids);
+  return ids.filter((id) => {
+    let parent = findBookmarkParent(tree, id);
+    while (parent) {
+      if (selected.has(parent.parentId)) {
+        return false;
+      }
+      parent = findBookmarkParent(tree, parent.parentId);
+    }
+    return true;
+  });
 }
 
 export function findFolder(tree: BookmarkTree | null, id: string): BookmarkTree["bar"] | null {

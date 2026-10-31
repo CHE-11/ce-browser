@@ -1,7 +1,7 @@
-import { useState, type DragEvent, type MouseEvent } from "react";
+import { useRef, useState, type DragEvent, type MouseEvent } from "react";
 import { LoaderCircle, Plus, X } from "lucide-react";
 import type { TabInfo, TabsSnapshot } from "../../../types/browser";
-import { activateTab, closeSelectedTabs, closeTab, createTab, moveTab, openPopup, selectTabRange, toggleTabSelection } from "../lib/browser-client";
+import { activateTab, closeSelectedTabs, closeTab, createTab, detachTab, moveTab, openPopup, selectTabRange, toggleTabSelection, windowOuterBounds } from "../lib/browser-client";
 import { cn } from "../lib/cn";
 import { FavIcon } from "./FavIcon";
 import { WindowControls } from "./WindowControls";
@@ -13,6 +13,8 @@ type TabStripProps = {
 export function TabStrip({ snapshot }: TabStripProps) {
   const [dragging, setDragging] = useState<number | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const droppedInside = useRef(false);
+  const windowBounds = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
   const grouped = (id: number) => snapshot.selectedIds.length > 1 && snapshot.selectedIds.includes(id);
 
@@ -47,6 +49,7 @@ export function TabStrip({ snapshot }: TabStripProps) {
 
   const onDrop = (event: DragEvent) => {
     event.preventDefault();
+    droppedInside.current = true;
     if (dragging !== null && dropIndex !== null) {
       const from = snapshot.tabs.findIndex((tab) => tab.id === dragging);
       const target = from >= 0 && from < dropIndex ? dropIndex - 1 : dropIndex;
@@ -56,14 +59,36 @@ export function TabStrip({ snapshot }: TabStripProps) {
     setDropIndex(null);
   };
 
+  const endDrag = (event: DragEvent) => {
+    const id = dragging;
+    const landedInside = droppedInside.current;
+    droppedInside.current = false;
+    setDragging(null);
+    setDropIndex(null);
+    if (id === null || landedInside) {
+      return;
+    }
+    const bounds = windowBounds.current;
+    if (!bounds) {
+      return;
+    }
+    const outside =
+      event.screenX < bounds.x ||
+      event.screenY < bounds.y ||
+      event.screenX > bounds.x + bounds.width ||
+      event.screenY > bounds.y + bounds.height;
+    if (outside) {
+      void detachTab(id);
+    }
+  };
+
   return (
-    <div id="tab-strip" className="flex h-9 shrink-0 items-stretch bg-zinc-950" data-tauri-drag-region>
+    <div id="tab-strip" className="flex h-9 shrink-0 items-stretch bg-zinc-950">
       <div
         id="tab-strip-tabs"
         role="tablist"
         aria-label="Tabs"
         className="no-scrollbar flex min-w-0 flex-1 items-end gap-px overflow-x-auto pl-2 pt-1.5"
-        data-tauri-drag-region
         onDragOver={(event) => dragging !== null && event.preventDefault()}
         onDrop={onDrop}
         onDoubleClick={(event) => {
@@ -83,11 +108,15 @@ export function TabStrip({ snapshot }: TabStripProps) {
             dropAfter={dropIndex === index + 1 && index === snapshot.tabs.length - 1}
             onContextMenu={(event) => openTabMenu(event, tab)}
             onClose={() => closeTarget(tab.id)}
-            onDragStart={() => setDragging(tab.id)}
-            onDragEnd={() => {
-              setDragging(null);
-              setDropIndex(null);
+            onDragStart={() => {
+              droppedInside.current = false;
+              windowBounds.current = null;
+              setDragging(tab.id);
+              void windowOuterBounds().then((bounds) => {
+                windowBounds.current = bounds;
+              });
             }}
+            onDragEnd={endDrag}
             onDragOver={(event) => onDragOver(event, index)}
           />
         ))}
@@ -118,7 +147,7 @@ type TabButtonProps = {
   onContextMenu: (event: MouseEvent) => void;
   onClose: () => void;
   onDragStart: () => void;
-  onDragEnd: () => void;
+  onDragEnd: (event: DragEvent) => void;
   onDragOver: (event: DragEvent) => void;
 };
 

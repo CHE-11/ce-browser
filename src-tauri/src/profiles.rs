@@ -7,7 +7,8 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
-use windows::Win32::Foundation::PROPERTYKEY;
+use windows::Win32::Foundation::{HWND, LPARAM, PROPERTYKEY};
+use windows::core::BOOL;
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
@@ -19,6 +20,9 @@ use windows::Win32::UI::Shell::{
     FOLDERID_Programs, FOLDERID_UserPinned, IShellLinkW, KNOWN_FOLDER_FLAG, SHCNE_UPDATEITEM,
     SHCNF_PATHW, SHChangeNotify, SHGetKnownFolderPath, SetCurrentProcessExplicitAppUserModelID,
     ShellLink,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
 };
 use windows::core::{GUID, HSTRING, Interface, PWSTR};
 
@@ -36,18 +40,8 @@ unsafe extern "system" {
     fn CreateMutexW(attrs: *mut core::ffi::c_void, initial_owner: i32, name: *const u16) -> *mut core::ffi::c_void;
     fn OpenMutexW(access: u32, inherit: i32, name: *const u16) -> *mut core::ffi::c_void;
     fn CloseHandle(handle: *mut core::ffi::c_void) -> i32;
-}
-
-#[link(name = "shell32")]
-unsafe extern "system" {
-    fn ShellExecuteW(
-        hwnd: *mut core::ffi::c_void,
-        operation: *const u16,
-        file: *const u16,
-        parameters: *const u16,
-        directory: *const u16,
-        show_cmd: i32,
-    ) -> isize;
+    fn GetLastError() -> u32;
+    fn SetLastError(code: u32);
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -143,7 +137,10 @@ pub fn init(app: &AppHandle) {
         DEFAULT_ID.to_string()
     };
     let _ = ACTIVE.set(id.clone());
-    hold_profile_mutex(&id);
+    if !hold_profile_mutex(&id) {
+        focus_profile_window(&id);
+        std::process::exit(0);
+    }
 }
 
 pub fn window_title(app: &AppHandle) -> String {
@@ -285,8 +282,21 @@ pub fn pin_taskbar(app: &AppHandle, id: &str) -> Result<Vec<ProfileInfo>, String
     }
     let shortcut =
         shortcut_path(&file.profiles[index]).ok_or("The Start menu item could not be created.")?;
-    if pin_shortcut(&shortcut).is_err() && taskbar_ids().iter().all(|pinned| pinned != id) {
-        return Err("Windows did not add the taskbar button. Right-click the Start menu item, or this window's taskbar button, and choose Pin to taskbar.".into());
+    let dir = known_folder(&FOLDERID_UserPinned)
+        .map(|path| path.join("TaskBar"))
+        .map_err(|_| "The taskbar folder is unavailable.".to_string())?;
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    for path in matching_shortcuts(&dir, id) {
+        let _ = fs::remove_file(path);
+    }
+    let name = shortcut
+        .file_name()
+        .ok_or("The Start menu item could not be created.")?;
+    let dest = dir.join(name);
+    fs::copy(&shortcut, &dest).map_err(|error| format!("Could not pin that profile ({error})."))?;
+    notify_item(&dest);
+    if taskbar_ids().iter().all(|pinned| pinned != id) {
+        return Err("Windows did not add the taskbar button. Right-click this window's taskbar button and choose Pin to taskbar.".into());
     }
     Ok(list(app))
 }
@@ -299,7 +309,6 @@ pub fn unpin_taskbar(app: &AppHandle, id: &str) -> Result<Vec<ProfileInfo>, Stri
         return Ok(list(app));
     };
     for path in matching_shortcuts(&dir, id) {
-        let _ = unpin_shortcut(&path);
         fs::remove_file(&path)
             .map_err(|error| format!("The taskbar button is still pinned ({error})."))?;
         notify_item(&path);
@@ -418,7 +427,6 @@ pub fn delete(app: &AppHandle, id: &str) -> Result<Vec<ProfileInfo>, String> {
     }
     if let Some(dir) = taskbar_dir() {
         for path in matching_shortcuts(&dir, id) {
-            let _ = unpin_shortcut(&path);
             let _ = fs::remove_file(path);
         }
     }
@@ -519,14 +527,98 @@ fn safe_profile_id(id: &str) -> bool {
             .all(|character| character.is_ascii_alphanumeric() || character == '-')
 }
 
-fn hold_profile_mutex(id: &str) {
+const ERROR_ALREADY_EXISTS: u32 = 183;
+
+/// Returns false when this profile is already open. The caller should focus that window and exit
+/// before WebView2 tries to open the same profile folder.
+fn hold_profile_mutex(id: &str) -> bool {
     let name = wide(format!("Local\\ce-browser-profile-{id}"));
+    unsafe { SetLastError(0) };
     let handle = unsafe { CreateMutexW(std::ptr::null_mut(), 0, name.as_ptr()) };
+    let error = unsafe { GetLastError() };
     if handle.is_null() {
         eprintln!("profile lock: {}", std::io::Error::last_os_error());
-        return;
+        return true;
+    }
+    if error == ERROR_ALREADY_EXISTS {
+        unsafe {
+            let _ = CloseHandle(handle);
+        }
+        return false;
     }
     let _ = PROFILE_MUTEX.set(handle as usize);
+    true
+}
+
+struct WindowSeek {
+    model: String,
+    found: HWND,
+}
+
+unsafe extern "system" fn seek_profile_window(hwnd: HWND, param: LPARAM) -> BOOL {
+    let seek = unsafe { &mut *(param.0 as *mut WindowSeek) };
+    if window_model_id(hwnd).as_deref() == Some(seek.model.as_str()) {
+        seek.found = hwnd;
+        return BOOL(0);
+    }
+    BOOL(1)
+}
+
+fn window_model_id(hwnd: HWND) -> Option<String> {
+    com_init();
+    unsafe {
+        let store: IPropertyStore = SHGetPropertyStoreForWindow(hwnd).ok()?;
+        let value = store.GetValue(&app_model_key(5)).ok()?;
+        prop_text(&value)
+    }
+}
+
+fn prop_text(value: &PROPVARIANT) -> Option<String> {
+    unsafe {
+        if (*value.Anonymous.Anonymous).vt != VT_LPWSTR {
+            return None;
+        }
+        let raw = (*value.Anonymous.Anonymous).Anonymous.pwszVal;
+        if raw.is_null() {
+            return None;
+        }
+        let mut length = 0;
+        while *raw.0.add(length) != 0 {
+            length += 1;
+        }
+        let slice = std::slice::from_raw_parts(raw.0, length);
+        Some(String::from_utf16_lossy(slice))
+    }
+}
+
+fn profile_id_from_model(model: &str) -> Option<String> {
+    if model == "com.ce.browser" {
+        return Some(DEFAULT_ID.to_string());
+    }
+    model
+        .strip_prefix("com.ce.browser.")
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+}
+
+fn focus_profile_window(id: &str) {
+    let mut seek = WindowSeek {
+        model: app_model_id(id),
+        found: HWND(std::ptr::null_mut()),
+    };
+    unsafe {
+        let _ = EnumWindows(
+            Some(seek_profile_window),
+            LPARAM(&mut seek as *mut WindowSeek as isize),
+        );
+        if seek.found.0.is_null() {
+            return;
+        }
+        if IsIconic(seek.found).as_bool() {
+            let _ = ShowWindow(seek.found, SW_RESTORE);
+        }
+        let _ = SetForegroundWindow(seek.found);
+    }
 }
 
 fn profile_is_open(id: &str) -> bool {
@@ -630,36 +722,7 @@ fn install_shortcut(id: &str, name: &str, icon: Option<&Path>) -> Result<PathBuf
         file.Save(&HSTRING::from(path.as_os_str()), true)
             .map_err(win_err)?;
     }
-    let _ = pin_shortcut(&path);
     Ok(path)
-}
-
-fn pin_shortcut(path: &Path) -> Result<(), String> {
-    shell_verb(path, "taskbarpin")
-}
-
-fn unpin_shortcut(path: &Path) -> Result<(), String> {
-    shell_verb(path, "taskbarunpin")
-}
-
-fn shell_verb(path: &Path, verb: &str) -> Result<(), String> {
-    let operation = wide(verb);
-    let file = wide(path.as_os_str());
-    let code = unsafe {
-        ShellExecuteW(
-            std::ptr::null_mut(),
-            operation.as_ptr(),
-            file.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-        )
-    };
-    if code > 32 {
-        Ok(())
-    } else {
-        Err(format!("The taskbar pin was not changed ({code})."))
-    }
 }
 
 fn programs_dir() -> Result<PathBuf, String> {
@@ -843,7 +906,12 @@ fn shortcut_profile_id(path: &Path) -> Option<String> {
             .ok()?;
         let mut buffer = [0u16; 1024];
         link.GetArguments(&mut buffer).ok()?;
-        profile_id_from_args(&wide_string(&buffer))
+        if let Some(id) = profile_id_from_args(&wide_string(&buffer)) {
+            return Some(id);
+        }
+        let store: IPropertyStore = link.cast().ok()?;
+        let value = store.GetValue(&app_model_key(5)).ok()?;
+        prop_text(&value).and_then(|model| profile_id_from_model(&model))
     }
 }
 
@@ -887,7 +955,11 @@ fn relaunch_command(id: &str) -> String {
     let Ok(exe) = std::env::current_exe() else {
         return String::new();
     };
-    format!("\"{}\" --profile {id}", exe.display())
+    if id == DEFAULT_ID {
+        format!("\"{}\"", exe.display())
+    } else {
+        format!("\"{}\" --profile {id}", exe.display())
+    }
 }
 
 fn app_model_id(id: &str) -> String {

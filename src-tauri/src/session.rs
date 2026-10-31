@@ -107,7 +107,8 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
     let pins = settings::get(app).pinned_tabs;
     saved = merge_startup_pins(saved, &pins);
     if saved.is_empty() {
-        return tabs::create_tab(app, None, false, None).map(|_| ());
+        let url = (!restore_all).then(|| tabs::home_url(app).to_string());
+        return tabs::create_tab(app, url, false, None).map(|_| ());
     }
     saved.sort_by_key(|tab| !tab.pinned);
     let active = if restore_all {
@@ -126,7 +127,7 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
         .collect();
     tabs::restore(app, restored, active)?;
     if !restore_all {
-        tabs::create_tab(app, None, false, None)?;
+        tabs::create_tab(app, Some(tabs::home_url(app).to_string()), false, None)?;
     }
     Ok(())
 }

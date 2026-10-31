@@ -2,6 +2,7 @@ import { useState } from "react";
 import { FileArchive, FolderOpen, Puzzle, Settings2, Trash2 } from "lucide-react";
 import type { ExtensionInfo } from "../../../types/browser";
 import { Button } from "../components/Button";
+import { ExtensionIcon } from "../components/ExtensionIcon";
 import { PageShell } from "../components/PageShell";
 import { Toggle } from "../components/Toggle";
 import {
@@ -88,11 +89,13 @@ export function ExtensionsPage() {
                   )}
                 >
                   <div id={`${domId}-header`} className="flex items-start gap-3">
-                    {extension.icon ? (
-                      <img id={`${domId}-icon`} src={extension.icon} alt="" className="size-10 shrink-0 rounded" />
-                    ) : (
-                      <Puzzle id={`${domId}-icon`} className="size-10 shrink-0 text-zinc-500" aria-hidden />
-                    )}
+                    <ExtensionIcon
+                      id={`${domId}-icon`}
+                      extensionId={extension.id}
+                      name={extension.name}
+                      src={extension.icon}
+                      className="size-10"
+                    />
                     <div id={`${domId}-text`} className="min-w-0 flex-1">
                       <h2 id={`${domId}-name`} className="truncate text-sm font-semibold">
                         {extension.name}

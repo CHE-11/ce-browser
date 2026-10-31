@@ -15,6 +15,8 @@ pub const SEARCH_ENGINES: &[(&str, &str)] = &[
     ("duckduckgo", "https://duckduckgo.com/?q=%s"),
     ("brave", "https://search.brave.com/search?q=%s"),
     ("startpage", "https://www.startpage.com/do/search?q=%s"),
+    ("kagi", "https://kagi.com/search?q=%s"),
+    ("mojeek", "https://www.mojeek.com/search?q=%s"),
 ];
 const STARTUP_MODES: &[&str] = &["restore", "home"];
 const COLOR_MODES: &[&str] = &["dark", "light", "system"];
@@ -56,6 +58,103 @@ pub struct BrowserSettings {
     pub sync_settings_revision: u64,
     #[serde(default)]
     pub sync_history_revision: u64,
+    /// Last choices in the Print to PDF editor.
+    #[serde(default)]
+    pub print_editor: PrintEditorSettings,
+    /// Last choices in the Page to PNG popover.
+    #[serde(default)]
+    pub page_capture: PageCaptureSettings,
+}
+
+const PRINT_MODES: &[&str] = &["article", "full"];
+const IMAGE_SIZES: &[&str] = &["original", "large", "medium", "small", "none"];
+const PRINT_FONTS: &[&str] = &["original", "serif", "sans"];
+const PAPER_SIZES: &[&str] = &["letter", "a4", "legal", "tabloid"];
+const MARGINS: &[&str] = &["none", "narrow", "normal", "wide"];
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PrintEditorSettings {
+    /// `article` keeps the main content only. `full` keeps the whole page.
+    pub mode: String,
+    pub remove_ads: bool,
+    pub remove_navigation: bool,
+    pub remove_popups: bool,
+    pub remove_social: bool,
+    pub remove_media: bool,
+    /// Percent of the page's text size.
+    pub text_size: u32,
+    pub image_size: String,
+    pub remove_backgrounds: bool,
+    pub font: String,
+    /// Title, source URL and date above the content.
+    pub show_header: bool,
+    pub paper: String,
+    pub landscape: bool,
+    pub margins: String,
+    pub header_footer: bool,
+    pub print_backgrounds: bool,
+    pub open_after_save: bool,
+}
+
+impl Default for PrintEditorSettings {
+    fn default() -> Self {
+        Self {
+            mode: "article".into(),
+            remove_ads: true,
+            remove_navigation: true,
+            remove_popups: true,
+            remove_social: true,
+            remove_media: false,
+            text_size: 100,
+            image_size: "original".into(),
+            remove_backgrounds: false,
+            font: "original".into(),
+            show_header: true,
+            paper: "letter".into(),
+            landscape: false,
+            margins: "normal".into(),
+            header_footer: false,
+            print_backgrounds: true,
+            open_after_save: true,
+        }
+    }
+}
+
+impl PrintEditorSettings {
+    fn normalize(mut self) -> Self {
+        let defaults = Self::default();
+        let keep = |value: &mut String, allowed: &[&str], fallback: String| {
+            if !allowed.contains(&value.as_str()) {
+                *value = fallback;
+            }
+        };
+        keep(&mut self.mode, PRINT_MODES, defaults.mode);
+        keep(&mut self.image_size, IMAGE_SIZES, defaults.image_size);
+        keep(&mut self.font, PRINT_FONTS, defaults.font);
+        keep(&mut self.paper, PAPER_SIZES, defaults.paper);
+        keep(&mut self.margins, MARGINS, defaults.margins);
+        self.text_size = ((self.text_size.clamp(70, 150) + 2) / 5) * 5;
+        self
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PageCaptureSettings {
+    /// The whole document, not only what is on screen.
+    pub full_page: bool,
+    /// Scroll through the page first so lazy images load.
+    pub load_lazy: bool,
+}
+
+impl Default for PageCaptureSettings {
+    fn default() -> Self {
+        Self {
+            full_page: true,
+            load_lazy: true,
+        }
+    }
 }
 
 impl Default for BrowserSettings {
@@ -63,7 +162,7 @@ impl Default for BrowserSettings {
         Self {
             search_engine: "google".into(),
             custom_search_url: String::new(),
-            home_page: paths::NEW_TAB.into(),
+            home_page: paths::BOOKMARKS.into(),
             startup: "restore".into(),
             pinned_tabs: Vec::new(),
             download_dir: String::new(),
@@ -79,6 +178,8 @@ impl Default for BrowserSettings {
             sync_extensions_revision: 0,
             sync_settings_revision: 0,
             sync_history_revision: 0,
+            print_editor: PrintEditorSettings::default(),
+            page_capture: PageCaptureSettings::default(),
         }
     }
 }
@@ -104,11 +205,12 @@ impl BrowserSettings {
         if self.theme.trim().is_empty() {
             self.theme = defaults.theme;
         }
-        if self.home_page.trim().is_empty() {
+        if self.home_page.trim().is_empty() || self.home_page == paths::NEW_TAB {
             self.home_page = defaults.home_page;
         }
         self.ui_zoom = ((self.ui_zoom.clamp(80, 150) + 2) / 5) * 5;
         self.page_zoom = snap_page_zoom(self.page_zoom);
+        self.print_editor = self.print_editor.normalize();
         self.sync_folder = folder_from_stored(&self.sync_folder);
         if self.sync_bookmarks_revision == 0
             && self.sync_extensions_revision == 0
@@ -399,6 +501,29 @@ pub fn update(
 #[cfg(test)]
 mod tests {
     use super::{folder_from_stored, snap_page_zoom};
+
+    #[test]
+    fn the_old_new_tab_home_page_opens_bookmarks() {
+        let mut settings = super::BrowserSettings::default();
+        settings.home_page = crate::paths::NEW_TAB.into();
+        assert_eq!(settings.normalize().home_page, crate::paths::BOOKMARKS);
+        let mut custom = super::BrowserSettings::default();
+        custom.home_page = "https://example.com".into();
+        assert_eq!(custom.normalize().home_page, "https://example.com");
+    }
+
+    #[test]
+    fn older_settings_get_page_tool_defaults() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"searchEngine":"bing","printEditor":{"paper":"a9","textSize":400}}"#)
+                .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.search_engine, "bing");
+        assert_eq!(loaded.print_editor.paper, "letter");
+        assert_eq!(loaded.print_editor.text_size, 150);
+        assert!(loaded.print_editor.remove_ads);
+        assert!(loaded.page_capture.full_page);
+    }
 
     #[test]
     fn page_zoom_snaps_to_a_page_level() {

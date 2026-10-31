@@ -10,6 +10,7 @@ static STORAGE_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 pub const INTERNAL_SCHEME: &str = "ce://";
 pub const NEW_TAB: &str = "ce://newtab";
+pub const BOOKMARKS: &str = "ce://bookmarks";
 
 pub fn root_data_dir(app: &AppHandle) -> PathBuf {
     app.path()

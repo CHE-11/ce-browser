@@ -77,6 +77,20 @@ pub fn conceal_popup(app: &AppHandle, webview: &Webview, label: &str) {
     }
 }
 
+/// The WebView2 environment already created for this profile. A second
+/// `CreateCoreWebView2EnvironmentWithOptions` for the same user-data folder
+/// waits forever, which is what froze the app when another window opened.
+pub fn environment_of(webview: &Webview) -> Option<ICoreWebView2Environment> {
+    let (tx, rx) = mpsc::channel();
+    let queued = webview.with_webview(move |platform| {
+        let _ = tx.send(MainThread::new(platform.environment()));
+    });
+    if queued.is_err() {
+        return None;
+    }
+    rx.recv().ok().map(MainThread::into_inner)
+}
+
 /// Clips the popup's own window to a rounded rectangle. The main window is left alone.
 pub fn round_popup(webview: &Webview, main: isize, radius: i32) {
     let radius = radius.max(1);
@@ -447,32 +461,44 @@ pub fn clear_site_cache(webview: &Webview, origin: &str) -> std::result::Result<
         "storageTypes": "appcache,cache_storage,shader_cache,service_workers",
     })
     .to_string();
-    call_cdp(webview, "Storage.clearDataForOrigin", &params)?;
-    if call_cdp(webview, "Page.reload", r#"{"ignoreCache":true}"#).is_err() {
+    const FAILURE: &str = "Couldn't clear the cache for this site.";
+    let timeout = Duration::from_secs(10);
+    call_cdp_json(webview, "Storage.clearDataForOrigin", &params, timeout, FAILURE)?;
+    if call_cdp_json(webview, "Page.reload", r#"{"ignoreCache":true}"#, timeout, FAILURE).is_err() {
         webview.reload().map_err(|error| error.to_string())?;
     }
     Ok(())
 }
 
-fn call_cdp(webview: &Webview, method: &str, params: &str) -> std::result::Result<(), String> {
-    let (tx, rx) = mpsc::channel::<std::result::Result<(), String>>();
+/// Runs a DevTools Protocol method and returns its JSON result. Waits on the main thread,
+/// so call it from a worker thread. `failure` starts every error message.
+pub fn call_cdp_json(
+    webview: &Webview,
+    method: &str,
+    params: &str,
+    timeout: Duration,
+    failure: &str,
+) -> std::result::Result<serde_json::Value, String> {
+    let (tx, rx) = mpsc::channel::<std::result::Result<String, String>>();
     let method = method.to_string();
     let params = params.to_string();
+    let message = failure.to_string();
     webview
         .with_webview(move |platform| {
             let core = match core(&platform) {
                 Ok(core) => core,
                 Err(error) => {
-                    let _ = tx.send(Err(error.to_string()));
+                    let _ = tx.send(Err(format!("{message} {error}")));
                     return;
                 }
             };
             let callback_tx = tx.clone();
+            let callback_message = message.clone();
             let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(
                 move |result, body| {
                     let outcome = match result {
-                        Ok(()) => Ok(()),
-                        Err(error) => Err(cdp_error(&error, &body)),
+                        Ok(()) => Ok(body),
+                        Err(error) => Err(cdp_error(&callback_message, &error, &body)),
                     };
                     let _ = callback_tx.send(outcome);
                     Ok(())
@@ -483,20 +509,146 @@ fn call_cdp(webview: &Webview, method: &str, params: &str) -> std::result::Resul
             if let Err(error) =
                 unsafe { core.CallDevToolsProtocolMethod(&method, &params, &handler) }
             {
-                let _ = tx.send(Err(error.to_string()));
+                let _ = tx.send(Err(format!("{message} {error}")));
             }
         })
         .map_err(|error| error.to_string())?;
-    rx.recv_timeout(Duration::from_secs(10))
-        .map_err(|_| "Couldn't clear the cache for this site.".to_string())?
+    let body = rx
+        .recv_timeout(timeout)
+        .map_err(|_| format!("{failure} The page did not answer in time."))??;
+    if body.trim().is_empty() {
+        return Ok(serde_json::Value::Null);
+    }
+    serde_json::from_str(&body).map_err(|error| format!("{failure} {error}"))
 }
 
-fn cdp_error(error: &windows::core::Error, body: &str) -> String {
+fn cdp_error(failure: &str, error: &windows::core::Error, body: &str) -> String {
     let detail = error.to_string();
     let body = body.trim();
     if body.is_empty() || body == "{}" {
-        format!("Couldn't clear the cache for this site. {detail}")
+        format!("{failure} {detail}")
     } else {
-        format!("Couldn't clear the cache for this site. {detail} {body}")
+        format!("{failure} {detail} {body}")
     }
+}
+
+/// Evaluates `expression` in the page's main world and returns its value. Promises are awaited.
+pub fn evaluate(
+    webview: &Webview,
+    expression: &str,
+    timeout: Duration,
+    failure: &str,
+) -> std::result::Result<serde_json::Value, String> {
+    let params = serde_json::json!({
+        "expression": expression,
+        "returnByValue": true,
+        "awaitPromise": true,
+        "userGesture": false,
+    })
+    .to_string();
+    let mut response = call_cdp_json(webview, "Runtime.evaluate", &params, timeout, failure)?;
+    if let Some(details) = response.get("exceptionDetails") {
+        let text = details
+            .pointer("/exception/description")
+            .or_else(|| details.get("text"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("The page script failed.");
+        return Err(format!("{failure} {text}"));
+    }
+    Ok(response
+        .pointer_mut("/result/value")
+        .map(serde_json::Value::take)
+        .unwrap_or(serde_json::Value::Null))
+}
+
+/// Page layout for `print_to_pdf`. Sizes are inches.
+pub struct PdfLayout {
+    pub page_width: f64,
+    pub page_height: f64,
+    pub landscape: bool,
+    pub margin: f64,
+    pub backgrounds: bool,
+    pub header_footer: bool,
+    pub title: String,
+    pub url: String,
+    pub scale: f64,
+}
+
+fn print_settings(
+    platform: &PlatformWebview,
+    layout: &PdfLayout,
+) -> windows::core::Result<ICoreWebView2PrintSettings> {
+    let environment = platform.environment().cast::<ICoreWebView2Environment6>()?;
+    unsafe {
+        let settings = environment.CreatePrintSettings()?;
+        settings.SetOrientation(if layout.landscape {
+            COREWEBVIEW2_PRINT_ORIENTATION_LANDSCAPE
+        } else {
+            COREWEBVIEW2_PRINT_ORIENTATION_PORTRAIT
+        })?;
+        settings.SetPageWidth(layout.page_width)?;
+        settings.SetPageHeight(layout.page_height)?;
+        settings.SetMarginTop(layout.margin)?;
+        settings.SetMarginBottom(layout.margin)?;
+        settings.SetMarginLeft(layout.margin)?;
+        settings.SetMarginRight(layout.margin)?;
+        settings.SetScaleFactor(layout.scale.clamp(0.1, 2.0))?;
+        settings.SetShouldPrintBackgrounds(layout.backgrounds)?;
+        settings.SetShouldPrintHeaderAndFooter(layout.header_footer)?;
+        if layout.header_footer {
+            settings.SetHeaderTitle(&HSTRING::from(layout.title.as_str()))?;
+            settings.SetFooterUri(&HSTRING::from(layout.url.as_str()))?;
+        }
+        Ok(settings)
+    }
+}
+
+/// Saves what the webview shows as a PDF at `path`. Waits on the main thread.
+pub fn print_to_pdf(
+    webview: &Webview,
+    path: &std::path::Path,
+    layout: PdfLayout,
+) -> std::result::Result<(), String> {
+    const FAILURE: &str = "Couldn't save the PDF.";
+    let (tx, rx) = mpsc::channel::<std::result::Result<(), String>>();
+    let path = HSTRING::from(path.as_os_str());
+    webview
+        .with_webview(move |platform| {
+            let started = (|| -> windows::core::Result<()> {
+                let core = core(&platform)?.cast::<ICoreWebView2_7>()?;
+                let settings = print_settings(&platform, &layout)?;
+                let callback_tx = tx.clone();
+                let handler = PrintToPdfCompletedHandler::create(Box::new(move |result, saved| {
+                    let outcome = match result {
+                        Ok(()) if saved => Ok(()),
+                        Ok(()) => Err(FAILURE.to_string()),
+                        Err(error) => Err(format!("{FAILURE} {error}")),
+                    };
+                    let _ = callback_tx.send(outcome);
+                    Ok(())
+                }));
+                unsafe { core.PrintToPdf(&path, &settings, &handler) }
+            })();
+            if let Err(error) = started {
+                let _ = tx.send(Err(format!("{FAILURE} {error}")));
+            }
+        })
+        .map_err(|error| error.to_string())?;
+    rx.recv_timeout(Duration::from_secs(120))
+        .map_err(|_| format!("{FAILURE} Printing took too long."))?
+}
+
+/// Opens the Windows print dialog for what the webview shows.
+pub fn show_print_dialog(webview: &Webview) -> std::result::Result<(), String> {
+    let (tx, rx) = mpsc::channel::<std::result::Result<(), String>>();
+    webview
+        .with_webview(move |platform| {
+            let shown = core(&platform)
+                .and_then(|core| core.cast::<ICoreWebView2_16>())
+                .and_then(|core| unsafe { core.ShowPrintUI(COREWEBVIEW2_PRINT_DIALOG_KIND_SYSTEM) });
+            let _ = tx.send(shown.map_err(|error| format!("Couldn't open the print dialog. {error}")));
+        })
+        .map_err(|error| error.to_string())?;
+    rx.recv_timeout(Duration::from_secs(10))
+        .map_err(|_| "Couldn't open the print dialog.".to_string())?
 }

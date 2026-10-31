@@ -1,14 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  Check,
   Download,
   EllipsisVertical,
   History,
-  Eraser,
   House,
-  LoaderCircle,
   Lock,
   Puzzle,
   RotateCw,
@@ -30,7 +27,6 @@ import type {
 } from "../../../../types/browser";
 import {
   activateTab,
-  clearSiteCache,
   closePopup,
   createTab,
   goBack,
@@ -51,6 +47,8 @@ import {
 import { cn } from "../../lib/cn";
 import { buildSuggestions, omniboxHeight } from "../../lib/omnibox";
 import { flattenBookmarks } from "../../lib/use-browser";
+import { BuiltinExtensions } from "../../extensions";
+import { ExtensionIcon } from "../ExtensionIcon";
 import { IconButton } from "../IconButton";
 
 type AddressBarProps = {
@@ -71,27 +69,13 @@ function addressText(tab: TabInfo | undefined) {
   return tab.url;
 }
 
-/** Host of an http(s) page, including a non-default port. Internal pages have no site cache. */
-function siteHost(url: string | undefined) {
-  if (!url) {
-    return null;
-  }
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return null;
-    }
-    return parsed.host || null;
-  } catch {
-    return null;
-  }
-}
-
 export function AddressBar({ snapshot, bookmarks, downloads, history, extensions, settings }: AddressBarProps) {
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const activeId = activeTab?.id ?? null;
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const activeRef = useRef(activeTab);
+  activeRef.current = activeTab;
   const fieldRef = useRef<HTMLDivElement>(null);
   const starRef = useRef<HTMLButtonElement>(null);
   const downloadsRef = useRef<HTMLButtonElement>(null);
@@ -101,10 +85,6 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const [editing, setEditing] = useState(false);
   const [omnibox, setOmnibox] = useState<OmniboxState>(EMPTY_OMNIBOX);
   const [downloadFlash, setDownloadFlash] = useState(false);
-  const [clearingCache, setClearingCache] = useState(false);
-  const [cacheNotice, setCacheNotice] = useState<"cleared" | "failed" | null>(null);
-  const clearingCacheRef = useRef(false);
-  const cacheTimer = useRef<number | null>(null);
   const omniboxRef = useRef(omnibox);
   const popupOpenRef = useRef(false);
   const blurTimer = useRef<number | null>(null);
@@ -118,7 +98,13 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     }
   }, [activeTab?.url, activeId, editing]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (activeRef.current?.url === "ce://newtab") {
+      setText("");
+      setEditing(true);
+      inputRef.current?.focus();
+      return;
+    }
     setEditing(false);
   }, [activeId]);
 
@@ -198,8 +184,14 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       onBrowserCommand((command) => {
         if (command === "focus-address") {
           const input = inputRef.current;
-          input?.focus();
-          input?.select();
+          if (!input) {
+            return;
+          }
+          const typing = document.activeElement === input && input.value !== addressText(activeRef.current);
+          input.focus();
+          if (!typing) {
+            input.select();
+          }
         } else if (command === "bookmark" && starRef.current) {
           openBookmarkEditor(starRef.current);
         } else if (command === "downloads") {
@@ -220,9 +212,6 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       }
     };
   }, []);
-
-  const activeRef = useRef(activeTab);
-  activeRef.current = activeTab;
 
   function openBookmarkEditor(anchor: HTMLElement) {
     const tab = activeRef.current;
@@ -296,44 +285,6 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const toolbarExtensions = extensions.filter((extension) => extension.enabled);
   const secure = activeTab?.url.startsWith("https://");
   const insecure = activeTab?.url.startsWith("http://");
-  const cacheHost = siteHost(activeTab?.url);
-  const cacheLabel =
-    cacheNotice === "cleared"
-      ? "Cache cleared"
-      : cacheNotice === "failed"
-        ? "Couldn't clear cache"
-        : clearingCache
-          ? "Clearing cache"
-          : cacheHost
-            ? `Clear cache for ${cacheHost}`
-            : "Clear cache for this site";
-
-  const showCacheNotice = (notice: "cleared" | "failed") => {
-    if (cacheTimer.current !== null) {
-      window.clearTimeout(cacheTimer.current);
-    }
-    setCacheNotice(notice);
-    cacheTimer.current = window.setTimeout(() => {
-      cacheTimer.current = null;
-      setCacheNotice(null);
-    }, 1600);
-  };
-
-  const onClearCache = () => {
-    if (activeId === null || cacheHost === null || clearingCacheRef.current) {
-      return;
-    }
-    clearingCacheRef.current = true;
-    setClearingCache(true);
-    setCacheNotice(null);
-    void clearSiteCache(activeId)
-      .then(() => showCacheNotice("cleared"))
-      .catch(() => showCacheNotice("failed"))
-      .finally(() => {
-        clearingCacheRef.current = false;
-        setClearingCache(false);
-      });
-  };
 
   return (
     <div id="address-bar" className="flex h-10 shrink-0 items-center gap-1 bg-zinc-900 px-2">
@@ -371,7 +322,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         id="address-home"
         label="Home"
         disabled={activeId === null}
-        onClick={() => activeId !== null && void navigate(activeId, settings?.homePage || "ce://newtab")}
+        onClick={() => activeId !== null && void navigate(activeId, settings?.homePage || "ce://bookmarks")}
       >
         <House id="address-home-icon" aria-hidden />
       </IconButton>
@@ -458,11 +409,13 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
               })
             }
           >
-            {extension.icon ? (
-              <img id={`address-extension-${extension.id}-icon`} src={extension.icon} alt="" className="size-4" />
-            ) : (
-              <Puzzle id={`address-extension-${extension.id}-icon`} aria-hidden />
-            )}
+            <ExtensionIcon
+              id={`address-extension-${extension.id}-icon`}
+              extensionId={extension.id}
+              name={extension.name}
+              src={extension.icon}
+              className="size-4"
+            />
           </IconButton>
         ))}
         <IconButton
@@ -506,24 +459,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         <History id="address-history-icon" aria-hidden />
       </IconButton>
 
-      <IconButton
-        id="address-clear-cache"
-        label={cacheLabel}
-        disabled={cacheHost === null || clearingCache}
-        className={cn(
-          cacheNotice === "cleared" && "text-sky-300",
-          cacheNotice === "failed" && "text-amber-300",
-        )}
-        onClick={onClearCache}
-      >
-        {clearingCache ? (
-          <LoaderCircle id="address-clear-cache-icon" className="animate-spin" aria-hidden />
-        ) : cacheNotice === "cleared" ? (
-          <Check id="address-clear-cache-icon" aria-hidden />
-        ) : (
-          <Eraser id="address-clear-cache-icon" aria-hidden />
-        )}
-      </IconButton>
+      <BuiltinExtensions activeTab={activeTab} settings={settings} />
 
       <IconButton
         id="address-menu"

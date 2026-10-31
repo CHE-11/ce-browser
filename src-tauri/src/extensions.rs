@@ -112,9 +112,7 @@ fn with_profile<T: Send + 'static>(
     app: &AppHandle,
     work: impl FnOnce(ICoreWebView2Profile7, Sender<Result<T, String>>) + Send + 'static,
 ) -> Result<T, String> {
-    let webview = app
-        .get_webview(tabs::UI)
-        .ok_or("The browser UI is not ready yet.")?;
+    let webview = tabs::any_ui(app).ok_or("The browser UI is not ready yet.")?;
     let (tx, rx) = mpsc::channel();
     let fail = tx.clone();
     webview
