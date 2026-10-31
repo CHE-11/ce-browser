@@ -15,7 +15,7 @@ const KIND_LABEL: Record<OmniboxSuggestion["kind"], string> = {
 };
 
 /** Shown under the address bar. The input keeps focus in the UI view; this view only mirrors its state. */
-export function OmniboxSuggestions() {
+export function AddressBarEllipsisMenu() {
   const [state, setState] = useState<OmniboxState>({ suggestions: [], selected: 0 });
 
   useEffect(() => {
@@ -28,14 +28,14 @@ export function OmniboxSuggestions() {
 
   return (
     <div
-      id="omnibox"
+      id="address-bar-ellipsis-menu"
       role="listbox"
       aria-label="Suggestions"
       className="h-full overflow-hidden rounded-xl bg-zinc-900 py-1.5 text-zinc-100 ring-1 ring-inset ring-zinc-700"
       onContextMenu={(event) => event.preventDefault()}
     >
       {state.suggestions.map((suggestion, index) => {
-        const domId = `omnibox-${index}`;
+        const domId = `address-bar-ellipsis-menu-${index}`;
         const Icon = suggestion.kind === "search" ? Search : suggestion.kind === "tab" ? AppWindow : suggestion.kind === "bookmark" ? Star : Globe;
         return (
           <div

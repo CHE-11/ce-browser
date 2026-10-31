@@ -64,6 +64,9 @@ pub struct BrowserSettings {
     /// Last choices in the Page to PNG popover.
     #[serde(default)]
     pub page_capture: PageCaptureSettings,
+    /// Extension ids left off the address bar. An older file omits this, so every extension stays pinned.
+    #[serde(default)]
+    pub hidden_toolbar_extensions: Vec<String>,
 }
 
 const PRINT_MODES: &[&str] = &["article", "full"];
@@ -180,6 +183,7 @@ impl Default for BrowserSettings {
             sync_history_revision: 0,
             print_editor: PrintEditorSettings::default(),
             page_capture: PageCaptureSettings::default(),
+            hidden_toolbar_extensions: Vec::new(),
         }
     }
 }
@@ -211,6 +215,7 @@ impl BrowserSettings {
         self.ui_zoom = ((self.ui_zoom.clamp(80, 150) + 2) / 5) * 5;
         self.page_zoom = snap_page_zoom(self.page_zoom);
         self.print_editor = self.print_editor.normalize();
+        self.hidden_toolbar_extensions = toolbar_hidden(&self.hidden_toolbar_extensions);
         self.sync_folder = folder_from_stored(&self.sync_folder);
         if self.sync_bookmarks_revision == 0
             && self.sync_extensions_revision == 0
@@ -468,6 +473,26 @@ fn snap_page_zoom(value: u32) -> u32 {
         .unwrap_or(100)
 }
 
+/// Drops blanks, duplicates and ids that cannot be an extension id.
+fn toolbar_hidden(ids: &[String]) -> Vec<String> {
+    let mut hidden = Vec::new();
+    for id in ids {
+        let id = id.trim();
+        if id.is_empty()
+            || id.len() > 128
+            || id.chars().any(char::is_whitespace)
+            || hidden.iter().any(|kept: &String| kept == id)
+        {
+            continue;
+        }
+        hidden.push(id.to_string());
+        if hidden.len() >= 200 {
+            break;
+        }
+    }
+    hidden
+}
+
 fn canonicalize_pins(app: &AppHandle, settings: &BrowserSettings) -> Vec<String> {
     let search = settings.search_url();
     let mut pins = Vec::new();
@@ -523,6 +548,22 @@ mod tests {
         assert_eq!(loaded.print_editor.text_size, 150);
         assert!(loaded.print_editor.remove_ads);
         assert!(loaded.page_capture.full_page);
+        assert!(loaded.hidden_toolbar_extensions.is_empty());
+    }
+
+    #[test]
+    fn toolbar_pins_ignore_blank_and_duplicate_ids() {
+        let mut settings = super::BrowserSettings::default();
+        settings.hidden_toolbar_extensions = vec![
+            " print-pdf ".into(),
+            "print-pdf".into(),
+            String::new(),
+            "not an id".into(),
+        ];
+        assert_eq!(
+            settings.normalize().hidden_toolbar_extensions,
+            vec!["print-pdf".to_string()]
+        );
     }
 
     #[test]

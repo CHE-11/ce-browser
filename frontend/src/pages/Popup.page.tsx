@@ -5,7 +5,7 @@ import { BookmarkEditor } from "../components/BookmarksBar/BookmarkEditor";
 import { BookmarkFolderMenu } from "../components/BookmarksBar/BookmarkFolderMenu";
 import { BookmarksBarMenu } from "../components/BookmarksBar/BookmarksBarMenu";
 import { DownloadsPanel } from "../components/DownloadsPanel";
-import { OmniboxSuggestions } from "../components/OmniboxSuggestions";
+import { AddressBarEllipsisMenu } from "../components/AddressBarEllipsisMenu";
 import { TabMenu } from "../components/TabMenu";
 import { PageCapturePopover } from "../extensions/page-capture/PageCapturePopover";
 import { PrintPdfPopover } from "../extensions/print-pdf/PrintPdfPopover";
@@ -51,7 +51,7 @@ export function PopupPage({ popup, params }: PopupPageProps) {
     case "app-menu":
       return <AppMenu />;
     case "omnibox":
-      return <OmniboxSuggestions />;
+      return <AddressBarEllipsisMenu />;
     case "print-pdf":
       return <PrintPdfPopover params={params} />;
     case "page-capture":

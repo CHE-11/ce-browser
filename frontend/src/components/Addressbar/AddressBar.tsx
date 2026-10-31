@@ -459,7 +459,9 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         <History id="address-history-icon" aria-hidden />
       </IconButton>
 
+      <div id="address-builtin-start" className="mx-0.5 h-4 w-px shrink-0 bg-zinc-600" />
       <BuiltinExtensions activeTab={activeTab} settings={settings} />
+      <div id="address-builtin-end" className="mx-0.5 h-4 w-px shrink-0 bg-zinc-600" />
 
       <IconButton
         id="address-menu"

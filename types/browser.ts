@@ -45,7 +45,8 @@ export type PopupKind =
   | "omnibox"
   | "extension"
   | "print-pdf"
-  | "page-capture";
+  | "page-capture"
+  | "extension-pin";
 
 export type PopupRequest = {
   kind: PopupKind;
@@ -150,6 +151,8 @@ export type BrowserSettings = {
   printEditor: PrintEditorSettings;
   /** Last choices in the Page to PNG popover. */
   pageCapture: PageCaptureSettings;
+  /** Extension ids left off the address bar. Empty means every enabled extension stays pinned. */
+  hiddenToolbarExtensions: string[];
 };
 
 export type PrintMode = "article" | "full";
