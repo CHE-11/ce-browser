@@ -120,7 +120,7 @@ export function SettingsPage() {
 
   if (!settings) {
     return (
-      <PageShell id="settings-page" page="settings" title="Settings">
+      <PageShell id="settings-page" page="settings" title="Settings" lockHorizontalScroll>
         <div id="settings-page-loading" className="text-sm text-zinc-500">
           Loading settings
         </div>
@@ -139,6 +139,7 @@ export function SettingsPage() {
       page="settings"
       title="Settings"
       outline={outline}
+      lockHorizontalScroll
       actions={
         <label id="settings-page-search" className="flex h-8 w-64 items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900 px-2">
           <Search id="settings-page-search-icon" className="size-4 text-zinc-500" aria-hidden />

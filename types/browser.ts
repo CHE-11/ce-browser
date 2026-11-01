@@ -298,6 +298,12 @@ export type BookmarkTree = {
   other: BookmarkNode;
 };
 
+/** A cached site icon. `host` is the lowercase URL hostname. `dataUrl` is a PNG data URL. */
+export type SiteFavicon = {
+  host: string;
+  dataUrl: string;
+};
+
 export type DownloadState = "inProgress" | "paused" | "completed" | "cancelled" | "interrupted";
 
 export type DownloadItem = {
@@ -383,6 +389,14 @@ export type BrowserSettings = {
   /** Empty keeps the name the site suggested. */
   downloadNameTemplate: string;
   showBookmarksBar: boolean;
+  /** Text size of bookmarks on the bar, in rem. */
+  bookmarksBarTextSize: number;
+  /** Side padding of bookmarks on the bar, in rem. Top and bottom get half. */
+  bookmarksBarPadding: number;
+  /** Text size of rows in a bookmark folder menu, in rem. */
+  bookmarkFolderTextSize: number;
+  /** Side padding of rows in a bookmark folder menu, in rem. Top and bottom get half. */
+  bookmarkFolderPadding: number;
   /** The status bar under every page. */
   showStatusBar: boolean;
   /** Memory, time and the other status readings. Off leaves the version and zoom. */

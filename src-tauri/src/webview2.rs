@@ -654,19 +654,30 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                     let favicon = read_pwstr(|value| core.FaviconUri(value));
                     let favicon = (!favicon.is_empty()).then_some(favicon);
                     tabs::update_favicon(&favicon_app, id, favicon);
+                    let page_url = read_pwstr(|value| core.Source(value));
                     let accent_app = favicon_app.clone();
                     let handler =
                         GetFaviconCompletedHandler::create(Box::new(move |result, stream| {
-                            if result.is_ok()
-                                && let Some(stream) = stream
-                                && let Some(bytes) = read_stream(&stream)
-                                && let Some(color) = crate::accent::average_png(&bytes)
-                            {
+                            let bytes = result
+                                .ok()
+                                .and(stream)
+                                .and_then(|stream| read_stream(&stream));
+                            let Some(bytes) = bytes else {
+                                return Ok(());
+                            };
+                            if let Some(color) = crate::accent::average_png(&bytes) {
                                 let app = accent_app.clone();
                                 tauri::async_runtime::spawn(async move {
                                     tabs::set_favicon_accent(&app, id, color)
                                 });
                             }
+                            let app = accent_app.clone();
+                            let page_url = page_url.clone();
+                            tauri::async_runtime::spawn_blocking(move || {
+                                if !tabs::is_ephemeral(&app, id) {
+                                    crate::favicons::remember(&app, &page_url, &bytes);
+                                }
+                            });
                             Ok(())
                         }));
                     let _ = core.GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG, &handler);

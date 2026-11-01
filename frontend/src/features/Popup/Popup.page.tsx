@@ -8,7 +8,7 @@ import { ExtensionPinMenu } from "@/components/TabsAddressAndBookmarks/Addressba
 import { BookmarkAdd } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarkAdd";
 import { BookmarkEditor } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarkEditor";
 import { BookmarkFolderMenu } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarkFolderMenu";
-import { BookmarksBarMenu } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarksBarMenu";
+import { BookmarksBarMenu, type BookmarkMenuTarget } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarksBarMenu";
 import { TabGroupFlyout } from "@/components/TabsAddressAndBookmarks/Tabs/TabGroupFlyout";
 import { TabGroupMenu } from "@/components/TabsAddressAndBookmarks/Tabs/TabGroupMenu";
 import { TabMenu } from "@/components/TabsAddressAndBookmarks/Tabs/TabMenu";
@@ -59,6 +59,15 @@ function UnknownPopup() {
   );
 }
 
+function bookmarkMenuTarget(params: URLSearchParams): BookmarkMenuTarget | null {
+  const id = params.get("target");
+  if (!id) {
+    return null;
+  }
+  const kind = params.get("kind");
+  return { id, kind: kind === "folder" || kind === "separator" ? kind : "link" };
+}
+
 function PopupContent({ popup, params }: PopupPageProps) {
   switch (popup) {
     case "downloads":
@@ -66,7 +75,7 @@ function PopupContent({ popup, params }: PopupPageProps) {
     case "bookmark-edit":
       return <BookmarkEditor url={params.get("url") ?? ""} title={params.get("title") ?? ""} />;
     case "bookmark-folder":
-      return <BookmarkFolderMenu folderId={params.get("id") ?? "bar"} />;
+      return <BookmarkFolderMenu folderId={params.get("id") ?? "bar"} dragOpened={params.get("drag") === "1"} />;
     case "bookmarks-bar-menu":
       return (
         <BookmarksBarMenu
@@ -74,6 +83,7 @@ function PopupContent({ popup, params }: PopupPageProps) {
           y={Number(params.get("y")) || 0}
           parentId={params.get("parent") || "bar"}
           divider={params.get("divider") === "horizontal" ? "horizontal" : "vertical"}
+          target={bookmarkMenuTarget(params)}
         />
       );
     case "bookmark-add":

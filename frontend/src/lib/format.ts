@@ -29,6 +29,22 @@ export function faviconFor(url: string) {
   }
 }
 
+/** Key of the backend favicon cache: the lowercase hostname of a web address. */
+export function faviconKey(url: string | null | undefined) {
+  if (!url) {
+    return null;
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.hostname.toLowerCase() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function isInternal(url: string) {
   return url.startsWith("ce://");
 }

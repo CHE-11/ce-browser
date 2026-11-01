@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { closePopup, resizePopup } from "../lib/browser-client";
 import { cn } from "../lib/cn";
 import { usePopupPainted } from "../lib/popup-ready";
@@ -94,9 +94,10 @@ type PopupMenuItemProps = {
   disabled?: boolean;
   danger?: boolean;
   onClick: () => void;
+  onContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void;
 };
 
-export function PopupMenuItem({ id, icon, label, shortcut, disabled, danger, onClick }: PopupMenuItemProps) {
+export function PopupMenuItem({ id, icon, label, shortcut, disabled, danger, onClick, onContextMenu }: PopupMenuItemProps) {
   return (
     <button
       id={id}
@@ -108,6 +109,7 @@ export function PopupMenuItem({ id, icon, label, shortcut, disabled, danger, onC
         danger && "text-red-300",
       )}
       onClick={onClick}
+      onContextMenu={onContextMenu}
     >
       <span id={`${id}-icon`} className="inline-flex size-4 shrink-0 items-center justify-center text-zinc-400 group-hover:text-zinc-200 [&_svg]:size-4">
         {icon}

@@ -98,7 +98,14 @@ export function BrowserPage() {
           settings={settings}
           windowControls={vertical}
         />
-        {showBookmarksBar ? <BookmarksBar tree={bookmarks} activeId={snapshot.activeId} /> : null}
+        {showBookmarksBar ? (
+          <BookmarksBar
+            tree={bookmarks}
+            activeId={snapshot.activeId}
+            textSize={settings?.bookmarksBarTextSize}
+            padding={settings?.bookmarksBarPadding}
+          />
+        ) : null}
         {findToken !== null && activeTab ? (
           <FindBar tabId={activeTab.id} focusToken={findToken} onClose={() => setFindToken(null)} />
         ) : null}

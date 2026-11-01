@@ -1361,6 +1361,7 @@ pub fn create_browser_window(app: &AppHandle, label: &str) -> Result<(), String>
     let ui_view = window
         .add_child(
             base_builder(app, &ui, WebviewUrl::App("index.html".into()))
+                .disable_drag_drop_handler()
                 .background_color(background)
                 .initialization_script(page_background_script(app))
                 .on_new_window(move |url, features| {
@@ -1692,6 +1693,15 @@ fn remember_visit(app: &AppHandle, id: u32) {
 
 pub fn update_favicon(app: &AppHandle, id: u32, favicon: Option<String>) {
     update(app, id, |tab| tab.info.favicon = favicon);
+}
+
+pub fn is_ephemeral(app: &AppHandle, id: u32) -> bool {
+    with_state(app, |state| {
+        state
+            .index_of(id)
+            .map(|index| state.tabs[index].info.ephemeral)
+    })
+    .unwrap_or(false)
 }
 
 pub fn activate(app: &AppHandle, id: u32) -> Result<(), String> {
@@ -2840,6 +2850,7 @@ pub fn open_popup(
     let reveal_label = label.clone();
     let popup_window = window_label.to_string();
     let mut builder = base_builder(app, &label, WebviewUrl::External(url))
+        .disable_drag_drop_handler()
         .background_color(surface)
         .focused(false)
         .on_page_load(move |_, payload| {

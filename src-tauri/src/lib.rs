@@ -8,6 +8,7 @@ mod browsers;
 mod capture;
 mod downloads;
 mod extensions;
+mod favicons;
 mod files;
 mod history;
 mod history_index;
@@ -621,6 +622,14 @@ fn delete_bookmark(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 fn find_bookmark(app: AppHandle, url: String) -> Option<BookmarkNode> {
     bookmarks::find_by_url(&app, &url)
+}
+
+#[tauri::command]
+async fn site_favicons(
+    app: AppHandle,
+    urls: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    blocking(move || Ok(favicons::lookup(&app, &urls))).await
 }
 
 #[tauri::command]
@@ -1426,6 +1435,7 @@ pub fn run() {
             move_bookmark,
             delete_bookmark,
             find_bookmark,
+            site_favicons,
             import_bookmarks_html,
             export_bookmarks_html,
             list_downloads,

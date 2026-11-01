@@ -31,6 +31,7 @@ import type {
   PageRules,
   PageTechnologies,
   PageToolRequest,
+  SiteFavicon,
   SitePatch,
   UserScript,
   PdfOptions,
@@ -746,6 +747,15 @@ export async function exportBookmarksHtml() {
 
 export function onBookmarksChanged(handler: (tree: BookmarkTree) => void): Promise<UnlistenFn> {
   return listen<BookmarkTree>("bookmarks-changed", (event) => handler(event.payload));
+}
+
+/** Cached icons by host. Missing hosts are fetched in the background and arrive through `onFaviconsChanged`. */
+export function siteFavicons(urls: string[]) {
+  return invoke<Record<string, string>>("site_favicons", { urls });
+}
+
+export function onFaviconsChanged(handler: (icon: SiteFavicon) => void): Promise<UnlistenFn> {
+  return listen<SiteFavicon>("favicons-changed", (event) => handler(event.payload));
 }
 
 // Downloads

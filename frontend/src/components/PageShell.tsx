@@ -25,19 +25,40 @@ type PageShellProps = {
   title: string;
   actions?: ReactNode;
   outline?: PageOutlineItem[];
+  lockHorizontalScroll?: boolean;
   children: ReactNode;
 };
 
-export function PageShell({ id, page, title, actions, outline, children }: PageShellProps) {
+export function PageShell({ id, page, title, actions, outline, lockHorizontalScroll = false, children }: PageShellProps) {
   useAppearanceFromSettings();
 
   useEffect(() => {
     document.title = title;
   }, [title]);
 
+  useEffect(() => {
+    if (!lockHorizontalScroll) {
+      return undefined;
+    }
+    const targets = [document.documentElement, document.body];
+    const previous = targets.map((node) => ({ overflowX: node.style.overflowX, overscrollBehaviorX: node.style.overscrollBehaviorX }));
+    for (const node of targets) {
+      node.style.overflowX = "hidden";
+      node.style.overscrollBehaviorX = "none";
+    }
+    return () => {
+      targets.forEach((node, index) => {
+        node.style.overflowX = previous[index].overflowX;
+        node.style.overscrollBehaviorX = previous[index].overscrollBehaviorX;
+      });
+    };
+  }, [lockHorizontalScroll]);
+
+  const scrollLock = lockHorizontalScroll && "overflow-x-hidden overscroll-x-none";
+
   return (
-    <div id={id} className="flex h-full bg-zinc-950 text-zinc-100">
-      <nav id={`${id}-nav`} className="flex w-56 shrink-0 flex-col gap-1 overflow-y-auto border-r border-zinc-800 p-3">
+    <div id={id} className={cn("flex h-full bg-zinc-950 text-zinc-100", lockHorizontalScroll && "overflow-hidden")}>
+      <nav id={`${id}-nav`} className={cn("flex w-56 shrink-0 flex-col gap-1 overflow-y-auto border-r border-zinc-800 p-3", scrollLock)}>
         <div id={`${id}-nav-brand`} className="px-3 pb-3 pt-1 text-sm font-semibold text-zinc-400">
           ce-browser
         </div>
@@ -87,7 +108,7 @@ export function PageShell({ id, page, title, actions, outline, children }: PageS
             {actions}
           </div>
         </header>
-        <div id={`${id}-body`} className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
+        <div id={`${id}-body`} className={cn("min-h-0 flex-1 overflow-y-auto px-8 py-6", scrollLock)}>
           {children}
         </div>
       </main>

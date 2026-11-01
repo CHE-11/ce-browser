@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { BookmarkNode, BookmarkTree, BrowserSettings, PageRules, TabsSnapshot } from "../../../types/browser";
@@ -13,12 +13,15 @@ import {
   listTabs,
   onBookmarksChanged,
   onDownloadsChanged,
+  onFaviconsChanged,
   onExtensionsChanged,
   onHistoryChanged,
   onPageRulesChanged,
   onSettingsChanged,
   onTabsChanged,
+  siteFavicons,
 } from "./browser-client";
+import { faviconKey } from "./format";
 import { publishZoom } from "./zoom";
 
 /** Loads a value once and keeps it current from a change event. */
@@ -112,6 +115,55 @@ export function useBookmarksState() {
 
 export function useBookmarks() {
   return useBookmarksState().tree;
+}
+
+/**
+ * Cached site icons for `urls`, keyed by `faviconKey`. Hosts the backend has not seen yet are
+ * fetched in the background and fill in as they arrive.
+ */
+export function useSiteFavicons(urls: (string | null | undefined)[]) {
+  const [icons, setIcons] = useState<Record<string, string>>({});
+  const byHost = new Map<string, string>();
+  for (const url of urls) {
+    const host = faviconKey(url);
+    if (host && url && !byHost.has(host)) {
+      byHost.set(host, url);
+    }
+  }
+  const requestKey = [...byHost.values()].sort().join("\n");
+  const requested = useMemo(() => (requestKey ? requestKey.split("\n") : []), [requestKey]);
+
+  useEffect(() => {
+    let disposed = false;
+    const unlisten = onFaviconsChanged((icon) => {
+      if (!disposed) {
+        setIcons((current) => (current[icon.host] === icon.dataUrl ? current : { ...current, [icon.host]: icon.dataUrl }));
+      }
+    });
+    return () => {
+      disposed = true;
+      void unlisten.then((stop) => stop());
+    };
+  }, []);
+
+  useEffect(() => {
+    if (requested.length === 0) {
+      return;
+    }
+    let disposed = false;
+    siteFavicons(requested)
+      .then((found) => {
+        if (!disposed) {
+          setIcons((current) => ({ ...current, ...found }));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [requested]);
+
+  return icons;
 }
 
 export function useDownloadsState() {

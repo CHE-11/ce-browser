@@ -1,20 +1,29 @@
-import { useRef, useState, type DragEvent, type MouseEvent } from "react";
+import { useRef, type MouseEvent } from "react";
 import { ChevronsRight, Folder } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
-import { createTab, navigate, openPopupBelow, openPopup, moveBookmark } from "@/lib/browser-client";
+import { createTab, navigate, openPopupBelow, openPopup, closePopup } from "@/lib/browser-client";
+import { BOOKMARK_DROP_END, useBookmarkDrag } from "@/lib/bookmark-drag";
+import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { cn } from "@/lib/cn";
-import { BookmarkDropPlace, BOOKMARK_DRAG_TYPE, bookmarkDropPlace } from "@/lib/use-browser";
+import { faviconKey } from "@/lib/format";
+import { useSiteFavicons } from "@/lib/use-browser";
 import { BookmarkTree, BookmarkNode } from "@type/browser";
 
 type BookmarksBarProps = {
   tree: BookmarkTree | null;
   activeId: number | null;
+  /** rem */
+  textSize?: number;
+  /** rem */
+  padding?: number;
 };
 
-type DropState = { id: string; place: BookmarkDropPlace };
-
+/** Gap, icon and width are in `em`, so they follow the text size setting. */
 const itemClass =
-  "inline-flex h-6 max-w-44 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100";
+  "inline-flex max-w-[15em] shrink-0 items-center gap-[0.5em] rounded-md text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100";
+const iconClass = "size-[1.2em] shrink-0";
+
+const FOLDER_POPUP = { kind: "bookmark-folder", width: 300, height: 360 } as const;
 
 export function openBookmarkLink(url: string, activeId: number | null, event?: MouseEvent) {
   const background = !!event && (event.ctrlKey || event.button === 1);
@@ -25,111 +34,90 @@ export function openBookmarkLink(url: string, activeId: number | null, event?: M
   }
 }
 
-function dropChrome(drop: DropState | null, id: string) {
-  if (!drop || drop.id !== id) {
-    return "";
-  }
-  if (drop.place === "into") {
-    return "ring-1 ring-sky-500";
-  }
-  if (drop.place === "before") {
-    return "shadow-[inset_2px_0_0_0_#0ea5e9]";
-  }
-  return "shadow-[inset_-2px_0_0_0_#0ea5e9]";
-}
-
-export function BookmarksBar({ tree, activeId }: BookmarksBarProps) {
+export function BookmarksBar({ tree, activeId, textSize, padding }: BookmarksBarProps) {
   const items = tree?.bar.children ?? [];
-  const dragged = useRef(false);
-  const [drop, setDrop] = useState<DropState | null>(null);
+  const icons = useSiteFavicons(items.map((node) => node.url));
+  const itemStyle = bookmarkItemStyle(textSize, padding, { text: BOOKMARK_SIZE.barText, padding: BOOKMARK_SIZE.barPadding });
+  /** Folder whose popup this drag opened by hovering it. */
+  const dragOpened = useRef<string | null>(null);
 
-  const openFolder = (event: MouseEvent<HTMLElement>, node: BookmarkNode) => {
-    if (dragged.current) {
-      dragged.current = false;
+  const openFolderWhileDragging = (node: BookmarkNode, element: HTMLElement) => {
+    if (!drag.dragged.current || dragOpened.current === node.id) {
       return;
     }
+    dragOpened.current = node.id;
     void openPopupBelow(
-      event.currentTarget,
-      { kind: "bookmark-folder", params: `id=${encodeURIComponent(node.id)}`, width: 300, height: 360 },
+      element,
+      { ...FOLDER_POPUP, params: `id=${encodeURIComponent(node.id)}&drag=1`, focus: false },
       "start",
     );
   };
 
-  const openBarMenu = (event: MouseEvent) => {
+  const closeDragPopup = () => {
+    if (dragOpened.current) {
+      dragOpened.current = null;
+      void closePopup();
+    }
+  };
+
+  const drag = useBookmarkDrag({
+    parentId: "bar",
+    axis: "x",
+    onHoverFolder: openFolderWhileDragging,
+    onDragEnd: closeDragPopup,
+  });
+
+  const openFolder = (event: MouseEvent<HTMLElement>, node: BookmarkNode) => {
+    if (drag.dragged.current) {
+      drag.dragged.current = false;
+      return;
+    }
+    void openPopupBelow(event.currentTarget, { ...FOLDER_POPUP, params: `id=${encodeURIComponent(node.id)}` }, "start");
+  };
+
+  const openBarMenu = (event: MouseEvent, node?: BookmarkNode) => {
     event.preventDefault();
+    event.stopPropagation();
     const params = new URLSearchParams({
       x: String(Math.round(event.clientX)),
       y: String(Math.round(event.clientY)),
       parent: "bar",
       divider: "vertical",
     });
+    if (node && node.id !== "bar" && node.id !== "other") {
+      const kind = node.separator ? "separator" : node.url ? "link" : "folder";
+      params.set("target", node.id);
+      params.set("kind", kind);
+    }
     void openPopup({
       kind: "bookmarks-bar-menu",
       params: params.toString(),
       x: event.clientX,
       y: event.clientY,
       width: 240,
-      height: 148,
+      height: params.has("target") ? 196 : 148,
     });
-  };
-
-  const rememberDrag = (event: DragEvent, node: BookmarkNode) => {
-    dragged.current = true;
-    event.dataTransfer.setData(BOOKMARK_DRAG_TYPE, node.id);
-    if (node.url) {
-      event.dataTransfer.setData("text/uri-list", node.url);
-    }
-    event.dataTransfer.effectAllowed = "move";
-  };
-
-  const allowDrop = (event: DragEvent, node: BookmarkNode) => {
-    if (!event.dataTransfer.types.includes(BOOKMARK_DRAG_TYPE)) {
-      return;
-    }
-    event.preventDefault();
-    const place = bookmarkDropPlace(event, node, "x");
-    setDrop((current) => (current?.id === node.id && current.place === place ? current : { id: node.id, place }));
-  };
-
-  const finishDrop = (event: DragEvent, node: BookmarkNode) => {
-    event.preventDefault();
-    const id = event.dataTransfer.getData(BOOKMARK_DRAG_TYPE);
-    const place = bookmarkDropPlace(event, node, "x");
-    setDrop(null);
-    if (!id || id === node.id) {
-      return;
-    }
-    if (place === "into" && !node.url && !node.separator) {
-      void moveBookmark(id, node.id);
-      return;
-    }
-    const index = items.findIndex((item) => item.id === node.id);
-    if (index < 0) {
-      return;
-    }
-    void moveBookmark(id, "bar", place === "after" ? index + 1 : index);
   };
 
   return (
     <div
       id="bookmarks-bar"
-      className="flex h-7 shrink-0 items-center gap-0.5 border-b border-zinc-800 bg-zinc-900 px-2"
+      className="flex shrink-0 items-center gap-0.5 border-b border-zinc-800 bg-zinc-900 px-2 py-0.5"
       onContextMenu={openBarMenu}
-      onDragLeave={(event) => {
-        const next = event.relatedTarget;
-        if (next instanceof Node && event.currentTarget.contains(next)) {
-          return;
-        }
-        setDrop(null);
-      }}
+      onDragLeave={drag.listProps.onDragLeave}
     >
-      <div id="bookmarks-bar-items" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden">
+      <div
+        id="bookmarks-bar-items"
+        className="flex min-w-0 flex-1 items-center gap-0.5 self-stretch overflow-hidden"
+        onDragOver={drag.listProps.onDragOver}
+        onDrop={drag.listProps.onDrop}
+      >
         {items.length === 0 ? (
           <span id="bookmarks-bar-empty" className="px-2 text-xs text-zinc-500">
             Press Ctrl+D to bookmark a page. Bookmarks in the bar folder show here.
           </span>
         ) : null}
-        {items.map((node) =>
+        {items.map((node, index) =>
           node.separator ? (
             <div
               key={node.id}
@@ -137,31 +125,24 @@ export function BookmarksBar({ tree, activeId }: BookmarksBarProps) {
               role="separator"
               aria-orientation="vertical"
               title="Divider"
-              draggable
-              className={cn("flex h-6 w-3 shrink-0 items-center justify-center", dropChrome(drop, node.id))}
-              onDragStart={(event) => rememberDrag(event, node)}
-              onDragEnd={() => {
-                setDrop(null);
-                window.setTimeout(() => {
-                  dragged.current = false;
-                });
-              }}
-              onDragOver={(event) => allowDrop(event, node)}
-              onDrop={(event) => finishDrop(event, node)}
+              className={cn("flex w-3 shrink-0 items-center justify-center self-stretch", drag.dropChrome(node.id))}
+              onContextMenu={(event) => openBarMenu(event, node)}
+              {...drag.itemProps(node, index)}
             >
-              <div id={`bookmarks-bar-${node.id}-line`} className="h-4 w-px bg-zinc-600" />
+              <div id={`bookmarks-bar-${node.id}-line`} className="h-2/3 w-px bg-zinc-600" />
             </div>
           ) : node.url ? (
             <button
               key={node.id}
               id={`bookmarks-bar-${node.id}`}
               type="button"
-              draggable
               title={`${node.title}\n${node.url}`}
-              className={cn(itemClass, dropChrome(drop, node.id))}
+              className={cn(itemClass, drag.dropChrome(node.id))}
+              style={itemStyle}
+              onContextMenu={(event) => openBarMenu(event, node)}
               onClick={(event) => {
-                if (dragged.current) {
-                  dragged.current = false;
+                if (drag.dragged.current) {
+                  drag.dragged.current = false;
                   return;
                 }
                 openBookmarkLink(node.url ?? "", activeId, event);
@@ -172,17 +153,14 @@ export function BookmarksBar({ tree, activeId }: BookmarksBarProps) {
                   openBookmarkLink(node.url ?? "", activeId, event);
                 }
               }}
-              onDragStart={(event) => rememberDrag(event, node)}
-              onDragEnd={() => {
-                setDrop(null);
-                window.setTimeout(() => {
-                  dragged.current = false;
-                });
-              }}
-              onDragOver={(event) => allowDrop(event, node)}
-              onDrop={(event) => finishDrop(event, node)}
+              {...drag.itemProps(node, index)}
             >
-              <FavIcon id={`bookmarks-bar-${node.id}-icon`} url={node.url} className="size-3.5" />
+              <FavIcon
+                id={`bookmarks-bar-${node.id}-icon`}
+                url={node.url}
+                src={icons[faviconKey(node.url) ?? ""] ?? null}
+                className={iconClass}
+              />
               <span id={`bookmarks-bar-${node.id}-title`} className="truncate">
                 {node.title || node.url}
               </span>
@@ -192,37 +170,35 @@ export function BookmarksBar({ tree, activeId }: BookmarksBarProps) {
               key={node.id}
               id={`bookmarks-bar-${node.id}`}
               type="button"
-              draggable
               title={node.title}
-              className={cn(itemClass, dropChrome(drop, node.id))}
+              className={cn(itemClass, drag.dropChrome(node.id))}
+              style={itemStyle}
+              onContextMenu={(event) => openBarMenu(event, node)}
               onClick={(event) => openFolder(event, node)}
-              onDragStart={(event) => rememberDrag(event, node)}
-              onDragEnd={() => {
-                setDrop(null);
-                window.setTimeout(() => {
-                  dragged.current = false;
-                });
-              }}
-              onDragOver={(event) => allowDrop(event, node)}
-              onDrop={(event) => finishDrop(event, node)}
+              {...drag.itemProps(node, index)}
             >
-              <Folder id={`bookmarks-bar-${node.id}-icon`} className="size-3.5 shrink-0 text-amber-400" aria-hidden />
+              <Folder id={`bookmarks-bar-${node.id}-icon`} className={cn(iconClass, "text-amber-400")} aria-hidden />
               <span id={`bookmarks-bar-${node.id}-title`} className="truncate">
                 {node.title}
               </span>
             </button>
           ),
         )}
+        {drag.drop?.id === BOOKMARK_DROP_END ? (
+          <div id="bookmarks-bar-drop-end" className="h-2/3 w-0.5 shrink-0 rounded bg-sky-500" />
+        ) : null}
       </div>
-      {items.length > 6 ? (
+      {tree && items.length > 6 ? (
         <button
           id="bookmarks-bar-all"
           type="button"
           title="All bar bookmarks"
-          className={itemClass}
-          onClick={(event) => tree && openFolder(event, tree.bar)}
+          className={cn(itemClass, drag.dropChrome(tree.bar.id))}
+          style={itemStyle}
+          onClick={(event) => openFolder(event, tree.bar)}
+          {...drag.targetProps(tree.bar, items.length)}
         >
-          <ChevronsRight id="bookmarks-bar-all-icon" className="size-3.5" aria-hidden />
+          <ChevronsRight id="bookmarks-bar-all-icon" className={iconClass} aria-hidden />
         </button>
       ) : null}
       {tree && (tree.other.children?.length ?? 0) > 0 ? (
@@ -230,12 +206,12 @@ export function BookmarksBar({ tree, activeId }: BookmarksBarProps) {
           id="bookmarks-bar-other"
           type="button"
           title="Other bookmarks"
-          className={cn(itemClass, dropChrome(drop, tree.other.id))}
+          className={cn(itemClass, drag.dropChrome(tree.other.id))}
+          style={itemStyle}
           onClick={(event) => openFolder(event, tree.other)}
-          onDragOver={(event) => allowDrop(event, tree.other)}
-          onDrop={(event) => finishDrop(event, tree.other)}
+          {...drag.targetProps(tree.other, 0)}
         >
-          <Folder id="bookmarks-bar-other-icon" className="size-3.5 shrink-0 text-amber-400" aria-hidden />
+          <Folder id="bookmarks-bar-other-icon" className={cn(iconClass, "text-amber-400")} aria-hidden />
           <span id="bookmarks-bar-other-title" className="truncate">
             {tree.other.title || "Other bookmarks"}
           </span>

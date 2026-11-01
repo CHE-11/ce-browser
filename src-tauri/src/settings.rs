@@ -20,6 +20,8 @@ pub const SEARCH_ENGINES: &[(&str, &str)] = &[
 ];
 const STARTUP_MODES: &[&str] = &["restore", "home"];
 const COLOR_MODES: &[&str] = &["dark", "light", "system"];
+const BOOKMARK_TEXT_REM: (f32, f32) = (0.5, 1.5);
+const BOOKMARK_PADDING_REM: (f32, f32) = (0.0, 1.5);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
@@ -43,6 +45,22 @@ pub struct BrowserSettings {
     #[serde(default)]
     pub download_name_template: String,
     pub show_bookmarks_bar: bool,
+    /// Text size of bookmarks on the bar, in rem.
+    #[serde(default = "default_bar_text_size")]
+    pub bookmarks_bar_text_size: f32,
+    /// Side padding of bookmarks on the bar, in rem. Top and bottom get half.
+    #[serde(default = "default_bar_padding")]
+    pub bookmarks_bar_padding: f32,
+    /// Text size of rows in a bookmark folder menu, in rem.
+    #[serde(default = "default_folder_text_size")]
+    pub bookmark_folder_text_size: f32,
+    /// Side padding of rows in a bookmark folder menu, in rem. Top and bottom get half.
+    #[serde(default = "default_folder_padding")]
+    pub bookmark_folder_padding: f32,
+    /// Retired preset (`small`, `default`, `large`, `xlarge`). Read once and mapped onto the
+    /// four values above.
+    #[serde(rename = "bookmarkSize", skip_serializing)]
+    pub legacy_bookmark_size: Option<String>,
     /// The status bar under every page. An older file omits this, so the bar stays on.
     #[serde(default = "default_true")]
     pub show_status_bar: bool,
@@ -408,6 +426,11 @@ impl Default for BrowserSettings {
             accelerate_downloads: true,
             download_name_template: String::new(),
             show_bookmarks_bar: true,
+            bookmarks_bar_text_size: default_bar_text_size(),
+            bookmarks_bar_padding: default_bar_padding(),
+            bookmark_folder_text_size: default_folder_text_size(),
+            bookmark_folder_padding: default_folder_padding(),
+            legacy_bookmark_size: None,
             show_status_bar: true,
             status_stats: true,
             theme: "zinc".into(),
@@ -472,6 +495,38 @@ impl BrowserSettings {
         if !COLOR_MODES.contains(&self.color_mode.as_str()) {
             self.color_mode = defaults.color_mode;
         }
+        if let Some(preset) = self.legacy_bookmark_size.take() {
+            let sizes = match preset.as_str() {
+                "small" => Some((0.6875, 0.375, 0.8125, 0.625)),
+                "large" => Some((0.875, 0.625, 0.9375, 0.75)),
+                "xlarge" => Some((1.0, 0.75, 1.0, 0.875)),
+                _ => None,
+            };
+            let untouched = self.bookmarks_bar_text_size == defaults.bookmarks_bar_text_size
+                && self.bookmarks_bar_padding == defaults.bookmarks_bar_padding
+                && self.bookmark_folder_text_size == defaults.bookmark_folder_text_size
+                && self.bookmark_folder_padding == defaults.bookmark_folder_padding;
+            if let (Some((bar_text, bar_padding, folder_text, folder_padding)), true) = (sizes, untouched) {
+                self.bookmarks_bar_text_size = bar_text;
+                self.bookmarks_bar_padding = bar_padding;
+                self.bookmark_folder_text_size = folder_text;
+                self.bookmark_folder_padding = folder_padding;
+            }
+        }
+        self.bookmarks_bar_text_size =
+            rem_in(self.bookmarks_bar_text_size, BOOKMARK_TEXT_REM, defaults.bookmarks_bar_text_size);
+        self.bookmarks_bar_padding =
+            rem_in(self.bookmarks_bar_padding, BOOKMARK_PADDING_REM, defaults.bookmarks_bar_padding);
+        self.bookmark_folder_text_size = rem_in(
+            self.bookmark_folder_text_size,
+            BOOKMARK_TEXT_REM,
+            defaults.bookmark_folder_text_size,
+        );
+        self.bookmark_folder_padding = rem_in(
+            self.bookmark_folder_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.bookmark_folder_padding,
+        );
         if self.theme.trim().is_empty() {
             self.theme = defaults.theme;
         }
@@ -772,6 +827,30 @@ fn default_page_zoom() -> u32 {
     100
 }
 
+fn default_bar_text_size() -> f32 {
+    0.75
+}
+
+fn default_bar_padding() -> f32 {
+    0.5
+}
+
+fn default_folder_text_size() -> f32 {
+    0.875
+}
+
+fn default_folder_padding() -> f32 {
+    0.75
+}
+
+/// Clamps a rem value into `range` and rounds it to 0.0001. Not a number falls back.
+fn rem_in(value: f32, range: (f32, f32), fallback: f32) -> f32 {
+    if !value.is_finite() {
+        return fallback;
+    }
+    (value.clamp(range.0, range.1) * 10000.0).round() / 10000.0
+}
+
 const PAGE_ZOOM_LEVELS: &[u32] = &[
     25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300,
 ];
@@ -962,6 +1041,33 @@ mod tests {
         assert!(loaded.vertical_toolbar);
         assert!(!loaded.vertical_toolbar_extensions);
         assert!(!loaded.vertical_toolbar_labels);
+    }
+
+    #[test]
+    fn bookmark_sizes_default_clamp_and_migrate_the_old_preset() {
+        let older: super::BrowserSettings =
+            serde_json::from_str(r#"{"searchEngine":"bing"}"#).expect("settings parse");
+        let older = older.normalize();
+        assert_eq!(older.bookmarks_bar_text_size, 0.75);
+        assert_eq!(older.bookmark_folder_padding, 0.75);
+
+        let preset: super::BrowserSettings =
+            serde_json::from_str(r#"{"bookmarkSize":"small"}"#).expect("settings parse");
+        let preset = preset.normalize();
+        assert_eq!(preset.bookmarks_bar_text_size, 0.6875);
+        assert_eq!(preset.bookmark_folder_text_size, 0.8125);
+        let saved = serde_json::to_string(&preset).expect("settings save");
+        assert!(!saved.contains("bookmarkSize"));
+        assert!(saved.contains("\"bookmarksBarTextSize\":0.6875"));
+
+        let custom: super::BrowserSettings = serde_json::from_str(
+            r#"{"bookmarkSize":"large","bookmarksBarTextSize":0.6,"bookmarksBarPadding":9,"bookmarkFolderTextSize":0.1}"#,
+        )
+        .expect("settings parse");
+        let custom = custom.normalize();
+        assert_eq!(custom.bookmarks_bar_text_size, 0.6);
+        assert_eq!(custom.bookmarks_bar_padding, 1.5);
+        assert_eq!(custom.bookmark_folder_text_size, 0.5);
     }
 
     #[test]
