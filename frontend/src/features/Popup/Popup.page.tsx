@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { AppMenu } from "@components/AppMenu";
-import { StatusPopover } from "@components/StatusBar";
+import { StatusPopover } from "@/components/StatusPopover";
 import { PopupAppearanceContext, usePopupPainted } from "@lib/popup-ready";
 import { useAppearanceState } from "@lib/use-browser";
 import { AddressBarEllipsisMenu } from "@/components/TabsAddressAndBookmarks/Addressbar/AddressBarEllipsisMenu";

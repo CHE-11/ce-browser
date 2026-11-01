@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity } from "lucide-react";
 import type { StatusSnapshot } from "@type/browser";
 import { useAdblockStats } from "@/features/BuiltInExtensions/ad-blocker/use-adblock-stats";
@@ -157,7 +157,7 @@ function StatRow({ id, label, value, hint }: { id: string; label: string; value:
   );
 }
 
-function Flag({ id, title, className, children }: { id: string; title: string; className?: string; children: string }) {
+function Flag({ id, title, className, children }: { id: string; title: string; className?: string; children: ReactNode }) {
   return (
     <span id={id} title={title} className={cn("rounded-full bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300", className)}>
       {children}

@@ -204,6 +204,7 @@ export type PopupKind =
   | "bookmark-add"
   | "tab-menu"
   | "app-menu"
+  | "status"
   | "omnibox"
   | "command-palette"
   | "extension"
