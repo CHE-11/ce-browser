@@ -177,14 +177,17 @@ pub fn mark_window(window: &tauri::Window) -> Result<(), String> {
         window,
         &app_model_id(&id),
         &relaunch_command(&id),
+        &relaunch_name(window.app_handle(), &id),
         &relaunch_icon(window.app_handle(), &id),
     )
 }
 
+/// Windows ignores the relaunch command unless the display name is set with it.
 pub fn mark_model(
     window: &tauri::Window,
     model: &str,
     relaunch: &str,
+    name: &str,
     icon: &str,
 ) -> Result<(), String> {
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
@@ -193,6 +196,7 @@ pub fn mark_model(
         let store: IPropertyStore = SHGetPropertyStoreForWindow(hwnd).map_err(win_err)?;
         set_text(&store, app_model_key(5), model)?;
         set_text(&store, app_model_key(2), relaunch)?;
+        set_text(&store, app_model_key(4), name)?;
         if !icon.is_empty() {
             set_text(&store, app_model_key(3), icon)?;
         }
@@ -308,13 +312,15 @@ pub fn pin_taskbar(app: &AppHandle, id: &str) -> Result<Vec<ProfileInfo>, String
         .map(|path| path.join("TaskBar"))
         .map_err(|_| "The taskbar folder is unavailable.".to_string())?;
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    for path in matching_shortcuts(&dir, id) {
-        let _ = fs::remove_file(path);
+    // The taskbar opens its pin through one of these files, so an existing one is never replaced.
+    if !matching_shortcuts(&dir, id).is_empty() {
+        return Ok(list(app));
     }
     let name = shortcut
         .file_name()
+        .and_then(|name| name.to_str())
         .ok_or("The Start menu item could not be created.")?;
-    let dest = dir.join(name);
+    let dest = files::unique_path(&dir, name);
     fs::copy(&shortcut, &dest).map_err(|error| format!("Could not pin that profile ({error})."))?;
     notify_item(&dest);
     if taskbar_ids().iter().all(|pinned| pinned != id) {
@@ -841,6 +847,18 @@ fn window_icon_bytes(app: &AppHandle) -> Vec<u8> {
     crate::profile_icons::default_png().to_vec()
 }
 
+fn relaunch_name(app: &AppHandle, id: &str) -> String {
+    if id == DEFAULT_ID {
+        return "ce-browser".into();
+    }
+    load(app)
+        .profiles
+        .into_iter()
+        .find(|profile| profile.id == id)
+        .map(|profile| format!("ce-browser {}", profile.name))
+        .unwrap_or_else(|| "ce-browser".into())
+}
+
 fn relaunch_icon(app: &AppHandle, id: &str) -> String {
     let record = load(app)
         .profiles
@@ -915,38 +933,14 @@ fn update_link_icon(link_path: &Path, icon: Option<&Path>) -> Result<(), String>
 }
 
 /// Points Start menu and taskbar shortcuts made by a dev build (or an exe that no longer exists)
-/// at this exe, and drops duplicate taskbar pins of one profile.
+/// at this exe. Taskbar files are never deleted: the pin opens through whichever file Windows
+/// chose, and nothing here can tell which one that is.
 pub fn repair_shortcuts() {
     let Ok(exe) = paths::launch_exe() else {
         return;
     };
-    if let Ok(programs) = programs_dir() {
-        for path in link_files(&programs) {
-            if let Err(error) = retarget_link(&path, &exe) {
-                eprintln!("shortcut repair: {error}");
-            }
-        }
-    }
-    let Some(taskbar) = taskbar_dir() else {
-        return;
-    };
-    let mut links = link_files(&taskbar);
-    links.sort_by_key(|path| path.as_os_str().len());
-    let mut kept: Vec<String> = Vec::new();
-    for path in links {
-        if let Some(id) = shortcut_profile_id(&path) {
-            if kept.contains(&id) {
-                if let Ok(target) = link_target(&path) {
-                    if stale_exe(&target, &exe) || target == exe {
-                        let _ = fs::remove_file(&path);
-                        notify_item(&path);
-                        continue;
-                    }
-                }
-            } else {
-                kept.push(id);
-            }
-        }
+    let dirs = [programs_dir().ok(), taskbar_dir()];
+    for path in dirs.iter().flatten().flat_map(|dir| link_files(dir)) {
         if let Err(error) = retarget_link(&path, &exe) {
             eprintln!("shortcut repair: {error}");
         }
@@ -982,21 +976,6 @@ fn stale_exe(target: &Path, exe: &Path) -> bool {
         .and_then(|dir| dir.file_name())
         .is_some_and(|name| name.eq_ignore_ascii_case("debug"));
     debug_build || !target.is_file()
-}
-
-fn link_target(path: &Path) -> Result<PathBuf, String> {
-    com_init();
-    unsafe {
-        let link: IShellLinkW =
-            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(win_err)?;
-        let file: IPersistFile = link.cast().map_err(win_err)?;
-        file.Load(&HSTRING::from(path.as_os_str()), STGM_READ)
-            .map_err(win_err)?;
-        let mut buffer = [0u16; 1024];
-        link.GetPath(&mut buffer, std::ptr::null_mut(), 0)
-            .map_err(win_err)?;
-        Ok(PathBuf::from(wide_string(&buffer)))
-    }
 }
 
 fn retarget_link(path: &Path, exe: &Path) -> Result<(), String> {

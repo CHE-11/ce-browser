@@ -283,7 +283,7 @@ fn save_site_icon(app: &AppHandle, id: &str, favicon: Option<&str>) -> Option<Pa
     Some(path)
 }
 
-pub fn mark_site_window(app: &AppHandle, window: &tauri::Window, id: &str) {
+pub fn mark_site_window(app: &AppHandle, window: &tauri::Window, id: &str, name: &str) {
     let model = format!("com.ce.browser.site.{id}");
     let relaunch = paths::launch_exe()
         .map(|exe| format!("\"{}\" --app {id}", exe.display()))
@@ -294,7 +294,7 @@ pub fn mark_site_window(app: &AppHandle, window: &tauri::Window, id: &str) {
     } else {
         String::new()
     };
-    let _ = profiles::mark_model(window, &model, &relaunch, &icon);
+    let _ = profiles::mark_model(window, &model, &relaunch, name, &icon);
     if icon_file_ok(&icon) {
         if let Ok(image) = tauri::image::Image::from_path(&icon) {
             let _ = window.set_icon(image);
@@ -311,7 +311,7 @@ fn mark_open_site(app: &AppHandle, site: &SiteApp) {
     if let Some(label) = labels.last() {
         if let Some(window) = app.get_window(label) {
             let _ = window.set_title(&site.name);
-            mark_site_window(app, &window, &site.id);
+            mark_site_window(app, &window, &site.id, &site.name);
         }
     }
 }
