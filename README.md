@@ -68,6 +68,16 @@ A speaker icon on a tab shows it is playing sound. Click it to mute or unmute th
 
 The star in the address bar adds or edits a bookmark. Bookmarks live in a **Bookmarks bar** folder and an **Other bookmarks** folder. `ce://bookmarks` manages folders and imports or exports the Netscape HTML format that Chrome, Edge and Firefox use.
 
+## Media
+
+The page-capture menu saves a PNG of the whole page or the visible area. **Region** lets you drag a rectangle. **Edit** opens `ce://capture-editor` with that image: pen, arrow, rectangle, text, and blur.
+
+**Record tab**, **Record area**, and **Record window** write a GIF, about 8 frames a second, for up to 15 seconds. The long side stays at 1280 pixels. Record window includes the tab strip of this browser and leaves other apps out. There is no MP4 file.
+
+**Media** on the toolbar lists audio and video in open tabs, with play, pause, and seek. **Media on this page** shows a grid; each item, and **Save all** (up to 40), downloads through the download shelf.
+
+**Save HTML** writes one file and inlines styles the page can read. **Save Markdown** writes the title, article text, links, and image addresses. **Copy text from image** uses Windows OCR on the visible page or a dragged region and copies the words. If Windows has no OCR language pack, the menu says so.
+
 ## Downloads
 
 Downloads go to your Downloads folder, or to a folder you choose in settings. An existing file is never overwritten: the new file gets a ` (1)` suffix. The toolbar button shows progress. Downloads can be paused, resumed, cancelled, opened and shown in Explorer. `ce://downloads` keeps the history.

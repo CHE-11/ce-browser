@@ -39,12 +39,12 @@
 - [x] Mouse gestures, for example right-drag left to go back.
 
 ## Media and capture
-- [ ] Full-page and region screenshot with an annotate-and-blur editor (extends Page Capture).
-- [ ] Area, screen, tab recording to mp4 or GIF. 
-- [ ] Media hub popup listing every playing audio or video across all tabs, with play, pause and seek.
-- [ ] Download any media on a page (images and video sources) from a grid view.
-- [ ] Save a page as a single self-contained HTML file or as markdown.
-- [ ] OCR an image or region on the page and copy the text.
+- [x] Full-page and region screenshot with an annotate-and-blur editor (extends Page Capture).
+- [x] Area, screen, tab recording to mp4 or GIF. 
+- [x] Media hub popup listing every playing audio or video across all tabs, with play, pause and seek.
+- [x] Download any media on a page (images and video sources) from a grid view.
+- [x] Save a page as a single self-contained HTML file or as markdown.
+- [x] OCR an image or region on the page and copy the text.
 
 ## Downloads and files
 - [ ] Multi-connection download accelerator for large files.

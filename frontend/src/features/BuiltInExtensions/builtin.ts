@@ -1,4 +1,4 @@
-import { Eraser, ImageDown, Layers, Printer, Shield, type LucideIcon } from "lucide-react";
+import { Clapperboard, Eraser, ImageDown, Layers, Printer, Shield, type LucideIcon } from "lucide-react";
 
 export type BuiltinTool = {
   id: string;
@@ -20,6 +20,12 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Save page as PNG",
     description: "Save or copy the page as an image.",
     icon: ImageDown,
+  },
+  {
+    id: "media-hub",
+    name: "Media",
+    description: "Play, pause and seek audio and video in open tabs.",
+    icon: Clapperboard,
   },
   {
     id: "clear-cache",

@@ -6,6 +6,7 @@ import { useRoute } from "./lib/route";
 import { applyUserStyles } from "./lib/user-styles";
 import { applyZoom, readZoom } from "./lib/zoom";
 import { BookmarksPage } from "./features/Bookmarks/Bookmarks.page";
+import { CaptureEditorPage } from "./features/CaptureEditor/CaptureEditor.page";
 import { BrowserPage } from "./features/Browser/Browser.page";
 import { DownloadsPage } from "./features/Downloads/Downloads.page";
 import { HistoryPage } from "./features/History/History.page";
@@ -61,6 +62,8 @@ function App() {
       return <ScriptsPage params={route.params} />;
     case "shortcuts":
       return <ShortcutsPage />;
+    case "capture-editor":
+      return <CaptureEditorPage />;
     default:
       return <NewTabPage />;
   }

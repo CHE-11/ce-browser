@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bookmark, Download, Globe, History, Puzzle, Settings, Sparkles } from "lucide-react";
+import { Bookmark, Download, Globe, History, ImageDown, Puzzle, Settings, Sparkles } from "lucide-react";
 import { cn } from "../lib/cn";
 import { faviconFor } from "../lib/format";
 
@@ -10,6 +10,7 @@ const INTERNAL_ICONS: Record<string, typeof Globe> = {
   "ce://extensions": Puzzle,
   "ce://settings": Settings,
   "ce://newtab": Sparkles,
+  "ce://capture-editor": ImageDown,
 };
 
 type FavIconProps = {

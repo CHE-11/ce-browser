@@ -5,6 +5,7 @@ import { AdBlockerButton } from "./ad-blocker/AdBlockerButton";
 import { PageControlsButton } from "./page-controls/PageControlsButton";
 import { ClearCacheButton } from "./clear-cache/ClearCacheButton";
 import { PageCaptureButton } from "./page-capture/PageCaptureButton";
+import { MediaHubButton } from "../Media/MediaHubButton";
 import { PrintPdfButton } from "./print-pdf/PrintPdfButton";
 import { WhatRunsButton } from "./what-runs/WhatRunsButton";
 
@@ -30,6 +31,7 @@ export function BuiltinExtensions({ activeTab, settings }: BuiltinExtensionsProp
     <div id="builtin-extensions" className="flex items-center">
       {pinnedTool(settings, "print-pdf", <PrintPdfButton activeTab={activeTab} settings={settings} />)}
       {pinnedTool(settings, "page-capture", <PageCaptureButton activeTab={activeTab} settings={settings} />)}
+      {pinnedTool(settings, "media-hub", <MediaHubButton />)}
       {pinnedTool(settings, "clear-cache", <ClearCacheButton activeTab={activeTab} />)}
       {pinnedTool(settings, "what-runs", <WhatRunsButton activeTab={activeTab} />)}
       {pinnedTool(settings, "ad-blocker", <AdBlockerButton activeTab={activeTab} settings={settings} />)}

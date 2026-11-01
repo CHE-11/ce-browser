@@ -1,5 +1,20 @@
 import { useState } from "react";
-import { CircleAlert, ClipboardCopy, FolderOpen, ImageDown, ImageUp, RotateCcw } from "lucide-react";
+import {
+  CircleAlert,
+  ClipboardCopy,
+  Crop,
+  FileCode,
+  FileText,
+  FolderOpen,
+  ImageDown,
+  ImageUp,
+  Languages,
+  Monitor,
+  Pencil,
+  RotateCcw,
+  Square,
+  Video,
+} from "lucide-react";
 import { ActionTile, OptionRow, PopoverHeader, Segmented } from "../PopoverParts";
 import { readPopoverTab } from "../shared";
 import { Button } from "@/components/Button";
@@ -19,7 +34,7 @@ export function PageCapturePopover({ params }: PageCapturePopoverProps) {
   const [loadLazy, setLoadLazy] = useState(params.get("loadLazy") !== "false");
   const [showResult, setShowResult] = useState(status !== null);
 
-  const send = (action: "save" | "copy") => {
+  const send = (action: "save" | "copy" | "region" | "edit" | "record-tab" | "record-area" | "record-window" | "stop-record" | "media" | "save-html" | "save-markdown" | "ocr" | "ocr-region") => {
     void requestPageTool({
       tool: "page-capture",
       action,
@@ -34,7 +49,7 @@ export function PageCapturePopover({ params }: PageCapturePopoverProps) {
   };
 
   return (
-    <PopupFrame id="page-capture-popover" maxHeight={420}>
+    <PopupFrame id="page-capture-popover" maxHeight={640}>
       <PopoverHeader
         id="page-capture-header"
         icon={<ImageDown aria-hidden />}
@@ -78,6 +93,41 @@ export function PageCapturePopover({ params }: PageCapturePopoverProps) {
             hint="Paste it into any app"
             onClick={() => send("copy")}
           />
+          <ActionTile
+            id="page-capture-region"
+            icon={<Crop aria-hidden />}
+            label="Region"
+            hint="Drag a rectangle on the page"
+            onClick={() => send("region")}
+          />
+          <ActionTile
+            id="page-capture-edit"
+            icon={<Pencil aria-hidden />}
+            label="Edit"
+            hint="Pen, arrow, rectangle, text and blur"
+            onClick={() => send("edit")}
+          />
+          {params.get("recording") === "true" ? (
+            <div id="page-capture-recording" className="flex items-center gap-2 rounded-lg bg-rose-500/15 px-3 py-2 text-sm text-rose-100">
+              <span id="page-capture-recording-time" className="flex-1">
+                Recording · {params.get("seconds") ?? "15"}s left
+              </span>
+              <button id="page-capture-recording-stop" type="button" className="rounded-md bg-rose-600 px-2 py-1 text-xs" onClick={() => send("stop-record")}>
+                Stop
+              </button>
+            </div>
+          ) : (
+            <>
+              <ActionTile id="page-capture-record-tab" icon={<Video aria-hidden />} label="Record tab" hint="GIF of the page, up to 15 seconds" onClick={() => send("record-tab")} />
+              <ActionTile id="page-capture-record-area" icon={<Crop aria-hidden />} label="Record area" hint="GIF of a region you drag" onClick={() => send("record-area")} />
+              <ActionTile id="page-capture-record-window" icon={<Monitor aria-hidden />} label="Record window" hint="GIF of this browser window" onClick={() => send("record-window")} />
+            </>
+          )}
+          <ActionTile id="page-capture-media" icon={<ImageDown aria-hidden />} label="Media on this page" hint="Download images and videos" onClick={() => send("media")} />
+          <ActionTile id="page-capture-html" icon={<FileCode aria-hidden />} label="Save HTML" hint="One file with styles inlined" onClick={() => send("save-html")} />
+          <ActionTile id="page-capture-markdown" icon={<FileText aria-hidden />} label="Save Markdown" hint="Title, text, links and images" onClick={() => send("save-markdown")} />
+          <ActionTile id="page-capture-ocr" icon={<Languages aria-hidden />} label="Copy text from image" hint="Windows OCR on the visible page" onClick={() => send("ocr")} />
+          <ActionTile id="page-capture-ocr-region" icon={<Square aria-hidden />} label="Copy text from a region" hint="Drag, then copy the words" onClick={() => send("ocr-region")} />
         </div>
       )}
     </PopupFrame>
@@ -103,10 +153,10 @@ function CaptureResult({ params, onAgain }: { params: URLSearchParams; onAgain: 
           ) : (
             <ImageUp id="page-capture-result-icon" className="size-4 shrink-0" aria-hidden />
           )}
-          {failed ? "Couldn't capture this page" : status === "copied" ? "Image copied" : "Image saved"}
+          {failed ? "Couldn't capture this page" : status === "copied" ? "Image copied" : status === "ocr" ? "Text copied" : "Image saved"}
         </div>
         <p id="page-capture-result-detail" className="mt-1 break-all text-xs opacity-80">
-          {failed ? params.get("message") : status === "copied" ? `${size} px, ready to paste` : `${size} px · ${path}`}
+          {failed || status === "ocr" ? params.get("message") : status === "copied" ? `${size} px, ready to paste` : `${size} px · ${path}`}
         </p>
         {truncated ? (
           <p id="page-capture-result-truncated" className="mt-1 text-xs text-amber-300">

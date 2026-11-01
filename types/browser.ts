@@ -160,6 +160,8 @@ export type PopupKind =
   | "extension"
   | "print-pdf"
   | "page-capture"
+  | "media-hub"
+  | "media-grid"
   | "what-runs"
   | "ad-blocker"
   | "extension-pin"
@@ -391,6 +393,31 @@ export type PageCaptureSettings = {
   loadLazy: boolean;
 };
 
+export type RecordingStatus = {
+  running: boolean;
+  secondsLeft: number;
+  path: string | null;
+  error: string | null;
+};
+
+export type MediaElement = {
+  tabId: number;
+  index: number;
+  kind: string;
+  label: string;
+  current: number;
+  duration: number;
+  paused: boolean;
+  muted: boolean;
+};
+
+export type PageMedia = {
+  url: string;
+  kind: string;
+  width: number;
+  height: number;
+};
+
 export type PageCaptureResult = {
   /** Set when the image was saved to a file. */
   path: string | null;
@@ -407,7 +434,20 @@ export type PageCaptureResult = {
 export type PageToolRequest =
   | {
       tool: "page-capture";
-      action: "save" | "copy";
+      action:
+        | "save"
+        | "copy"
+        | "region"
+        | "edit"
+        | "record-tab"
+        | "record-area"
+        | "record-window"
+        | "stop-record"
+        | "media"
+        | "save-html"
+        | "save-markdown"
+        | "ocr"
+        | "ocr-region";
       /** Browser window whose toolbar should run the job. */
       window: string;
       tabId: number;

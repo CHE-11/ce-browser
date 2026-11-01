@@ -1,9 +1,27 @@
 import { IconButton } from "@/components/IconButton";
-import { openPopupBelow, saveSettings, defaultDownloadDir, chooseSavePath, capturePagePng, copyPagePng } from "@/lib/browser-client";
+import {
+  openPopupBelow,
+  saveSettings,
+  defaultDownloadDir,
+  chooseSavePath,
+  capturePagePng,
+  copyPagePng,
+  captureRegion,
+  storeVisiblePng,
+  lastCapturePng,
+  createTab,
+  startRecording,
+  stopRecording,
+  onRecordingStatus,
+  savePageHtml,
+  savePageMarkdown,
+  ocrVisible,
+  ocrRegion,
+} from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
-import { TabInfo, BrowserSettings, PageToolRequest } from "@type/browser";
-import { LoaderCircle, Check, ImageDown } from "lucide-react";
-import { useRef } from "react";
+import { TabInfo, BrowserSettings, PageToolRequest, RecordingStatus } from "@type/browser";
+import { LoaderCircle, Check, ImageDown, Square } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { tabParams, joinPath, fileNameFor, capturable } from "../shared";
 import { useToolStatus, errorText, usePageToolRequests } from "../use-page-tool";
 
@@ -15,11 +33,12 @@ type PageCaptureButtonProps = {
 
 const POPOVER_WIDTH = 320;
 /** Placeholder only. The popover stays hidden until it reports its real height. */
-const POPOVER_HEIGHT = 300;
+const POPOVER_HEIGHT = 560;
 
 export function PageCaptureButton({ activeTab, settings }: PageCaptureButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [status, setStatus] = useToolStatus();
+  const [recording, setRecording] = useState<RecordingStatus | null>(null);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
 
@@ -35,6 +54,25 @@ export function PageCaptureButton({ activeTab, settings }: PageCaptureButtonProp
     }
   };
 
+  useEffect(() => {
+    const unlisten = onRecordingStatus((next) => {
+      setRecording(next.running ? next : null);
+      if (!next.running && next.error) {
+        setStatus("failed");
+      }
+      if (!next.running && next.path) {
+        const result = new URLSearchParams();
+        result.set("status", "saved");
+        result.set("path", next.path);
+        result.set("size", "GIF");
+        showPopover(result);
+      }
+    });
+    return () => {
+      void unlisten.then((stop) => stop());
+    };
+  }, []);
+
   const open = () => {
     if (!activeTab) {
       return;
@@ -43,6 +81,10 @@ export function PageCaptureButton({ activeTab, settings }: PageCaptureButtonProp
     const params = new URLSearchParams(tabParams(activeTab));
     params.set("fullPage", String(capture.fullPage));
     params.set("loadLazy", String(capture.loadLazy));
+    if (recording?.running) {
+      params.set("recording", "true");
+      params.set("seconds", String(recording.secondsLeft));
+    }
     showPopover(params);
   };
 
@@ -60,11 +102,9 @@ export function PageCaptureButton({ activeTab, settings }: PageCaptureButtonProp
     result.set("fullPage", String(request.fullPage));
     result.set("loadLazy", String(request.loadLazy));
     try {
+      const folder = settingsRef.current?.downloadDir || (await defaultDownloadDir());
       if (request.action === "save") {
-        const folder = settingsRef.current?.downloadDir || (await defaultDownloadDir());
-        const path = await chooseSavePath(joinPath(folder, fileNameFor(request.title, request.url, "png")), "PNG image", [
-          "png",
-        ]);
+        const path = await chooseSavePath(joinPath(folder, fileNameFor(request.title, request.url, "png")), "PNG image", ["png"]);
         if (!path) {
           return;
         }
@@ -74,12 +114,67 @@ export function PageCaptureButton({ activeTab, settings }: PageCaptureButtonProp
         result.set("path", saved.path ?? path);
         result.set("size", `${saved.width} × ${saved.height}`);
         result.set("truncated", String(saved.truncated));
-      } else {
+      } else if (request.action === "copy") {
         setStatus("busy");
         const copied = await copyPagePng(request.tabId, request.fullPage, request.loadLazy);
         result.set("status", "copied");
         result.set("size", `${copied.width} × ${copied.height}`);
         result.set("truncated", String(copied.truncated));
+      } else if (request.action === "region") {
+        setStatus("busy");
+        await captureRegion(request.tabId);
+        await createTab("ce://capture-editor");
+        setStatus("done");
+        return;
+      } else if (request.action === "edit") {
+        setStatus("busy");
+        const existing = await lastCapturePng().catch(() => "");
+        if (!existing) {
+          await storeVisiblePng(request.tabId);
+        }
+        await createTab("ce://capture-editor");
+        setStatus("done");
+        return;
+      } else if (request.action === "record-tab" || request.action === "record-area" || request.action === "record-window") {
+        const path = await chooseSavePath(joinPath(folder, fileNameFor(request.title, request.url, "gif")), "GIF", ["gif"]);
+        if (!path) {
+          return;
+        }
+        const kind = request.action === "record-window" ? "window" : request.action === "record-area" ? "area" : "tab";
+        setStatus("busy");
+        await startRecording(request.tabId, kind, path);
+        setStatus("done");
+        return;
+      } else if (request.action === "stop-record") {
+        await stopRecording();
+        return;
+      } else if (request.action === "media") {
+        const anchor = buttonRef.current;
+        if (anchor) {
+          void openPopupBelow(anchor, { kind: "media-grid", params: `id=${request.tabId}`, width: 420, height: 420 });
+        }
+        return;
+      } else if (request.action === "save-html" || request.action === "save-markdown") {
+        const extension = request.action === "save-html" ? "html" : "md";
+        const label = request.action === "save-html" ? "HTML" : "Markdown";
+        const path = await chooseSavePath(joinPath(folder, fileNameFor(request.title, request.url, extension)), label, [extension]);
+        if (!path) {
+          return;
+        }
+        setStatus("busy");
+        if (request.action === "save-html") {
+          await savePageHtml(request.tabId, path);
+        } else {
+          await savePageMarkdown(request.tabId, path);
+        }
+        result.set("status", "saved");
+        result.set("path", path);
+        result.set("size", label);
+      } else if (request.action === "ocr" || request.action === "ocr-region") {
+        setStatus("busy");
+        const text = request.action === "ocr" ? await ocrVisible(request.tabId) : await ocrRegion(request.tabId);
+        result.set("status", "ocr");
+        result.set("message", text.slice(0, 400));
       }
       setStatus("done");
     } catch (error) {
@@ -92,25 +187,29 @@ export function PageCaptureButton({ activeTab, settings }: PageCaptureButtonProp
 
   usePageToolRequests("page-capture", (request) => void run(request));
 
-  const busy = status === "busy";
-  const label = busy
-    ? "Capturing page…"
-    : status === "done"
-      ? "Page captured"
-      : status === "failed"
-        ? "Couldn't capture page"
-        : "Save page as PNG";
+  const busy = status === "busy" || recording?.running === true;
+  const label = recording?.running
+    ? `Recording · ${recording.secondsLeft}s`
+    : busy
+      ? "Capturing page…"
+      : status === "done"
+        ? "Page captured"
+        : status === "failed"
+          ? "Couldn't capture page"
+          : "Save page as PNG";
 
   return (
     <IconButton
       id="address-page-capture"
       ref={buttonRef}
       label={label}
-      disabled={busy || !capturable(activeTab?.url)}
+      disabled={(status === "busy" && !recording?.running) || !capturable(activeTab?.url)}
       className={cn(status === "done" && "text-sky-300", status === "failed" && "text-amber-300")}
       onClick={open}
     >
-      {busy ? (
+      {recording?.running ? (
+        <Square id="address-page-capture-icon" aria-hidden />
+      ) : busy ? (
         <LoaderCircle id="address-page-capture-icon" className="animate-spin" aria-hidden />
       ) : status === "done" ? (
         <Check id="address-page-capture-icon" aria-hidden />

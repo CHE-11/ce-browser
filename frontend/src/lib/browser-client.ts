@@ -17,6 +17,9 @@ import type {
   Keyword,
   ShortcutBinding,
   PageCaptureResult,
+  PageMedia,
+  MediaElement,
+  RecordingStatus,
   PageRules,
   PageTechnologies,
   PageToolRequest,
@@ -423,6 +426,70 @@ export function capturePagePng(id: number, fullPage: boolean, loadLazy: boolean,
 
 export function copyPagePng(id: number, fullPage: boolean, loadLazy: boolean) {
   return invoke<PageCaptureResult>("copy_page_png", { id, fullPage, loadLazy });
+}
+
+export function captureRegion(id: number) {
+  return invoke<PageCaptureResult>("capture_region", { id });
+}
+
+export function storeVisiblePng(id: number) {
+  return invoke<PageCaptureResult>("store_visible_png", { id });
+}
+
+export function lastCapturePng() {
+  return invoke<string>("last_capture_png");
+}
+
+export function saveEditedPng(data: string, path: string) {
+  return invoke<void>("save_edited_png", { data, path });
+}
+
+export function copyEditedPng(data: string) {
+  return invoke<void>("copy_edited_png", { data });
+}
+
+export function startRecording(id: number, kind: "tab" | "area" | "window", path: string) {
+  return invoke<void>("start_recording", { id, kind, path });
+}
+
+export function stopRecording() {
+  return invoke<void>("stop_recording");
+}
+
+export function onRecordingStatus(handler: (status: RecordingStatus) => void): Promise<UnlistenFn> {
+  return listen<RecordingStatus>("recording-status", (event) => handler(event.payload));
+}
+
+export function listMedia() {
+  return invoke<MediaElement[]>("list_media");
+}
+
+export function controlMedia(tab: number, index: number, action: "play" | "pause" | "seek", time?: number) {
+  return invoke<void>("control_media", { tab, index, action, time });
+}
+
+export function pageMedia(id: number) {
+  return invoke<PageMedia[]>("page_media", { id });
+}
+
+export function downloadPageMedia(id: number, urls: string[]) {
+  return invoke<number>("download_page_media", { id, urls });
+}
+
+export function savePageHtml(id: number, path: string) {
+  return invoke<void>("save_page_html", { id, path });
+}
+
+export function savePageMarkdown(id: number, path: string) {
+  return invoke<void>("save_page_markdown", { id, path });
+}
+
+export function ocrVisible(id: number) {
+  return invoke<string>("ocr_visible", { id });
+}
+
+export function ocrRegion(id: number) {
+  return invoke<string>("ocr_region", { id });
 }
 
 export function extractPage(id: number) {

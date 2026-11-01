@@ -4,6 +4,8 @@ mod keywords;
 mod bookmarks;
 mod capture;
 mod downloads;
+mod media;
+mod ocr;
 mod history;
 mod extensions;
 mod files;
@@ -393,6 +395,96 @@ async fn copy_page_png(
     load_lazy: bool,
 ) -> Result<PageCaptureResult, String> {
     blocking(move || capture::copy_png(&app, id, full_page, load_lazy)).await
+}
+
+#[tauri::command]
+async fn capture_region(app: AppHandle, id: u32) -> Result<PageCaptureResult, String> {
+    blocking(move || capture::capture_region(&app, id)).await
+}
+
+#[tauri::command]
+async fn store_visible_png(app: AppHandle, id: u32) -> Result<PageCaptureResult, String> {
+    blocking(move || capture::store_visible(&app, id)).await
+}
+
+#[tauri::command]
+async fn last_capture_png() -> Result<String, String> {
+    blocking(capture::last_png_base64).await
+}
+
+#[tauri::command]
+async fn save_edited_png(data: String, path: String) -> Result<(), String> {
+    blocking(move || {
+        let bytes = capture::decode_png(&data)?;
+        capture::save_edited_png(&bytes, &PathBuf::from(path))
+    })
+    .await
+}
+
+#[tauri::command]
+async fn copy_edited_png(data: String) -> Result<(), String> {
+    blocking(move || {
+        let bytes = capture::decode_png(&data)?;
+        capture::copy_edited_png(&bytes)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn start_recording(app: AppHandle, id: u32, kind: String, path: String) -> Result<(), String> {
+    blocking(move || capture::start_recording(&app, id, &kind, PathBuf::from(path))).await
+}
+
+#[tauri::command]
+async fn stop_recording() -> Result<(), String> {
+    capture::stop_recording();
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_media(app: AppHandle) -> Result<Vec<media::MediaElement>, String> {
+    blocking(move || Ok(media::list_playing(&app))).await
+}
+
+#[tauri::command]
+async fn control_media(
+    app: AppHandle,
+    tab: u32,
+    index: u32,
+    action: String,
+    time: Option<f64>,
+) -> Result<(), String> {
+    blocking(move || media::control(&app, tab, index, &action, time)).await
+}
+
+#[tauri::command]
+async fn page_media(app: AppHandle, id: u32) -> Result<Vec<media::PageMedia>, String> {
+    blocking(move || media::page_media(&app, id)).await
+}
+
+#[tauri::command]
+async fn download_page_media(app: AppHandle, id: u32, urls: Vec<String>) -> Result<u32, String> {
+    blocking(move || media::download_media(&app, id, &urls)).await
+}
+
+#[tauri::command]
+async fn save_page_html(app: AppHandle, id: u32, path: String) -> Result<(), String> {
+    blocking(move || media::save_html(&app, id, &PathBuf::from(path))).await
+}
+
+#[tauri::command]
+async fn save_page_markdown(app: AppHandle, id: u32, path: String) -> Result<(), String> {
+    blocking(move || media::save_markdown(&app, id, &PathBuf::from(path))).await
+}
+
+#[tauri::command]
+async fn ocr_visible(app: AppHandle, id: u32) -> Result<String, String> {
+    blocking(move || ocr::recognize_visible(&app, id)).await
+}
+
+#[tauri::command]
+async fn ocr_region(app: AppHandle, id: u32) -> Result<String, String> {
+    blocking(move || ocr::recognize_region(&app, id)).await
 }
 
 #[tauri::command]
@@ -1042,6 +1134,21 @@ pub fn run() {
             popup_painted,
             capture_page_png,
             copy_page_png,
+            capture_region,
+            store_visible_png,
+            last_capture_png,
+            save_edited_png,
+            copy_edited_png,
+            start_recording,
+            stop_recording,
+            list_media,
+            control_media,
+            page_media,
+            download_page_media,
+            save_page_html,
+            save_page_markdown,
+            ocr_visible,
+            ocr_region,
             extract_page,
             detect_technologies,
             print_tab_to_pdf,

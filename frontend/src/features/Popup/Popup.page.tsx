@@ -20,6 +20,8 @@ import { PageCapturePopover } from "@features/BuiltInExtensions/page-capture/Pag
 import { PrintPdfPopover } from "@features/BuiltInExtensions/print-pdf/PrintPdfPopover";
 import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
 import { DownloadsPanel } from "@features/Downloads/DownloadsPanel";
+import { MediaGrid } from "@features/Media/MediaGrid";
+import { MediaHub } from "@features/Media/MediaHub";
 
 type PopupPageProps = {
   popup: string;
@@ -85,6 +87,10 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <PrintPdfPopover params={params} />;
     case "page-capture":
       return <PageCapturePopover params={params} />;
+    case "media-hub":
+      return <MediaHub />;
+    case "media-grid":
+      return <MediaGrid tabId={Number(params.get("id"))} />;
     case "what-runs":
       return <WhatRunsPopover params={params} />;
     case "ad-blocker":
