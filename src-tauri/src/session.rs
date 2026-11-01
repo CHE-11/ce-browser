@@ -32,6 +32,8 @@ pub struct SessionTabFile {
     pub group_id: Option<u32>,
     /// Empty in files written before workspaces. Those tabs belong to `default`.
     pub workspace: String,
+    pub refresh_secs: u32,
+    pub watch_changes: bool,
     /// Position in the file, so the split can find its tabs after pins are merged and sorted.
     #[serde(skip)]
     pub origin: Option<usize>,
@@ -107,6 +109,8 @@ pub fn save_now(app: &AppHandle) -> Result<(), String> {
                 muted: tab.muted,
                 group_id: tab.group_id,
                 workspace: tab.workspace,
+                refresh_secs: tab.refresh_secs,
+                watch_changes: tab.watch_changes,
                 origin: None,
             })
             .collect(),
@@ -212,6 +216,8 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
             muted: tab.muted,
             group_id: if restore_all { tab.group_id } else { None },
             workspace: tab.workspace,
+            refresh_secs: if restore_all { tab.refresh_secs } else { 0 },
+            watch_changes: restore_all && tab.watch_changes,
         })
         .collect();
     tabs::restore(

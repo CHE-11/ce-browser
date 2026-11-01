@@ -59,6 +59,12 @@ pub struct TabInfo {
     pub sleeping: bool,
     pub group_id: Option<u32>,
     pub workspace: String,
+    /// Seconds between automatic reloads. Zero is off.
+    pub refresh_secs: u32,
+    /// Compare the page text before each reload and mark the tab when it differs.
+    pub watch_changes: bool,
+    /// The watched page changed since this tab was last selected.
+    pub changed: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -201,6 +207,10 @@ struct Tab {
     hidden: bool,
     /// Mute state last sent to the page view, so unchanged tabs skip the COM call.
     applied_mute: Option<bool>,
+    /// When the auto-refresh interval last fired.
+    last_refresh: Instant,
+    /// Text fingerprint from the previous watched reload.
+    content_mark: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -823,6 +833,9 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                     sleeping: false,
                     group_id: if tab.pinned { None } else { group },
                     workspace: workspace.clone(),
+                    refresh_secs: 0,
+                    watch_changes: false,
+                    changed: false,
                 },
                 pending_url: Some(tab.url.clone()),
                 webview: None,
@@ -831,6 +844,8 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                 last_shown: Instant::now(),
                 hidden: false,
                 applied_mute: None,
+                last_refresh: Instant::now(),
+                content_mark: None,
             },
         );
         state.normalize_groups();
@@ -1419,6 +1434,9 @@ fn set_active(app: &AppHandle, id: u32, collapse: bool) -> Result<(), String> {
             state.selected.clear();
         }
         state.set_window_active(&window, Some(id));
+        if let Some(tab) = state.tab_mut(id) {
+            tab.info.changed = false;
+        }
         if collapse {
             state.select_only(id);
         } else if !state.selected.contains(&id) {
@@ -2609,6 +2627,8 @@ pub struct SessionTab {
     pub muted: bool,
     pub group_id: Option<u32>,
     pub workspace: String,
+    pub refresh_secs: u32,
+    pub watch_changes: bool,
 }
 
 pub struct SessionState {
@@ -2634,6 +2654,8 @@ pub fn session_tabs(app: &AppHandle) -> SessionState {
                 muted: tab.info.muted,
                 group_id: tab.info.group_id,
                 workspace: tab.info.workspace.clone(),
+                refresh_secs: tab.info.refresh_secs,
+                watch_changes: tab.info.watch_changes,
             })
             .collect();
         let active = state
@@ -2697,7 +2719,13 @@ pub fn restore(app: &AppHandle, restored: RestoreState) -> Result<(), String> {
                 ..OpenTab::new(url)
             },
         )?;
-        update(app, id, |entry| entry.info.favicon = tab.favicon);
+        let refresh_secs = tab.refresh_secs;
+        let watch_changes = tab.watch_changes;
+        update(app, id, |entry| {
+            entry.info.favicon = tab.favicon;
+            entry.info.refresh_secs = refresh_secs;
+            entry.info.watch_changes = watch_changes;
+        });
         memberships.push((id, tab.group_id));
         ids.push(id);
     }
@@ -3512,6 +3540,112 @@ pub fn move_tabs_to_workspace(app: &AppHandle, ids: &[u32], workspace: &str) -> 
     Ok(())
 }
 
+const REFRESH_CHOICES: &[u32] = &[0, 15, 30, 60, 300, 900];
+
+pub fn set_refresh(app: &AppHandle, id: u32, secs: u32, watch: bool) -> Result<(), String> {
+    let secs = if REFRESH_CHOICES.contains(&secs) { secs } else { 0 };
+    let found = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        tab.info.refresh_secs = secs;
+        tab.info.watch_changes = watch && secs > 0;
+        tab.last_refresh = Instant::now();
+        tab.content_mark = None;
+        if secs == 0 {
+            tab.info.changed = false;
+        }
+        Some(())
+    });
+    if found.is_none() {
+        return Err("That tab is no longer open.".into());
+    }
+    emit_tabs(app);
+    Ok(())
+}
+
+/// Tabs whose reload interval has elapsed. The bool is whether to compare page text first.
+pub fn refresh_due(app: &AppHandle) -> Vec<(u32, bool)> {
+    if app.try_state::<Tabs>().is_none() {
+        return Vec::new();
+    }
+    with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .filter(|tab| {
+                tab.info.refresh_secs > 0
+                    && tab.webview.is_some()
+                    && !tab.info.sleeping
+                    && !tab.hidden
+                    && !tab.info.loading
+                    && tab.info.url.starts_with("http")
+                    && tab.last_refresh.elapsed() >= Duration::from_secs(u64::from(tab.info.refresh_secs))
+            })
+            .map(|tab| (tab.info.id, tab.info.watch_changes))
+            .collect()
+    })
+}
+
+pub fn stamp_refresh(app: &AppHandle, id: u32) {
+    with_state(app, |state| {
+        if let Some(tab) = state.tab_mut(id) {
+            tab.last_refresh = Instant::now();
+        }
+    });
+}
+
+/// Remembers the page text fingerprint. Returns true the first time it differs from a stored one.
+pub fn note_content(app: &AppHandle, id: u32, mark: &str) -> bool {
+    with_state(app, |state| {
+        let Some(tab) = state.tab_mut(id) else {
+            return false;
+        };
+        let changed = tab.content_mark.as_deref().is_some_and(|previous| previous != mark);
+        tab.content_mark = Some(mark.to_string());
+        if changed {
+            tab.info.changed = true;
+        }
+        changed
+    })
+}
+
+/// Runs the page-control script again in every open http(s) tab.
+pub fn reinject_page_rules(app: &AppHandle) {
+    if app.try_state::<Tabs>().is_none() {
+        return;
+    }
+    let pages = with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .filter_map(|tab| {
+                let label = tab.webview.clone()?;
+                (tab.info.url.starts_with("http://") || tab.info.url.starts_with("https://"))
+                    .then(|| (label, tab.info.url.clone()))
+            })
+            .collect::<Vec<_>>()
+    });
+    for (label, url) in pages {
+        let script = crate::page_rules::injection(app, &url);
+        if script.is_empty() {
+            continue;
+        }
+        if let Some(webview) = app.get_webview(&label) {
+            let _ = webview.eval(script);
+        }
+    }
+}
+
+pub fn run_zapper(app: &AppHandle, id: u32) -> Result<(), String> {
+    let webview = page_view(app, id).ok_or("This page is not loaded yet.")?;
+    webview
+        .eval(crate::page_rules::zapper_script())
+        .map_err(|error| error.to_string())
+}
+
+pub fn tab_page_url(app: &AppHandle, id: u32) -> Option<String> {
+    with_state(app, |state| state.index_of(id).map(|index| state.tabs[index].info.url.clone()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3535,6 +3669,9 @@ mod tests {
                 sleeping: false,
                 group_id: group,
                 workspace: workspace.into(),
+                refresh_secs: 0,
+                watch_changes: false,
+                changed: false,
             },
             pending_url: None,
             webview: None,
@@ -3543,6 +3680,8 @@ mod tests {
             last_shown: Instant::now(),
             hidden: false,
             applied_mute: None,
+            last_refresh: Instant::now(),
+            content_mark: None,
         }
     }
 

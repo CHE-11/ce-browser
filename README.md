@@ -35,6 +35,7 @@ On startup the browser restores the last session, pinned tabs first. Restored ta
 | Ctrl+Alt+1 to Ctrl+Alt+9 | Switch to workspace 1 to 9 |
 | Shift+click a link | Open it in a peek |
 | Esc (in a peek) | Close the peek |
+| [ / ] | Slow down or speed up a video on the page |
 
 ## Vertical tabs
 
@@ -71,6 +72,20 @@ The star in the address bar adds or edits a bookmark. Bookmarks live in a **Book
 Downloads go to your Downloads folder, or to a folder you choose in settings. An existing file is never overwritten: the new file gets a ` (1)` suffix. The toolbar button shows progress. Downloads can be paused, resumed, cancelled, opened and shown in Explorer. `ce://downloads` keeps the history.
 
 
+## Page control
+
+The sliders button in the toolbar changes how the current site behaves. A rule for a site also covers its subdomains, and it is remembered in `site-controls.json`.
+
+- **Allow copy, paste and selection** turns those back on, including the right-click menu, on sites that block them.
+- **Clean page** hides sticky bars, cookie notices and subscribe popups.
+- **Force dark mode** inverts the page, with brightness and contrast sliders. Photos stay as they are.
+- **Video speed** applies to every video and audio element. `[` and `]` change it while you watch.
+- **User agent**, **block JavaScript**, **block images** and **block fonts** take effect on the next load of that site.
+- **Pick an element to hide** outlines elements as you move the pointer. Click one to hide it on that site from then on. Esc cancels.
+- **Reader mode** opens the article in the same tab, using the same cleanup as Print to PDF. Back, or Show original, returns to the site.
+- **Auto-refresh** reloads that tab on an interval. **Notify when the page changes** puts a dot on the tab when the text differs.
+- **Site scripts** opens `ce://scripts`, where CSS and JavaScript can be saved for one site or for every site. `styles.css` still styles the browser itself.
+
 ## Data
 
 Each profile keeps its settings, session, bookmarks, downloads, history and extension list as JSON files in its own folder. The folder is named after the profile. The first profile is named "Default". The root folder is the sync folder when one is selected, otherwise `%APPDATA%\com.ce.browser`.
@@ -85,6 +100,7 @@ Each profile keeps its settings, session, bookmarks, downloads, history and exte
     - history.json
     - session.json
     - settings.json
+    - site-controls.json
     - styles.css
   - Profile 2
     - extensions folder
@@ -94,6 +110,7 @@ Each profile keeps its settings, session, bookmarks, downloads, history and exte
     - history.json
     - session.json
     - settings.json
+    - site-controls.json
     - styles.css
 
 Cookies, logins and the WebView2 profile stay in `%LOCALAPPDATA%\com.ce.browser` on each computer. Data written by an older build (default profile files loose in the root, other profiles under `profiles\<id>`, or a `ce-browser` folder in the sync folder) moves into this layout the next time the browser starts.

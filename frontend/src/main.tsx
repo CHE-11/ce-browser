@@ -14,6 +14,8 @@ import { NewTabPage } from "./features/NewTab/NewTab.page";
 import { PeekPage } from "./features/Peek/Peek.page";
 import { PopupPage } from "./features/Popup/Popup.page";
 import { PrintEditorPage } from "./features/PrintEditor/PrintEditor.page";
+import { ReaderPage } from "./features/Reader/Reader.page";
+import { ScriptsPage } from "./features/Scripts/Scripts.page";
 import { SettingsPage } from "./features/Settings/Settings.page";
 import "./index.css";
 
@@ -49,6 +51,10 @@ function App() {
       return <PrintEditorPage params={route.params} />;
     case "peek":
       return <PeekPage />;
+    case "reader":
+      return <ReaderPage />;
+    case "scripts":
+      return <ScriptsPage params={route.params} />;
     default:
       return <NewTabPage />;
   }

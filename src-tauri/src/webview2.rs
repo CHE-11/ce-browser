@@ -291,15 +291,38 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                 let Ok(message) = serde_json::from_str::<serde_json::Value>(&json) else {
                     return Ok(());
                 };
-                if message.get("type").and_then(|kind| kind.as_str()) != Some("ce-peek") {
-                    return Ok(());
-                }
-                if let Some(url) = message.get("url").and_then(|url| url.as_str()) {
-                    let app = message_app.clone();
-                    let url = url.to_string();
-                    tauri::async_runtime::spawn(async move {
-                        crate::peek::request(&app, id, &url);
-                    });
+                match message.get("type").and_then(|kind| kind.as_str()) {
+                    Some("ce-peek") => {
+                        if let Some(url) = message.get("url").and_then(|url| url.as_str()) {
+                            let app = message_app.clone();
+                            let url = url.to_string();
+                            tauri::async_runtime::spawn(async move {
+                                crate::peek::request(&app, id, &url);
+                            });
+                        }
+                    }
+                    Some("ce-zap") => {
+                        if let Some(selector) = message.get("selector").and_then(|value| value.as_str()) {
+                            let app = message_app.clone();
+                            let selector = selector.to_string();
+                            tauri::async_runtime::spawn(async move {
+                                if let Some(url) = tabs::tab_page_url(&app, id) {
+                                    crate::page_rules::remember_zap(&app, &url, &selector);
+                                }
+                            });
+                        }
+                    }
+                    Some("ce-speed") => {
+                        if let Some(speed) = message.get("speed").and_then(|value| value.as_f64()) {
+                            let app = message_app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Some(url) = tabs::tab_page_url(&app, id) {
+                                    crate::page_rules::remember_speed(&app, &url, speed);
+                                }
+                            });
+                        }
+                    }
+                    _ => {}
                 }
                 Ok(())
             })),
@@ -388,6 +411,22 @@ fn attach_adblock(
                         windows::core::w!(""),
                     )?;
                     args.SetResponse(&response)?;
+                    return Ok(());
+                }
+                let page = tabs::tab_page_url(&request_app, id).unwrap_or_default();
+                let blank = !is_document
+                    && ((context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE
+                        && crate::page_rules::blocks_images(&request_app, &page))
+                        || (context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT
+                            && crate::page_rules::blocks_fonts(&request_app, &page)));
+                if blank {
+                    let response = environment.CreateWebResourceResponse(
+                        None::<&IStream>,
+                        200,
+                        windows::core::w!("OK"),
+                        windows::core::w!(""),
+                    )?;
+                    args.SetResponse(&response)?;
                 }
                 Ok(())
             })),
@@ -396,16 +435,20 @@ fn attach_adblock(
 
         let navigation_app = app.clone();
         core.add_NavigationStarting(
-            &NavigationStartingEventHandler::create(Box::new(move |_, args| {
+            &NavigationStartingEventHandler::create(Box::new(move |sender, args| {
                 if let Some(args) = args {
                     let uri = read_pwstr(|value| args.Uri(value));
                     crate::adblock::page_started(&navigation_app, id, &uri);
+                    if let Some(core) = sender {
+                        apply_page_settings(&navigation_app, &core, &uri);
+                    }
                 }
                 Ok(())
             })),
             &mut token,
         )?;
 
+        let content_app = app.clone();
         core.add_ContentLoading(
             &ContentLoadingEventHandler::create(Box::new(move |sender, _| {
                 let Some(core) = sender else {
@@ -419,12 +462,37 @@ fn attach_adblock(
                         None::<&ICoreWebView2ExecuteScriptCompletedHandler>,
                     );
                 }
+                let injection = crate::page_rules::injection(&content_app, &source);
+                if !injection.is_empty() {
+                    let script = HSTRING::from(injection);
+                    let _ = core.ExecuteScript(
+                        &script,
+                        None::<&ICoreWebView2ExecuteScriptCompletedHandler>,
+                    );
+                }
                 Ok(())
             })),
             &mut token,
         )?;
     }
     Ok(())
+}
+
+/// Sets the user agent and whether JavaScript runs for the page that is about to load.
+fn apply_page_settings(app: &AppHandle, core: &ICoreWebView2, url: &str) {
+    let agent = crate::page_rules::user_agent_for(app, url);
+    let enabled = crate::page_rules::scripts_enabled(app, url);
+    unsafe {
+        let Ok(settings) = core.Settings() else {
+            return;
+        };
+        let _ = settings.SetIsScriptEnabled(enabled);
+        if let Some(agent) = agent {
+            if let Ok(settings) = settings.cast::<ICoreWebView2Settings2>() {
+                let _ = settings.SetUserAgent(&HSTRING::from(agent));
+            }
+        }
+    }
 }
 
 fn attach_downloads(app: &AppHandle, core: &ICoreWebView2) -> windows::core::Result<()> {

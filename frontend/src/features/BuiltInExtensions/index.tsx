@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { BrowserSettings, TabInfo } from "../../../../types/browser";
 import { openToolbarPinMenu, toolbarPinned } from "../../lib/toolbar-pin";
 import { AdBlockerButton } from "./ad-blocker/AdBlockerButton";
+import { PageControlsButton } from "./page-controls/PageControlsButton";
 import { ClearCacheButton } from "./clear-cache/ClearCacheButton";
 import { PageCaptureButton } from "./page-capture/PageCaptureButton";
 import { PrintPdfButton } from "./print-pdf/PrintPdfButton";
@@ -32,6 +33,7 @@ export function BuiltinExtensions({ activeTab, settings }: BuiltinExtensionsProp
       {pinnedTool(settings, "clear-cache", <ClearCacheButton activeTab={activeTab} />)}
       {pinnedTool(settings, "what-runs", <WhatRunsButton activeTab={activeTab} />)}
       {pinnedTool(settings, "ad-blocker", <AdBlockerButton activeTab={activeTab} settings={settings} />)}
+      {pinnedTool(settings, "page-controls", <PageControlsButton activeTab={activeTab} />)}
     </div>
   );
 }

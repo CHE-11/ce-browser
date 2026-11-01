@@ -171,6 +171,9 @@ export function TabItem({
           <span id={`${domId}-title`} className="min-w-0 flex-1 truncate">
             {tab.title || tab.url}
           </span>
+          {tab.changed ? (
+            <span id={`${domId}-changed`} className="size-2 shrink-0 rounded-full bg-sky-400" title="This page changed" />
+          ) : null}
           {tab.sleeping ? <Moon id={`${domId}-sleeping`} className="size-3 shrink-0 text-zinc-500" aria-label="Sleeping" /> : null}
           {audioButton}
           {tab.zoom !== 1 ? (

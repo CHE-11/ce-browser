@@ -13,6 +13,7 @@ import { TabGroupMenu } from "@/components/TabsAddressAndBookmarks/Tabs/TabGroup
 import { TabMenu } from "@/components/TabsAddressAndBookmarks/Tabs/TabMenu";
 import { WorkspaceMenu } from "@/components/WorkspaceMenu";
 import { AdBlockerPopover } from "@features/BuiltInExtensions/ad-blocker/AdBlockerPopover";
+import { PageControlsPopover } from "@features/BuiltInExtensions/page-controls/PageControlsPopover";
 import { PageCapturePopover } from "@features/BuiltInExtensions/page-capture/PageCapturePopover";
 import { PrintPdfPopover } from "@features/BuiltInExtensions/print-pdf/PrintPdfPopover";
 import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
@@ -84,6 +85,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <WhatRunsPopover params={params} />;
     case "ad-blocker":
       return <AdBlockerPopover params={params} />;
+    case "page-controls":
+      return <PageControlsPopover params={params} />;
     case "extension-pin":
       return <ExtensionPinMenu extensionId={params.get("id") ?? ""} />;
     case "tab-group":

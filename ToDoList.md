@@ -10,16 +10,16 @@
 - [x] Per-tab mute, and a "mute all but the active tab" mode.
 
 ## Page control (things sites normally decide)
-- [ ] Per-site user CSS and JS (built-in userscript manager): extends the profile `styles.css` to a per-domain style and script editor at `ce://scripts`.
-- [ ] Force-enable copy, paste, right-click and text selection on sites that block them.
-- [ ] "Clean page" action that removes sticky headers, cookie banners and subscribe overlays.
-- [ ] Element zapper: click any element to hide it permanently on that site, stored as a rule.
-- [ ] Force dark mode per site, with brightness and contrast sliders.
-- [ ] Reader mode that reuses the Print Editor cleanup rules.
-- [ ] Custom user agent per site.
-- [ ] Global video speed control (keyboard shortcuts for any HTML5 video), remembered per site.
-- [ ] Disable JavaScript, images or fonts per site from an address-bar toggle.
-- [ ] Auto-refresh a tab on an interval, with an optional "notify when the page content changes" mode.
+- [x] Per-site user CSS and JS (built-in userscript manager): extends the profile `styles.css` to a per-domain style and script editor at `ce://scripts`.
+- [x] Force-enable copy, paste, right-click and text selection on sites that block them.
+- [x] "Clean page" action that removes sticky headers, cookie banners and subscribe overlays.
+- [x] Element zapper: click any element to hide it permanently on that site, stored as a rule.
+- [x] Force dark mode per site, with brightness and contrast sliders.
+- [x] Reader mode that reuses the Print Editor cleanup rules.
+- [x] Custom user agent per site.
+- [x] Global video speed control (keyboard shortcuts for any HTML5 video), remembered per site.
+- [x] Disable JavaScript, images or fonts per site from an address-bar toggle.
+- [x] Auto-refresh a tab on an interval, with an optional "notify when the page content changes" mode.
 
 ## Privacy and security
 - [ ] Containers: isolated cookie stores per tab group (WebView2 profiles via `CreateCoreWebView2ControllerOptions` with a profile name).

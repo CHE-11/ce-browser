@@ -21,6 +21,12 @@ export type TabInfo = {
   sleeping: boolean;
   groupId: number | null;
   workspace: string;
+  /** Seconds between automatic reloads. Zero is off. */
+  refreshSecs: number;
+  /** Compare the page text before each reload and mark the tab when it differs. */
+  watchChanges: boolean;
+  /** The watched page changed since this tab was last selected. */
+  changed: boolean;
 };
 
 export type SplitView = {
@@ -69,6 +75,60 @@ export type TabsSnapshot = {
   workspaces: Workspace[];
 };
 
+export type DarkMode = {
+  enabled: boolean;
+  /** Percent, 50 to 150. */
+  brightness: number;
+  contrast: number;
+};
+
+/** Controls stored for one site. A rule for a host also covers its subdomains. */
+export type SiteControl = {
+  forceInteraction: boolean;
+  cleanPage: boolean;
+  dark: DarkMode;
+  /** Empty keeps the browser's normal user agent. */
+  userAgent: string;
+  /** 1 leaves the page's own speed. */
+  videoSpeed: number;
+  blockScript: boolean;
+  blockImages: boolean;
+  blockFonts: boolean;
+  /** CSS selectors hidden by the element zapper. */
+  hidden: string[];
+};
+
+export type UserScript = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** Empty matches every site. */
+  hosts: string[];
+  css: string;
+  js: string;
+};
+
+export type PageRules = {
+  sites: Record<string, SiteControl>;
+  scripts: UserScript[];
+};
+
+/** Absent fields stay as they are. */
+export type SitePatch = {
+  forceInteraction?: boolean;
+  cleanPage?: boolean;
+  darkEnabled?: boolean;
+  brightness?: number;
+  contrast?: number;
+  userAgent?: string;
+  videoSpeed?: number;
+  blockScript?: boolean;
+  blockImages?: boolean;
+  blockFonts?: boolean;
+  hide?: string;
+  clearHidden?: boolean;
+};
+
 export type PeekInfo = {
   window: string;
   url: string;
@@ -95,7 +155,8 @@ export type PopupKind =
   | "extension-pin"
   | "tab-group"
   | "tab-group-menu"
-  | "workspaces";
+  | "workspaces"
+  | "page-controls";
 
 export type PopupRequest = {
   kind: PopupKind;

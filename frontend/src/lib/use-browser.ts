@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { BookmarkNode, BookmarkTree, BrowserSettings, TabsSnapshot } from "../../../types/browser";
+import type { BookmarkNode, BookmarkTree, BrowserSettings, PageRules, TabsSnapshot } from "../../../types/browser";
 import { publishAppearance } from "./appearance";
 import {
+  getPageRules,
   getSettings,
   listBookmarks,
   listDownloads,
@@ -14,6 +15,7 @@ import {
   onDownloadsChanged,
   onExtensionsChanged,
   onHistoryChanged,
+  onPageRulesChanged,
   onSettingsChanged,
   onTabsChanged,
 } from "./browser-client";
@@ -133,6 +135,10 @@ export function useExtensions() {
 export function useSettingsState() {
   const { value, loaded } = useLiveValue(getSettings, onSettingsChanged);
   return { settings: value, loaded };
+}
+
+export function usePageRules(): PageRules | null {
+  return useLiveValue(getPageRules, onPageRulesChanged).value;
 }
 
 export function useSettings(): BrowserSettings | null {

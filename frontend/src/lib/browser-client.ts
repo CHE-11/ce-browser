@@ -15,8 +15,11 @@ import type {
   ExtractedPage,
   HistoryItem,
   PageCaptureResult,
+  PageRules,
   PageTechnologies,
   PageToolRequest,
+  SitePatch,
+  UserScript,
   PdfOptions,
   SyncStatus,
   ExtensionInfo,
@@ -143,6 +146,26 @@ export function reopenClosedTab() {
 /** `top` is the header height and `left` the vertical tab sidebar width, in CSS pixels. */
 export function setUiInsets(top: number, left: number) {
   return invoke<void>("set_ui_insets", { top, left });
+}
+
+export function setTabRefresh(id: number, secs: number, watch: boolean) {
+  return invoke<void>("set_tab_refresh", { id, secs, watch });
+}
+
+export function openReader(id: number) {
+  return invoke<void>("open_reader", { id });
+}
+
+export function readerPage() {
+  return invoke<ExtractedPage | null>("reader_page");
+}
+
+export function showReaderOriginal() {
+  return invoke<void>("show_reader_original");
+}
+
+export function startZapper(id: number) {
+  return invoke<void>("start_zapper", { id });
 }
 
 export function setTabsMuted(ids: number[], muted: boolean) {
@@ -583,6 +606,26 @@ export function onExtensionsChanged(handler: (extensions: ExtensionInfo[]) => vo
 }
 
 // Settings
+
+export function getPageRules() {
+  return invoke<PageRules>("get_page_rules");
+}
+
+export function updateSiteControl(host: string, patch: SitePatch) {
+  return invoke<PageRules>("update_site_control", { host, patch });
+}
+
+export function saveUserScript(script: UserScript) {
+  return invoke<PageRules>("save_user_script", { script });
+}
+
+export function deleteUserScript(id: string) {
+  return invoke<PageRules>("delete_user_script", { id });
+}
+
+export function onPageRulesChanged(handler: (rules: PageRules) => void): Promise<UnlistenFn> {
+  return listen<PageRules>("page-rules-changed", (event) => handler(event.payload));
+}
 
 export function getSettings() {
   return invoke<BrowserSettings>("get_settings");

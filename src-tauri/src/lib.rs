@@ -5,6 +5,7 @@ mod downloads;
 mod history;
 mod extensions;
 mod files;
+mod page_rules;
 mod paths;
 mod peek;
 mod print;
@@ -597,6 +598,70 @@ async fn open_extension_options(app: AppHandle, id: String) -> Result<u32, Strin
 // Settings
 
 #[tauri::command]
+fn get_page_rules(app: AppHandle) -> page_rules::PageRules {
+    page_rules::get(&app)
+}
+
+#[tauri::command]
+fn update_site_control(
+    app: AppHandle,
+    host: String,
+    patch: page_rules::SitePatch,
+) -> Result<page_rules::PageRules, String> {
+    page_rules::update_site(&app, &host, patch)
+}
+
+#[tauri::command]
+fn save_user_script(app: AppHandle, script: page_rules::UserScript) -> Result<page_rules::PageRules, String> {
+    page_rules::save_script(&app, script)
+}
+
+#[tauri::command]
+fn delete_user_script(app: AppHandle, id: String) -> Result<page_rules::PageRules, String> {
+    page_rules::delete_script(&app, &id)
+}
+
+#[tauri::command]
+async fn start_zapper(app: AppHandle, id: u32) -> Result<(), String> {
+    tabs::run_zapper(&app, id)
+}
+
+#[tauri::command]
+async fn set_tab_refresh(app: AppHandle, id: u32, secs: u32, watch: bool) -> Result<(), String> {
+    tabs::set_refresh(&app, id, secs, watch)
+}
+
+#[tauri::command]
+async fn open_reader(app: AppHandle, id: u32) -> Result<(), String> {
+    let page = blocking({
+        let app = app.clone();
+        move || print::extract_page(&app, id)
+    })
+    .await?;
+    page_rules::store_reader(&app, page);
+    tabs::navigate(&app, id, "ce://reader")
+}
+
+#[tauri::command]
+fn reader_page(app: AppHandle) -> Option<print::ExtractedPage> {
+    page_rules::reader(&app)
+}
+
+#[tauri::command]
+async fn show_reader_original(app: AppHandle, webview: tauri::Webview) -> Result<(), String> {
+    let id = webview
+        .label()
+        .strip_prefix("tab-")
+        .and_then(|id| id.parse().ok())
+        .ok_or("This page is not a tab.")?;
+    let url = page_rules::reader(&app)
+        .map(|page| page.url)
+        .filter(|url| !url.is_empty())
+        .ok_or("The original page is no longer available.")?;
+    tabs::navigate(&app, id, &url)
+}
+
+#[tauri::command]
 fn get_settings(app: AppHandle) -> BrowserSettings {
     settings::get(&app)
 }
@@ -738,6 +803,7 @@ pub fn run() {
                 eprintln!("profile identity: {error}");
             }
             settings::init(&handle);
+            page_rules::init(&handle);
             if let Err(error) = user_styles::ensure(&handle) {
                 eprintln!("user styles: {error}");
             }
@@ -900,6 +966,15 @@ pub fn run() {
             set_extension_enabled,
             remove_extension,
             open_extension_options,
+            get_page_rules,
+            update_site_control,
+            save_user_script,
+            delete_user_script,
+            start_zapper,
+            set_tab_refresh,
+            open_reader,
+            reader_page,
+            show_reader_original,
             get_settings,
             save_settings,
             default_download_dir,
