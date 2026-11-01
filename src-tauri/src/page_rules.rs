@@ -360,6 +360,8 @@ pub fn injection(app: &AppHandle, url: &str) -> String {
     script.push_str(&crate::privacy::fingerprint_script(app, url));
     script.push('\n');
     script.push_str(ERROR_JS);
+    script.push('\n');
+    script.push_str(THEME_JS);
     script
 }
 
@@ -624,6 +626,22 @@ const INJECTION_JS: &str = r#"(function () {
     }
   }
   window.ceApply = ceApply;
+})();"#;
+
+const THEME_JS: &str = r#"(function () {
+  if (window.__ceTheme) return;
+  window.__ceTheme = true;
+  function send() {
+    var meta = document.querySelector('meta[name="theme-color"]');
+    var color = meta && meta.content ? String(meta.content) : "";
+    try {
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage({ type: "ce-theme", color: color });
+      }
+    } catch (error) {}
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", send);
+  else send();
 })();"#;
 
 const ERROR_JS: &str = r#"(function () {

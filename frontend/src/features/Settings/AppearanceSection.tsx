@@ -12,6 +12,8 @@ import { matchesQuery, Row, Section, useReportMatch, useSectionMatches, useSetti
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-appearance")!;
 
+const ACCENT_LABEL = "Site accent";
+const ACCENT_HINT = "Tints the active tab and address bar from the site's theme color or favicon.";
 const BAR_LABEL = "Show bookmarks bar";
 const BAR_HINT = "Ctrl+Shift+B";
 const MODE_LABEL = "Mode";
@@ -39,6 +41,8 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
     section.title,
     BAR_LABEL,
     BAR_HINT,
+    ACCENT_LABEL,
+    ACCENT_HINT,
     MODE_LABEL,
     ...COLOR_MODE_OPTIONS.map((option) => option.label),
     THEME_LABEL,
@@ -68,6 +72,9 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
 
   return (
     <Section id={section.id} title={section.title}>
+      <Row id="settings-site-accent" label={ACCENT_LABEL} hint={ACCENT_HINT}>
+        <Toggle id="settings-site-accent-toggle" checked={settings.siteAccent} onChange={(value) => onUpdate({ siteAccent: value })} />
+      </Row>
       <Row id="settings-bookmarks-bar" label={BAR_LABEL} hint={BAR_HINT}>
         <Toggle id="settings-bookmarks-bar-toggle" checked={settings.showBookmarksBar} onChange={(value) => onUpdate({ showBookmarksBar: value })} />
       </Row>

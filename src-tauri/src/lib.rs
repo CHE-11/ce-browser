@@ -1,3 +1,4 @@
+mod accent;
 mod adblock;
 mod answer;
 mod accelerator;

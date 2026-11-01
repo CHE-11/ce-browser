@@ -73,6 +73,12 @@ pub struct BrowserSettings {
     /// Extension ids left off the address bar. An older file omits this, so every extension stays pinned.
     #[serde(default)]
     pub hidden_toolbar_extensions: Vec<String>,
+    /// Order of pinned toolbar icons. Empty keeps the built-in order, then extensions.
+    #[serde(default)]
+    pub toolbar_order: Vec<String>,
+    /// Tint the active tab and address bar from the site's theme color or favicon.
+    #[serde(default = "default_true")]
+    pub site_accent: bool,
     /// Built-in ad blocker. An older file omits this, so blocking starts on with no paused sites.
     #[serde(default)]
     pub adblock: AdblockSettings,
@@ -347,6 +353,8 @@ impl Default for BrowserSettings {
             print_editor: PrintEditorSettings::default(),
             page_capture: PageCaptureSettings::default(),
             hidden_toolbar_extensions: Vec::new(),
+            toolbar_order: Vec::new(),
+            site_accent: true,
             adblock: AdblockSettings::default(),
             tab_layout: "horizontal".into(),
             vertical_tabs_collapsed: false,
@@ -391,6 +399,7 @@ impl BrowserSettings {
         self.page_zoom = snap_page_zoom(self.page_zoom);
         self.print_editor = self.print_editor.normalize();
         self.hidden_toolbar_extensions = toolbar_hidden(&self.hidden_toolbar_extensions);
+        self.toolbar_order = toolbar_hidden(&self.toolbar_order);
         self.adblock = self.adblock.normalize();
         if !TAB_LAYOUTS.contains(&self.tab_layout.as_str()) {
             self.tab_layout = defaults.tab_layout.clone();
@@ -682,6 +691,22 @@ fn clean_hosts(hosts: &[String]) -> Vec<String> {
     kept
 }
 
+/// Saved ids that are still available, in that order, then any available id the list does not mention.
+pub fn toolbar_order(saved: &[String], available: &[String]) -> Vec<String> {
+    let mut ordered = Vec::new();
+    for id in saved {
+        if available.iter().any(|item| item == id) && !ordered.iter().any(|item| item == id) {
+            ordered.push(id.clone());
+        }
+    }
+    for id in available {
+        if !ordered.iter().any(|item| item == id) {
+            ordered.push(id.clone());
+        }
+    }
+    ordered
+}
+
 fn toolbar_hidden(ids: &[String]) -> Vec<String> {
     let mut hidden = Vec::new();
     for id in ids {
@@ -820,6 +845,25 @@ mod tests {
         let loaded = loaded.normalize();
         assert!(!loaded.adblock.enabled);
         assert_eq!(loaded.adblock.allowed_sites, vec!["example.com".to_string()]);
+    }
+
+    #[test]
+    fn an_empty_toolbar_order_keeps_the_default_sequence() {
+        let available = ["print-pdf", "page-capture", "ext-a"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        assert_eq!(super::toolbar_order(&[], &available), available);
+    }
+
+    #[test]
+    fn a_saved_toolbar_order_drops_an_unpinned_id() {
+        let available = ["print-pdf".to_string(), "ad-blocker".to_string()];
+        let saved = ["missing".to_string(), "ad-blocker".to_string(), "print-pdf".to_string()];
+        assert_eq!(
+            super::toolbar_order(&saved, &available),
+            vec!["ad-blocker".to_string(), "print-pdf".to_string()]
+        );
     }
 
     #[test]

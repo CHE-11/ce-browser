@@ -61,8 +61,8 @@
 - [x] Color picker and font inspector tools.
 
 ## Customization and UI
-- [ ] Drag-to-arrange toolbar items.
-- [ ] Per-site accent color: tint the tab and toolbar from the site's theme color or favicon.
+- [x] Drag-to-arrange toolbar items.
+- [x] Per-site accent color: tint the tab and toolbar from the site's theme color or favicon.
 
 ## Built-in extensions (new toolbar tools)
 - [ ] Translate page inline through a configurable provider.

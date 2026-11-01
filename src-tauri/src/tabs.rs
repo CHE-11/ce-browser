@@ -69,6 +69,8 @@ pub struct TabInfo {
     pub ephemeral: bool,
     /// Page errors since the last navigation. Not written into the session.
     pub errors: u32,
+    /// `#rrggbb` from the site's theme color or favicon. Not written into the session.
+    pub accent: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -223,6 +225,8 @@ struct Tab {
     last_refresh: Instant,
     /// Text fingerprint from the previous watched reload.
     content_mark: Option<String>,
+    /// The accent came from theme-color, so a later favicon does not replace it.
+    accent_locked: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -913,6 +917,7 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                     changed: false,
                     ephemeral: tab.ephemeral,
                     errors: 0,
+                    accent: None,
                 },
                 pending_url: Some(tab.url.clone()),
                 webview: None,
@@ -923,6 +928,7 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                 applied_mute: None,
                 last_refresh: Instant::now(),
                 content_mark: None,
+                accent_locked: false,
             },
         );
         state.normalize_groups();
@@ -1502,6 +1508,39 @@ pub fn note_error(app: &AppHandle, id: u32) {
     update(app, id, |tab| {
         tab.info.errors = tab.info.errors.saturating_add(1);
     });
+}
+
+pub fn set_theme_color(app: &AppHandle, id: u32, raw: &str) {
+    let color = crate::accent::parse_color(raw);
+    update(app, id, move |tab| {
+        if let Some(color) = color {
+            tab.info.accent = Some(color);
+            tab.accent_locked = true;
+        } else {
+            tab.accent_locked = false;
+        }
+    });
+}
+
+pub fn set_favicon_accent(app: &AppHandle, id: u32, color: String) {
+    update(app, id, |tab| {
+        if !tab.accent_locked {
+            tab.info.accent = Some(color);
+        }
+    });
+}
+
+pub fn clear_accent(app: &AppHandle, id: u32) {
+    let changed = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        let changed = tab.info.accent.is_some() || tab.accent_locked;
+        tab.info.accent = None;
+        tab.accent_locked = false;
+        Some(changed)
+    });
+    if changed == Some(true) {
+        emit_tabs(app);
+    }
 }
 
 pub fn clear_errors(app: &AppHandle, id: u32) {
@@ -3960,6 +3999,7 @@ mod tests {
                 changed: false,
                 ephemeral: false,
                 errors: 0,
+                accent: None,
             },
             pending_url: None,
             webview: None,
@@ -3970,6 +4010,7 @@ mod tests {
             applied_mute: None,
             last_refresh: Instant::now(),
             content_mark: None,
+            accent_locked: false,
         }
     }
 

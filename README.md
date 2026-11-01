@@ -141,6 +141,12 @@ The tab menu and the browser menu can open the current site in Chrome, Firefox, 
 
 Page errors, unhandled rejections, and `console.error` put a count on the tab. It clears when the tab navigates and is not kept in the session. **Color and font** in page controls follows the pointer and copies the element's color, background, and font. Esc cancels.
 
+## Customization
+
+Drag a pinned icon on the address bar onto another to reorder the built-in tools and extension buttons. The order is remembered. Back, forward, reload, home, the address field, Downloads, and the menu stay put. Right-click still unpins an icon.
+
+**Site accent** in Settings > Appearance is on by default. The active tab and the address bar take a tint from the site's theme color, or from its favicon when the page has no theme color. Other tabs for that site show a thin edge in the same color.
+
 ## Data
 
 Each profile keeps its settings, session, bookmarks, downloads, history and extension list as JSON files in its own folder. The folder is named after the profile. The first profile is named "Default". The root folder is the sync folder when one is selected, otherwise `%APPDATA%\com.ce.browser`.

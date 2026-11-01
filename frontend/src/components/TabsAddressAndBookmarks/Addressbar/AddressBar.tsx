@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -45,15 +45,17 @@ import {
   openPopupBelow,
   reload,
   resizePopup,
+  saveSettings,
   sendOmniboxState,
   splitWith,
   stop,
 } from "../../../lib/browser-client";
+import { accentTint } from "../../../lib/accent";
 import { cn } from "../../../lib/cn";
-import { openToolbarPinMenu, toolbarPinned } from "../../../lib/toolbar-pin";
+import { DEFAULT_TOOLBAR, openToolbarPinMenu, toolbarOrder, toolbarPinned } from "../../../lib/toolbar-pin";
 import { buildSuggestions, omniboxHeight } from "../../../lib/omnibox";
 import { flattenBookmarks } from "../../../lib/use-browser";
-import { BuiltinExtensions } from "../../../features/BuiltInExtensions";
+import { ToolbarIcon } from "../../../features/BuiltInExtensions";
 import { ExtensionIcon } from "../../ExtensionIcon";
 import { IconButton } from "../../IconButton";
 import { WindowControls } from "../../WindowControls";
@@ -333,6 +335,22 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const toolbarExtensions = extensions.filter(
     (extension) => extension.enabled && toolbarPinned(settings, extension.id),
   );
+  const toolbarIds = toolbarOrder(settings?.toolbarOrder, [
+    ...DEFAULT_TOOLBAR.filter((id) => toolbarPinned(settings, id)),
+    ...toolbarExtensions.map((extension) => extension.id),
+  ]);
+  const moveToolbar = (from: string, to: string) => {
+    if (!settings || from === to) {
+      return;
+    }
+    const next = toolbarIds.filter((id) => id !== from);
+    const index = next.indexOf(to);
+    if (index < 0) {
+      return;
+    }
+    next.splice(index, 0, from);
+    void saveSettings({ ...settings, toolbarOrder: next });
+  };
   const secure = activeTab?.url.startsWith("https://");
   const insecure = activeTab?.url.startsWith("http://");
 
@@ -340,6 +358,11 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     <div
       id="address-bar"
       className={cn("flex h-10 shrink-0 items-center gap-1 bg-zinc-900 px-2", windowControls && "pr-0")}
+      style={
+        settings?.siteAccent && activeTab?.accent
+          ? { backgroundColor: accentTint(activeTab.accent, 0.28) }
+          : undefined
+      }
       data-tauri-drag-region={windowControls ? true : undefined}
     >
       <IconButton
@@ -447,37 +470,57 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         </button>
       </div>
 
-      <div id="address-extensions" className="flex items-center">
-        {toolbarExtensions.map((extension) => (
-          <span
-            key={extension.id}
-            id={`address-extension-${extension.id}-pin`}
-            className="inline-flex"
-            onContextMenu={(event) => openToolbarPinMenu(event, extension.id)}
-          >
-            <IconButton
-              id={`address-extension-${extension.id}`}
-              label={extension.name}
-              disabled={!extension.popup}
-              onClick={(event) =>
-                void openPopupBelow(event.currentTarget, {
-                  kind: "extension",
-                  params: `id=${extension.id}`,
-                  width: 380,
-                  height: 600,
-                })
-              }
+      <div id="address-tools" className="flex items-center">
+        {toolbarIds.map((id) => {
+          const extension = toolbarExtensions.find((item) => item.id === id);
+          return (
+            <span
+              key={id}
+              id={`address-tool-${id}`}
+              className="inline-flex"
+              draggable
+              onDragStart={(event: DragEvent) => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", id);
+              }}
+              onDragOver={(event: DragEvent) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event: DragEvent) => {
+                event.preventDefault();
+                moveToolbar(event.dataTransfer.getData("text/plain"), id);
+              }}
+              onContextMenu={(event) => openToolbarPinMenu(event, id)}
             >
-              <ExtensionIcon
-                id={`address-extension-${extension.id}-icon`}
-                extensionId={extension.id}
-                name={extension.name}
-                src={extension.icon}
-                className="size-4"
-              />
-            </IconButton>
-          </span>
-        ))}
+              {extension ? (
+                <IconButton
+                  id={`address-extension-${extension.id}`}
+                  label={extension.name}
+                  disabled={!extension.popup}
+                  onClick={(event) =>
+                    void openPopupBelow(event.currentTarget, {
+                      kind: "extension",
+                      params: `id=${extension.id}`,
+                      width: 380,
+                      height: 600,
+                    })
+                  }
+                >
+                  <ExtensionIcon
+                    id={`address-extension-${extension.id}-icon`}
+                    extensionId={extension.id}
+                    name={extension.name}
+                    src={extension.icon}
+                    className="size-4"
+                  />
+                </IconButton>
+              ) : (
+                <ToolbarIcon id={id} activeTab={activeTab} settings={settings} />
+              )}
+            </span>
+          );
+        })}
         <IconButton
           id="address-extensions-page"
           label="Extensions"
@@ -528,10 +571,6 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       >
         <Columns2 id="address-split-icon" aria-hidden />
       </IconButton>
-
-      <div id="address-builtin-start" className="mx-0.5 h-4 w-px shrink-0 bg-zinc-600" />
-      <BuiltinExtensions activeTab={activeTab} settings={settings} />
-      <div id="address-builtin-end" className="mx-0.5 h-4 w-px shrink-0 bg-zinc-600" />
 
       <IconButton
         id="address-menu"

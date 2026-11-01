@@ -2,6 +2,33 @@ import type { MouseEvent } from "react";
 import type { BrowserSettings } from "../../../types/browser";
 import { openPopup, saveSettings } from "./browser-client";
 
+/** Built-in tools, in the order they had before a custom order was saved. */
+export const DEFAULT_TOOLBAR = [
+  "print-pdf",
+  "page-capture",
+  "media-hub",
+  "clear-cache",
+  "what-runs",
+  "ad-blocker",
+  "page-controls",
+];
+
+/** Saved ids that are still pinned, then any pinned id the saved list does not mention. */
+export function toolbarOrder(saved: string[] | undefined, available: string[]) {
+  const ordered: string[] = [];
+  for (const id of saved ?? []) {
+    if (available.includes(id) && !ordered.includes(id)) {
+      ordered.push(id);
+    }
+  }
+  for (const id of available) {
+    if (!ordered.includes(id)) {
+      ordered.push(id);
+    }
+  }
+  return ordered;
+}
+
 /** An extension stays on the address bar until its id is stored in settings. */
 export function toolbarPinned(settings: BrowserSettings | null, id: string) {
   return !settings?.hiddenToolbarExtensions?.includes(id);

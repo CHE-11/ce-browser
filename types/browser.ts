@@ -31,6 +31,8 @@ export type TabInfo = {
   ephemeral: boolean;
   /** Page errors since the last navigation. */
   errors: number;
+  /** `#rrggbb` from the site's theme color or favicon. */
+  accent: string | null;
 };
 
 export type SplitView = {
@@ -333,6 +335,10 @@ export type BrowserSettings = {
   pageCapture: PageCaptureSettings;
   /** Extension ids left off the address bar. Empty means every enabled extension stays pinned. */
   hiddenToolbarExtensions: string[];
+  /** Order of pinned toolbar icons. Empty keeps the built-in order, then extensions. */
+  toolbarOrder: string[];
+  /** Tint the active tab and address bar from the site's color. */
+  siteAccent: boolean;
   /** Built-in ad blocker. */
   adblock: AdblockSettings;
   /** `horizontal` puts tabs above the address bar, `vertical` in a sidebar on the left. */

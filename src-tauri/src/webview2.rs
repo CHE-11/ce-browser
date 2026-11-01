@@ -235,6 +235,23 @@ fn key_down(key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> bo
     unsafe { GetKeyState(key.0 as i32) < 0 }
 }
 
+fn read_stream(stream: &IStream) -> Option<Vec<u8>> {
+    let mut bytes = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let mut read = 0u32;
+        let status = unsafe { stream.Read(buffer.as_mut_ptr().cast(), buffer.len() as u32, Some(&mut read)) };
+        if status.is_err() || read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..read as usize]);
+        if bytes.len() > 512 * 1024 {
+            break;
+        }
+    }
+    (!bytes.is_empty()).then_some(bytes)
+}
+
 fn core(platform: &PlatformWebview) -> windows::core::Result<ICoreWebView2> {
     unsafe { platform.controller().CoreWebView2() }
 }
@@ -489,6 +506,11 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                             });
                         }
                     }
+                    Some("ce-theme") => {
+                        let color = message.get("color").and_then(|value| value.as_str()).unwrap_or("").to_string();
+                        let app = message_app.clone();
+                        tauri::async_runtime::spawn(async move { tabs::set_theme_color(&app, id, &color) });
+                    }
                     Some("ce-error") => {
                         let app = message_app.clone();
                         tauri::async_runtime::spawn(async move { tabs::note_error(&app, id) });
@@ -550,11 +572,25 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
             let favicon_app = app.clone();
             core15.add_FaviconChanged(
                 &FaviconChangedEventHandler::create(Box::new(move |sender, _| {
-                    let favicon = sender
-                        .and_then(|core| core.cast::<ICoreWebView2_15>().ok())
-                        .map(|core| read_pwstr(|value| core.FaviconUri(value)))
-                        .filter(|uri| !uri.is_empty());
+                    let Some(core) = sender.and_then(|core| core.cast::<ICoreWebView2_15>().ok()) else {
+                        return Ok(());
+                    };
+                    let favicon = read_pwstr(|value| core.FaviconUri(value));
+                    let favicon = (!favicon.is_empty()).then_some(favicon);
                     tabs::update_favicon(&favicon_app, id, favicon);
+                    let accent_app = favicon_app.clone();
+                    let handler = GetFaviconCompletedHandler::create(Box::new(move |result, stream| {
+                        if result.is_ok()
+                            && let Some(stream) = stream
+                            && let Some(bytes) = read_stream(&stream)
+                            && let Some(color) = crate::accent::average_png(&bytes)
+                        {
+                            let app = accent_app.clone();
+                            tauri::async_runtime::spawn(async move { tabs::set_favicon_accent(&app, id, color) });
+                        }
+                        Ok(())
+                    }));
+                    let _ = core.GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG, &handler);
                     Ok(())
                 })),
                 &mut token,
@@ -700,6 +736,7 @@ fn attach_adblock(
                 if let Some(args) = args {
                     let uri = read_pwstr(|value| args.Uri(value));
                     tabs::clear_errors(&navigation_app, id);
+                    tabs::clear_accent(&navigation_app, id);
                     if let Some(next) = crate::privacy::rewrite_navigation(&navigation_app, &uri) {
                         let _ = args.SetCancel(true);
                         let app = navigation_app.clone();

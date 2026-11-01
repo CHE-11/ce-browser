@@ -2,7 +2,9 @@ import type { DragEvent, MouseEvent } from "react";
 import { Glasses, LoaderCircle, Moon, Volume2, VolumeX, X } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
 import { setTabsMuted, selectTabRange, toggleTabSelection, activateTab } from "@/lib/browser-client";
+import { accentTint } from "@/lib/accent";
 import { cn } from "@/lib/cn";
+import { useSettings } from "@/lib/use-browser";
 import { groupColorClasses } from "@/lib/tab-rows";
 import { TabInfo } from "@type/browser";
 
@@ -42,6 +44,8 @@ export function TabItem({
   onDragEnd,
   onDragOver,
 }: TabItemProps) {
+  const settings = useSettings();
+  const accent = settings?.siteAccent && tab.accent ? tab.accent : null;
   const domId = `tab-${tab.id}`;
   const vertical = orientation === "vertical";
   const showAudio = tab.audible || tab.muted;
@@ -94,6 +98,14 @@ export function TabItem({
         split === "left" && (vertical ? "rounded-b-none" : "rounded-tr-none"),
         split === "right" && (vertical ? "rounded-t-none" : "rounded-tl-none"),
       )}
+      style={
+        accent
+          ? {
+              backgroundColor: active ? accentTint(accent, 0.28) : undefined,
+              boxShadow: vertical ? `inset 3px 0 0 ${accent}` : `inset 0 2px 0 ${accent}`,
+            }
+          : undefined
+      }
       onMouseDown={(event) => {
         if (event.button !== 0) {
           return;

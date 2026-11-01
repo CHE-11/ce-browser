@@ -1,4 +1,4 @@
-import { Clapperboard, Eraser, ImageDown, Layers, Printer, Shield, type LucideIcon } from "lucide-react";
+import { Clapperboard, Eraser, ImageDown, Layers, Printer, Shield, SlidersHorizontal, type LucideIcon } from "lucide-react";
 
 export type BuiltinTool = {
   id: string;
@@ -44,6 +44,12 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Ad blocker",
     description: "Block ads and trackers on websites.",
     icon: Shield,
+  },
+  {
+    id: "page-controls",
+    name: "Page controls",
+    description: "Change dark mode, scripts, media and other behavior for this site.",
+    icon: SlidersHorizontal,
   },
 ];
 
