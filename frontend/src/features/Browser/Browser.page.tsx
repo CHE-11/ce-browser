@@ -165,6 +165,7 @@ export function BrowserPage() {
             activeId={snapshot.activeId}
             textSize={settings?.bookmarksBarTextSize}
             padding={settings?.bookmarksBarPadding}
+            folderIcons={settings?.bookmarksBarFolderIcons ?? true}
           />
         ) : null}
         {findToken !== null && activeTab ? (

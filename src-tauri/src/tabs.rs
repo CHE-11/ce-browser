@@ -3814,7 +3814,8 @@ const TOAST_WIDTH: f64 = 400.0;
 const TOAST_HEIGHT: f64 = 52.0;
 const TOAST_MARGIN: f64 = 16.0;
 
-/// Where the toast sits: centered near the bottom of the page area, in logical pixels.
+/// Where the toast sits in the page area, in logical pixels. The `toastPosition` setting picks the
+/// corner or edge.
 fn toast_rect(app: &AppHandle, window_label: &str) -> (LogicalPosition<f64>, LogicalSize<f64>) {
     let (position, size) = page_rect(app, window_label);
     let scale = app
@@ -3826,16 +3827,37 @@ fn toast_rect(app: &AppHandle, window_label: &str) -> (LogicalPosition<f64>, Log
     let width = size.width as f64 / scale;
     let height = size.height as f64 / scale;
     let toast_width = TOAST_WIDTH.min((width - 16.0).max(200.0));
+    let placement = settings::get(app).toast_position;
+    let (vertical, horizontal) = placement.split_once('-').unwrap_or(("bottom", "right"));
+    let x = match horizontal {
+        "left" => TOAST_MARGIN,
+        "center" => ((width - toast_width) / 2.0).max(8.0),
+        _ => (width - toast_width - TOAST_MARGIN).max(8.0),
+    };
+    let y = match vertical {
+        "top" => TOAST_MARGIN,
+        _ => (height - TOAST_HEIGHT - TOAST_MARGIN).max(8.0),
+    };
     (
-        LogicalPosition::new(
-            left + ((width - toast_width) / 2.0).max(8.0),
-            top + (height - TOAST_HEIGHT - TOAST_MARGIN).max(8.0),
-        ),
+        LogicalPosition::new(left + x, top + y),
         LogicalSize::new(toast_width, TOAST_HEIGHT),
     )
 }
 
-/// Shows a toast over the bottom of the window's pages. A newer toast replaces the old one.
+/// Moves every open toast to where the current settings place it.
+pub fn place_all_toasts(app: &AppHandle) {
+    if app.try_state::<Tabs>().is_none() {
+        return;
+    }
+    let windows: Vec<String> = with_state(app, |state| {
+        state.windows.iter().map(|chrome| chrome.label.clone()).collect()
+    });
+    for window in windows {
+        place_toast(app, &window);
+    }
+}
+
+/// Shows a toast over the window's pages. A newer toast replaces the old one.
 /// `params` is the query string the toast page reads.
 pub fn show_toast(app: &AppHandle, window_label: &str, params: &str) -> Result<(), String> {
     close_toast(app, window_label);

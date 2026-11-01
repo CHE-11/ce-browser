@@ -472,6 +472,8 @@ export type BrowserSettings = {
   /** Empty keeps the name the site suggested. */
   downloadNameTemplate: string;
   showBookmarksBar: boolean;
+  /** Folder icons on the bookmarks bar. Off leaves folder titles only. Site favicons always show. */
+  bookmarksBarFolderIcons: boolean;
   /** Text size of bookmarks on the bar, in rem. */
   bookmarksBarTextSize: number;
   /** Side padding of bookmarks on the bar, in rem. Top and bottom get half. */
@@ -561,7 +563,11 @@ export type BrowserSettings = {
   lastSeenVersion: string;
   /** Resting on a tab shows a small preview of its page. */
   tabHoverPreview: boolean;
+  /** Corner or edge of the page area where toasts appear. */
+  toastPosition: ToastPosition;
 };
+
+export type ToastPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
 
 /** One on-screen page in a status snapshot. */
 export type StatusPage = {

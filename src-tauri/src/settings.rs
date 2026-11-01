@@ -45,6 +45,9 @@ pub struct BrowserSettings {
     #[serde(default)]
     pub download_name_template: String,
     pub show_bookmarks_bar: bool,
+    /// Folder icons on the bookmarks bar. Off leaves folder titles only. Site favicons always show.
+    #[serde(default = "default_true")]
+    pub bookmarks_bar_folder_icons: bool,
     /// Text size of bookmarks on the bar, in rem.
     #[serde(default = "default_bar_text_size")]
     pub bookmarks_bar_text_size: f32,
@@ -195,9 +198,24 @@ pub struct BrowserSettings {
     /// Version that last ran. A newer running version opens ce://whats-new once.
     #[serde(default)]
     pub last_seen_version: String,
+    /// Corner or edge of the page area where toasts appear, such as `bottom-right`.
+    #[serde(default = "default_toast_position")]
+    pub toast_position: String,
 }
 
 const TAB_LAYOUTS: &[&str] = &["horizontal", "vertical"];
+pub const TOAST_POSITIONS: &[&str] = &[
+    "top-left",
+    "top-center",
+    "top-right",
+    "bottom-left",
+    "bottom-center",
+    "bottom-right",
+];
+
+fn default_toast_position() -> String {
+    "bottom-right".into()
+}
 const TAB_CYCLE_ORDERS: &[&str] = &["strip", "recent"];
 
 fn default_tab_cycle_order() -> String {
@@ -457,6 +475,7 @@ impl Default for BrowserSettings {
             accelerate_downloads: true,
             download_name_template: String::new(),
             show_bookmarks_bar: true,
+            bookmarks_bar_folder_icons: true,
             bookmarks_bar_text_size: default_bar_text_size(),
             bookmarks_bar_padding: default_bar_padding(),
             bookmark_folder_text_size: default_folder_text_size(),
@@ -510,6 +529,7 @@ impl Default for BrowserSettings {
             window_backdrop: default_backdrop(),
             auto_update: true,
             last_seen_version: String::new(),
+            toast_position: default_toast_position(),
         }
     }
 }
@@ -609,6 +629,9 @@ impl BrowserSettings {
         }
         if !BACKDROPS.contains(&self.window_backdrop.as_str()) {
             self.window_backdrop = defaults.window_backdrop.clone();
+        }
+        if !TOAST_POSITIONS.contains(&self.toast_position.as_str()) {
+            self.toast_position = defaults.toast_position.clone();
         }
         self.last_seen_version = self.last_seen_version.trim().chars().take(40).collect();
         self.vertical_tabs_width = self.vertical_tabs_width.clamp(160, 400);
@@ -809,6 +832,7 @@ pub fn reload(app: &AppHandle) {
     let _ = app.emit("settings-changed", &loaded);
     crate::tabs::apply_page_background(app);
     crate::tabs::apply_audio_all(app);
+    crate::tabs::place_all_toasts(app);
 }
 
 pub fn get(app: &AppHandle) -> BrowserSettings {
@@ -857,6 +881,7 @@ pub fn store(
     let _ = app.emit("settings-changed", &saved);
     crate::tabs::apply_page_background(app);
     crate::tabs::apply_audio_all(app);
+    crate::tabs::place_all_toasts(app);
     Ok(saved)
 }
 
@@ -1121,6 +1146,11 @@ mod tests {
         let older = older.normalize();
         assert_eq!(older.bookmarks_bar_text_size, 0.75);
         assert_eq!(older.bookmark_folder_padding, 0.75);
+        assert!(older.bookmarks_bar_folder_icons);
+
+        let no_icons: super::BrowserSettings =
+            serde_json::from_str(r#"{"bookmarksBarFolderIcons":false}"#).expect("settings parse");
+        assert!(!no_icons.normalize().bookmarks_bar_folder_icons);
 
         let preset: super::BrowserSettings =
             serde_json::from_str(r#"{"bookmarkSize":"small"}"#).expect("settings parse");
@@ -1251,6 +1281,17 @@ mod tests {
         assert_eq!(loaded.window_backdrop, "none");
         assert!(loaded.auto_update);
         assert_eq!(loaded.last_seen_version, "");
+        assert_eq!(loaded.toast_position, "bottom-right");
+    }
+
+    #[test]
+    fn toast_position_keeps_a_saved_corner_and_drops_an_unknown_one() {
+        let saved: super::BrowserSettings =
+            serde_json::from_str(r#"{"toastPosition":"top-left"}"#).expect("settings parse");
+        assert_eq!(saved.normalize().toast_position, "top-left");
+        let unknown: super::BrowserSettings =
+            serde_json::from_str(r#"{"toastPosition":"middle"}"#).expect("settings parse");
+        assert_eq!(unknown.normalize().toast_position, "bottom-right");
     }
 
     #[test]

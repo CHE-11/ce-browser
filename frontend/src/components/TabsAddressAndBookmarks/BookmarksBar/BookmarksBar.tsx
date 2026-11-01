@@ -17,6 +17,8 @@ type BookmarksBarProps = {
   textSize?: number;
   /** rem */
   padding?: number;
+  /** Off hides folder icons. A folder without a title keeps its icon so it stays visible. */
+  folderIcons?: boolean;
 };
 
 /** Gap, icon and width are in `em`, so they follow the text size setting. */
@@ -56,7 +58,7 @@ export function openBookmarkLink(url: string, activeId: number | null, event?: M
   }
 }
 
-export function BookmarksBar({ tree, activeId, textSize, padding }: BookmarksBarProps) {
+export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = true }: BookmarksBarProps) {
   const items = tree?.bar.children ?? [];
   const icons = useSiteFavicons(items.map((node) => node.url));
   const itemStyle = bookmarkItemStyle(textSize, padding, { text: BOOKMARK_SIZE.barText, padding: BOOKMARK_SIZE.barPadding });
@@ -196,7 +198,9 @@ export function BookmarksBar({ tree, activeId, textSize, padding }: BookmarksBar
               onClick={(event) => openFolder(event, node)}
               {...drag.itemProps(node, index)}
             >
-              <Folder id={`bookmarks-bar-${node.id}-icon`} className={cn(iconClass, "text-amber-400")} aria-hidden />
+              {folderIcons || !node.title ? (
+                <Folder id={`bookmarks-bar-${node.id}-icon`} className={cn(iconClass, "text-amber-400")} aria-hidden />
+              ) : null}
               <span id={`bookmarks-bar-${node.id}-title`} className="truncate">
                 {node.title}
               </span>
@@ -233,7 +237,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding }: BookmarksBar
           onClick={(event) => openFolder(event, tree.other)}
           {...drag.targetProps(tree.other, 0)}
         >
-          <Folder id="bookmarks-bar-other-icon" className={cn(iconClass, "text-amber-400")} aria-hidden />
+          {folderIcons ? <Folder id="bookmarks-bar-other-icon" className={cn(iconClass, "text-amber-400")} aria-hidden /> : null}
           <span id="bookmarks-bar-other-title" className="truncate">
             {tree.other.title || "Other bookmarks"}
           </span>

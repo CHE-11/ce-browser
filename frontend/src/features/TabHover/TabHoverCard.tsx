@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Glasses, Moon, Volume2 } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
 import { PopupFrame } from "@/components/PopupFrame";
-import { tabMemory, tabThumbnail } from "@/lib/browser-client";
+import { closePopup, tabMemory, tabThumbnail } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { formatBytes, hostOf } from "@/lib/format";
 import { groupColorClasses, groupLabel } from "@/lib/tab-rows";
@@ -58,14 +58,15 @@ export function TabHoverCard({ tabId }: TabHoverCardProps) {
     };
   }, [tabId, sleeping, loaded]);
 
+  const missing = snapshot.loaded && !tab;
+  useEffect(() => {
+    if (missing) {
+      void closePopup();
+    }
+  }, [missing]);
+
   if (!tab) {
-    return (
-      <PopupFrame id="tab-hover" ready={snapshot.loaded}>
-        <div id="tab-hover-missing" className="px-3 py-2 text-xs text-zinc-500">
-          That tab closed.
-        </div>
-      </PopupFrame>
-    );
+    return <PopupFrame id="tab-hover" ready={false}>{null}</PopupFrame>;
   }
 
   const state = sleeping

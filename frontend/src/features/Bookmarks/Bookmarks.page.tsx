@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
 import { hostOf } from "@/lib/format";
 import { useRoute } from "@/lib/route";
 import { BookmarkDropPlace, useAppearanceFromSettings, useBookmarks, findFolder, bookmarkRootsOf, bookmarkContains, BOOKMARK_DRAG_TYPE, bookmarkDropPlace, findBookmarkParent, listFolders } from "@/lib/use-browser";
-import { ChevronRight, Columns3, Search, SearchX, LayoutGrid, List, Type, Upload, Download, Plus, FolderOpen, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, Link2 } from "lucide-react";
+import { ChevronRight, Columns3, Search, SearchX, LayoutGrid, List, Type, Upload, Download, Plus, FolderOpen, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, Link2, SeparatorHorizontal } from "lucide-react";
 import { useRef, useState, useEffect, useMemo, useCallback, type DragEvent, type MouseEvent } from "react";
 import { BookmarkHealthProgress, BookmarkHealthReport, BookmarkNode, BookmarkTree } from "../../../../types/browser";
 
@@ -156,6 +156,17 @@ export function BookmarksPage() {
   };
 
   const closeMenu = useCallback(() => setMenu(null), []);
+
+  const addDivider = (parentId: string, index?: number) => {
+    report(addBookmark(parentId, "", null, index, true));
+  };
+
+  const addDividerAfter = (node: BookmarkNode) => {
+    const parent = findBookmarkParent(tree, node.id);
+    if (parent) {
+      addDivider(parent.parentId, parent.index + 1);
+    }
+  };
 
   const endDrag = () => {
     setDrop(null);
@@ -390,6 +401,9 @@ export function BookmarksPage() {
             <IconButton id="bookmarks-page-add-folder" label="New folder" onClick={() => setEditor({ mode: "add-folder", parentId: selected.id })}>
               <FolderPlus id="bookmarks-page-add-folder-icon" aria-hidden />
             </IconButton>
+            <IconButton id="bookmarks-page-add-divider" label="Add horizontal divider" onClick={() => addDivider(selected.id)}>
+              <SeparatorHorizontal id="bookmarks-page-add-divider-icon" aria-hidden />
+            </IconButton>
           </>
         ) : null}
       </header>
@@ -577,6 +591,17 @@ export function BookmarksPage() {
                 }}
               />
             </>
+          )}
+          {bulkMenu || results || ROOT_FOLDERS.has(menu.node.id) ? null : (
+            <ContextMenuItem
+              id="bookmarks-menu-add-divider"
+              icon={<SeparatorHorizontal />}
+              label="Add divider below"
+              onClick={() => {
+                addDividerAfter(menu.node);
+                closeMenu();
+              }}
+            />
           )}
           {menu.node.separator && !bulkMenu ? null : (
             <ContextMenuItem
@@ -801,7 +826,7 @@ function BookmarkColumnRow({
       id={domId}
       role="option"
       aria-selected={active || chosen}
-      draggable={!ROOT_FOLDERS.has(node.id) && !node.separator}
+      draggable={!ROOT_FOLDERS.has(node.id)}
       title={node.url ?? node.title}
       className={cn(
         "mx-1 flex h-8 cursor-default items-center gap-2 rounded-md px-2 text-left select-none",

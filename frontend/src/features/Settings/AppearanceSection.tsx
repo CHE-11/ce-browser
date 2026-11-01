@@ -7,7 +7,7 @@ import { BOOKMARK_SIZE } from "@/lib/bookmark-size";
 import { backdropSupport, getUserStyles, showUserStyles } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, PAGE_ZOOM_LEVELS, stepPageZoom, ZOOM_STEP } from "@/lib/zoom";
-import type { BackdropSupport } from "@type/browser";
+import type { BackdropSupport, ToastPosition } from "@type/browser";
 import { SETTINGS_SECTIONS } from "./settings-sections";
 import {
   inputClass,
@@ -28,6 +28,8 @@ const ACCENT_LABEL = "Site accent";
 const ACCENT_HINT = "Tints the active tab and address bar from the site's theme color or favicon.";
 const BAR_LABEL = "Show bookmarks bar";
 const BAR_HINT = "Ctrl+Shift+B";
+const FOLDER_ICONS_LABEL = "Show folder icons on the bookmarks bar";
+const FOLDER_ICONS_HINT = "Off shows folder names only. Site icons stay.";
 const TEXT_HINT = "In rem. 1rem is the browser's base text size.";
 const PADDING_HINT = "Side padding in rem. Top and bottom get half.";
 
@@ -85,6 +87,16 @@ const UI_ZOOM_LABEL = "Browser UI size";
 const UI_ZOOM_HINT = "Scales tabs, toolbars and ce:// pages.";
 const PAGE_ZOOM_LABEL = "Web page zoom";
 const PAGE_ZOOM_HINT = "Default size for websites. Ctrl +/- changes the page you are on. Ctrl 0 returns to this size.";
+const TOAST_LABEL = "Toast position";
+const TOAST_HINT = "Where messages such as Undo for closed tabs appear over the page.";
+const TOAST_POSITIONS: { value: ToastPosition; label: string }[] = [
+  { value: "bottom-right", label: "Bottom right" },
+  { value: "bottom-center", label: "Bottom center" },
+  { value: "bottom-left", label: "Bottom left" },
+  { value: "top-right", label: "Top right" },
+  { value: "top-center", label: "Top center" },
+  { value: "top-left", label: "Top left" },
+];
 
 export function AppearanceSection({ settings, query, onUpdate, onError, onMatch }: SettingsSectionProps) {
   const [userCssPath, setUserCssPath] = useState("");
@@ -101,6 +113,8 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
     section.title,
     BAR_LABEL,
     BAR_HINT,
+    FOLDER_ICONS_LABEL,
+    FOLDER_ICONS_HINT,
     ...BOOKMARK_SIZE_ROWS.flatMap((row) => [row.label, row.hint]),
     "rem",
     ACCENT_LABEL,
@@ -129,6 +143,10 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
     "Decrease web page zoom",
     "Increase web page zoom",
     `${pageZoom}%`,
+    TOAST_LABEL,
+    TOAST_HINT,
+    "notification",
+    ...TOAST_POSITIONS.map((option) => option.label),
   );
   useReportMatch(section.id, visible, onMatch);
 
@@ -143,6 +161,13 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
       </Row>
       <Row id="settings-bookmarks-bar" setting="showBookmarksBar" label={BAR_LABEL} hint={BAR_HINT}>
         <Toggle id="settings-bookmarks-bar-toggle" checked={settings.showBookmarksBar} onChange={(value) => onUpdate({ showBookmarksBar: value })} />
+      </Row>
+      <Row id="settings-bookmarks-bar-folder-icons" setting="bookmarksBarFolderIcons" label={FOLDER_ICONS_LABEL} hint={FOLDER_ICONS_HINT}>
+        <Toggle
+          id="settings-bookmarks-bar-folder-icons-toggle"
+          checked={settings.bookmarksBarFolderIcons}
+          onChange={(value) => onUpdate({ bookmarksBarFolderIcons: value })}
+        />
       </Row>
       {BOOKMARK_SIZE_ROWS.map((row) => (
         <RemSetting
@@ -239,6 +264,27 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
         >
           <Plus id="settings-page-zoom-in-icon" aria-hidden />
         </IconButton>
+      </Row>
+      <Row
+        id="settings-toast-position"
+        setting="toastPosition"
+        label={TOAST_LABEL}
+        hint={TOAST_HINT}
+        search={["notification", ...TOAST_POSITIONS.map((option) => option.label)]}
+      >
+        <select
+          id="settings-toast-position-select"
+          value={settings.toastPosition ?? "bottom-right"}
+          aria-label={TOAST_LABEL}
+          className={inputClass}
+          onChange={(event) => onUpdate({ toastPosition: event.target.value as ToastPosition })}
+        >
+          {TOAST_POSITIONS.map((option) => (
+            <option key={option.value} id={`settings-toast-position-${option.value}`} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </Row>
     </Section>
   );
