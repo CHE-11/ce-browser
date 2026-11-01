@@ -92,6 +92,41 @@ export type ProductPrice = {
   stockChanged: boolean;
 };
 
+export type SearchResult = {
+  title: string;
+  url: string;
+  snippet: string;
+};
+
+export type Coupon = {
+  code: string;
+  description: string;
+  /** Search result that shows the code. */
+  source: string;
+};
+
+export type Offer = {
+  store: string;
+  price: number | null;
+  currency: string;
+  url: string;
+  note: string;
+};
+
+export type ShoppingDeals = {
+  /** Price read from the page, when it has structured product data. */
+  product: ProductPrice | null;
+  /** Product name that was searched for. */
+  query: string;
+  /** Host of the current store, without `www.`. */
+  store: string;
+  summary: string;
+  coupons: Coupon[];
+  /** Cheaper offers elsewhere, cheapest first. */
+  offers: Offer[];
+  sources: SearchResult[];
+};
+
 export type StoragePair = {
   key: string;
   value: string;
@@ -225,7 +260,8 @@ export type PopupKind =
   | "price"
   | "wayback"
   | "reading"
-  | "assistant";
+  | "assistant"
+  | "shopping";
 
 export type PopupRequest = {
   kind: PopupKind;
@@ -383,6 +419,10 @@ export type BrowserSettings = {
   assistantModel: string;
   /** Kept on this computer. Sync does not copy it. */
   assistantKey: string;
+  /** DuckDuckGo region for shopping searches, for example `us-en`. */
+  shoppingRegion: string;
+  /** Model for the shopping tool. Blank uses `assistantModel`. */
+  shoppingModel: string;
   /** Restores the window and focuses the address bar. */
   summonHotkey: string;
   /** On battery, background tabs sleep sooner and the visible page stays near 30 frames a second. */

@@ -108,6 +108,12 @@ pub struct BrowserSettings {
     /// Kept on this computer. The sync folder does not receive it.
     #[serde(default)]
     pub assistant_key: String,
+    /// DuckDuckGo region (`kl`) for shopping searches, for example `us-en`.
+    #[serde(default = "default_shopping_region")]
+    pub shopping_region: String,
+    /// Model for the shopping tool. Blank uses `assistant_model`.
+    #[serde(default)]
+    pub shopping_model: String,
     /// Restores the window and focuses the address bar. Default is Ctrl+Alt+Space.
     #[serde(default = "default_hotkey")]
     pub summon_hotkey: String,
@@ -175,6 +181,10 @@ fn default_assistant_endpoint() -> String {
 
 fn default_assistant_model() -> String {
     "llama3.2".into()
+}
+
+fn default_shopping_region() -> String {
+    "us-en".into()
 }
 
 fn default_hotkey() -> String {
@@ -423,6 +433,8 @@ impl Default for BrowserSettings {
             assistant_endpoint: default_assistant_endpoint(),
             assistant_model: default_assistant_model(),
             assistant_key: String::new(),
+            shopping_region: default_shopping_region(),
+            shopping_model: String::new(),
             summon_hotkey: default_hotkey(),
             battery_saver: true,
             adblock: AdblockSettings::default(),
@@ -481,6 +493,18 @@ impl BrowserSettings {
         if self.assistant_model.trim().is_empty() {
             self.assistant_model = default_assistant_model();
         }
+        self.shopping_region = self
+            .shopping_region
+            .trim()
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
+            .take(12)
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if self.shopping_region.is_empty() {
+            self.shopping_region = default_shopping_region();
+        }
+        self.shopping_model = self.shopping_model.trim().to_string();
         if hotkey_blank(&self.summon_hotkey) {
             self.summon_hotkey = default_hotkey();
         }

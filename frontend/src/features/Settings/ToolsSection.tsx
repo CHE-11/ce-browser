@@ -12,6 +12,10 @@ const ENDPOINT_HINT = "An OpenAI-compatible base URL. A local server may omit th
 const MODEL_LABEL = "Assistant model";
 const KEY_LABEL = "Assistant API key";
 const KEY_HINT = "Stays on this computer. Sync does not copy it.";
+const REGION_LABEL = "Shopping region";
+const REGION_HINT = "DuckDuckGo region for coupon and price searches, for example us-en or uk-en.";
+const SHOPPING_MODEL_LABEL = "Shopping model";
+const SHOPPING_MODEL_HINT = "Leave blank to use the assistant model. Uses the assistant endpoint and key.";
 
 export function ToolsSection({ settings, query, onUpdate, onMatch }: SettingsSectionProps) {
   const visible = matchesQuery(
@@ -26,6 +30,12 @@ export function ToolsSection({ settings, query, onUpdate, onMatch }: SettingsSec
     MODEL_LABEL,
     KEY_LABEL,
     KEY_HINT,
+    REGION_LABEL,
+    REGION_HINT,
+    SHOPPING_MODEL_LABEL,
+    SHOPPING_MODEL_HINT,
+    "coupons",
+    "deals",
   );
   useReportMatch(section.id, visible, onMatch);
   if (!visible) {
@@ -77,6 +87,25 @@ export function ToolsSection({ settings, query, onUpdate, onMatch }: SettingsSec
           value={settings.assistantKey}
           autoComplete="off"
           onChange={(event) => onUpdate({ assistantKey: event.target.value })}
+        />
+      </Row>
+      <Row id="settings-shopping-region" label={REGION_LABEL} hint={REGION_HINT} search={["coupons", "deals"]}>
+        <input
+          id="settings-shopping-region-input"
+          className={inputClass}
+          value={settings.shoppingRegion}
+          spellCheck={false}
+          onChange={(event) => onUpdate({ shoppingRegion: event.target.value })}
+        />
+      </Row>
+      <Row id="settings-shopping-model" label={SHOPPING_MODEL_LABEL} hint={SHOPPING_MODEL_HINT} search={["coupons", "deals"]}>
+        <input
+          id="settings-shopping-model-input"
+          className={inputClass}
+          value={settings.shoppingModel}
+          placeholder={settings.assistantModel}
+          spellCheck={false}
+          onChange={(event) => onUpdate({ shoppingModel: event.target.value })}
         />
       </Row>
     </Section>

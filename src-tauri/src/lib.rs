@@ -26,6 +26,7 @@ mod profiles;
 mod rewrite;
 mod session;
 mod settings;
+mod shopping;
 mod shortcuts;
 mod status;
 mod storage;
@@ -950,6 +951,11 @@ async fn ask_page(app: AppHandle, id: u32, question: String) -> Result<String, S
 }
 
 #[tauri::command]
+async fn find_deals(app: AppHandle, id: u32) -> Result<shopping::ShoppingDeals, String> {
+    blocking(move || shopping::find_deals(&app, id)).await
+}
+
+#[tauri::command]
 fn install_site(app: AppHandle, id: u32) -> Result<(), String> {
     system::install_site(&app, id)
 }
@@ -1475,6 +1481,7 @@ pub fn run() {
             track_price,
             check_prices,
             ask_page,
+            find_deals,
             install_site,
             open_default_apps,
             set_device,

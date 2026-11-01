@@ -14,6 +14,7 @@ export const DEFAULT_TOOLBAR = [
   "translate",
   "password",
   "price",
+  "shopping",
   "wayback",
   "reading",
   "assistant",

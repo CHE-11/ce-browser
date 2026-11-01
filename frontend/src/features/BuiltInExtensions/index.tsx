@@ -9,6 +9,7 @@ import { PriceButton } from "./price/Price";
 import { MediaHubButton } from "../Media/MediaHubButton";
 import { PrintPdfButton } from "./print-pdf/PrintPdfButton";
 import { ReadingButton } from "./reading/Reading";
+import { ShoppingButton } from "./shopping/Shopping";
 import { TranslateButton } from "./translate/Translate";
 import { WaybackButton } from "./wayback/Wayback";
 import { WhatRunsButton } from "./what-runs/WhatRunsButton";
@@ -36,6 +37,8 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <PasswordButton activeTab={activeTab} />;
     case "price":
       return <PriceButton activeTab={activeTab} />;
+    case "shopping":
+      return <ShoppingButton activeTab={activeTab} />;
     case "wayback":
       return <WaybackButton activeTab={activeTab} />;
     case "reading":

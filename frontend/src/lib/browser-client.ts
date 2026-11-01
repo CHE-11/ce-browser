@@ -10,6 +10,7 @@ import type {
   RewriteRule,
   ProductPrice,
   ReadingStats,
+  ShoppingDeals,
   SiteCookie,
   StoragePair,
   BrowseResult,
@@ -276,6 +277,10 @@ export function checkPrices() {
 
 export function askPage(id: number, question: string) {
   return invoke<string>("ask_page", { id, question });
+}
+
+export function findDeals(id: number) {
+  return invoke<ShoppingDeals>("find_deals", { id });
 }
 
 export function installSite(id: number) {

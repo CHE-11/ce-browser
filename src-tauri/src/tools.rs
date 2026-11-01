@@ -608,8 +608,14 @@ pub fn localhost_endpoint(endpoint: &str) -> bool {
     lower.contains("://127.0.0.1") || lower.contains("://localhost") || lower.contains("://[::1]")
 }
 
-pub fn ask_page(app: &AppHandle, id: u32, question: &str) -> Result<String, String> {
-    let current = settings::get(app);
+/// Sends one chat request to the assistant endpoint. A blank `model` uses the assistant model.
+pub(crate) fn chat(
+    current: &settings::BrowserSettings,
+    model: &str,
+    system: &str,
+    user: &str,
+    timeout: Duration,
+) -> Result<String, String> {
     let endpoint = current.assistant_endpoint.trim();
     if endpoint.is_empty() {
         return Err("Set an assistant endpoint in Settings, under Tools.".into());
@@ -617,30 +623,21 @@ pub fn ask_page(app: &AppHandle, id: u32, question: &str) -> Result<String, Stri
     if current.assistant_key.trim().is_empty() && !localhost_endpoint(endpoint) {
         return Err("This endpoint needs an API key. Add it in Settings, under Tools.".into());
     }
-    let page = crate::print::extract_page(app, id)?;
-    let mut article = plain_text(&page.html);
-    if article.chars().count() > 12_000 {
-        article = article.chars().take(12_000).collect();
-    }
-    let question = question.trim();
-    let user = if question.is_empty() {
-        format!("Summarize this page.\n\nTitle: {}\n\n{article}", page.title)
-    } else {
-        format!(
-            "Answer using only this page.\n\nQuestion: {question}\n\nTitle: {}\n\n{article}",
-            page.title
-        )
+    let model = match (model.trim(), current.assistant_model.trim()) {
+        ("", "") => "llama3.2",
+        ("", assistant) => assistant,
+        (chosen, _) => chosen,
     };
     let url = chat_url(endpoint);
     let body = serde_json::json!({
-        "model": if current.assistant_model.trim().is_empty() { "llama3.2" } else { current.assistant_model.trim() },
+        "model": model,
         "messages": [
-            { "role": "system", "content": "You answer briefly about the web page the user is reading." },
+            { "role": "system", "content": system },
             { "role": "user", "content": user }
         ]
     });
     let mut request = ureq::post(&url)
-        .timeout(Duration::from_secs(60))
+        .timeout(timeout)
         .set("Content-Type", "application/json");
     if !current.assistant_key.trim().is_empty() {
         request = request.set(
@@ -661,6 +658,31 @@ pub fn ask_page(app: &AppHandle, id: u32, question: &str) -> Result<String, Stri
         .filter(|text| !text.is_empty())
         .map(str::to_string)
         .ok_or_else(|| "The assistant returned nothing.".to_string())
+}
+
+pub fn ask_page(app: &AppHandle, id: u32, question: &str) -> Result<String, String> {
+    let current = settings::get(app);
+    let page = crate::print::extract_page(app, id)?;
+    let mut article = plain_text(&page.html);
+    if article.chars().count() > 12_000 {
+        article = article.chars().take(12_000).collect();
+    }
+    let question = question.trim();
+    let user = if question.is_empty() {
+        format!("Summarize this page.\n\nTitle: {}\n\n{article}", page.title)
+    } else {
+        format!(
+            "Answer using only this page.\n\nQuestion: {question}\n\nTitle: {}\n\n{article}",
+            page.title
+        )
+    };
+    chat(
+        &current,
+        "",
+        "You answer briefly about the web page the user is reading.",
+        &user,
+        Duration::from_secs(60),
+    )
 }
 
 #[cfg(test)]

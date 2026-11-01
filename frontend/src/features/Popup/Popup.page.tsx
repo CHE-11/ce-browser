@@ -21,6 +21,7 @@ import { PasswordPopover } from "@features/BuiltInExtensions/password/Password";
 import { PricePopover } from "@features/BuiltInExtensions/price/Price";
 import { PrintPdfPopover } from "@features/BuiltInExtensions/print-pdf/PrintPdfPopover";
 import { ReadingPopover } from "@features/BuiltInExtensions/reading/Reading";
+import { ShoppingPopover } from "@features/BuiltInExtensions/shopping/Shopping";
 import { TranslatePopover } from "@features/BuiltInExtensions/translate/Translate";
 import { WaybackPopover } from "@features/BuiltInExtensions/wayback/Wayback";
 import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
@@ -114,6 +115,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <PasswordPopover />;
     case "price":
       return <PricePopover params={params} />;
+    case "shopping":
+      return <ShoppingPopover params={params} />;
     case "wayback":
       return <WaybackPopover params={params} />;
     case "reading":
