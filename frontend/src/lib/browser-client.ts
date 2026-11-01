@@ -22,8 +22,10 @@ import type {
   ExtensionInfo,
   OmniboxState,
   OmniboxSuggestion,
+  PeekInfo,
   PopupChange,
   PopupRequest,
+  TabGroupColor,
   TabsSnapshot,
   UserStyles,
 } from "../../../types/browser";
@@ -138,8 +140,125 @@ export function reopenClosedTab() {
   return invoke<number | null>("reopen_closed_tab");
 }
 
-export function setUiHeight(height: number) {
-  return invoke<void>("set_ui_height", { height });
+/** `top` is the header height and `left` the vertical tab sidebar width, in CSS pixels. */
+export function setUiInsets(top: number, left: number) {
+  return invoke<void>("set_ui_insets", { top, left });
+}
+
+export function setTabsMuted(ids: number[], muted: boolean) {
+  return invoke<void>("set_tabs_muted", { ids, muted });
+}
+
+export function toggleSelectedMuted() {
+  return invoke<void>("toggle_selected_muted");
+}
+
+export function sleepTab(id: number) {
+  return invoke<void>("sleep_tab", { id });
+}
+
+export function sleepOtherTabs(id: number) {
+  return invoke<void>("sleep_other_tabs", { id });
+}
+
+export function neverSleepSite(id: number) {
+  return invoke<void>("never_sleep_site", { id });
+}
+
+// Split view
+
+export function splitWith(id: number) {
+  return invoke<void>("split_with", { id });
+}
+
+export function openInSplit(url: string) {
+  return invoke<number>("open_in_split", { url });
+}
+
+export function swapSplit() {
+  return invoke<void>("swap_split");
+}
+
+export function exitSplit() {
+  return invoke<void>("exit_split");
+}
+
+export function setSplitRatio(ratio: number) {
+  return invoke<void>("set_split_ratio", { ratio });
+}
+
+// Tab groups
+
+export function createGroup(ids: number[]) {
+  return invoke<number>("create_group", { ids });
+}
+
+export function addToGroup(ids: number[], groupId: number) {
+  return invoke<void>("add_to_group", { ids, groupId });
+}
+
+export function removeFromGroup(ids: number[]) {
+  return invoke<void>("remove_from_group", { ids });
+}
+
+export function updateGroup(id: number, change: { name?: string; color?: TabGroupColor; collapsed?: boolean }) {
+  return invoke<void>("update_group", { id, ...change });
+}
+
+export function ungroup(id: number) {
+  return invoke<void>("ungroup", { id });
+}
+
+export function closeGroup(id: number) {
+  return invoke<void>("close_group", { id });
+}
+
+export function newTabInGroup(id: number) {
+  return invoke<number>("new_tab_in_group", { id });
+}
+
+// Workspaces
+
+export function createWorkspace(name: string, color: TabGroupColor) {
+  return invoke<string>("create_workspace", { name, color });
+}
+
+export function renameWorkspace(id: string, name: string, color: TabGroupColor) {
+  return invoke<void>("rename_workspace", { id, name, color });
+}
+
+export function deleteWorkspace(id: string) {
+  return invoke<void>("delete_workspace", { id });
+}
+
+export function switchWorkspace(id: string) {
+  return invoke<void>("switch_workspace", { id });
+}
+
+export function moveTabsToWorkspace(ids: number[], workspace: string) {
+  return invoke<void>("move_tabs_to_workspace", { ids, workspace });
+}
+
+// Peek
+
+export function peekState() {
+  return invoke<PeekInfo | null>("peek_state");
+}
+
+export function closePeek() {
+  return invoke<void>("close_peek");
+}
+
+export function peekToTab() {
+  return invoke<number>("peek_to_tab");
+}
+
+export function peekToSplit() {
+  return invoke<number>("peek_to_split");
+}
+
+export function onPeekChanged(handler: (info: PeekInfo | null) => void): Promise<UnlistenFn> {
+  return listen<PeekInfo | null>("peek-changed", (event) => handler(event.payload));
 }
 
 export function zoomTab(id: number, change: "in" | "out" | "reset") {
@@ -178,6 +297,11 @@ export function closePopup() {
 
 export function resizePopup(height: number, width?: number) {
   return invoke<void>("resize_popup", { height, width });
+}
+
+/** Tells the backend this popup has drawn its first complete frame and can be shown. */
+export function popupPainted() {
+  return invoke<void>("popup_painted");
 }
 
 export function onPopupChanged(handler: (change: PopupChange) => void): Promise<UnlistenFn> {

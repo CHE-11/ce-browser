@@ -32,6 +32,35 @@ On startup the browser restores the last session, pinned tabs first. Restored ta
 | Ctrl+F | Find in page |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Zoom in / out / reset |
 | F12 | Developer tools |
+| Ctrl+Alt+1 to Ctrl+Alt+9 | Switch to workspace 1 to 9 |
+| Shift+click a link | Open it in a peek |
+| Esc (in a peek) | Close the peek |
+
+## Vertical tabs
+
+Settings > Tabs (or the browser menu) moves the tabs into a sidebar left of the page. The sidebar can be collapsed to icons with the button at its bottom, and dragged wider or narrower from its right edge.
+
+## Tab groups
+
+Right-click a tab and choose **Add to new group**. A group gets a color and an optional name. Click the group's label to collapse it into one chip. Hover a collapsed chip to see its tabs and pick one. Right-click the label to rename it, change its color, add a tab, ungroup it or close it. Links opened from a grouped tab join the group.
+
+## Split view
+
+The split button in the toolbar, or **Split with current tab** in a tab's right-click menu, shows two tabs side by side. Drag the divider to resize them, or double-click it to make both sides equal. Click into either side to make it the active tab. Selecting another tab leaves split view, and selecting either half again brings it back.
+
+## Workspaces
+
+A workspace is a named set of tabs in the same window. The workspace button at the left of the tab strip lists workspaces and creates new ones. A tab's right-click menu moves it to another workspace. Tabs in the workspace you leave stay open in the background.
+
+## Peek
+
+Shift+click a link, or choose **Open link in peek** from its right-click menu, to open it in a card over the current tab. Esc, the close button, or a click on the tab behind closes it. **Open as tab** and **Open in split view** keep the page. Settings > Tabs can turn Shift+click peeks off.
+
+## Sleeping tabs and muting
+
+Tabs that stay in the background for 30 minutes go to sleep: the page is suspended and wakes when you select it. Sleeping tabs are dimmed and show a moon. Tabs playing sound, the tabs on screen, and sites in the never-sleep list stay awake. Settings > Tabs changes the delay or turns sleep off.
+
+A speaker icon on a tab shows it is playing sound. Click it to mute or unmute the tab. Settings > Tabs can mute every tab that is not on screen.
 
 ## Bookmarks
 

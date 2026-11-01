@@ -1,7 +1,7 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { ArrowLeft, ExternalLink, Folder, FolderCog } from "lucide-react";
 import { closePopup, createTab, navigate, windowPoint } from "../../lib/browser-client";
-import { findFolder, useBookmarks, useTabs } from "../../lib/use-browser";
+import { findFolder, useBookmarksState, useTabs } from "../../lib/use-browser";
 import { FavIcon } from "../FavIcon";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "../PopupFrame";
 import { BookmarksBarMenuItems } from "./BookmarksBarMenu";
@@ -13,23 +13,14 @@ type BookmarkFolderMenuProps = {
 type FolderContext = { x: number; y: number; windowX: number; windowY: number };
 
 export function BookmarkFolderMenu({ folderId }: BookmarkFolderMenuProps) {
-  const tree = useBookmarks();
+  const { tree, loaded } = useBookmarksState();
   const { activeId } = useTabs();
   const [path, setPath] = useState<string[]>([folderId]);
   const [context, setContext] = useState<FolderContext | null>(null);
-  const [loadTimedOut, setLoadTimedOut] = useState(false);
   const currentId = path[path.length - 1];
   const folder = findFolder(tree, currentId);
   const children = folder?.children ?? [];
   const links = children.filter((node) => node.url);
-
-  useEffect(() => {
-    if (tree || loadTimedOut) {
-      return;
-    }
-    const timer = window.setTimeout(() => setLoadTimedOut(true), 400);
-    return () => window.clearTimeout(timer);
-  }, [tree, loadTimedOut]);
 
   useEffect(() => {
     if (!context) {
@@ -81,10 +72,8 @@ export function BookmarkFolderMenu({ folderId }: BookmarkFolderMenuProps) {
     }
   };
 
-  // The native popup stays hidden until this height is reported. Measuring the
-  // empty shell before bookmarks load makes the menu snap open.
   return (
-    <PopupFrame id="bookmark-folder-menu" fit={tree !== null || loadTimedOut} maxHeight={560}>
+    <PopupFrame id="bookmark-folder-menu" maxHeight={560} ready={loaded}>
       <div id="bookmark-folder-menu-body" onContextMenu={openContext}>
       <PopupMenu id="bookmark-folder-menu-items" label={folder?.title ?? "Bookmarks"}>
         {path.length > 1 ? (

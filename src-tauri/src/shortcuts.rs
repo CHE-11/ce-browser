@@ -7,6 +7,8 @@ pub enum Target {
     Ui,
     Page,
     Popup,
+    /// The peek frame and the page inside it.
+    Peek,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +33,8 @@ pub enum Action {
     ZoomReset,
     DevTools,
     ClosePopup,
+    ClosePeek,
+    Workspace(usize),
 }
 
 const VK_TAB: u32 = 0x09;
@@ -53,6 +57,12 @@ pub fn action_for(key: u32, ctrl: bool, shift: bool, alt: bool, target: Target) 
     let letter = |character: char| key == character as u32;
     if target == Target::Popup && key == VK_ESCAPE && !ctrl && !alt {
         return Some(Action::ClosePopup);
+    }
+    if target == Target::Peek && key == VK_ESCAPE && !ctrl && !alt && !shift {
+        return Some(Action::ClosePeek);
+    }
+    if ctrl && alt && !shift && (0x31..=0x39).contains(&key) {
+        return Some(Action::Workspace((key - 0x31) as usize));
     }
     if ctrl && !alt {
         if shift {
@@ -184,5 +194,10 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             tabs::close_window_popup(app, &window);
             Ok(())
         }
+        Action::ClosePeek => {
+            crate::peek::close(app, &window);
+            Ok(())
+        }
+        Action::Workspace(index) => tabs::switch_workspace_index(app, index),
     }
 }

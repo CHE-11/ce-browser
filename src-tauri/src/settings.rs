@@ -70,6 +70,104 @@ pub struct BrowserSettings {
     /// Built-in ad blocker. An older file omits this, so blocking starts on with no paused sites.
     #[serde(default)]
     pub adblock: AdblockSettings,
+    /// `horizontal` puts tabs above the address bar, `vertical` in a sidebar on the left.
+    #[serde(default)]
+    pub tab_layout: String,
+    /// The vertical sidebar shows icons only.
+    #[serde(default)]
+    pub vertical_tabs_collapsed: bool,
+    /// Width of the expanded vertical sidebar in CSS pixels.
+    #[serde(default = "default_vertical_tabs_width")]
+    pub vertical_tabs_width: u32,
+    /// Tabs that are not on screen are muted.
+    #[serde(default)]
+    pub mute_background_tabs: bool,
+    /// Shift+click on a link opens it in a peek instead of a new tab.
+    #[serde(default = "default_true")]
+    pub peek_on_shift_click: bool,
+    /// Background tabs are suspended after a while.
+    #[serde(default)]
+    pub tab_sleep: TabSleepSettings,
+}
+
+const TAB_LAYOUTS: &[&str] = &["horizontal", "vertical"];
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_vertical_tabs_width() -> u32 {
+    240
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TabSleepSettings {
+    pub enabled: bool,
+    /// Minutes a tab stays off screen before it sleeps.
+    pub minutes: u32,
+    pub sleep_pinned: bool,
+    /// Hosts that never sleep, lowercase and without a leading `www.`.
+    pub never_sleep_sites: Vec<String>,
+}
+
+impl Default for TabSleepSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            minutes: 30,
+            sleep_pinned: false,
+            never_sleep_sites: Vec::new(),
+        }
+    }
+}
+
+impl TabSleepSettings {
+    fn normalize(mut self) -> Self {
+        self.minutes = self.minutes.clamp(5, 720);
+        let mut sites: Vec<String> = Vec::new();
+        for raw in &self.never_sleep_sites {
+            let host = sleep_site_key(raw);
+            if host.is_empty()
+                || host.len() > 253
+                || host.chars().any(char::is_whitespace)
+                || sites.contains(&host)
+            {
+                continue;
+            }
+            sites.push(host);
+            if sites.len() >= 1000 {
+                break;
+            }
+        }
+        self.never_sleep_sites = sites;
+        self
+    }
+
+    pub fn never_sleeps(&self, url: &str) -> bool {
+        let host = sleep_site_key(url);
+        !host.is_empty()
+            && self
+                .never_sleep_sites
+                .iter()
+                .any(|site| host == *site || host.ends_with(&format!(".{site}")))
+    }
+}
+
+/// Host of a URL or a bare host, as the never-sleep list stores it. Empty for pages without a host.
+pub fn sleep_site_key(raw: &str) -> String {
+    let raw = raw.trim();
+    let host = if raw.contains("://") {
+        match url::Url::parse(raw) {
+            Ok(url) if matches!(url.scheme(), "http" | "https") => {
+                url.host_str().unwrap_or_default().to_string()
+            }
+            _ => String::new(),
+        }
+    } else {
+        raw.split('/').next().unwrap_or_default().to_string()
+    };
+    crate::adblock::site_key(&host)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -227,6 +325,12 @@ impl Default for BrowserSettings {
             page_capture: PageCaptureSettings::default(),
             hidden_toolbar_extensions: Vec::new(),
             adblock: AdblockSettings::default(),
+            tab_layout: "horizontal".into(),
+            vertical_tabs_collapsed: false,
+            vertical_tabs_width: default_vertical_tabs_width(),
+            mute_background_tabs: false,
+            peek_on_shift_click: true,
+            tab_sleep: TabSleepSettings::default(),
         }
     }
 }
@@ -260,6 +364,11 @@ impl BrowserSettings {
         self.print_editor = self.print_editor.normalize();
         self.hidden_toolbar_extensions = toolbar_hidden(&self.hidden_toolbar_extensions);
         self.adblock = self.adblock.normalize();
+        if !TAB_LAYOUTS.contains(&self.tab_layout.as_str()) {
+            self.tab_layout = defaults.tab_layout.clone();
+        }
+        self.vertical_tabs_width = self.vertical_tabs_width.clamp(160, 400);
+        self.tab_sleep = self.tab_sleep.normalize();
         self.sync_folder = folder_from_stored(&self.sync_folder);
         if self.sync_bookmarks_revision == 0
             && self.sync_extensions_revision == 0
@@ -433,6 +542,7 @@ pub fn reload(app: &AppHandle) {
     }
     let _ = app.emit("settings-changed", &loaded);
     crate::tabs::apply_page_background(app);
+    crate::tabs::apply_audio_all(app);
 }
 
 pub fn get(app: &AppHandle) -> BrowserSettings {
@@ -480,6 +590,7 @@ pub fn store(
     }
     let _ = app.emit("settings-changed", &saved);
     crate::tabs::apply_page_background(app);
+    crate::tabs::apply_audio_all(app);
     Ok(saved)
 }
 
@@ -605,6 +716,35 @@ mod tests {
         let loaded = loaded.normalize();
         assert!(loaded.adblock.enabled);
         assert!(loaded.adblock.allowed_sites.is_empty());
+    }
+
+    #[test]
+    fn older_settings_get_tab_feature_defaults() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"searchEngine":"bing"}"#).expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.tab_layout, "horizontal");
+        assert!(!loaded.vertical_tabs_collapsed);
+        assert_eq!(loaded.vertical_tabs_width, 240);
+        assert!(!loaded.mute_background_tabs);
+        assert!(loaded.peek_on_shift_click);
+        assert!(loaded.tab_sleep.enabled);
+        assert_eq!(loaded.tab_sleep.minutes, 30);
+    }
+
+    #[test]
+    fn tab_settings_out_of_range_fall_back() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"tabLayout":"diagonal","verticalTabsWidth":9000,"tabSleep":{"minutes":1,"neverSleepSites":["https://www.Mail.example.com/inbox","mail.example.com",""]}}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.tab_layout, "horizontal");
+        assert_eq!(loaded.vertical_tabs_width, 400);
+        assert_eq!(loaded.tab_sleep.minutes, 5);
+        assert_eq!(loaded.tab_sleep.never_sleep_sites, vec!["mail.example.com".to_string()]);
+        assert!(loaded.tab_sleep.never_sleeps("https://inbox.mail.example.com/x"));
+        assert!(!loaded.tab_sleep.never_sleeps("https://example.com/"));
     }
 
     #[test]

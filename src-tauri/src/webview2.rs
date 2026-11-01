@@ -62,21 +62,6 @@ pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview) {
     });
 }
 
-/// Hides the popup before it can paint WebView2's white default, then tells the tab state
-/// the hide has landed so a page that already finished loading can be shown.
-pub fn conceal_popup(app: &AppHandle, webview: &Webview, label: &str) {
-    let task_app = app.clone();
-    let task_label = label.to_string();
-    let fallback = task_label.clone();
-    let queued = webview.with_webview(move |platform| {
-        let _ = unsafe { platform.controller().SetIsVisible(false) };
-        tauri::async_runtime::spawn(async move { tabs::popup_concealed(&task_app, &task_label) });
-    });
-    if queued.is_err() {
-        tabs::popup_concealed(app, &fallback);
-    }
-}
-
 /// The WebView2 environment already created for this profile. A second
 /// `CreateCoreWebView2EnvironmentWithOptions` for the same user-data folder
 /// waits forever, which is what froze the app when another window opened.
@@ -271,6 +256,56 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
             &mut token,
         )?;
 
+        if let Ok(core8) = core.cast::<ICoreWebView2_8>() {
+            let audio_app = app.clone();
+            core8.add_IsDocumentPlayingAudioChanged(
+                &IsDocumentPlayingAudioChangedEventHandler::create(Box::new(move |sender, _| {
+                    let audible = sender
+                        .and_then(|core| core.cast::<ICoreWebView2_8>().ok())
+                        .is_some_and(|core| read_bool(|value| core.IsDocumentPlayingAudio(value)));
+                    let app = audio_app.clone();
+                    tauri::async_runtime::spawn(async move { tabs::update_audio(&app, id, audible) });
+                    Ok(())
+                })),
+                &mut token,
+            )?;
+        }
+
+        let focus_app = app.clone();
+        controller.add_GotFocus(
+            &FocusChangedEventHandler::create(Box::new(move |_, _| {
+                let app = focus_app.clone();
+                tauri::async_runtime::spawn(async move { tabs::page_focused(&app, id) });
+                Ok(())
+            })),
+            &mut token,
+        )?;
+
+        let message_app = app.clone();
+        core.add_WebMessageReceived(
+            &WebMessageReceivedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                let json = read_pwstr(|value| args.WebMessageAsJson(value));
+                let Ok(message) = serde_json::from_str::<serde_json::Value>(&json) else {
+                    return Ok(());
+                };
+                if message.get("type").and_then(|kind| kind.as_str()) != Some("ce-peek") {
+                    return Ok(());
+                }
+                if let Some(url) = message.get("url").and_then(|url| url.as_str()) {
+                    let app = message_app.clone();
+                    let url = url.to_string();
+                    tauri::async_runtime::spawn(async move {
+                        crate::peek::request(&app, id, &url);
+                    });
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+
         if let Ok(core15) = core.cast::<ICoreWebView2_15>() {
             let favicon_app = app.clone();
             core15.add_FaviconChanged(
@@ -429,6 +464,28 @@ fn add_link_items(
             return Ok(());
         }
         let items = args.MenuItems()?;
+        if link.starts_with("http://") || link.starts_with("https://") {
+            let item = environment.CreateContextMenuItem(
+                &HSTRING::from("Open link in peek"),
+                None::<&IStream>,
+                COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND,
+            )?;
+            let peek_app = app.clone();
+            let peek_link = link.clone();
+            let mut token = 0i64;
+            item.add_CustomItemSelected(
+                &CustomItemSelectedEventHandler::create(Box::new(move |_, _| {
+                    let app = peek_app.clone();
+                    let link = peek_link.clone();
+                    tauri::async_runtime::spawn(async move {
+                        crate::peek::open_for_tab(&app, id, &link);
+                    });
+                    Ok(())
+                })),
+                &mut token,
+            )?;
+            items.InsertValueAtIndex(0, &item)?;
+        }
         let entries = [
             ("Open link in new tab", false),
             ("Open link in background tab", true),
@@ -450,19 +507,7 @@ fn add_link_items(
                         let Ok(url) = url::Url::parse(&link) else {
                             return;
                         };
-                        let index = tabs::snapshot(&app)
-                            .tabs
-                            .iter()
-                            .position(|tab| tab.id == id)
-                            .map(|index| index + 1);
-                        let _ = tabs::open(
-                            &app,
-                            tabs::OpenTab {
-                                background,
-                                index,
-                                ..tabs::OpenTab::new(url)
-                            },
-                        );
+                        let _ = tabs::open_beside(&app, id, url, background);
                     });
                     Ok(())
                 })),
@@ -521,6 +566,103 @@ fn with_core(
     let _ = webview.with_webview(move |platform| {
         if let Ok(core) = core(&platform) {
             let _ = work(&core);
+        }
+    });
+}
+
+pub fn set_muted(webview: &Webview, muted: bool) {
+    with_core(webview, move |core| unsafe {
+        core.cast::<ICoreWebView2_8>()?.SetIsMuted(muted)
+    });
+}
+
+/// Hides the page and asks WebView2 to suspend it. `tabs::finish_sleep` gets the answer.
+pub fn suspend(app: &AppHandle, webview: &Webview, id: u32) {
+    let app = app.clone();
+    let _ = webview.with_webview(move |platform| {
+        let controller = platform.controller();
+        let started = (|| -> windows::core::Result<()> {
+            let core3 = core(&platform)?.cast::<ICoreWebView2_3>()?;
+            unsafe { controller.SetIsVisible(false)? };
+            let done_app = app.clone();
+            let handler = TrySuspendCompletedHandler::create(Box::new(move |result, suspended| {
+                let app = done_app.clone();
+                let suspended = result.is_ok() && suspended;
+                tauri::async_runtime::spawn(async move { tabs::finish_sleep(&app, id, suspended) });
+                Ok(())
+            }));
+            unsafe { core3.TrySuspend(&handler) }
+        })();
+        if started.is_err() {
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move { tabs::finish_sleep(&app, id, false) });
+        }
+    });
+}
+
+/// Makes a hidden page visible again. WebView2 resumes a suspended page when it becomes visible.
+pub fn wake(webview: &Webview) {
+    let _ = webview.with_webview(move |platform| {
+        let _ = unsafe { platform.controller().SetIsVisible(true) };
+    });
+}
+
+/// Shortcuts for the peek's two views. Esc closes the peek.
+pub fn attach_peek_hooks(app: &AppHandle, webview: &Webview, window: &str, page: bool) {
+    let app = app.clone();
+    let window = window.to_string();
+    let _ = webview.with_webview(move |platform| {
+        if let Err(error) = attach_accelerators(&app, &platform.controller(), Target::Peek) {
+            eprintln!("WebView2 shortcuts for the peek: {error}");
+        }
+        if !page {
+            return;
+        }
+        let Ok(core) = core(&platform) else {
+            return;
+        };
+        let _ = attach_downloads(&app, &core);
+        let mut token = 0i64;
+        let source_app = app.clone();
+        let source_window = window.clone();
+        let _ = unsafe {
+            core.add_SourceChanged(
+                &SourceChangedEventHandler::create(Box::new(move |sender, _| {
+                    if let Some(core) = sender {
+                        let source = read_pwstr(|value| core.Source(value));
+                        if !source.is_empty() {
+                            let app = source_app.clone();
+                            let window = source_window.clone();
+                            tauri::async_runtime::spawn(async move {
+                                crate::peek::update_url(&app, &window, &source);
+                            });
+                        }
+                    }
+                    Ok(())
+                })),
+                &mut token,
+            )
+        };
+        if let Ok(core15) = core.cast::<ICoreWebView2_15>() {
+            let favicon_app = app.clone();
+            let favicon_window = window.clone();
+            let _ = unsafe {
+                core15.add_FaviconChanged(
+                    &FaviconChangedEventHandler::create(Box::new(move |sender, _| {
+                        let favicon = sender
+                            .and_then(|core| core.cast::<ICoreWebView2_15>().ok())
+                            .map(|core| read_pwstr(|value| core.FaviconUri(value)))
+                            .filter(|uri| !uri.is_empty());
+                        let app = favicon_app.clone();
+                        let window = favicon_window.clone();
+                        tauri::async_runtime::spawn(async move {
+                            crate::peek::update_favicon(&app, &window, favicon);
+                        });
+                        Ok(())
+                    })),
+                    &mut token,
+                )
+            };
         }
     });
 }

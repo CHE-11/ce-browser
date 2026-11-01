@@ -52,7 +52,7 @@ export function WhatRunsPopover({ params }: WhatRunsPopoverProps) {
   }, [tab.id, attempt]);
 
   return (
-    <PopupFrame id="what-runs-popover" maxHeight={480}>
+    <PopupFrame id="what-runs-popover" maxHeight={480} ready={scan.state !== "loading"}>
       <PopoverHeader
         id="what-runs-header"
         icon={<Layers aria-hidden />}

@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { closePopup, resizePopup } from "../lib/browser-client";
 import { cn } from "../lib/cn";
+import { usePopupPainted } from "../lib/popup-ready";
 
 type PopupFrameProps = {
   id: string;
@@ -9,10 +10,16 @@ type PopupFrameProps = {
   /** Grow or shrink the native popup to the content height. */
   fit?: boolean;
   maxHeight?: number;
+  /** The content shows real data, not a loading placeholder. The popup stays offscreen until then. */
+  ready?: boolean;
 };
 
-export function PopupFrame({ id, children, className, fit = true, maxHeight = 640 }: PopupFrameProps) {
+export function PopupFrame({ id, children, className, fit = true, maxHeight = 640, ready = true }: PopupFrameProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const lastResize = useRef<Promise<unknown>>(Promise.resolve());
+  const settle = useCallback(() => lastResize.current, []);
+
+  usePopupPainted(ready, settle);
 
   useLayoutEffect(() => {
     const element = ref.current;
@@ -24,7 +31,7 @@ export function PopupFrame({ id, children, className, fit = true, maxHeight = 64
       const height = Math.min(maxHeight, Math.ceil(element.getBoundingClientRect().height) + 2);
       if (Math.abs(height - last) >= 1) {
         last = height;
-        void resizePopup(height).catch(() => undefined);
+        lastResize.current = resizePopup(height).catch(() => undefined);
       }
     };
     report();

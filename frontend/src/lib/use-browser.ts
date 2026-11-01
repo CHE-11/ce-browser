@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { BookmarkNode, BookmarkTree, BrowserSettings, TabsSnapshot } from "../../../types/browser";
@@ -48,7 +48,9 @@ function useLiveValue<T>(load: () => Promise<T>, subscribe: (handler: (value: T)
     };
   }, [load, subscribe]);
 
-  return { value, error };
+  /** The first load finished, with a value or an error. */
+  const loaded = value !== null || error !== null;
+  return { value, error, loaded };
 }
 
 const EMPTY_TABS: TabsSnapshot = {
@@ -58,6 +60,8 @@ const EMPTY_TABS: TabsSnapshot = {
   canReopen: false,
   fullscreen: false,
   windows: [],
+  groups: [],
+  workspaces: [],
 };
 
 function currentWindowLabel() {
@@ -69,28 +73,52 @@ function currentWindowLabel() {
 }
 
 export function useTabs() {
-  const snapshot = useLiveValue(listTabs, onTabsChanged).value ?? EMPTY_TABS;
+  const live = useLiveValue(listTabs, onTabsChanged);
+  const snapshot = live.value ?? EMPTY_TABS;
   const label = currentWindowLabel();
-  const tabs = snapshot.tabs.filter((tab) => (tab.window || "main") === label);
   const mine = snapshot.windows?.find((item) => item.label === label);
+  const workspace = mine?.workspace ?? "default";
+  /** Every tab in this window, across workspaces. */
+  const windowTabs = snapshot.tabs.filter((tab) => (tab.window || "main") === label);
+  const tabs = windowTabs.filter((tab) => (tab.workspace || "default") === workspace);
   const activeId = mine ? mine.activeId : label === "main" ? snapshot.activeId : null;
   const fullscreen = mine ? mine.fullscreen : label === "main" && snapshot.fullscreen;
   const selectedIds = (snapshot.selectedIds ?? []).filter((id) => tabs.some((tab) => tab.id === id));
+  const groups = (snapshot.groups ?? []).filter((group) => group.window === label);
   return {
     ...snapshot,
     tabs,
+    windowTabs,
     activeId,
     fullscreen,
+    workspace,
+    workspaces: snapshot.workspaces ?? [],
+    split: mine?.split ?? null,
+    peekUrl: mine?.peekUrl ?? null,
+    groups,
     selectedIds: selectedIds.length > 0 ? selectedIds : activeId === null ? [] : [activeId],
+    loaded: live.loaded,
   };
 }
 
+export type WindowTabsState = ReturnType<typeof useTabs>;
+
+export function useBookmarksState() {
+  const { value, loaded } = useLiveValue(listBookmarks, onBookmarksChanged);
+  return { tree: value, loaded };
+}
+
 export function useBookmarks() {
-  return useLiveValue(listBookmarks, onBookmarksChanged).value;
+  return useBookmarksState().tree;
+}
+
+export function useDownloadsState() {
+  const { value, loaded } = useLiveValue(listDownloads, onDownloadsChanged);
+  return { downloads: value ?? [], loaded };
 }
 
 export function useDownloads() {
-  return useLiveValue(listDownloads, onDownloadsChanged).value ?? [];
+  return useDownloadsState().downloads;
 }
 
 export function useHistory() {
@@ -98,25 +126,37 @@ export function useHistory() {
 }
 
 export function useExtensions() {
-  const { value, error } = useLiveValue(listExtensions, onExtensionsChanged);
-  return { extensions: value ?? [], error };
+  const { value, error, loaded } = useLiveValue(listExtensions, onExtensionsChanged);
+  return { extensions: value ?? [], error, loaded };
+}
+
+export function useSettingsState() {
+  const { value, loaded } = useLiveValue(getSettings, onSettingsChanged);
+  return { settings: value, loaded };
 }
 
 export function useSettings(): BrowserSettings | null {
-  return useLiveValue(getSettings, onSettingsChanged).value;
+  return useSettingsState().settings;
 }
 
-/** Applies theme, color mode and UI zoom from settings to this webview. */
-export function useAppearanceFromSettings() {
-  const settings = useSettings();
-  useEffect(() => {
+/**
+ * Applies theme, color mode and UI zoom from settings to this webview. `loaded` turns true in
+ * the same commit that publishes the saved appearance, or when settings fail to load.
+ */
+export function useAppearanceState() {
+  const { settings, loaded } = useSettingsState();
+  useLayoutEffect(() => {
     if (!settings) {
       return;
     }
     publishAppearance(settings.theme, settings.colorMode);
     publishZoom(settings.uiZoom);
   }, [settings]);
-  return settings;
+  return { settings, loaded };
+}
+
+export function useAppearanceFromSettings() {
+  return useAppearanceState().settings;
 }
 
 export function flattenBookmarks(tree: BookmarkTree | null) {

@@ -3,7 +3,13 @@ import { getAdblockStats, onAdblockStats } from "../../lib/browser-client";
 
 /** Requests blocked in tab `tabId` since its current page started loading. Updates live. */
 export function useAdblockStats(tabId: number | null) {
+  return useAdblockStatsState(tabId).blocked;
+}
+
+/** Like `useAdblockStats`, plus whether the first count for `tabId` has arrived. */
+export function useAdblockStatsState(tabId: number | null) {
   const [blocked, setBlocked] = useState(0);
+  const [loadedFor, setLoadedFor] = useState<number | null>(null);
 
   useEffect(() => {
     setBlocked(0);
@@ -17,7 +23,12 @@ export function useAdblockStats(tabId: number | null) {
           setBlocked(stats.blocked);
         }
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (live) {
+          setLoadedFor(tabId);
+        }
+      });
     const unlisten = onAdblockStats((stats) => {
       if (live && stats.tabId === tabId) {
         setBlocked(stats.blocked);
@@ -29,7 +40,7 @@ export function useAdblockStats(tabId: number | null) {
     };
   }, [tabId]);
 
-  return blocked;
+  return { blocked, loaded: tabId === null || loadedFor === tabId };
 }
 
 /** The form a host takes on the paused-sites list. Matches `adblock::site_key` in Rust. */

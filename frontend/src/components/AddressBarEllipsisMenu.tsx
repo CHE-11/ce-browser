@@ -4,6 +4,7 @@ import type { OmniboxState, OmniboxSuggestion } from "../../../types/browser";
 import { onOmniboxState, sendOmniboxPick, sendOmniboxReady } from "../lib/browser-client";
 import { cn } from "../lib/cn";
 import { OMNIBOX_ROW_HEIGHT } from "../lib/omnibox";
+import { usePopupPainted } from "../lib/popup-ready";
 import { FavIcon } from "./FavIcon";
 
 const KIND_LABEL: Record<OmniboxSuggestion["kind"], string> = {
@@ -17,9 +18,15 @@ const KIND_LABEL: Record<OmniboxSuggestion["kind"], string> = {
 /** Shown under the address bar. The input keeps focus in the UI view; this view only mirrors its state. */
 export function AddressBarEllipsisMenu() {
   const [state, setState] = useState<OmniboxState>({ suggestions: [], selected: 0 });
+  const [received, setReceived] = useState(false);
+
+  usePopupPainted(received);
 
   useEffect(() => {
-    const unlisten = onOmniboxState(setState);
+    const unlisten = onOmniboxState((next) => {
+      setState(next);
+      setReceived(true);
+    });
     void unlisten.then(() => sendOmniboxReady());
     return () => {
       void unlisten.then((stop) => stop());

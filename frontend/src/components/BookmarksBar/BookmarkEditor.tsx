@@ -8,7 +8,7 @@ import {
   moveBookmark,
   updateBookmark,
 } from "../../lib/browser-client";
-import { listFolders, useBookmarks } from "../../lib/use-browser";
+import { listFolders, useBookmarksState } from "../../lib/use-browser";
 import { Button } from "../Button";
 import { PopupFrame } from "../PopupFrame";
 
@@ -38,7 +38,7 @@ export function findParentId(tree: BookmarkTree | null, id: string): string | nu
 
 /** The star adds the page right away, like Chrome. The editor then renames, moves or removes it. */
 export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
-  const tree = useBookmarks();
+  const { tree, loaded } = useBookmarksState();
   const folders = useMemo(() => listFolders(tree), [tree]);
   const [bookmark, setBookmark] = useState<BookmarkNode | null>(null);
   const [created, setCreated] = useState(false);
@@ -114,7 +114,7 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
   };
 
   return (
-    <PopupFrame id="bookmark-editor">
+    <PopupFrame id="bookmark-editor" ready={loaded && (bookmark !== null || error !== null)}>
       <form
         id="bookmark-editor-form"
         className="flex flex-col gap-3 p-4"

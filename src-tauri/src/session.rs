@@ -15,6 +15,10 @@ const SAVE_DELAY: Duration = Duration::from_millis(800);
 pub struct SessionFile {
     pub tabs: Vec<SessionTabFile>,
     pub active_index: Option<usize>,
+    pub groups: Vec<SessionGroupFile>,
+    pub workspaces: Vec<tabs::Workspace>,
+    pub active_workspace: String,
+    pub split: Option<SessionSplitFile>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -24,6 +28,31 @@ pub struct SessionTabFile {
     pub title: String,
     pub pinned: bool,
     pub favicon: Option<String>,
+    pub muted: bool,
+    pub group_id: Option<u32>,
+    /// Empty in files written before workspaces. Those tabs belong to `default`.
+    pub workspace: String,
+    /// Position in the file, so the split can find its tabs after pins are merged and sorted.
+    #[serde(skip)]
+    pub origin: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SessionGroupFile {
+    pub id: u32,
+    pub name: String,
+    pub color: String,
+    pub collapsed: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SessionSplitFile {
+    /// Indexes into `tabs`.
+    pub left: usize,
+    pub right: usize,
+    pub ratio: f64,
 }
 
 pub struct SessionSaver {
@@ -62,21 +91,39 @@ pub fn schedule(app: &AppHandle) {
 }
 
 pub fn save_now(app: &AppHandle) -> Result<(), String> {
-    let (tabs, active_index) = tabs::session_tabs(app);
-    if tabs.is_empty() {
+    let saved = tabs::session_tabs(app);
+    if saved.tabs.is_empty() {
         return Ok(());
     }
     let file = SessionFile {
-        tabs: tabs
+        tabs: saved
+            .tabs
             .into_iter()
             .map(|tab| SessionTabFile {
                 url: tab.url,
                 title: tab.title,
                 pinned: tab.pinned,
                 favicon: tab.favicon,
+                muted: tab.muted,
+                group_id: tab.group_id,
+                workspace: tab.workspace,
+                origin: None,
             })
             .collect(),
-        active_index,
+        active_index: saved.active,
+        groups: saved
+            .groups
+            .into_iter()
+            .map(|group| SessionGroupFile {
+                id: group.id,
+                name: group.name,
+                color: group.color,
+                collapsed: group.collapsed,
+            })
+            .collect(),
+        workspaces: saved.workspaces,
+        active_workspace: saved.active_workspace,
+        split: saved.split.map(|(left, right, ratio)| SessionSplitFile { left, right, ratio }),
     };
     files::write_json(&paths::data_file(app, FILE), &file)
 }
@@ -92,15 +139,32 @@ pub fn shutdown(app: &AppHandle) {
 pub fn restore(app: &AppHandle) -> Result<(), String> {
     let file: SessionFile = files::read_json(&paths::data_file(app, FILE));
     let restore_all = settings::get(app).startup == "restore";
+    let workspaces = tabs::normalize_workspaces(file.workspaces);
+    let known = |id: &str| workspaces.iter().any(|workspace| workspace.id == id);
+    let active_workspace = if known(&file.active_workspace) {
+        file.active_workspace.clone()
+    } else {
+        tabs::DEFAULT_WORKSPACE.to_string()
+    };
     let mut saved: Vec<SessionTabFile> = file
         .tabs
         .into_iter()
+        .enumerate()
+        .map(|(index, mut tab)| {
+            tab.origin = Some(index);
+            if !known(&tab.workspace) {
+                tab.workspace = tabs::DEFAULT_WORKSPACE.to_string();
+            }
+            if tab.group_id.is_some_and(|id| !file.groups.iter().any(|group| group.id == id)) {
+                tab.group_id = None;
+            }
+            tab
+        })
         .filter(|tab| !tab.url.trim().is_empty())
         .collect();
-    let active_url = file
+    let active_origin = file
         .active_index
-        .and_then(|index| saved.get(index))
-        .map(|tab| tab.url.clone());
+        .filter(|index| saved.iter().any(|tab| tab.origin == Some(*index)));
     if !restore_all {
         saved.retain(|tab| tab.pinned);
     }
@@ -111,10 +175,32 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
         return tabs::create_tab(app, url, false, None).map(|_| ());
     }
     saved.sort_by_key(|tab| !tab.pinned);
+    let position_of = |origin: usize| saved.iter().position(|tab| tab.origin == Some(origin));
     let active = if restore_all {
-        active_url.and_then(|url| saved.iter().position(|tab| tab.url == url))
+        active_origin.and_then(position_of)
     } else {
         None
+    };
+    let split = if restore_all {
+        file.split.as_ref().and_then(|split| {
+            Some((position_of(split.left)?, position_of(split.right)?, split.ratio))
+        })
+    } else {
+        None
+    };
+    let groups = if restore_all {
+        file.groups
+            .into_iter()
+            .map(|group| tabs::TabGroup {
+                id: group.id,
+                name: group.name,
+                color: group.color,
+                collapsed: group.collapsed,
+                window: tabs::WINDOW.to_string(),
+            })
+            .collect()
+    } else {
+        Vec::new()
     };
     let restored = saved
         .into_iter()
@@ -123,9 +209,22 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
             title: tab.title,
             pinned: tab.pinned,
             favicon: tab.favicon,
+            muted: tab.muted,
+            group_id: if restore_all { tab.group_id } else { None },
+            workspace: tab.workspace,
         })
         .collect();
-    tabs::restore(app, restored, active)?;
+    tabs::restore(
+        app,
+        tabs::RestoreState {
+            tabs: restored,
+            active,
+            groups,
+            workspaces,
+            active_workspace,
+            split,
+        },
+    )?;
     if !restore_all {
         tabs::create_tab(app, Some(tabs::home_url(app).to_string()), false, None)?;
     }
@@ -158,9 +257,9 @@ fn merge_startup_pins(saved: Vec<SessionTabFile>, pins: &[String]) -> Vec<Sessio
         } else {
             merged.push(SessionTabFile {
                 url: key,
-                title: String::new(),
                 pinned: true,
-                favicon: None,
+                workspace: crate::tabs::DEFAULT_WORKSPACE.to_string(),
+                ..SessionTabFile::default()
             });
         }
     }
@@ -174,15 +273,32 @@ fn merge_startup_pins(saved: Vec<SessionTabFile>, pins: &[String]) -> Vec<Sessio
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionTabFile, merge_startup_pins};
+    use super::{SessionFile, SessionTabFile, merge_startup_pins};
 
     fn tab(url: &str, pinned: bool) -> SessionTabFile {
         SessionTabFile {
             url: url.into(),
             title: url.into(),
             pinned,
-            favicon: None,
+            ..SessionTabFile::default()
         }
+    }
+
+    #[test]
+    fn an_older_session_file_still_loads() {
+        let file: SessionFile = serde_json::from_str(
+            r#"{"tabs":[{"url":"https://a.example","title":"A","pinned":false,"favicon":null}],"activeIndex":0}"#,
+        )
+        .expect("session parse");
+        assert_eq!(file.tabs.len(), 1);
+        assert_eq!(file.tabs[0].workspace, "");
+        assert!(!file.tabs[0].muted);
+        assert!(file.tabs[0].group_id.is_none());
+        assert!(file.groups.is_empty());
+        assert!(file.split.is_none());
+        assert!(crate::tabs::normalize_workspaces(file.workspaces)
+            .iter()
+            .any(|workspace| workspace.id == crate::tabs::DEFAULT_WORKSPACE));
     }
 
     #[test]

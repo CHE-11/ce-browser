@@ -13,12 +13,47 @@ export type TabInfo = {
   loaded: boolean;
   /** Browser window that shows this tab. The first window is `main`. */
   window: string;
+  /** The page is playing sound. */
+  audible: boolean;
+  /** Muted by the user. Background muting from settings does not set this. */
+  muted: boolean;
+  /** The page is suspended until the tab is shown again. */
+  sleeping: boolean;
+  groupId: number | null;
+  workspace: string;
+};
+
+export type SplitView = {
+  left: number;
+  right: number;
+  /** Share of the page area the left tab takes, 0.2 to 0.8. */
+  ratio: number;
 };
 
 export type WindowTabs = {
   label: string;
   activeId: number | null;
   fullscreen: boolean;
+  workspace: string;
+  split: SplitView | null;
+  /** Address of the open peek, if any. */
+  peekUrl: string | null;
+};
+
+export type TabGroupColor = "grey" | "blue" | "red" | "yellow" | "green" | "pink" | "purple" | "cyan" | "orange";
+
+export type TabGroup = {
+  id: number;
+  name: string;
+  color: TabGroupColor;
+  collapsed: boolean;
+  window: string;
+};
+
+export type Workspace = {
+  id: string;
+  name: string;
+  color: TabGroupColor;
 };
 
 export type TabsSnapshot = {
@@ -30,6 +65,15 @@ export type TabsSnapshot = {
   fullscreen: boolean;
   /** One entry per browser window, with that window's active tab. */
   windows: WindowTabs[];
+  groups: TabGroup[];
+  workspaces: Workspace[];
+};
+
+export type PeekInfo = {
+  window: string;
+  url: string;
+  title: string;
+  favicon: string | null;
 };
 
 export type BrowserCommand = "focus-address" | "find" | "bookmark" | "downloads";
@@ -48,7 +92,10 @@ export type PopupKind =
   | "page-capture"
   | "what-runs"
   | "ad-blocker"
-  | "extension-pin";
+  | "extension-pin"
+  | "tab-group"
+  | "tab-group-menu"
+  | "workspaces";
 
 export type PopupRequest = {
   kind: PopupKind;
@@ -157,6 +204,26 @@ export type BrowserSettings = {
   hiddenToolbarExtensions: string[];
   /** Built-in ad blocker. */
   adblock: AdblockSettings;
+  /** `horizontal` puts tabs above the address bar, `vertical` in a sidebar on the left. */
+  tabLayout: "horizontal" | "vertical";
+  /** The vertical sidebar shows icons only. */
+  verticalTabsCollapsed: boolean;
+  /** Width of the expanded vertical sidebar in CSS pixels, 160 to 400. */
+  verticalTabsWidth: number;
+  /** Tabs that are not on screen are muted. */
+  muteBackgroundTabs: boolean;
+  /** Shift+click on a link opens it in a peek instead of a new tab. */
+  peekOnShiftClick: boolean;
+  tabSleep: TabSleepSettings;
+};
+
+export type TabSleepSettings = {
+  enabled: boolean;
+  /** Minutes a tab stays off screen before it sleeps, 5 to 720. */
+  minutes: number;
+  sleepPinned: boolean;
+  /** Hosts that never sleep, lowercase and without a leading `www.`. */
+  neverSleepSites: string[];
 };
 
 export type AdblockSettings = {

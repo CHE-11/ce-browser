@@ -123,12 +123,15 @@ export function SettingsPage() {
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [iconProfile, setIconProfile] = useState<string | null>(null);
   const [userCssPath, setUserCssPath] = useState("");
+  const [sleepMinutesDraft, setSleepMinutesDraft] = useState("30");
+  const [neverSleepDraft, setNeverSleepDraft] = useState("");
 
   useEffect(() => {
     if (settings) {
       setHomeDraft(settings.homePage);
       setPinnedDraft(settings.pinnedTabs.join("\n"));
       setCustomDraft(settings.customSearchUrl);
+      setSleepMinutesDraft(String(settings.tabSleep.minutes));
     }
   }, [settings]);
 
@@ -174,6 +177,15 @@ export function SettingsPage() {
   const update = (patch: Partial<BrowserSettings>) => {
     setError(null);
     void saveSettings({ ...settings, ...patch }).catch((reason: unknown) => setError(String(reason)));
+  };
+
+  const addNeverSleep = () => {
+    const site = neverSleepDraft.trim();
+    if (!site) {
+      return;
+    }
+    setNeverSleepDraft("");
+    update({ tabSleep: { ...settings.tabSleep, neverSleepSites: [...settings.tabSleep.neverSleepSites, site] } });
   };
 
   const engine = pendingCustom ? "custom" : settings.searchEngine;
@@ -590,6 +602,144 @@ export function SettingsPage() {
           <Row id="settings-ask-save" label="Ask where to save each file">
             <Toggle id="settings-ask-save-toggle" checked={settings.askWhereToSave} onChange={(value) => update({ askWhereToSave: value })} />
           </Row>
+        </Section>
+
+        <Section id="settings-tabs" title="Tabs">
+          <Row id="settings-tab-layout" label="Tab layout" hint="Vertical tabs sit in a sidebar left of the page.">
+            <div id="settings-tab-layout-options" className="flex rounded-md border border-zinc-700 p-0.5">
+              {(["horizontal", "vertical"] as const).map((layout) => (
+                <button
+                  key={layout}
+                  id={`settings-tab-layout-${layout}`}
+                  type="button"
+                  aria-pressed={settings.tabLayout === layout}
+                  className={cn(
+                    "rounded px-3 py-1 text-xs capitalize text-zinc-400 transition-colors hover:text-zinc-100",
+                    settings.tabLayout === layout && "bg-zinc-700 text-zinc-100",
+                  )}
+                  onClick={() => update({ tabLayout: layout })}
+                >
+                  {layout}
+                </button>
+              ))}
+            </div>
+          </Row>
+          <Row id="settings-peek" label="Shift+click opens links in a peek" hint="A peek shows the page over the current tab. Esc closes it.">
+            <Toggle
+              id="settings-peek-toggle"
+              checked={settings.peekOnShiftClick}
+              onChange={(value) => update({ peekOnShiftClick: value })}
+            />
+          </Row>
+          <Row id="settings-mute-background" label="Mute tabs in the background" hint="Only the tab on screen plays sound.">
+            <Toggle
+              id="settings-mute-background-toggle"
+              checked={settings.muteBackgroundTabs}
+              onChange={(value) => update({ muteBackgroundTabs: value })}
+            />
+          </Row>
+          <Row id="settings-sleep" label="Put background tabs to sleep" hint="Sleeping tabs free memory and CPU, and wake when you select them.">
+            <Toggle
+              id="settings-sleep-toggle"
+              checked={settings.tabSleep.enabled}
+              onChange={(enabled) => update({ tabSleep: { ...settings.tabSleep, enabled } })}
+            />
+          </Row>
+          <Row id="settings-sleep-minutes" label="Sleep after" hint="Minutes a tab stays in the background first.">
+            <input
+              id="settings-sleep-minutes-input"
+              type="number"
+              min={5}
+              max={720}
+              step={5}
+              disabled={!settings.tabSleep.enabled}
+              value={sleepMinutesDraft}
+              className={cn(inputClass, "w-24 text-right disabled:opacity-40")}
+              onChange={(event) => setSleepMinutesDraft(event.target.value)}
+              onBlur={() => {
+                const minutes = Math.min(720, Math.max(5, Math.round(Number(sleepMinutesDraft) || 30)));
+                setSleepMinutesDraft(String(minutes));
+                if (minutes !== settings.tabSleep.minutes) {
+                  update({ tabSleep: { ...settings.tabSleep, minutes } });
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.currentTarget.blur();
+                }
+              }}
+            />
+            <span id="settings-sleep-minutes-unit" className="text-xs text-zinc-500">
+              minutes
+            </span>
+          </Row>
+          <Row id="settings-sleep-pinned" label="Pinned tabs can sleep too">
+            <Toggle
+              id="settings-sleep-pinned-toggle"
+              checked={settings.tabSleep.sleepPinned}
+              disabled={!settings.tabSleep.enabled}
+              onChange={(sleepPinned) => update({ tabSleep: { ...settings.tabSleep, sleepPinned } })}
+            />
+          </Row>
+          <div id="settings-never-sleep" className="px-5 py-3">
+            <div id="settings-never-sleep-label" className="text-sm text-zinc-100">
+              Never sleep on these sites
+            </div>
+            <div id="settings-never-sleep-hint" className="mb-2 text-xs text-zinc-500">
+              Tabs on these sites and their subdomains stay awake. Tabs playing sound never sleep.
+            </div>
+            <div id="settings-never-sleep-add" className="mb-2 flex gap-2">
+              <input
+                id="settings-never-sleep-input"
+                value={neverSleepDraft}
+                placeholder="example.com"
+                className={inputClass}
+                onChange={(event) => setNeverSleepDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addNeverSleep();
+                  }
+                }}
+              />
+              <Button id="settings-never-sleep-add-button" size="sm" disabled={!neverSleepDraft.trim()} onClick={addNeverSleep}>
+                Add
+              </Button>
+            </div>
+            {settings.tabSleep.neverSleepSites.length === 0 ? (
+              <div id="settings-never-sleep-empty" className="text-xs text-zinc-500">
+                No sites yet. You can also add one from a tab's right-click menu.
+              </div>
+            ) : (
+              <ul id="settings-never-sleep-list" className="flex flex-col gap-1">
+                {settings.tabSleep.neverSleepSites.map((site) => (
+                  <li
+                    id={`settings-never-sleep-${site}`}
+                    key={site}
+                    className="flex h-8 items-center justify-between rounded-md bg-zinc-950 pl-3 pr-1 text-sm text-zinc-200"
+                  >
+                    <span id={`settings-never-sleep-${site}-host`} className="truncate">
+                      {site}
+                    </span>
+                    <IconButton
+                      id={`settings-never-sleep-${site}-remove`}
+                      label={`Let tabs on ${site} sleep again`}
+                      onClick={() =>
+                        update({
+                          tabSleep: {
+                            ...settings.tabSleep,
+                            neverSleepSites: settings.tabSleep.neverSleepSites.filter((item) => item !== site),
+                          },
+                        })
+                      }
+                    >
+                      <X id={`settings-never-sleep-${site}-remove-icon`} aria-hidden />
+                    </IconButton>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </Section>
 
         <Section id="settings-adblock" title="Ad blocker">

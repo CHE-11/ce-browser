@@ -1,6 +1,6 @@
 import { Download } from "lucide-react";
 import { closePopup, createTab } from "../lib/browser-client";
-import { useDownloads } from "../lib/use-browser";
+import { useDownloadsState } from "../lib/use-browser";
 import { Button } from "./Button";
 import { DownloadRow } from "./DownloadRow";
 import { PopupFrame } from "./PopupFrame";
@@ -8,11 +8,11 @@ import { PopupFrame } from "./PopupFrame";
 const PANEL_LIMIT = 8;
 
 export function DownloadsPanel() {
-  const downloads = useDownloads();
+  const { downloads, loaded } = useDownloadsState();
   const recent = downloads.slice(0, PANEL_LIMIT);
 
   return (
-    <PopupFrame id="downloads-panel" maxHeight={520}>
+    <PopupFrame id="downloads-panel" maxHeight={520} ready={loaded}>
       <div id="downloads-panel-header" className="flex items-center justify-between px-4 pb-1 pt-3">
         <h2 id="downloads-panel-title" className="text-sm font-semibold">
           Recent downloads

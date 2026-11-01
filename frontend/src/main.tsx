@@ -11,6 +11,7 @@ import { DownloadsPage } from "./pages/Downloads.page";
 import { HistoryPage } from "./pages/History.page";
 import { ExtensionsPage } from "./pages/Extensions.page";
 import { NewTabPage } from "./pages/NewTab.page";
+import { PeekPage } from "./pages/Peek.page";
 import { PopupPage } from "./pages/Popup.page";
 import { PrintEditorPage } from "./pages/PrintEditor.page";
 import { SettingsPage } from "./pages/Settings.page";
@@ -46,6 +47,8 @@ function App() {
       return <ExtensionsPage />;
     case "print-editor":
       return <PrintEditorPage params={route.params} />;
+    case "peek":
+      return <PeekPage />;
     default:
       return <NewTabPage />;
   }

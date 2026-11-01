@@ -7,12 +7,16 @@ import { BookmarkFolderMenu } from "../components/BookmarksBar/BookmarkFolderMen
 import { BookmarksBarMenu } from "../components/BookmarksBar/BookmarksBarMenu";
 import { DownloadsPanel } from "../components/DownloadsPanel";
 import { AddressBarEllipsisMenu } from "../components/AddressBarEllipsisMenu";
+import { TabGroupFlyout } from "../components/TabGroupFlyout";
+import { TabGroupMenu } from "../components/TabGroupMenu";
 import { TabMenu } from "../components/TabMenu";
+import { WorkspaceMenu } from "../components/WorkspaceMenu";
 import { AdBlockerPopover } from "../extensions/ad-blocker/AdBlockerPopover";
 import { PageCapturePopover } from "../extensions/page-capture/PageCapturePopover";
 import { PrintPdfPopover } from "../extensions/print-pdf/PrintPdfPopover";
 import { WhatRunsPopover } from "../extensions/what-runs/WhatRunsPopover";
-import { useAppearanceFromSettings } from "../lib/use-browser";
+import { PopupAppearanceContext, usePopupPainted } from "../lib/popup-ready";
+import { useAppearanceState } from "../lib/use-browser";
 
 type PopupPageProps = {
   popup: string;
@@ -20,12 +24,29 @@ type PopupPageProps = {
 };
 
 export function PopupPage({ popup, params }: PopupPageProps) {
-  useAppearanceFromSettings();
+  const { loaded } = useAppearanceState();
 
   useEffect(() => {
     document.title = `ce-browser ${popup}`;
   }, [popup]);
 
+  return (
+    <PopupAppearanceContext.Provider value={loaded}>
+      <PopupContent popup={popup} params={params} />
+    </PopupAppearanceContext.Provider>
+  );
+}
+
+function UnknownPopup() {
+  usePopupPainted(true);
+  return (
+    <div id="popup-unknown" className="p-3 text-sm text-zinc-500">
+      Unknown popup.
+    </div>
+  );
+}
+
+function PopupContent({ popup, params }: PopupPageProps) {
   switch (popup) {
     case "downloads":
       return <DownloadsPanel />;
@@ -65,11 +86,13 @@ export function PopupPage({ popup, params }: PopupPageProps) {
       return <AdBlockerPopover params={params} />;
     case "extension-pin":
       return <ExtensionPinMenu extensionId={params.get("id") ?? ""} />;
+    case "tab-group":
+      return <TabGroupFlyout groupId={Number(params.get("id"))} />;
+    case "tab-group-menu":
+      return <TabGroupMenu groupId={Number(params.get("id"))} />;
+    case "workspaces":
+      return <WorkspaceMenu />;
     default:
-      return (
-        <div id="popup-unknown" className="p-3 text-sm text-zinc-500">
-          Unknown popup.
-        </div>
-      );
+      return <UnknownPopup />;
   }
 }

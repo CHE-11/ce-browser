@@ -4,10 +4,10 @@ import type { AdblockSettings } from "../../../../types/browser";
 import { PopupFrame } from "../../components/PopupFrame";
 import { reload, saveSettings } from "../../lib/browser-client";
 import { cn } from "../../lib/cn";
-import { useSettings } from "../../lib/use-browser";
+import { useSettingsState } from "../../lib/use-browser";
 import { OptionRow, PopoverHeader } from "../PopoverParts";
 import { readPopoverTab } from "../shared";
-import { siteKey, sitePaused, useAdblockStats } from "./use-adblock-stats";
+import { siteKey, sitePaused, useAdblockStatsState } from "./use-adblock-stats";
 
 type AdBlockerPopoverProps = {
   params: URLSearchParams;
@@ -25,8 +25,8 @@ function withSitePaused(allowedSites: string[], host: string, pause: boolean) {
 export function AdBlockerPopover({ params }: AdBlockerPopoverProps) {
   const tab = readPopoverTab(params);
   const host = params.get("host") ?? "";
-  const settings = useSettings();
-  const blocked = useAdblockStats(tab.id);
+  const { settings, loaded: settingsLoaded } = useSettingsState();
+  const { blocked, loaded: statsLoaded } = useAdblockStatsState(tab.id);
   const [saving, setSaving] = useState(false);
 
   const adblock = settings?.adblock ?? { enabled: true, allowedSites: [] };
@@ -49,7 +49,7 @@ export function AdBlockerPopover({ params }: AdBlockerPopoverProps) {
   };
 
   return (
-    <PopupFrame id="ad-blocker-popover" maxHeight={420}>
+    <PopupFrame id="ad-blocker-popover" maxHeight={420} ready={settingsLoaded && statsLoaded}>
       <PopoverHeader
         id="ad-blocker-header"
         icon={<ShieldCheck aria-hidden />}

@@ -2,7 +2,7 @@ import { PinOff } from "lucide-react";
 import { builtinTool } from "../extensions/builtin";
 import { closePopup } from "../lib/browser-client";
 import { saveToolbarPin } from "../lib/toolbar-pin";
-import { useExtensions, useSettings } from "../lib/use-browser";
+import { useExtensions, useSettingsState } from "../lib/use-browser";
 import { PopupFrame, PopupMenu, PopupMenuItem } from "./PopupFrame";
 
 type ExtensionPinMenuProps = {
@@ -10,8 +10,8 @@ type ExtensionPinMenuProps = {
 };
 
 export function ExtensionPinMenu({ extensionId }: ExtensionPinMenuProps) {
-  const settings = useSettings();
-  const { extensions } = useExtensions();
+  const { settings, loaded: settingsLoaded } = useSettingsState();
+  const { extensions, loaded: extensionsLoaded } = useExtensions();
   const name =
     extensions.find((extension) => extension.id === extensionId)?.name ??
     builtinTool(extensionId)?.name ??
@@ -25,7 +25,7 @@ export function ExtensionPinMenu({ extensionId }: ExtensionPinMenuProps) {
   };
 
   return (
-    <PopupFrame id="extension-pin-menu">
+    <PopupFrame id="extension-pin-menu" ready={settingsLoaded && extensionsLoaded}>
       <PopupMenu id="extension-pin-menu-items" label={name}>
         <PopupMenuItem
           id="extension-pin-menu-unpin"

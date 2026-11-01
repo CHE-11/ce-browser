@@ -2,9 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AddressBar } from "../components/Addressbar/AddressBar";
 import { BookmarksBar } from "../components/BookmarksBar/BookmarksBar";
 import { FindBar } from "../components/FindBar";
+import { SplitDivider } from "../components/SplitDivider";
 import { SyncToast } from "../components/SyncToast";
 import { TabStrip } from "../components/TabStrip";
-import { onBrowserCommand, setUiHeight } from "../lib/browser-client";
+import { VerticalTabs } from "../components/VerticalTabs";
+import { onBrowserCommand, setUiInsets } from "../lib/browser-client";
 import { useAppearanceFromSettings, useBookmarks, useDownloads, useExtensions, useHistory, useTabs } from "../lib/use-browser";
 
 export function BrowserPage() {
@@ -15,9 +17,14 @@ export function BrowserPage() {
   const { extensions } = useExtensions();
   const settings = useAppearanceFromSettings();
   const headerRef = useRef<HTMLDivElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
   const [findToken, setFindToken] = useState<number | null>(null);
 
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
+  const vertical = settings?.tabLayout === "vertical";
+  const split = snapshot.split;
+  const splitShown =
+    !!split && !snapshot.fullscreen && (snapshot.activeId === split.left || snapshot.activeId === split.right);
 
   useEffect(() => {
     document.title = activeTab ? `${activeTab.title || activeTab.url} - ce-browser` : "ce-browser";
@@ -39,19 +46,26 @@ export function BrowserPage() {
     if (!header) {
       return;
     }
-    const report = () => void setUiHeight(Math.ceil(header.getBoundingClientRect().height));
+    const report = () => {
+      const top = Math.ceil(header.getBoundingClientRect().height);
+      const left = sidebarRef.current ? Math.ceil(sidebarRef.current.getBoundingClientRect().width) : 0;
+      void setUiInsets(top, left);
+    };
     report();
     const observer = new ResizeObserver(report);
     observer.observe(header);
+    if (sidebarRef.current) {
+      observer.observe(sidebarRef.current);
+    }
     return () => observer.disconnect();
-  }, []);
+  }, [vertical, snapshot.fullscreen]);
 
   const showBookmarksBar = settings?.showBookmarksBar ?? true;
 
   return (
     <div id="browser" className="flex h-full flex-col bg-zinc-950 text-zinc-100">
       <div id="browser-header" ref={headerRef} className={snapshot.fullscreen ? "hidden" : "flex flex-col"}>
-        <TabStrip snapshot={snapshot} />
+        {vertical ? null : <TabStrip snapshot={snapshot} />}
         <AddressBar
           snapshot={snapshot}
           bookmarks={bookmarks}
@@ -59,6 +73,7 @@ export function BrowserPage() {
           history={history}
           extensions={extensions}
           settings={settings}
+          windowControls={vertical}
         />
         {showBookmarksBar ? <BookmarksBar tree={bookmarks} activeId={snapshot.activeId} /> : null}
         {findToken !== null && activeTab ? (
@@ -66,12 +81,18 @@ export function BrowserPage() {
         ) : null}
         <SyncToast />
       </div>
-      <div id="browser-page-area" className="flex flex-1 items-center justify-center bg-zinc-950">
-        {activeTab && !activeTab.loaded ? (
-          <span id="browser-page-loading" className="text-sm text-zinc-500">
-            Loading {activeTab.title || activeTab.url}
-          </span>
+      <div id="browser-body" className="flex min-h-0 flex-1">
+        {vertical && settings && !snapshot.fullscreen ? (
+          <VerticalTabs ref={sidebarRef} snapshot={snapshot} settings={settings} />
         ) : null}
+        <div id="browser-page-area" className="relative flex min-w-0 flex-1 items-center justify-center bg-zinc-950">
+          {activeTab && !activeTab.loaded ? (
+            <span id="browser-page-loading" className="text-sm text-zinc-500">
+              Loading {activeTab.title || activeTab.url}
+            </span>
+          ) : null}
+          {splitShown && split ? <SplitDivider split={split} activeId={snapshot.activeId} /> : null}
+        </div>
       </div>
     </div>
   );

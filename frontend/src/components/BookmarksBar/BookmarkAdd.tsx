@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addBookmark, closePopup } from "../../lib/browser-client";
-import { listFolders, useBookmarks, useTabs } from "../../lib/use-browser";
+import { listFolders, useBookmarksState, useTabs } from "../../lib/use-browser";
 import { Button } from "../Button";
 import { PopupFrame } from "../PopupFrame";
 
@@ -10,7 +10,7 @@ type BookmarkAddProps = {
 };
 
 export function BookmarkAdd({ mode, parentId }: BookmarkAddProps) {
-  const tree = useBookmarks();
+  const { tree, loaded: treeLoaded } = useBookmarksState();
   const snapshot = useTabs();
   const folders = useMemo(() => listFolders(tree), [tree]);
   const isLink = mode === "link";
@@ -60,7 +60,7 @@ export function BookmarkAdd({ mode, parentId }: BookmarkAddProps) {
   };
 
   return (
-    <PopupFrame id="bookmark-add">
+    <PopupFrame id="bookmark-add" ready={treeLoaded && (!isLink || snapshot.loaded)}>
       <form
         id="bookmark-add-form"
         className="flex flex-col gap-3 p-4"

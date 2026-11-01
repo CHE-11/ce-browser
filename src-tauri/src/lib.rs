@@ -6,6 +6,7 @@ mod history;
 mod extensions;
 mod files;
 mod paths;
+mod peek;
 mod print;
 mod profile_icons;
 mod profiles;
@@ -13,6 +14,7 @@ mod session;
 mod settings;
 mod shortcuts;
 mod sync;
+mod tab_sleep;
 mod tabs;
 mod user_styles;
 mod webview2;
@@ -163,8 +165,152 @@ async fn reopen_closed_tab(app: AppHandle) -> Result<Option<u32>, String> {
 }
 
 #[tauri::command]
-async fn set_ui_height(app: AppHandle, window: Window, height: f64) {
-    tabs::set_ui_height(&app, window.label(), height);
+async fn set_ui_insets(app: AppHandle, window: Window, top: f64, left: f64) {
+    tabs::set_ui_insets(&app, window.label(), top, left);
+}
+
+#[tauri::command]
+async fn set_tabs_muted(app: AppHandle, ids: Vec<u32>, muted: bool) -> Result<(), String> {
+    tabs::set_muted(&app, &ids, muted)
+}
+
+#[tauri::command]
+async fn toggle_selected_muted(app: AppHandle) -> Result<(), String> {
+    tabs::toggle_selected_muted(&app)
+}
+
+#[tauri::command]
+async fn sleep_tab(app: AppHandle, id: u32) -> Result<(), String> {
+    tabs::sleep_tab(&app, id)
+}
+
+#[tauri::command]
+async fn sleep_other_tabs(app: AppHandle, id: u32) -> Result<(), String> {
+    tabs::sleep_other_tabs(&app, id)
+}
+
+#[tauri::command]
+async fn never_sleep_site(app: AppHandle, id: u32) -> Result<(), String> {
+    tabs::never_sleep_site(&app, id)
+}
+
+// Split view
+
+#[tauri::command]
+async fn split_with(app: AppHandle, id: u32) -> Result<(), String> {
+    tabs::split_with(&app, id)
+}
+
+#[tauri::command]
+async fn open_in_split(app: AppHandle, window: Window, url: String) -> Result<u32, String> {
+    tabs::open_in_split(&app, window.label(), &url)
+}
+
+#[tauri::command]
+async fn swap_split(app: AppHandle, window: Window) -> Result<(), String> {
+    tabs::swap_split(&app, window.label())
+}
+
+#[tauri::command]
+async fn exit_split(app: AppHandle, window: Window) -> Result<(), String> {
+    tabs::exit_split(&app, window.label())
+}
+
+#[tauri::command]
+async fn set_split_ratio(app: AppHandle, window: Window, ratio: f64) {
+    tabs::set_split_ratio(&app, window.label(), ratio);
+}
+
+// Tab groups
+
+#[tauri::command]
+async fn create_group(app: AppHandle, ids: Vec<u32>) -> Result<u32, String> {
+    tabs::create_group(&app, &ids)
+}
+
+#[tauri::command]
+async fn add_to_group(app: AppHandle, ids: Vec<u32>, group_id: u32) -> Result<(), String> {
+    tabs::add_to_group(&app, &ids, group_id)
+}
+
+#[tauri::command]
+async fn remove_from_group(app: AppHandle, ids: Vec<u32>) -> Result<(), String> {
+    tabs::remove_from_group(&app, &ids)
+}
+
+#[tauri::command]
+async fn update_group(
+    app: AppHandle,
+    id: u32,
+    name: Option<String>,
+    color: Option<String>,
+    collapsed: Option<bool>,
+) -> Result<(), String> {
+    tabs::update_group(&app, id, name, color, collapsed)
+}
+
+#[tauri::command]
+async fn ungroup(app: AppHandle, id: u32) -> Result<(), String> {
+    tabs::ungroup(&app, id)
+}
+
+#[tauri::command]
+async fn close_group(app: AppHandle, id: u32) -> Result<(), String> {
+    tabs::close_group(&app, id)
+}
+
+#[tauri::command]
+async fn new_tab_in_group(app: AppHandle, id: u32) -> Result<u32, String> {
+    tabs::new_tab_in_group(&app, id)
+}
+
+// Workspaces
+
+#[tauri::command]
+async fn create_workspace(app: AppHandle, name: String, color: String) -> Result<String, String> {
+    tabs::create_workspace(&app, &name, &color)
+}
+
+#[tauri::command]
+async fn rename_workspace(app: AppHandle, id: String, name: String, color: String) -> Result<(), String> {
+    tabs::rename_workspace(&app, &id, &name, &color)
+}
+
+#[tauri::command]
+async fn delete_workspace(app: AppHandle, id: String) -> Result<(), String> {
+    tabs::delete_workspace(&app, &id)
+}
+
+#[tauri::command]
+async fn switch_workspace(app: AppHandle, window: Window, id: String) -> Result<(), String> {
+    tabs::switch_workspace(&app, window.label(), &id)
+}
+
+#[tauri::command]
+async fn move_tabs_to_workspace(app: AppHandle, ids: Vec<u32>, workspace: String) -> Result<(), String> {
+    tabs::move_tabs_to_workspace(&app, &ids, &workspace)
+}
+
+// Peek
+
+#[tauri::command]
+fn peek_state(app: AppHandle, window: Window) -> Option<peek::PeekInfo> {
+    peek::info(&app, window.label())
+}
+
+#[tauri::command]
+async fn close_peek(app: AppHandle, window: Window) {
+    peek::close(&app, window.label());
+}
+
+#[tauri::command]
+async fn peek_to_tab(app: AppHandle, window: Window) -> Result<u32, String> {
+    peek::to_tab(&app, window.label())
+}
+
+#[tauri::command]
+async fn peek_to_split(app: AppHandle, window: Window) -> Result<u32, String> {
+    peek::to_split(&app, window.label())
 }
 
 #[tauri::command]
@@ -210,6 +356,11 @@ async fn resize_popup(
     height: f64,
 ) -> Result<(), String> {
     tabs::resize_popup(&app, window.label(), width, height)
+}
+
+#[tauri::command]
+async fn popup_painted(app: AppHandle, window: Window) {
+    tabs::popup_painted(&app, window.label());
 }
 
 #[tauri::command]
@@ -595,7 +746,9 @@ pub fn run() {
             history::init(&handle);
             extensions::init(&handle);
             tabs::init(&handle);
+            peek::init(&handle);
             session::init(&handle);
+            tab_sleep::init(&handle);
             build_window(&handle)?;
 
             tauri::async_runtime::spawn(async move {
@@ -678,7 +831,33 @@ pub fn run() {
             unpin_tab,
             duplicate_tab,
             reopen_closed_tab,
-            set_ui_height,
+            set_ui_insets,
+            set_tabs_muted,
+            toggle_selected_muted,
+            sleep_tab,
+            sleep_other_tabs,
+            never_sleep_site,
+            split_with,
+            open_in_split,
+            swap_split,
+            exit_split,
+            set_split_ratio,
+            create_group,
+            add_to_group,
+            remove_from_group,
+            update_group,
+            ungroup,
+            close_group,
+            new_tab_in_group,
+            create_workspace,
+            rename_workspace,
+            delete_workspace,
+            switch_workspace,
+            move_tabs_to_workspace,
+            peek_state,
+            close_peek,
+            peek_to_tab,
+            peek_to_split,
             zoom_tab,
             find_in_page,
             clear_find,
@@ -686,6 +865,7 @@ pub fn run() {
             open_popup,
             close_popup,
             resize_popup,
+            popup_painted,
             capture_page_png,
             copy_page_png,
             extract_page,

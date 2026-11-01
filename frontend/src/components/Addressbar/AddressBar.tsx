@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import {
   ArrowLeft,
   ArrowRight,
+  Columns2,
   Download,
   EllipsisVertical,
   History,
@@ -22,6 +23,7 @@ import type {
   HistoryItem,
   OmniboxState,
   OmniboxSuggestion,
+  SplitView,
   TabInfo,
   TabsSnapshot,
 } from "../../../../types/browser";
@@ -29,6 +31,7 @@ import {
   activateTab,
   closePopup,
   createTab,
+  exitSplit,
   goBack,
   goForward,
   navigate,
@@ -42,6 +45,7 @@ import {
   reload,
   resizePopup,
   sendOmniboxState,
+  splitWith,
   stop,
 } from "../../lib/browser-client";
 import { cn } from "../../lib/cn";
@@ -51,14 +55,17 @@ import { flattenBookmarks } from "../../lib/use-browser";
 import { BuiltinExtensions } from "../../extensions";
 import { ExtensionIcon } from "../ExtensionIcon";
 import { IconButton } from "../IconButton";
+import { WindowControls } from "../WindowControls";
 
 type AddressBarProps = {
-  snapshot: TabsSnapshot;
+  snapshot: TabsSnapshot & { split?: SplitView | null };
   bookmarks: BookmarkTree | null;
   downloads: DownloadItem[];
   history: HistoryItem[];
   extensions: ExtensionInfo[];
   settings: BrowserSettings | null;
+  /** With vertical tabs there is no tab strip, so the address bar holds the window buttons. */
+  windowControls?: boolean;
 };
 
 const EMPTY_OMNIBOX: OmniboxState = { suggestions: [], selected: 0 };
@@ -70,9 +77,27 @@ function addressText(tab: TabInfo | undefined) {
   return tab.url;
 }
 
-export function AddressBar({ snapshot, bookmarks, downloads, history, extensions, settings }: AddressBarProps) {
+export function AddressBar({ snapshot, bookmarks, downloads, history, extensions, settings, windowControls = false }: AddressBarProps) {
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const activeId = activeTab?.id ?? null;
+  const split = snapshot.split ?? null;
+  const inSplit = !!split && activeId !== null && (split.left === activeId || split.right === activeId);
+  const activeIndex = snapshot.tabs.findIndex((tab) => tab.id === activeId);
+  const splitPartner =
+    snapshot.tabs.slice(activeIndex + 1).find((tab) => !tab.pinned) ??
+    snapshot.tabs
+      .slice(0, Math.max(0, activeIndex))
+      .reverse()
+      .find((tab) => !tab.pinned);
+  const canSplit = !!activeTab && !activeTab.pinned && !!splitPartner;
+
+  const toggleSplit = () => {
+    if (inSplit) {
+      void exitSplit();
+    } else if (splitPartner) {
+      void splitWith(splitPartner.id);
+    }
+  };
 
   const inputRef = useRef<HTMLInputElement>(null);
   const activeRef = useRef(activeTab);
@@ -290,7 +315,11 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const insecure = activeTab?.url.startsWith("http://");
 
   return (
-    <div id="address-bar" className="flex h-10 shrink-0 items-center gap-1 bg-zinc-900 px-2">
+    <div
+      id="address-bar"
+      className={cn("flex h-10 shrink-0 items-center gap-1 bg-zinc-900 px-2", windowControls && "pr-0")}
+      data-tauri-drag-region={windowControls ? true : undefined}
+    >
       <IconButton
         id="address-back"
         label="Back (Alt+Left)"
@@ -468,6 +497,15 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       <IconButton id="address-history" label="History" onClick={() => void createTab("ce://history")}>
         <History id="address-history-icon" aria-hidden />
       </IconButton>
+      <IconButton
+        id="address-split"
+        label={inSplit ? "Exit split view" : "Split view with the next tab"}
+        active={inSplit}
+        disabled={!inSplit && !canSplit}
+        onClick={toggleSplit}
+      >
+        <Columns2 id="address-split-icon" aria-hidden />
+      </IconButton>
 
       <div id="address-builtin-start" className="mx-0.5 h-4 w-px shrink-0 bg-zinc-600" />
       <BuiltinExtensions activeTab={activeTab} settings={settings} />
@@ -484,6 +522,12 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       <span id="address-omnibox-count" className="sr-only">
         {omnibox.suggestions.length} suggestions
       </span>
+      {windowControls ? (
+        <>
+          <div id="address-drag-space" className="h-full w-6 shrink-0" data-tauri-drag-region />
+          <WindowControls />
+        </>
+      ) : null}
     </div>
   );
 }

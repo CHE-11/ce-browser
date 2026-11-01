@@ -5,6 +5,7 @@ import {
   History,
   LogOut,
   Minus,
+  PanelLeft,
   PanelTop,
   Plus,
   Puzzle,
@@ -41,8 +42,13 @@ export function AppMenu() {
     await saveSettings({ ...settings, showBookmarksBar: !settings.showBookmarksBar });
   };
 
+  const toggleVerticalTabs = async () => {
+    const settings = await getSettings();
+    await saveSettings({ ...settings, tabLayout: settings.tabLayout === "vertical" ? "horizontal" : "vertical" });
+  };
+
   return (
-    <PopupFrame id="app-menu">
+    <PopupFrame id="app-menu" ready={snapshot.loaded}>
       <PopupMenu id="app-menu-items" label="Browser menu">
         <PopupMenuItem id="app-menu-new-tab" icon={<SquarePlus />} label="New tab" shortcut="Ctrl+T" onClick={openPage("ce://newtab")} />
         <PopupMenuItem
@@ -61,6 +67,12 @@ export function AppMenu() {
           label="Show or hide bookmarks bar"
           shortcut="Ctrl+Shift+B"
           onClick={run(toggleBookmarksBar)}
+        />
+        <PopupMenuItem
+          id="app-menu-vertical-tabs"
+          icon={<PanelLeft />}
+          label="Vertical tabs on or off"
+          onClick={run(toggleVerticalTabs)}
         />
         <PopupMenuItem id="app-menu-downloads" icon={<Download />} label="Downloads" shortcut="Ctrl+J" onClick={openPage("ce://downloads")} />
         <PopupMenuItem id="app-menu-history" icon={<History />} label="History" onClick={openPage("ce://history")} />
