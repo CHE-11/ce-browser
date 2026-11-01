@@ -303,7 +303,92 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
         }
     }
 
+    if let Err(error) = attach_adblock(app, platform, &core, id) {
+        eprintln!("WebView2 ad blocker for tab {id}: {error}");
+    }
     attach_downloads(app, &core)?;
+    Ok(())
+}
+
+fn attach_adblock(
+    app: &AppHandle,
+    platform: &PlatformWebview,
+    core: &ICoreWebView2,
+    id: u32,
+) -> windows::core::Result<()> {
+    let mut token = 0i64;
+    unsafe {
+        // Without source kinds, requests made inside iframes skip the event.
+        match core.cast::<ICoreWebView2_22>() {
+            Ok(core22) => core22.AddWebResourceRequestedFilterWithRequestSourceKinds(
+                windows::core::w!("*"),
+                COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
+            )?,
+            Err(_) => core.AddWebResourceRequestedFilter(
+                windows::core::w!("*"),
+                COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+            )?,
+        }
+
+        let environment = platform.environment();
+        let request_app = app.clone();
+        core.add_WebResourceRequested(
+            &WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                let uri = args
+                    .Request()
+                    .map(|request| read_pwstr(|value| request.Uri(value)))
+                    .unwrap_or_default();
+                let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
+                let _ = args.ResourceContext(&mut context);
+                let is_document = context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT;
+                if crate::adblock::should_block(&request_app, id, &uri, is_document) {
+                    let response = environment.CreateWebResourceResponse(
+                        None::<&IStream>,
+                        403,
+                        windows::core::w!("Blocked"),
+                        windows::core::w!(""),
+                    )?;
+                    args.SetResponse(&response)?;
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+
+        let navigation_app = app.clone();
+        core.add_NavigationStarting(
+            &NavigationStartingEventHandler::create(Box::new(move |_, args| {
+                if let Some(args) = args {
+                    let uri = read_pwstr(|value| args.Uri(value));
+                    crate::adblock::page_started(&navigation_app, id, &uri);
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+
+        core.add_ContentLoading(
+            &ContentLoadingEventHandler::create(Box::new(move |sender, _| {
+                let Some(core) = sender else {
+                    return Ok(());
+                };
+                let source = read_pwstr(|value| core.Source(value));
+                if source.starts_with("http") && crate::adblock::active_for(&source) {
+                    let script = HSTRING::from(crate::adblock::cosmetic_script());
+                    let _ = core.ExecuteScript(
+                        &script,
+                        None::<&ICoreWebView2ExecuteScriptCompletedHandler>,
+                    );
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
     Ok(())
 }
 

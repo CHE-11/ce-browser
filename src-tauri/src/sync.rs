@@ -236,31 +236,45 @@ pub fn status(app: &AppHandle) -> SyncStatus {
 /// Points profile storage at the sync folder already saved on this computer, and moves any
 /// profiles still sitting in app data into that folder.
 pub fn attach(app: &AppHandle) {
+    let appdata = paths::root_data_dir(app);
+    let moved = crate::profiles::migrate_layout(&appdata, true).unwrap_or_else(|error| {
+        eprintln!("profiles: {error}");
+        false
+    });
+    let moved = moved | attach_folder(app, &appdata);
+    if moved {
+        crate::profiles::refresh_icons(app);
+    }
+}
+
+/// Returns true when profile folders moved into the sync folder.
+fn attach_folder(app: &AppHandle, appdata: &Path) -> bool {
     let Some(folder) = saved_folder(app) else {
         paths::set_storage_root(None);
-        return;
+        return false;
     };
     let path = PathBuf::from(folder);
-    if !path.is_dir() || path.starts_with(paths::root_data_dir(app)) {
+    if !path.is_dir() || path.starts_with(appdata) {
         paths::set_storage_root(None);
-        return;
+        return false;
     }
-    let appdata = paths::root_data_dir(app);
-    if !crate::profiles::sync_has_profile_settings(&path) && !appdata.join("settings.json").is_file() {
+    if !crate::profiles::sync_has_profile_settings(&path)
+        && !crate::profiles::sync_has_profile_settings(appdata)
+    {
         if let Err(error) = materialize_legacy(&path) {
             eprintln!("sync: {error}");
         }
     }
     if let Err(error) = write_machine(app, &path) {
         eprintln!("sync: {error}");
-        return;
+        return false;
     }
-    if let Err(error) = crate::profiles::transfer_appdata_to_sync(&appdata, &path) {
+    let moved = crate::profiles::transfer_appdata_to_sync(appdata, &path).unwrap_or_else(|error| {
         eprintln!("sync: {error}");
-        paths::set_storage_root(Some(path.clone()));
-        return;
-    }
+        false
+    });
     paths::set_storage_root(Some(path));
+    moved
 }
 
 pub fn create(app: &AppHandle, raw: &str) -> Result<SyncStatus, String> {
@@ -268,8 +282,9 @@ pub fn create(app: &AppHandle, raw: &str) -> Result<SyncStatus, String> {
     let folder = target_folder(app, raw, false)?;
     relocate_into(app, &folder)?;
     point_at(app, &folder)?;
+    crate::profiles::refresh_icons(app);
     refresh_open_profile(app)?;
-    remember(&folder)?;
+    remember_chosen(&folder)?;
     set_error(app, None);
     Ok(status(app))
 }
@@ -283,11 +298,12 @@ pub fn select(app: &AppHandle, raw: &str) -> Result<SyncStatus, String> {
     if !folder_has_profiles(&folder) {
         return Err("That folder has no profiles.".into());
     }
-    crate::profiles::layout_sync_profiles(&folder)?;
+    crate::profiles::migrate_layout(&folder, false)?;
     point_at(app, &folder)?;
     let _ = crate::profiles::discard_appdata_profiles(&paths::root_data_dir(app));
+    crate::profiles::refresh_icons(app);
     refresh_open_profile(app)?;
-    remember(&folder)?;
+    remember_chosen(&folder)?;
     set_error(app, None);
     Ok(status(app))
 }
@@ -298,6 +314,7 @@ pub fn clear(app: &AppHandle) -> Result<SyncStatus, String> {
         crate::profiles::transfer_sync_to_appdata(&folder, &paths::root_data_dir(app))?;
     }
     paths::set_storage_root(None);
+    crate::profiles::refresh_icons(app);
     clear_machine(app)?;
     let mut settings = settings::get(app);
     settings.sync_folder.clear();
@@ -760,6 +777,18 @@ fn remember(folder: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Profile folders keep bookmarks and settings inside each profile, not as the four files
+/// at the sync folder root. Choosing one of those still counts as selected.
+fn remember_chosen(folder: &Path) -> Result<(), String> {
+    if all_present(folder) {
+        return remember(folder);
+    }
+    *stamp_slot()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = None;
+    Ok(())
+}
+
 fn folder_stamp(folder: &Path) -> Option<FolderStamp> {
     Some(FolderStamp {
         bookmarks: file_stamp(&folder.join(BOOKMARKS_FILE))?,
@@ -839,7 +868,10 @@ fn saved_folder(app: &AppHandle) -> Option<String> {
 }
 
 fn legacy_sync_folder(app: &AppHandle) -> Option<String> {
-    let Ok(text) = fs::read_to_string(paths::root_data_dir(app).join("settings.json")) else {
+    let appdata = paths::root_data_dir(app);
+    let Ok(text) = fs::read_to_string(crate::profiles::default_dir(&appdata).join("settings.json"))
+        .or_else(|_| fs::read_to_string(appdata.join("settings.json")))
+    else {
         return None;
     };
     let Ok(value) = serde_json::from_str::<Value>(&text) else {
@@ -894,10 +926,11 @@ fn relocate_into(app: &AppHandle, folder: &Path) -> Result<(), String> {
         if current == folder {
             return Ok(());
         }
-        crate::profiles::transfer_sync_to_sync(&current, folder)
+        crate::profiles::transfer_sync_to_sync(&current, folder)?;
     } else {
-        crate::profiles::transfer_appdata_to_sync(&paths::root_data_dir(app), folder)
+        crate::profiles::transfer_appdata_to_sync(&paths::root_data_dir(app), folder)?;
     }
+    Ok(())
 }
 
 fn refresh_open_profile(app: &AppHandle) -> Result<(), String> {
@@ -919,7 +952,7 @@ fn folder_has_profiles(folder: &Path) -> bool {
 }
 
 fn materialize_legacy(folder: &Path) -> Result<(), String> {
-    let dest = folder.join("ce-browser");
+    let dest = folder.join(crate::profiles::DEFAULT_FOLDER);
     if crate::profiles::sync_has_profile_settings(folder) {
         return Ok(());
     }

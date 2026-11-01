@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, FolderOpen, ImagePlus, Minus, Plus, RotateCcw } from "lucide-react";
+import { Check, FolderOpen, ImagePlus, Minus, Plus, RotateCcw, X } from "lucide-react";
 import type { BrowserProfile, BrowserSettings, ProfileIconChoice, SearchEngine, SyncStatus } from "../../../types/browser";
 import { Button } from "../components/Button";
 import { IconButton } from "../components/IconButton";
@@ -48,6 +48,30 @@ const SEARCH_ENGINES: { id: SearchEngine; label: string }[] = [
 const inputClass =
   "h-8 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-sky-500";
 
+function errorText(reason: unknown) {
+  if (typeof reason === "string" && reason.trim()) {
+    return reason;
+  }
+  if (reason instanceof Error && reason.message.trim()) {
+    return reason.message;
+  }
+  if (reason && typeof reason === "object" && "message" in reason) {
+    const message = reason.message;
+    if (typeof message === "string" && message.trim()) {
+      return message;
+    }
+  }
+  try {
+    const text = JSON.stringify(reason);
+    if (text && text !== "null" && text !== "{}") {
+      return text;
+    }
+  } catch {
+    // A circular value still needs a readable fallback below.
+  }
+  return "Unknown error";
+}
+
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
     <section id={id} className="flex flex-col gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60">
@@ -90,6 +114,7 @@ export function SettingsPage() {
   const [systemDownloads, setSystemDownloads] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<SyncStatus | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [syncWorking, setSyncWorking] = useState(false);
   const [profiles, setProfiles] = useState<BrowserProfile[]>([]);
   const [profileIcons, setProfileIcons] = useState<ProfileIconChoice[]>([]);
@@ -156,15 +181,41 @@ export function SettingsPage() {
   const resolved = resolveMode(settings.colorMode);
   const syncBusy = syncWorking;
 
-  const runSync = (work: () => Promise<unknown>) => {
+  const reportSyncError = (reason: unknown) => {
+    const message = errorText(reason);
+    setError(message);
+    setSyncError(message);
+  };
+
+  const runSync = (work: () => Promise<SyncStatus>) => {
     setSyncWorking(true);
     setError(null);
+    setSyncError(null);
     void work()
-      .catch((reason: unknown) => setError(String(reason)))
+      .then((status) => {
+        setSyncState(status);
+        if (status.error) {
+          setError(status.error);
+          setSyncError(status.error);
+        }
+      })
+      .catch(reportSyncError)
       .finally(() => {
         setSyncWorking(false);
         void listProfiles().then(setProfiles).catch(() => undefined);
       });
+  };
+
+  const pickAndSync = (title: string, apply: (path: string) => Promise<SyncStatus>) => {
+    setError(null);
+    setSyncError(null);
+    void pickSyncFolder(title)
+      .then((path) => {
+        if (path) {
+          runSync(() => apply(path));
+        }
+      })
+      .catch(reportSyncError);
   };
 
 
@@ -197,7 +248,7 @@ export function SettingsPage() {
           <Row
             id="settings-profiles-new"
             label="New profile"
-            hint="Each profile has its own bookmarks, history, extensions, and settings. A sync folder stores those profiles. Its icon is used for a separate Start menu item and taskbar button."
+            hint="Each profile has its own bookmarks, history, extensions, and settings, kept in a folder named after the profile (Default for the first one) in the sync folder or in app data. Its icon is used for a separate Start menu item and taskbar button."
           >
             <input
               id="settings-profiles-name"
@@ -541,6 +592,57 @@ export function SettingsPage() {
           </Row>
         </Section>
 
+        <Section id="settings-adblock" title="Ad blocker">
+          <Row id="settings-adblock-enabled" label="Block ads and trackers" hint="Open pages pick up the change when they next load.">
+            <Toggle
+              id="settings-adblock-enabled-toggle"
+              checked={settings.adblock.enabled}
+              onChange={(enabled) => update({ adblock: { ...settings.adblock, enabled } })}
+            />
+          </Row>
+          <div id="settings-adblock-paused" className="px-5 py-3">
+            <div id="settings-adblock-paused-label" className="text-sm text-zinc-100">
+              Paused sites
+            </div>
+            <div id="settings-adblock-paused-hint" className="mb-2 text-xs text-zinc-500">
+              Ads are allowed on these sites and their subdomains. Pause a site from the shield on the address bar.
+            </div>
+            {settings.adblock.allowedSites.length === 0 ? (
+              <div id="settings-adblock-paused-empty" className="text-xs text-zinc-500">
+                No paused sites.
+              </div>
+            ) : (
+              <ul id="settings-adblock-paused-list" className="flex flex-col gap-1">
+                {settings.adblock.allowedSites.map((site) => (
+                  <li
+                    id={`settings-adblock-paused-${site}`}
+                    key={site}
+                    className="flex h-8 items-center justify-between rounded-md bg-zinc-950 pl-3 pr-1 text-sm text-zinc-200"
+                  >
+                    <span id={`settings-adblock-paused-${site}-host`} className="truncate">
+                      {site}
+                    </span>
+                    <IconButton
+                      id={`settings-adblock-paused-${site}-remove`}
+                      label={`Block ads on ${site} again`}
+                      onClick={() =>
+                        update({
+                          adblock: {
+                            ...settings.adblock,
+                            allowedSites: settings.adblock.allowedSites.filter((item) => item !== site),
+                          },
+                        })
+                      }
+                    >
+                      <X id={`settings-adblock-paused-${site}-remove-icon`} aria-hidden />
+                    </IconButton>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Section>
+
         <Section id="settings-appearance" title="Appearance">
           <Row id="settings-bookmarks-bar" label="Show bookmarks bar" hint="Ctrl+Shift+B">
             <Toggle
@@ -695,13 +797,7 @@ export function SettingsPage() {
               id="settings-sync-create"
               size="sm"
               disabled={syncBusy}
-              onClick={() =>
-                void pickSyncFolder("Create a sync folder").then((path) => {
-                  if (path) {
-                    runSync(() => createSyncFolder(path));
-                  }
-                })
-              }
+              onClick={() => pickAndSync("Create a sync folder", createSyncFolder)}
             >
               Create
             </Button>
@@ -709,13 +805,7 @@ export function SettingsPage() {
               id="settings-sync-select"
               size="sm"
               disabled={syncBusy}
-              onClick={() =>
-                void pickSyncFolder("Select a sync folder").then((path) => {
-                  if (path) {
-                    runSync(() => selectSyncFolder(path));
-                  }
-                })
-              }
+              onClick={() => pickAndSync("Select a sync folder", selectSyncFolder)}
             >
               Select
             </Button>
@@ -733,7 +823,7 @@ export function SettingsPage() {
                   {settings.syncFolder}
                 </button>
                 <div id="settings-sync-path-files" className="mt-1 text-xs text-zinc-500">
-                  profiles.json and a folder for each profile, using the profile name
+                  profiles.json and a folder for each profile (Default, then one per profile name)
                 </div>
               </div>
               <Button id="settings-sync-clear" size="sm" variant="ghost" disabled={syncBusy} onClick={() => runSync(() => clearSyncFolder())}>
@@ -741,9 +831,9 @@ export function SettingsPage() {
               </Button>
             </div>
           ) : null}
-          {syncState?.error ? (
-            <div id="settings-sync-error" className="px-5 py-3 text-xs text-red-300">
-              {syncState.error}
+          {syncError || syncState?.error ? (
+            <div id="settings-sync-error" className="px-5 py-3 text-sm text-red-300">
+              {syncError ?? syncState?.error}
             </div>
           ) : null}
         </Section>

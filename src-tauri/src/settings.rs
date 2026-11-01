@@ -67,6 +67,48 @@ pub struct BrowserSettings {
     /// Extension ids left off the address bar. An older file omits this, so every extension stays pinned.
     #[serde(default)]
     pub hidden_toolbar_extensions: Vec<String>,
+    /// Built-in ad blocker. An older file omits this, so blocking starts on with no paused sites.
+    #[serde(default)]
+    pub adblock: AdblockSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AdblockSettings {
+    pub enabled: bool,
+    /// Hosts where blocking is paused, lowercase and without a leading `www.`.
+    pub allowed_sites: Vec<String>,
+}
+
+impl Default for AdblockSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            allowed_sites: Vec::new(),
+        }
+    }
+}
+
+impl AdblockSettings {
+    fn normalize(mut self) -> Self {
+        let mut sites: Vec<String> = Vec::new();
+        for raw in &self.allowed_sites {
+            let host = crate::adblock::site_key(raw);
+            if host.is_empty()
+                || host.len() > 253
+                || host.chars().any(char::is_whitespace)
+                || sites.contains(&host)
+            {
+                continue;
+            }
+            sites.push(host);
+            if sites.len() >= 1000 {
+                break;
+            }
+        }
+        self.allowed_sites = sites;
+        self
+    }
 }
 
 const PRINT_MODES: &[&str] = &["article", "full"];
@@ -184,6 +226,7 @@ impl Default for BrowserSettings {
             print_editor: PrintEditorSettings::default(),
             page_capture: PageCaptureSettings::default(),
             hidden_toolbar_extensions: Vec::new(),
+            adblock: AdblockSettings::default(),
         }
     }
 }
@@ -216,6 +259,7 @@ impl BrowserSettings {
         self.page_zoom = snap_page_zoom(self.page_zoom);
         self.print_editor = self.print_editor.normalize();
         self.hidden_toolbar_extensions = toolbar_hidden(&self.hidden_toolbar_extensions);
+        self.adblock = self.adblock.normalize();
         self.sync_folder = folder_from_stored(&self.sync_folder);
         if self.sync_bookmarks_revision == 0
             && self.sync_extensions_revision == 0
@@ -263,6 +307,7 @@ pub fn init(app: &AppHandle) {
     let mut loaded: BrowserSettings = files::read_json(&paths::data_file(app, FILE));
     loaded = loaded.normalize();
     loaded.pinned_tabs = canonicalize_pins(app, &loaded);
+    crate::adblock::configure(&loaded.adblock);
     app.manage(SettingsState(Mutex::new(loaded)));
 }
 
@@ -375,6 +420,7 @@ pub fn reload(app: &AppHandle) {
     if let Some(root) = paths::storage_root() {
         loaded.sync_folder = root.to_string_lossy().into_owned();
     }
+    crate::adblock::configure(&loaded.adblock);
     let previous_page_zoom = {
         let state = app.state::<SettingsState>();
         let mut guard = state.0.lock().expect("settings lock");
@@ -425,6 +471,7 @@ pub fn store(
         }
         let previous_page_zoom = guard.page_zoom;
         files::write_json(&paths::data_file(app, FILE), &settings)?;
+        crate::adblock::configure(&settings.adblock);
         *guard = settings.clone();
         (settings, previous_page_zoom)
     };
@@ -549,6 +596,26 @@ mod tests {
         assert!(loaded.print_editor.remove_ads);
         assert!(loaded.page_capture.full_page);
         assert!(loaded.hidden_toolbar_extensions.is_empty());
+    }
+
+    #[test]
+    fn older_settings_get_ad_blocker_defaults() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"searchEngine":"bing"}"#).expect("settings parse");
+        let loaded = loaded.normalize();
+        assert!(loaded.adblock.enabled);
+        assert!(loaded.adblock.allowed_sites.is_empty());
+    }
+
+    #[test]
+    fn paused_sites_are_cleaned_up() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"adblock":{"enabled":false,"allowedSites":[" WWW.Example.com ","example.com","","a b"]}}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert!(!loaded.adblock.enabled);
+        assert_eq!(loaded.adblock.allowed_sites, vec!["example.com".to_string()]);
     }
 
     #[test]

@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { FileArchive, FolderOpen, Puzzle, Settings2, Trash2 } from "lucide-react";
+import { FileArchive, FolderOpen, Pin, PinOff, Puzzle, Settings2, Trash2 } from "lucide-react";
 import type { ExtensionInfo } from "../../../types/browser";
 import { Button } from "../components/Button";
 import { ExtensionIcon } from "../components/ExtensionIcon";
 import { PageShell } from "../components/PageShell";
 import { Toggle } from "../components/Toggle";
+import { BUILTIN_TOOLS } from "../extensions/builtin";
 import {
   installExtensionFolder,
   installExtensionZip,
@@ -13,10 +14,12 @@ import {
   setExtensionEnabled,
 } from "../lib/browser-client";
 import { cn } from "../lib/cn";
-import { useExtensions } from "../lib/use-browser";
+import { saveToolbarPin, toolbarPinned } from "../lib/toolbar-pin";
+import { useExtensions, useSettings } from "../lib/use-browser";
 
 export function ExtensionsPage() {
   const { extensions, error: loadError } = useExtensions();
+  const settings = useSettings();
   const [status, setStatus] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -37,6 +40,12 @@ export function ExtensionsPage() {
 
   const act = (action: Promise<unknown>) => {
     action.catch((reason: unknown) => setStatus({ tone: "error", text: String(reason) }));
+  };
+
+  const setPinned = (id: string, pinned: boolean) => {
+    if (settings) {
+      act(saveToolbarPin(settings, id, pinned));
+    }
   };
 
   return (
@@ -118,6 +127,21 @@ export function ExtensionsPage() {
                     />
                   </div>
                   <div id={`${domId}-actions`} className="flex justify-end gap-2">
+                    <Button
+                      id={`${domId}-pin`}
+                      size="sm"
+                      variant="ghost"
+                      disabled={!settings}
+                      title={toolbarPinned(settings, extension.id) ? "Hide from the address bar" : "Show on the address bar"}
+                      onClick={() => setPinned(extension.id, !toolbarPinned(settings, extension.id))}
+                    >
+                      {toolbarPinned(settings, extension.id) ? (
+                        <PinOff id={`${domId}-pin-icon`} className="size-3.5" aria-hidden />
+                      ) : (
+                        <Pin id={`${domId}-pin-icon`} className="size-3.5" aria-hidden />
+                      )}
+                      {toolbarPinned(settings, extension.id) ? "Unpin" : "Pin"}
+                    </Button>
                     {extension.optionsPage ? (
                       <Button id={`${domId}-options`} size="sm" variant="ghost" onClick={() => act(openExtensionOptions(extension.id))}>
                         <Settings2 id={`${domId}-options-icon`} className="size-3.5" aria-hidden />
@@ -135,6 +159,51 @@ export function ExtensionsPage() {
           </div>
         )}
 
+        <section id="extensions-page-builtin" className="flex flex-col gap-3">
+          <h2 id="extensions-page-builtin-title" className="text-sm font-semibold">
+            Built-in tools
+          </h2>
+          <div id="extensions-page-builtin-grid" className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {BUILTIN_TOOLS.map((tool) => {
+              const domId = `builtin-${tool.id}`;
+              const pinned = toolbarPinned(settings, tool.id);
+              const Icon = tool.icon;
+              return (
+                <article
+                  key={tool.id}
+                  id={domId}
+                  className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 p-4"
+                >
+                  <Icon id={`${domId}-icon`} className="size-8 shrink-0 text-zinc-300" aria-hidden />
+                  <div id={`${domId}-text`} className="min-w-0 flex-1">
+                    <h3 id={`${domId}-name`} className="truncate text-sm font-semibold">
+                      {tool.name}
+                    </h3>
+                    <p id={`${domId}-description`} className="line-clamp-2 text-xs text-zinc-400">
+                      {tool.description}
+                    </p>
+                  </div>
+                  <Button
+                    id={`${domId}-pin`}
+                    size="sm"
+                    variant="ghost"
+                    disabled={!settings}
+                    title={pinned ? "Hide from the address bar" : "Show on the address bar"}
+                    onClick={() => setPinned(tool.id, !pinned)}
+                  >
+                    {pinned ? (
+                      <PinOff id={`${domId}-pin-icon`} className="size-3.5" aria-hidden />
+                    ) : (
+                      <Pin id={`${domId}-pin-icon`} className="size-3.5" aria-hidden />
+                    )}
+                    {pinned ? "Unpin" : "Pin"}
+                  </Button>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+
         <section id="extensions-page-install" className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-5">
           <h2 id="extensions-page-install-title" className="flex items-center gap-2 text-sm font-semibold">
             <Puzzle id="extensions-page-install-icon" className="size-4 text-sky-400" aria-hidden />
@@ -149,7 +218,7 @@ export function ExtensionsPage() {
               Click <strong>Install .zip or .crx</strong> and pick the file. An unzipped folder works with <strong>Load unpacked</strong>.
             </li>
             <li id="extensions-page-install-step-3">
-              The extension icon appears next to the address bar. Click it to open the extension.
+              The extension icon appears next to the address bar. Unpin it on this page, or right-click the icon, to take it off the toolbar.
             </li>
           </ol>
           <p id="extensions-page-install-note" className="mt-3 text-xs text-zinc-500">

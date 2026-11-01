@@ -32,13 +32,14 @@ pub fn set_storage_root(path: Option<PathBuf>) {
     }
 }
 
-/// `profiles.json` for every profile. In the sync folder when one is set, otherwise app data.
+/// Folder that holds `profiles.json` and one folder per profile: the sync folder when one is set,
+/// otherwise app data.
+pub fn data_root(app: &AppHandle) -> PathBuf {
+    storage_root().unwrap_or_else(|| root_data_dir(app))
+}
+
 pub fn profiles_registry(app: &AppHandle) -> PathBuf {
-    if let Some(root) = storage_root() {
-        root.join("profiles.json")
-    } else {
-        root_data_dir(app).join("profiles.json")
-    }
+    data_root(app).join("profiles.json")
 }
 
 pub fn machine_sync_file(app: &AppHandle) -> PathBuf {
@@ -46,18 +47,7 @@ pub fn machine_sync_file(app: &AppHandle) -> PathBuf {
 }
 
 pub fn profile_data_dir(app: &AppHandle, id: &str) -> PathBuf {
-    if let Some(root) = storage_root() {
-        return root.join(crate::profiles::sync_dir_name(app, id));
-    }
-    appdata_profile_dir(&root_data_dir(app), id)
-}
-
-pub fn appdata_profile_dir(appdata: &std::path::Path, id: &str) -> PathBuf {
-    if id == crate::profiles::DEFAULT_ID {
-        appdata.to_path_buf()
-    } else {
-        appdata.join("profiles").join(id)
-    }
+    data_root(app).join(crate::profiles::folder_name(app, id))
 }
 
 pub fn data_file(app: &AppHandle, name: &str) -> PathBuf {

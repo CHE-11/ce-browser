@@ -4,6 +4,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
+  AdblockStats,
   BookmarkNode,
   BookmarkTree,
   BrowserCommand,
@@ -14,6 +15,7 @@ import type {
   ExtractedPage,
   HistoryItem,
   PageCaptureResult,
+  PageTechnologies,
   PageToolRequest,
   PdfOptions,
   SyncStatus,
@@ -82,6 +84,14 @@ export function reload(id: number) {
 
 export function clearSiteCache(id: number) {
   return invoke<void>("clear_site_cache", { id });
+}
+
+export function getAdblockStats(id: number) {
+  return invoke<AdblockStats>("get_adblock_stats", { id });
+}
+
+export function onAdblockStats(handler: (stats: AdblockStats) => void): Promise<UnlistenFn> {
+  return listen<AdblockStats>("adblock-stats", (event) => handler(event.payload));
 }
 
 export function stop(id: number) {
@@ -221,6 +231,10 @@ export function copyPagePng(id: number, fullPage: boolean, loadLazy: boolean) {
 
 export function extractPage(id: number) {
   return invoke<ExtractedPage>("extract_page", { id });
+}
+
+export function detectTechnologies(id: number) {
+  return invoke<PageTechnologies>("detect_technologies", { id });
 }
 
 export function printTabToPdf(id: number, options: PdfOptions, path: string) {
@@ -515,8 +529,16 @@ export function onSyncStatus(handler: (status: SyncStatus) => void): Promise<Unl
   return listen<SyncStatus>("sync-status", (event) => handler(event.payload));
 }
 
-export function pickSyncFolder(title: string) {
-  return chooseFolder(title);
+export async function pickSyncFolder(title: string) {
+  const path = await open({ directory: true, multiple: false, title });
+  if (path == null) {
+    return null;
+  }
+  if (typeof path === "string" && path.trim()) {
+    return path;
+  }
+  const detail = typeof path === "string" ? "an empty path" : JSON.stringify(path);
+  throw new Error(`Couldn't read the selected folder. The dialog returned ${detail}.`);
 }
 
 export function listProfiles() {

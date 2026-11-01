@@ -45,6 +45,7 @@ import {
   stop,
 } from "../../lib/browser-client";
 import { cn } from "../../lib/cn";
+import { openToolbarPinMenu, toolbarPinned } from "../../lib/toolbar-pin";
 import { buildSuggestions, omniboxHeight } from "../../lib/omnibox";
 import { flattenBookmarks } from "../../lib/use-browser";
 import { BuiltinExtensions } from "../../extensions";
@@ -282,7 +283,9 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     return total > 0 ? Math.min(1, received / total) : null;
   }, [activeDownloads]);
 
-  const toolbarExtensions = extensions.filter((extension) => extension.enabled);
+  const toolbarExtensions = extensions.filter(
+    (extension) => extension.enabled && toolbarPinned(settings, extension.id),
+  );
   const secure = activeTab?.url.startsWith("https://");
   const insecure = activeTab?.url.startsWith("http://");
 
@@ -395,28 +398,34 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
 
       <div id="address-extensions" className="flex items-center">
         {toolbarExtensions.map((extension) => (
-          <IconButton
+          <span
             key={extension.id}
-            id={`address-extension-${extension.id}`}
-            label={extension.name}
-            disabled={!extension.popup}
-            onClick={(event) =>
-              void openPopupBelow(event.currentTarget, {
-                kind: "extension",
-                params: `id=${extension.id}`,
-                width: 380,
-                height: 600,
-              })
-            }
+            id={`address-extension-${extension.id}-pin`}
+            className="inline-flex"
+            onContextMenu={(event) => openToolbarPinMenu(event, extension.id)}
           >
-            <ExtensionIcon
-              id={`address-extension-${extension.id}-icon`}
-              extensionId={extension.id}
-              name={extension.name}
-              src={extension.icon}
-              className="size-4"
-            />
-          </IconButton>
+            <IconButton
+              id={`address-extension-${extension.id}`}
+              label={extension.name}
+              disabled={!extension.popup}
+              onClick={(event) =>
+                void openPopupBelow(event.currentTarget, {
+                  kind: "extension",
+                  params: `id=${extension.id}`,
+                  width: 380,
+                  height: 600,
+                })
+              }
+            >
+              <ExtensionIcon
+                id={`address-extension-${extension.id}-icon`}
+                extensionId={extension.id}
+                name={extension.name}
+                src={extension.icon}
+                className="size-4"
+              />
+            </IconButton>
+          </span>
         ))}
         <IconButton
           id="address-extensions-page"
@@ -426,6 +435,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           <Puzzle id="address-extensions-page-icon" aria-hidden />
         </IconButton>
       </div>
+      <div id="address-extensions-end" className="mx-0.5 h-4 w-px shrink-0 bg-zinc-600" />
 
       <IconButton
         id="address-downloads"

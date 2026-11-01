@@ -20,7 +20,7 @@ const MAX_CLOSED: usize = 25;
 const DEFAULT_UI_HEIGHT: f64 = 84.0;
 const POPUP_TOGGLE_WINDOW: Duration = Duration::from_millis(400);
 /// Popups that stay hidden until `PopupFrame` reports the content height.
-const MEASURED_POPUPS: &[&str] = &["bookmark-folder", "print-pdf", "page-capture"];
+const MEASURED_POPUPS: &[&str] = &["bookmark-folder", "print-pdf", "page-capture", "what-runs", "ad-blocker"];
 const ZOOM_LEVELS: &[f64] = &[
     0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
 ];
@@ -808,6 +808,7 @@ fn allocate_window(app: &AppHandle) -> String {
     with_state(app, |state| {
         state.next_window += 1;
         let number = state.next_window;
+        // `main-*` is listed in capabilities/default.json. A different prefix cannot drag or invoke.
         let label = format!("main-{number}");
         let ui = format!("ui-{number}");
         state.windows.push(WindowChrome::new(&label, &ui));
@@ -1183,6 +1184,13 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
 }
 
 fn retire_webview(app: &AppHandle, label: Option<String>) {
+    if let Some(id) = label
+        .as_deref()
+        .and_then(|label| label.strip_prefix("tab-"))
+        .and_then(|id| id.parse().ok())
+    {
+        crate::adblock::forget(id);
+    }
     let Some(webview) = label.and_then(|label| app.get_webview(&label)) else {
         return;
     };

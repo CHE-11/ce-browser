@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { AppMenu } from "../components/AppMenu";
+import { ExtensionPinMenu } from "../components/ExtensionPinMenu";
 import { BookmarkAdd } from "../components/BookmarksBar/BookmarkAdd";
 import { BookmarkEditor } from "../components/BookmarksBar/BookmarkEditor";
 import { BookmarkFolderMenu } from "../components/BookmarksBar/BookmarkFolderMenu";
@@ -7,8 +8,10 @@ import { BookmarksBarMenu } from "../components/BookmarksBar/BookmarksBarMenu";
 import { DownloadsPanel } from "../components/DownloadsPanel";
 import { AddressBarEllipsisMenu } from "../components/AddressBarEllipsisMenu";
 import { TabMenu } from "../components/TabMenu";
+import { AdBlockerPopover } from "../extensions/ad-blocker/AdBlockerPopover";
 import { PageCapturePopover } from "../extensions/page-capture/PageCapturePopover";
 import { PrintPdfPopover } from "../extensions/print-pdf/PrintPdfPopover";
+import { WhatRunsPopover } from "../extensions/what-runs/WhatRunsPopover";
 import { useAppearanceFromSettings } from "../lib/use-browser";
 
 type PopupPageProps = {
@@ -56,6 +59,12 @@ export function PopupPage({ popup, params }: PopupPageProps) {
       return <PrintPdfPopover params={params} />;
     case "page-capture":
       return <PageCapturePopover params={params} />;
+    case "what-runs":
+      return <WhatRunsPopover params={params} />;
+    case "ad-blocker":
+      return <AdBlockerPopover params={params} />;
+    case "extension-pin":
+      return <ExtensionPinMenu extensionId={params.get("id") ?? ""} />;
     default:
       return (
         <div id="popup-unknown" className="p-3 text-sm text-zinc-500">

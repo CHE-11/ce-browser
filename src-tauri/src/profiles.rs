@@ -29,6 +29,9 @@ use windows::core::{GUID, HSTRING, Interface, PWSTR};
 use crate::{files, paths};
 
 pub const DEFAULT_ID: &str = "default";
+pub const DEFAULT_FOLDER: &str = "Default";
+/// Name and sync folder of the default profile before it was called Default.
+const LEGACY_DEFAULT_NAME: &str = "ce-browser";
 
 const APP_MODEL_FMT: u128 = 0x9F4C2855_9F79_4B39_A8D0_E1D42DE1D5F3;
 
@@ -65,7 +68,7 @@ impl Default for ProfileRecord {
     fn default() -> Self {
         Self {
             id: DEFAULT_ID.into(),
-            name: "ce-browser".into(),
+            name: DEFAULT_FOLDER.into(),
             shortcut: String::new(),
             icon: String::new(),
             icon_file: String::new(),
@@ -344,11 +347,7 @@ pub fn create(app: &AppHandle, name: &str) -> Result<Vec<ProfileInfo>, String> {
     let mut file = load(app);
     let id = unique_id(&file, name);
     let folder = unique_directory_name(name, &id, &taken_folders(&file));
-    let data_dir = if let Some(root) = paths::storage_root() {
-        root.join(&folder)
-    } else {
-        paths::appdata_profile_dir(&paths::root_data_dir(app), &id)
-    };
+    let data_dir = paths::data_root(app).join(&folder);
     fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
     fs::create_dir_all(paths::profile_webview_dir(app, &id)).map_err(|error| error.to_string())?;
     let shortcut = match install_shortcut(&id, name, None) {
@@ -418,6 +417,7 @@ pub fn delete(app: &AppHandle, id: &str) -> Result<Vec<ProfileInfo>, String> {
     let profile = file.profiles[index].clone();
     // The profile stays in the list until its own files are gone, so a locked folder can be retried.
     purge_profile_storage(
+        &paths::data_root(app),
         &paths::profile_data_dir(app, id),
         &paths::profile_webview_dir(app, id),
         id,
@@ -437,18 +437,23 @@ pub fn delete(app: &AppHandle, id: &str) -> Result<Vec<ProfileInfo>, String> {
 
 /// Settings, history, bookmarks, extensions, downloads, the session, and styles live in `data_dir`.
 /// Cookies and the installed extension state live in `webview_dir`.
-fn purge_profile_storage(data_dir: &Path, webview_dir: &Path, id: &str) -> Result<(), String> {
-    remove_profile_dir(data_dir, id)?;
-    remove_profile_dir(webview_dir, id)?;
+fn purge_profile_storage(
+    data_root: &Path,
+    data_dir: &Path,
+    webview_dir: &Path,
+    id: &str,
+) -> Result<(), String> {
+    remove_profile_dir(data_dir, id, data_root)?;
+    remove_profile_dir(webview_dir, id, data_root)?;
     Ok(())
 }
 
-fn remove_profile_dir(path: &Path, id: &str) -> Result<(), String> {
+fn remove_profile_dir(path: &Path, id: &str, data_root: &Path) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    if !profile_child_dir(&canonical, id) || canonical.join("profiles.json").is_file() {
+    if !profile_child_dir(&canonical, id, data_root) || canonical.join("profiles.json").is_file() {
         return Err("Refusing to delete a folder outside that profile.".into());
     }
     let mut last = String::new();
@@ -470,8 +475,8 @@ fn remove_profile_dir(path: &Path, id: &str) -> Result<(), String> {
     ))
 }
 
-/// App data and WebView2 keep `profiles/<id>`. A sync folder keeps `<profile name>` at its root.
-fn profile_child_dir(path: &Path, id: &str) -> bool {
+/// WebView2 keeps `profiles/<id>`. The data root keeps `<profile name>` directly inside it.
+fn profile_child_dir(path: &Path, id: &str, data_root: &Path) -> bool {
     let Some(name) = path.file_name() else {
         return false;
     };
@@ -481,30 +486,18 @@ fn profile_child_dir(path: &Path, id: &str) -> bool {
     if parent.file_name().is_some_and(|parent_name| parent_name == "profiles") && name == id {
         return true;
     }
-    if let Some(root) = paths::storage_root() {
-        let root = root.canonicalize().unwrap_or(root);
-        if parent == root {
-            return true;
-        }
-    }
-    false
+    let root = data_root.canonicalize().unwrap_or_else(|_| data_root.to_path_buf());
+    parent == root
 }
 
-pub fn sync_dir_name(app: &AppHandle, id: &str) -> String {
-    let mut file = load(app);
-    assign_folders(&mut file);
-    file.profiles
-        .into_iter()
-        .find(|profile| profile.id == id)
-        .map(|profile| profile.folder)
-        .filter(|folder| valid_folder_name(folder))
-        .unwrap_or_else(|| {
-            if id == DEFAULT_ID {
-                "ce-browser".into()
-            } else {
-                sanitize_directory_name(id)
-            }
-        })
+/// Folder of a profile inside the data root.
+pub fn folder_name(app: &AppHandle, id: &str) -> String {
+    folder_of(&load(app), id)
+}
+
+/// Folder of the default profile inside `root`.
+pub fn default_dir(root: &Path) -> PathBuf {
+    root.join(folder_of(&read_profiles_file(&root.join("profiles.json")), DEFAULT_ID))
 }
 
 pub fn sync_has_profile_settings(folder: &Path) -> bool {
@@ -638,8 +631,25 @@ static PROFILE_MUTEX: OnceLock<usize> = OnceLock::new();
 fn load(app: &AppHandle) -> ProfilesFile {
     let mut file: ProfilesFile = files::read_json(&registry_path(app));
     ensure_default(&mut file);
+    migrate_default(&mut file);
     assign_folders(&mut file);
     file
+}
+
+/// The default profile used to be named `ce-browser` and kept that folder in a sync folder.
+fn migrate_default(file: &mut ProfilesFile) {
+    let other_owns_default = file.profiles.iter().any(|profile| {
+        profile.id != DEFAULT_ID && profile.folder.eq_ignore_ascii_case(DEFAULT_FOLDER)
+    });
+    let Some(record) = file.profiles.iter_mut().find(|profile| profile.id == DEFAULT_ID) else {
+        return;
+    };
+    if record.name == LEGACY_DEFAULT_NAME || record.name.trim().is_empty() {
+        record.name = DEFAULT_FOLDER.into();
+    }
+    if record.folder == LEGACY_DEFAULT_NAME && !other_owns_default {
+        record.folder = DEFAULT_FOLDER.into();
+    }
 }
 
 fn save(app: &AppHandle, file: &ProfilesFile) -> Result<(), String> {
@@ -1051,56 +1061,131 @@ const PROFILE_FILES: &[&str] = &[
     "window-icon.png",
 ];
 
-/// Moves profile stores between app data and a sync folder.
+/// Moves profile stores between app data and a sync folder. Both keep `profiles.json` and one
+/// folder per profile at the root.
 /// `overwrite` replaces the destination. When it is false and the destination already has a file,
 /// the source copy is removed so the profile is not kept in both places.
-pub fn transfer_appdata_to_sync(appdata: &Path, sync_folder: &Path) -> Result<(), String> {
-    move_entry(
-        &appdata.join("profiles.json"),
-        &sync_folder.join("profiles.json"),
-        false,
-    )?;
-    let file = read_profiles_file(&sync_folder.join("profiles.json"));
-    let default_folder = folder_of(&file, DEFAULT_ID);
-    move_loose_profile(appdata, &sync_folder.join(&default_folder), false)?;
-    let named = appdata.join("profiles");
-    if named.is_dir() {
-        for entry in fs::read_dir(&named).map_err(|error| error.to_string())?.flatten() {
-            if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
-                continue;
-            }
-            let id_text = entry.file_name().to_string_lossy().into_owned();
-            if !acceptable_dir_name(&id_text) {
-                continue;
-            }
-            let dest = sync_folder.join(folder_of(&file, &id_text));
-            if id_text == DEFAULT_ID {
-                move_loose_profile(&entry.path(), &dest, false)?;
-            } else {
-                move_profile_dir(&entry.path(), &dest, false)?;
-            }
-        }
-    }
-    layout_sync_profiles(sync_folder)
+pub fn transfer_appdata_to_sync(appdata: &Path, sync_folder: &Path) -> Result<bool, String> {
+    transfer_profiles(appdata, true, sync_folder, false, false)
 }
 
-pub fn transfer_sync_to_sync(from: &Path, to: &Path) -> Result<(), String> {
+pub fn transfer_sync_to_sync(from: &Path, to: &Path) -> Result<bool, String> {
     if from == to {
-        return Ok(());
+        return Ok(false);
     }
-    move_entry(&from.join("profiles.json"), &to.join("profiles.json"), false)?;
+    transfer_profiles(from, false, to, false, false)
+}
+
+pub fn transfer_sync_to_appdata(sync_folder: &Path, appdata: &Path) -> Result<bool, String> {
+    transfer_profiles(sync_folder, false, appdata, true, true)
+}
+
+/// Returns true when any profile folder moved, so shortcut icons need to point at the new place.
+fn transfer_profiles(
+    from: &Path,
+    from_appdata: bool,
+    to: &Path,
+    to_appdata: bool,
+    overwrite: bool,
+) -> Result<bool, String> {
+    let mut moved = migrate_layout(from, from_appdata)?;
+    moved |= migrate_layout(to, to_appdata)?;
+    let source = read_profiles_file(&from.join("profiles.json"));
+    move_entry(&from.join("profiles.json"), &to.join("profiles.json"), overwrite)?;
     let file = read_profiles_file(&to.join("profiles.json"));
     for profile in &file.profiles {
-        let dest = to.join(&profile.folder);
-        if from.join(&profile.folder) != dest {
-            move_profile_dir(&from.join(&profile.folder), &dest, false)?;
+        let from_dir = from.join(folder_of(&source, &profile.id));
+        if from_dir.exists() {
+            move_profile_dir(&from_dir, &to.join(&profile.folder), overwrite)?;
+            moved = true;
         }
-        move_profile_dir(&from.join("profiles").join(&profile.id), &dest, false)?;
     }
-    layout_sync_profiles(to)
+    Ok(moved)
+}
+
+/// Puts every profile in `<root>\<folder>`. Older builds kept the default profile's files loose
+/// in app data (`loose_default`), other profiles in `profiles\<id>`, and the default profile of a
+/// sync folder in `ce-browser`. A folder already in this layout is left unchanged.
+/// Returns true when a profile folder or file moved.
+pub fn migrate_layout(root: &Path, loose_default: bool) -> Result<bool, String> {
+    let registry = root.join("profiles.json");
+    let stored_value = fs::read_to_string(&registry)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+    let mut file: ProfilesFile = if registry.is_file() {
+        files::read_json(&registry)
+    } else {
+        ProfilesFile::default()
+    };
+    ensure_default(&mut file);
+    let stored_folders: Vec<(String, String)> = file
+        .profiles
+        .iter()
+        .map(|profile| (profile.id.clone(), profile.folder.clone()))
+        .collect();
+    migrate_default(&mut file);
+    assign_folders(&mut file);
+
+    let mut moved = false;
+    if loose_default && has_loose_files(root) {
+        move_loose_profile(root, &root.join(folder_of(&file, DEFAULT_ID)), false)?;
+        moved = true;
+    }
+    for profile in &file.profiles {
+        let dest = root.join(&profile.folder);
+        let old = stored_folders
+            .iter()
+            .find(|(id, _)| id == &profile.id)
+            .map(|(_, folder)| folder.as_str())
+            .unwrap_or_default();
+        if valid_folder_name(old) && !old.eq_ignore_ascii_case(&profile.folder) {
+            let source = root.join(old);
+            if source.is_dir() {
+                move_profile_dir(&source, &dest, false)?;
+                moved = true;
+            }
+        }
+        let nested = root.join("profiles").join(&profile.id);
+        if nested.is_dir() {
+            move_profile_dir(&nested, &dest, false)?;
+            moved = true;
+        }
+    }
+    if let Ok(entries) = fs::read_dir(root.join("profiles")) {
+        let leftover = entries.flatten().any(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()));
+        if !leftover {
+            let _ = fs::remove_dir_all(root.join("profiles"));
+        }
+    }
+
+    let current = serde_json::to_value(&file).ok();
+    let changed = stored_value.is_some() && stored_value != current;
+    if moved || changed {
+        files::write_json(&registry, &file)?;
+    }
+    Ok(moved)
+}
+
+fn has_loose_files(dir: &Path) -> bool {
+    PROFILE_FILES.iter().any(|name| dir.join(name).is_file()) || dir.join("extensions").is_dir()
+}
+
+/// Points Start menu and taskbar shortcuts at each profile's icon after its folder moved.
+pub fn refresh_icons(app: &AppHandle) {
+    for profile in load(app).profiles {
+        if let Err(error) = refresh_shell_icons(app, &profile) {
+            eprintln!("profile icon: {error}");
+        }
+    }
 }
 
 pub fn discard_appdata_profiles(appdata: &Path) -> Result<(), String> {
+    let file = read_profiles_file(&appdata.join("profiles.json"));
+    for profile in &file.profiles {
+        if valid_folder_name(&profile.folder) {
+            remove_path(&appdata.join(&profile.folder))?;
+        }
+    }
     for name in PROFILE_FILES {
         remove_path(&appdata.join(name))?;
     }
@@ -1118,55 +1203,6 @@ pub fn discard_appdata_profiles(appdata: &Path) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-pub fn transfer_sync_to_appdata(sync_folder: &Path, appdata: &Path) -> Result<(), String> {
-    let file = read_profiles_file(&sync_folder.join("profiles.json"));
-    move_entry(
-        &sync_folder.join("profiles.json"),
-        &appdata.join("profiles.json"),
-        true,
-    )?;
-    for profile in &file.profiles {
-        let named = sync_folder.join(&profile.folder);
-        let nested = sync_folder.join("profiles").join(&profile.id);
-        let source = if named.join("settings.json").is_file() {
-            named
-        } else if nested.exists() {
-            nested
-        } else {
-            named
-        };
-        if profile.id == DEFAULT_ID {
-            move_loose_profile(&source, appdata, true)?;
-            if source.is_dir() && source != appdata {
-                let _ = remove_path(&source);
-            }
-        } else if source.exists() {
-            move_profile_dir(&source, &appdata.join("profiles").join(&profile.id), true)?;
-        }
-    }
-    Ok(())
-}
-
-/// Moves `profiles/<id>` up to a folder named for the profile, at the sync folder root.
-pub fn layout_sync_profiles(sync_folder: &Path) -> Result<(), String> {
-    let registry = sync_folder.join("profiles.json");
-    let file = read_profiles_file(&registry);
-    for profile in &file.profiles {
-        let dest = sync_folder.join(&profile.folder);
-        let nested = sync_folder.join("profiles").join(&profile.id);
-        if nested.exists() && nested != dest {
-            move_profile_dir(&nested, &dest, false)?;
-        }
-    }
-    if let Ok(entries) = fs::read_dir(sync_folder.join("profiles")) {
-        let leftover = entries.flatten().any(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()));
-        if !leftover {
-            let _ = fs::remove_dir_all(sync_folder.join("profiles"));
-        }
-    }
-    files::write_json(&registry, &file)
 }
 
 fn move_loose_profile(from_dir: &Path, to_dir: &Path, overwrite: bool) -> Result<(), String> {
@@ -1254,6 +1290,7 @@ fn read_profiles_file(path: &Path) -> ProfilesFile {
         ProfilesFile::default()
     };
     ensure_default(&mut file);
+    migrate_default(&mut file);
     assign_folders(&mut file);
     file
 }
@@ -1275,19 +1312,27 @@ fn taken_folders(file: &ProfilesFile) -> Vec<String> {
         .collect()
 }
 
+/// Gives every profile without a stored folder one that no other profile uses.
 fn assign_folders(file: &mut ProfilesFile) {
-    let mut used = Vec::new();
+    let mut used: Vec<String> = Vec::new();
     for profile in &mut file.profiles {
-        if !valid_folder_name(&profile.folder) {
-            profile.folder = unique_directory_name(&profile.name, &profile.id, &used);
+        if valid_folder_name(&profile.folder) && !folder_taken(&profile.folder, &used) {
+            used.push(profile.folder.clone());
+        } else {
+            profile.folder.clear();
         }
-        used.push(profile.folder.clone());
+    }
+    for profile in &mut file.profiles {
+        if profile.folder.is_empty() {
+            profile.folder = unique_directory_name(&profile.name, &profile.id, &used);
+            used.push(profile.folder.clone());
+        }
     }
 }
 
 fn fallback_folder(id: &str) -> String {
     if id == DEFAULT_ID {
-        "ce-browser".into()
+        DEFAULT_FOLDER.into()
     } else {
         let name = sanitize_directory_name(id);
         if valid_folder_name(&name) {
@@ -1353,27 +1398,26 @@ fn folder_taken(name: &str, used: &[String]) -> bool {
     used.iter().any(|folder| folder.eq_ignore_ascii_case(name))
 }
 
-fn acceptable_dir_name(name: &str) -> bool {
-    !name.is_empty()
-        && name != "."
-        && name != ".."
-        && name
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '-')
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
 
-    use super::{profile_child_dir, purge_profile_storage, remove_profile_dir, safe_profile_id};
+    use super::{
+        ProfilesFile, migrate_layout, profile_child_dir, purge_profile_storage, read_profiles_file,
+        remove_profile_dir, safe_profile_id,
+    };
+
+    fn registry(root: &std::path::Path) -> ProfilesFile {
+        read_profiles_file(&root.join("profiles.json"))
+    }
 
     #[test]
     fn deleting_a_profile_removes_its_stores() {
         let root = std::env::temp_dir().join(format!("ce-browser-profile-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let id = "work";
-        let data = root.join("roaming").join("profiles").join(id);
+        let roaming = root.join("roaming");
+        let data = roaming.join("Work");
         let webview = root.join("local").join("profiles").join(id);
         fs::create_dir_all(data.join("extensions")).unwrap();
         fs::create_dir_all(&webview).unwrap();
@@ -1383,10 +1427,99 @@ mod tests {
         fs::write(data.join("extensions").join("manifest.json"), "{}").unwrap();
         fs::write(webview.join("Cookies"), "x").unwrap();
 
-        purge_profile_storage(&data, &webview, id).unwrap();
+        purge_profile_storage(&roaming, &data, &webview, id).unwrap();
 
         assert!(!data.exists());
         assert!(!webview.exists());
+        assert!(roaming.exists());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn old_app_data_moves_into_one_folder_per_profile() {
+        let root = std::env::temp_dir().join(format!("ce-browser-appdata-layout-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("profiles").join("work").join("extensions")).unwrap();
+        fs::create_dir_all(root.join("extensions").join("ublock")).unwrap();
+        fs::write(
+            root.join("profiles.json"),
+            r#"{"profiles":[{"id":"default","name":"ce-browser"},{"id":"work","name":"Work"}]}"#,
+        )
+        .unwrap();
+        fs::write(root.join("sync-folder.json"), "{}").unwrap();
+        for name in ["settings.json", "downloads.json", "session.json", "styles.css"] {
+            fs::write(root.join(name), "{}").unwrap();
+        }
+        fs::write(root.join("extensions").join("ublock").join("manifest.json"), "{}").unwrap();
+        fs::write(root.join("profiles").join("work").join("settings.json"), "{}").unwrap();
+
+        assert!(migrate_layout(&root, true).unwrap());
+
+        for name in ["settings.json", "downloads.json", "session.json", "styles.css"] {
+            assert!(root.join("Default").join(name).is_file(), "{name}");
+            assert!(!root.join(name).exists(), "{name}");
+        }
+        assert!(root.join("Default").join("extensions").join("ublock").join("manifest.json").is_file());
+        assert!(root.join("Work").join("settings.json").is_file());
+        assert!(!root.join("profiles").exists());
+        assert!(root.join("sync-folder.json").is_file());
+        let file = registry(&root);
+        assert_eq!(file.profiles[0].name, "Default");
+        assert_eq!(file.profiles[0].folder, "Default");
+        assert_eq!(file.profiles[1].folder, "Work");
+
+        let written = fs::read_to_string(root.join("profiles.json")).unwrap();
+        assert!(!migrate_layout(&root, true).unwrap());
+        assert_eq!(fs::read_to_string(root.join("profiles.json")).unwrap(), written);
+        assert!(root.join("Default").join("settings.json").is_file());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_old_sync_folder_renames_ce_browser_to_default() {
+        let root = std::env::temp_dir().join(format!("ce-browser-sync-layout-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("ce-browser")).unwrap();
+        fs::create_dir_all(root.join("Work")).unwrap();
+        fs::write(
+            root.join("profiles.json"),
+            r#"{"profiles":[{"id":"default","name":"ce-browser","folder":"ce-browser"},{"id":"work","name":"Work","folder":"Work"}]}"#,
+        )
+        .unwrap();
+        fs::write(root.join("ce-browser").join("settings.json"), "{}").unwrap();
+        fs::write(root.join("Work").join("settings.json"), "{}").unwrap();
+
+        assert!(migrate_layout(&root, false).unwrap());
+
+        assert!(root.join("Default").join("settings.json").is_file());
+        assert!(!root.join("ce-browser").exists());
+        assert!(root.join("Work").join("settings.json").is_file());
+        let file = registry(&root);
+        assert_eq!(file.profiles[0].name, "Default");
+        assert_eq!(file.profiles[0].folder, "Default");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_profile_already_named_default_keeps_its_folder() {
+        let root = std::env::temp_dir().join(format!("ce-browser-default-clash-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("ce-browser")).unwrap();
+        fs::create_dir_all(root.join("Default")).unwrap();
+        fs::write(
+            root.join("profiles.json"),
+            r#"{"profiles":[{"id":"default","name":"ce-browser","folder":"ce-browser"},{"id":"default-2","name":"Default","folder":"Default"}]}"#,
+        )
+        .unwrap();
+        fs::write(root.join("ce-browser").join("settings.json"), "{\"a\":1}").unwrap();
+        fs::write(root.join("Default").join("settings.json"), "{\"b\":2}").unwrap();
+
+        migrate_layout(&root, false).unwrap();
+
+        assert_eq!(fs::read_to_string(root.join("ce-browser").join("settings.json")).unwrap(), "{\"a\":1}");
+        assert_eq!(fs::read_to_string(root.join("Default").join("settings.json")).unwrap(), "{\"b\":2}");
+        let file = registry(&root);
+        assert_eq!(file.profiles[0].folder, "ce-browser");
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1400,10 +1533,10 @@ mod tests {
         fs::create_dir_all(root.join("profiles")).unwrap();
         fs::write(root.join("profiles.json"), "{}").unwrap();
 
-        let error = remove_profile_dir(&root.join("profiles").join(".."), "nope").unwrap_err();
+        let error = remove_profile_dir(&root.join("profiles").join(".."), "nope", &root).unwrap_err();
         assert!(error.contains("outside"));
         assert!(root.join("profiles.json").is_file());
-        assert!(!profile_child_dir(&root, "default"));
+        assert!(!profile_child_dir(&root, "default", &root));
         assert!(!safe_profile_id("default"));
         assert!(!safe_profile_id("../default"));
         assert!(safe_profile_id("work"));
@@ -1418,7 +1551,11 @@ mod tests {
         let sync = root.join("sync");
         fs::create_dir_all(appdata.join("profiles").join("work").join("extensions")).unwrap();
         fs::create_dir_all(appdata.join("extensions")).unwrap();
-        fs::write(appdata.join("profiles.json"), "{\"profiles\":[]}").unwrap();
+        fs::write(
+            appdata.join("profiles.json"),
+            r#"{"profiles":[{"id":"default","name":"ce-browser"},{"id":"work","name":"Work"}]}"#,
+        )
+        .unwrap();
         fs::write(appdata.join("sync-folder.json"), "{}").unwrap();
         for name in ["settings.json", "history.json", "bookmarks.json", "extensions.json"] {
             fs::write(appdata.join(name), "{}").unwrap();
@@ -1429,16 +1566,27 @@ mod tests {
         super::transfer_appdata_to_sync(&appdata, &sync).unwrap();
 
         assert!(sync.join("profiles.json").is_file());
-        assert!(sync.join("ce-browser").join("settings.json").is_file());
-        assert!(sync.join("ce-browser").join("history.json").is_file());
-        assert!(sync.join("ce-browser").join("bookmarks.json").is_file());
-        assert!(sync.join("ce-browser").join("extensions").join("manifest.json").is_file());
-        assert!(sync.join("work").join("settings.json").is_file());
-        assert!(!sync.join("profiles").join("default").exists());
+        assert!(sync.join("Default").join("settings.json").is_file());
+        assert!(sync.join("Default").join("history.json").is_file());
+        assert!(sync.join("Default").join("bookmarks.json").is_file());
+        assert!(sync.join("Default").join("extensions").join("manifest.json").is_file());
+        assert!(sync.join("Work").join("settings.json").is_file());
+        assert!(!sync.join("profiles").exists());
         assert!(!appdata.join("settings.json").exists());
+        assert!(!appdata.join("Default").exists());
+        assert!(!appdata.join("Work").exists());
         assert!(!appdata.join("profiles.json").exists());
-        assert!(!appdata.join("profiles").join("work").exists());
+        assert!(!appdata.join("profiles").exists());
         assert!(appdata.join("sync-folder.json").is_file());
+
+        super::transfer_sync_to_appdata(&sync, &appdata).unwrap();
+
+        assert!(appdata.join("Default").join("settings.json").is_file());
+        assert!(appdata.join("Default").join("extensions").join("manifest.json").is_file());
+        assert!(appdata.join("Work").join("settings.json").is_file());
+        assert!(appdata.join("profiles.json").is_file());
+        assert!(!sync.join("Default").exists());
+        assert!(!sync.join("profiles.json").exists());
         let _ = fs::remove_dir_all(&root);
     }
 }

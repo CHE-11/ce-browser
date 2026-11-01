@@ -46,6 +46,8 @@ export type PopupKind =
   | "extension"
   | "print-pdf"
   | "page-capture"
+  | "what-runs"
+  | "ad-blocker"
   | "extension-pin";
 
 export type PopupRequest = {
@@ -153,6 +155,20 @@ export type BrowserSettings = {
   pageCapture: PageCaptureSettings;
   /** Extension ids left off the address bar. Empty means every enabled extension stays pinned. */
   hiddenToolbarExtensions: string[];
+  /** Built-in ad blocker. */
+  adblock: AdblockSettings;
+};
+
+export type AdblockSettings = {
+  enabled: boolean;
+  /** Hosts where blocking is paused, lowercase and without a leading `www.`. */
+  allowedSites: string[];
+};
+
+/** Requests blocked in a tab since its current page started loading. */
+export type AdblockStats = {
+  tabId: number;
+  blocked: number;
 };
 
 export type PrintMode = "article" | "full";
@@ -235,6 +251,32 @@ export type ExtractedPage = {
   byline: string;
   siteName: string;
   published: string;
+};
+
+export type TechnologyCategory =
+  | "framework"
+  | "language"
+  | "library"
+  | "ui"
+  | "cms"
+  | "analytics"
+  | "server"
+  | "hosting"
+  | "build"
+  | "other";
+
+/** One technology the What runs scan found on a page. */
+export type DetectedTechnology = {
+  name: string;
+  category: TechnologyCategory;
+  /** Null when the page does not expose a version. */
+  version: string | null;
+  /** Project home page, shown as a link. */
+  url: string | null;
+};
+
+export type PageTechnologies = {
+  technologies: DetectedTechnology[];
 };
 
 /** Paper and layout for a PDF. Sizes are inches and describe the page in portrait. */

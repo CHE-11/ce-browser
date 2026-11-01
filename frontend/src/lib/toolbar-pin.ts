@@ -4,11 +4,11 @@ import { openPopup, saveSettings } from "./browser-client";
 
 /** An extension stays on the address bar until its id is stored in settings. */
 export function toolbarPinned(settings: BrowserSettings | null, id: string) {
-  return !settings?.hiddenToolbarExtensions.includes(id);
+  return !settings?.hiddenToolbarExtensions?.includes(id);
 }
 
 export function saveToolbarPin(settings: BrowserSettings, id: string, pinned: boolean) {
-  const hidden = settings.hiddenToolbarExtensions.filter((item) => item !== id);
+  const hidden = (settings.hiddenToolbarExtensions ?? []).filter((item) => item !== id);
   if (!pinned) {
     hidden.push(id);
   }

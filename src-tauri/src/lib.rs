@@ -1,3 +1,4 @@
+mod adblock;
 mod bookmarks;
 mod capture;
 mod downloads;
@@ -15,11 +16,13 @@ mod sync;
 mod tabs;
 mod user_styles;
 mod webview2;
+mod what_runs;
 
 use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager, Window, WindowEvent};
 
+use adblock::AdblockStats;
 use bookmarks::{BookmarkNode, BookmarkTree};
 use capture::PageCaptureResult;
 use print::{ExtractedPage, PdfOptions};
@@ -30,6 +33,7 @@ use profiles::{ProfileIconChoice, ProfileInfo};
 use settings::BrowserSettings;
 use sync::SyncStatus;
 use tabs::{PopupRequest, TabsSnapshot};
+use what_runs::PageTechnologies;
 
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
@@ -121,6 +125,11 @@ async fn reload(app: AppHandle, id: u32) -> Result<(), String> {
 #[tauri::command]
 async fn clear_site_cache(app: AppHandle, id: u32) -> Result<(), String> {
     blocking(move || tabs::clear_site_cache(&app, id)).await
+}
+
+#[tauri::command]
+fn get_adblock_stats(id: u32) -> Result<AdblockStats, String> {
+    Ok(adblock::stats(id))
 }
 
 #[tauri::command]
@@ -234,6 +243,11 @@ async fn copy_page_png(
 #[tauri::command]
 async fn extract_page(app: AppHandle, id: u32) -> Result<ExtractedPage, String> {
     blocking(move || print::extract_page(&app, id)).await
+}
+
+#[tauri::command]
+async fn detect_technologies(app: AppHandle, id: u32) -> Result<PageTechnologies, String> {
+    blocking(move || what_runs::detect_technologies(&app, id)).await
 }
 
 #[tauri::command]
@@ -656,6 +670,7 @@ pub fn run() {
             go_forward,
             reload,
             clear_site_cache,
+            get_adblock_stats,
             stop,
             move_tab,
             detach_tab,
@@ -674,6 +689,7 @@ pub fn run() {
             capture_page_png,
             copy_page_png,
             extract_page,
+            detect_technologies,
             print_tab_to_pdf,
             print_html_to_pdf,
             print_html_dialog,
