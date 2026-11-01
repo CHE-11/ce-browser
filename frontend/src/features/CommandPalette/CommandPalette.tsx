@@ -117,6 +117,7 @@ export function CommandPalette() {
       { id: "shortcut-sheet", title: "Keyboard shortcut cheat sheet", hint: "Ctrl+/", group: "Action", run: () => sendUiCommand("shortcut-sheet") },
       { id: "group-by-site", title: "Group tabs by site", hint: "Tab groups", group: "Action", run: () => groupBySite() },
       { id: "bookmarks", title: "Bookmarks", hint: "ce://bookmarks", group: "Action", run: () => createTab("ce://bookmarks") },
+      { id: "boards", title: "Boards", hint: "ce://boards", group: "Action", run: () => createTab("ce://boards") },
       { id: "downloads", title: "Downloads", hint: "ce://downloads", group: "Action", run: () => createTab("ce://downloads") },
       { id: "files", title: "Files", hint: "ce://files", group: "Action", run: () => createTab("ce://files") },
       { id: "history", title: "History", hint: "ce://history", group: "Action", run: () => createTab("ce://history") },

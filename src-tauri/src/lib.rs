@@ -3,6 +3,7 @@ mod accent;
 mod adblock;
 mod answer;
 mod backdrop;
+mod boards;
 mod bookmark_health;
 mod bookmarks;
 mod browsers;
@@ -1179,6 +1180,118 @@ async fn check_prices(app: AppHandle) -> Result<Vec<tools::ProductPrice>, String
     blocking(move || tools::check_prices(&app)).await
 }
 
+// Boards: pins saved from pages, on boards inside folders.
+
+#[tauri::command]
+fn list_boards(app: AppHandle) -> boards::BoardsSnapshot {
+    boards::snapshot(&app)
+}
+
+#[tauri::command]
+fn create_board_folder(app: AppHandle, name: String, parent_id: Option<String>) -> Result<boards::BoardFolder, String> {
+    boards::create_folder(&app, &name, parent_id.as_deref())
+}
+
+#[tauri::command]
+fn rename_board_folder(app: AppHandle, id: String, name: String) -> Result<(), String> {
+    boards::rename_folder(&app, &id, &name)
+}
+
+#[tauri::command]
+fn move_board_folder(app: AppHandle, id: String, parent_id: Option<String>) -> Result<(), String> {
+    boards::move_folder(&app, &id, parent_id.as_deref())
+}
+
+#[tauri::command]
+async fn delete_board_folder(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(move || boards::delete_folder(&app, &id)).await
+}
+
+#[tauri::command]
+fn create_board(app: AppHandle, name: String, folder_id: Option<String>) -> Result<boards::Board, String> {
+    boards::create_board(&app, &name, folder_id.as_deref())
+}
+
+#[tauri::command]
+fn rename_board(app: AppHandle, id: String, name: String) -> Result<(), String> {
+    boards::rename_board(&app, &id, &name)
+}
+
+#[tauri::command]
+fn move_board(app: AppHandle, id: String, folder_id: Option<String>) -> Result<(), String> {
+    boards::move_board(&app, &id, folder_id.as_deref())
+}
+
+#[tauri::command]
+fn set_board_cover(app: AppHandle, id: String, pin_id: Option<String>) -> Result<(), String> {
+    boards::set_cover(&app, &id, pin_id.as_deref())
+}
+
+#[tauri::command]
+async fn delete_board(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(move || boards::delete_board(&app, &id)).await
+}
+
+#[tauri::command]
+fn update_pin(app: AppHandle, id: String, title: String, note: String) -> Result<(), String> {
+    boards::update_pin(&app, &id, &title, &note)
+}
+
+#[tauri::command]
+fn move_pins(app: AppHandle, ids: Vec<String>, board_id: String) -> Result<(), String> {
+    boards::move_pins(&app, &ids, &board_id)
+}
+
+#[tauri::command]
+async fn delete_pins(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    blocking(move || boards::delete_pins(&app, &ids)).await
+}
+
+#[tauri::command]
+async fn pin_page(app: AppHandle, id: u32, board_id: String, full_page: bool) -> Result<boards::Pin, String> {
+    blocking(move || boards::pin_page(&app, id, &board_id, full_page)).await
+}
+
+#[tauri::command]
+async fn pin_region(app: AppHandle, id: u32, board_id: String) -> Result<boards::Pin, String> {
+    blocking(move || boards::pin_region(&app, id, &board_id)).await
+}
+
+#[tauri::command]
+async fn pin_element(app: AppHandle, id: u32, board_id: String) -> Result<boards::Pin, String> {
+    blocking(move || boards::pin_element(&app, id, &board_id)).await
+}
+
+#[tauri::command]
+async fn pin_link(app: AppHandle, id: u32, board_id: String) -> Result<boards::Pin, String> {
+    blocking(move || boards::pin_link(&app, id, &board_id)).await
+}
+
+#[tauri::command]
+async fn pin_images(app: AppHandle, id: u32, board_id: String, urls: Vec<String>) -> Result<Vec<boards::Pin>, String> {
+    blocking(move || boards::pin_images(&app, id, &board_id, &urls)).await
+}
+
+#[tauri::command]
+async fn board_thumbnails(app: AppHandle, ids: Vec<String>) -> Result<std::collections::HashMap<String, String>, String> {
+    blocking(move || Ok(boards::thumbnails(&app, &ids))).await
+}
+
+#[tauri::command]
+async fn board_image(app: AppHandle, id: String) -> Result<String, String> {
+    blocking(move || boards::image_data_url(&app, &id)).await
+}
+
+#[tauri::command]
+async fn copy_pin_image(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(move || boards::copy_image(&app, &id)).await
+}
+
+#[tauri::command]
+async fn save_pin_image(app: AppHandle, id: String, path: String) -> Result<(), String> {
+    blocking(move || boards::save_image_as(&app, &id, &PathBuf::from(path))).await
+}
+
 #[tauri::command]
 async fn ask_page(app: AppHandle, id: u32, question: String) -> Result<String, String> {
     blocking(move || tools::ask_page(&app, id, &question)).await
@@ -1773,6 +1886,28 @@ pub fn run() {
             list_prices,
             track_price,
             check_prices,
+            list_boards,
+            create_board_folder,
+            rename_board_folder,
+            move_board_folder,
+            delete_board_folder,
+            create_board,
+            rename_board,
+            move_board,
+            set_board_cover,
+            delete_board,
+            update_pin,
+            move_pins,
+            delete_pins,
+            pin_page,
+            pin_region,
+            pin_element,
+            pin_link,
+            pin_images,
+            board_thumbnails,
+            board_image,
+            copy_pin_image,
+            save_pin_image,
             ask_page,
             find_deals,
             install_site,

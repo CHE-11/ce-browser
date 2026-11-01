@@ -1248,10 +1248,14 @@ pub(crate) const PROFILE_FILES: &[&str] = &[
     "shortcuts.json",
     "rewrite-rules.json",
     "prices.json",
+    "boards.json",
     "stats.json",
     "window-icon.png",
     "history-text.json",
 ];
+
+/// Folders inside a profile that move, export and import with `PROFILE_FILES`.
+pub(crate) const PROFILE_DIRS: &[&str] = &["extensions", "boards"];
 
 /// Moves profile stores between app data and a sync folder. Both keep `profiles.json` and one
 /// folder per profile at the root.
@@ -1365,7 +1369,7 @@ pub fn migrate_layout(root: &Path, loose_default: bool) -> Result<bool, String> 
 }
 
 fn has_loose_files(dir: &Path) -> bool {
-    PROFILE_FILES.iter().any(|name| dir.join(name).is_file()) || dir.join("extensions").is_dir()
+    PROFILE_FILES.iter().any(|name| dir.join(name).is_file()) || PROFILE_DIRS.iter().any(|name| dir.join(name).is_dir())
 }
 
 /// Points Start menu and taskbar shortcuts at each profile's icon after its folder moved.
@@ -1384,10 +1388,9 @@ pub fn discard_appdata_profiles(appdata: &Path) -> Result<(), String> {
             remove_path(&appdata.join(&profile.folder))?;
         }
     }
-    for name in PROFILE_FILES {
+    for name in PROFILE_FILES.iter().chain(PROFILE_DIRS) {
         remove_path(&appdata.join(name))?;
     }
-    remove_path(&appdata.join("extensions"))?;
     remove_path(&appdata.join("profiles.json"))?;
     remove_path(&appdata.join("profiles"))?;
     let Ok(entries) = fs::read_dir(appdata) else {
@@ -1408,14 +1411,9 @@ fn move_loose_profile(from_dir: &Path, to_dir: &Path, overwrite: bool) -> Result
         return Ok(());
     }
     let _ = fs::create_dir_all(to_dir);
-    for name in PROFILE_FILES {
+    for name in PROFILE_FILES.iter().chain(PROFILE_DIRS) {
         move_entry(&from_dir.join(name), &to_dir.join(name), overwrite)?;
     }
-    move_entry(
-        &from_dir.join("extensions"),
-        &to_dir.join("extensions"),
-        overwrite,
-    )?;
     let Ok(entries) = fs::read_dir(from_dir) else {
         return Ok(());
     };

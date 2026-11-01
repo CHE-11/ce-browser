@@ -1,5 +1,5 @@
 import { Fragment, useEffect, type ReactNode } from "react";
-import { Bookmark, Download, Folder, History, Puzzle, Settings } from "lucide-react";
+import { Bookmark, Download, Folder, History, LayoutGrid, Puzzle, Settings } from "lucide-react";
 import { cn } from "../lib/cn";
 import { focusRing } from "../lib/focus-ring";
 import { goToPage } from "../lib/route";
@@ -13,6 +13,7 @@ export type PageOutlineItem = {
 
 const NAV = [
   { page: "bookmarks", label: "Bookmarks", icon: Bookmark },
+  { page: "boards", label: "Boards", icon: LayoutGrid },
   { page: "downloads", label: "Downloads", icon: Download },
   { page: "files", label: "Files", icon: Folder },
   { page: "history", label: "History", icon: History },

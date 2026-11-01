@@ -101,7 +101,18 @@ pub fn copy_png(
     })
 }
 
-fn encode_png(image: &RgbaImage) -> Result<Vec<u8>, String> {
+/// The whole page or the visible area as an image, and whether a long page was cut off.
+pub fn page_image(
+    app: &AppHandle,
+    id: u32,
+    full_page: bool,
+    load_lazy: bool,
+) -> Result<(RgbaImage, bool), String> {
+    let capture = capture(app, id, full_page, load_lazy)?;
+    Ok((capture.image, capture.truncated))
+}
+
+pub fn encode_png(image: &RgbaImage) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     image
         .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
@@ -267,7 +278,8 @@ pub fn decode_png(data: &str) -> Result<Vec<u8>, String> {
         .map_err(|error| format!("{FAILURE} {error}"))
 }
 
-pub fn capture_region(app: &AppHandle, id: u32) -> Result<PageCaptureResult, String> {
+/// A rectangle the user drags on the page, as an image.
+pub fn region_image(app: &AppHandle, id: u32) -> Result<RgbaImage, String> {
     let webview = tabs::page_view(app, id).ok_or("This page is not loaded yet.")?;
     let value = webview2::evaluate(&webview, REGION_SCRIPT, Duration::from_secs(60), FAILURE)?;
     let x = value.get("x").and_then(|item| item.as_f64());
@@ -277,7 +289,33 @@ pub fn capture_region(app: &AppHandle, id: u32) -> Result<PageCaptureResult, Str
     let (Some(x), Some(y), Some(width), Some(height)) = (x, y, width, height) else {
         return Err("The capture was cancelled.".into());
     };
-    let metrics = cdp(&webview, "Page.getLayoutMetrics", "{}")?;
+    let (image, rect) = clip_shot(&webview, x, y, width, height)?;
+    *LAST_REGION.lock().expect("region") = Some(rect);
+    Ok(image)
+}
+
+/// A rectangle of the page in document CSS pixels, as an image. Tall rectangles stop at the
+/// full-page capture limit.
+pub fn clip_image(
+    app: &AppHandle,
+    id: u32,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<RgbaImage, String> {
+    let webview = tabs::page_view(app, id).ok_or("This page is not loaded yet.")?;
+    clip_shot(&webview, x, y, width, height.min(MAX_CSS_HEIGHT)).map(|(image, _)| image)
+}
+
+fn clip_shot(
+    webview: &Webview,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(RgbaImage, (f64, f64, f64, f64)), String> {
+    let metrics = cdp(webview, "Page.getLayoutMetrics", "{}")?;
     let page_width = metrics
         .pointer("/cssContentSize/width")
         .and_then(|item| item.as_f64())
@@ -286,9 +324,13 @@ pub fn capture_region(app: &AppHandle, id: u32) -> Result<PageCaptureResult, Str
         .pointer("/cssContentSize/height")
         .and_then(|item| item.as_f64())
         .unwrap_or(height);
-    let (x, y, width, height) = clip_inside(page_width, page_height, x, y, width, height);
-    *LAST_REGION.lock().expect("region") = Some((x, y, width, height));
-    let image = shot(&webview, x, y, width, height, 1.0, true)?;
+    let rect = clip_inside(page_width, page_height, x, y, width, height);
+    let image = shot(webview, rect.0, rect.1, rect.2, rect.3, 1.0, true)?;
+    Ok((image, rect))
+}
+
+pub fn capture_region(app: &AppHandle, id: u32) -> Result<PageCaptureResult, String> {
+    let image = region_image(app, id)?;
     let png = encode_png(&image)?;
     remember_png(&png);
     Ok(PageCaptureResult {

@@ -1,6 +1,7 @@
 import type { BrowserSettings, TabInfo } from "../../../../types/browser";
 import { AdBlockerButton } from "./ad-blocker/AdBlockerButton";
 import { AssistantButton } from "./assistant/Assistant";
+import { BoardsButton } from "./boards/BoardsButton";
 import { PageControlsButton } from "./page-controls/PageControlsButton";
 import { ClearCacheButton } from "./clear-cache/ClearCacheButton";
 import { PageCaptureButton } from "./page-capture/PageCaptureButton";
@@ -21,6 +22,8 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <PrintPdfButton activeTab={activeTab} settings={settings} />;
     case "page-capture":
       return <PageCaptureButton activeTab={activeTab} settings={settings} />;
+    case "boards":
+      return <BoardsButton activeTab={activeTab} />;
     case "media-hub":
       return <MediaHubButton />;
     case "clear-cache":

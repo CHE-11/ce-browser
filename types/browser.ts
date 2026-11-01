@@ -332,7 +332,9 @@ export type PopupKind =
   | "unresponsive"
   | "site-info"
   | "find-all"
-  | "selection-translate";
+  | "selection-translate"
+  | "boards"
+  | "board-images";
 
 export type PopupRequest = {
   kind: PopupKind;
@@ -756,7 +758,64 @@ export type PageToolRequest =
       tabId: number;
       title: string;
       url: string;
+    }
+  | {
+      tool: "boards";
+      action: "page" | "full-page" | "region" | "element" | "link" | "images";
+      window: string;
+      tabId: number;
+      title: string;
+      url: string;
+      boardId: string;
     };
+
+export type PinKind = "page" | "region" | "element" | "link" | "image";
+
+/** A folder on `ce://boards`. Folders nest; `parentId` is null at the top level. */
+export type BoardFolder = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: number;
+};
+
+export type Board = {
+  id: string;
+  name: string;
+  /** Null when the board sits at the top level. */
+  folderId: string | null;
+  /** Pin whose image shows for the board. Null uses the newest pin. */
+  coverPinId: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+/** One saved item on a board. Times are milliseconds since the epoch. */
+export type Pin = {
+  id: string;
+  boardId: string;
+  kind: PinKind;
+  title: string;
+  /** Page the pin was saved from. */
+  pageUrl: string;
+  /** Link target for link pins, image address for image pins. */
+  linkUrl: string;
+  /** Section text or link description. */
+  text: string;
+  note: string;
+  hasImage: boolean;
+  width: number;
+  height: number;
+  createdAt: number;
+};
+
+export type BoardsSnapshot = {
+  folders: BoardFolder[];
+  boards: Board[];
+  pins: Pin[];
+  /** Board the toolbar and the page menu save to by default. */
+  lastBoardId: string | null;
+};
 
 /** A tab's document copied for the print editor: no scripts, absolute URLs. */
 export type ExtractedPage = {

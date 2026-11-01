@@ -133,9 +133,11 @@ fn pack_profile(dir: &Path, name: &str) -> Result<Vec<u8>, String> {
                 }
             }
         }
-        let extensions = dir.join("extensions");
-        if extensions.is_dir() {
-            add_tree(&mut zip, &extensions, "extensions", options)?;
+        for name in profiles::PROFILE_DIRS {
+            let folder = dir.join(name);
+            if folder.is_dir() {
+                add_tree(&mut zip, &folder, name, options)?;
+            }
         }
         zip.finish().map_err(|error| error.to_string())?;
     }
@@ -239,9 +241,11 @@ fn copy_profile_files(from: &Path, dest: &Path) -> Result<(), String> {
             }
         }
     }
-    let extensions = from.join("extensions");
-    if extensions.is_dir() {
-        files::copy_dir(&extensions, &dest.join("extensions"))?;
+    for name in profiles::PROFILE_DIRS {
+        let folder = from.join(name);
+        if folder.is_dir() {
+            files::copy_dir(&folder, &dest.join(name))?;
+        }
     }
     Ok(())
 }

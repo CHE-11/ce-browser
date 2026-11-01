@@ -1,4 +1,4 @@
-import { Archive, BookOpen, Clapperboard, Eraser, ImageDown, KeyRound, Languages, Layers, Printer, Shield, ShoppingCart, SlidersHorizontal, Sparkles, Tags, type LucideIcon } from "lucide-react";
+import { Archive, BookOpen, Clapperboard, Eraser, ImageDown, KeyRound, Languages, Layers, LayoutGrid, Printer, Shield, ShoppingCart, SlidersHorizontal, Sparkles, Tags, type LucideIcon } from "lucide-react";
 
 export type BuiltinTool = {
   id: string;
@@ -20,6 +20,12 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Save page as PNG",
     description: "Save or copy the page as an image.",
     icon: ImageDown,
+  },
+  {
+    id: "boards",
+    name: "Boards",
+    description: "Save pages, regions, sections, links and images to boards.",
+    icon: LayoutGrid,
   },
   {
     id: "media-hub",

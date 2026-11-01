@@ -6,6 +6,10 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdblockStats,
   BackdropSupport,
+  Board,
+  BoardFolder,
+  BoardsSnapshot,
+  Pin,
   BookmarkNode,
   ExternalBrowser,
   RewriteRule,
@@ -334,6 +338,103 @@ export function waybackUrl(save: boolean, url: string) {
 
 export function readingStats(id: number) {
   return invoke<ReadingStats>("reading_stats", { id });
+}
+
+// Boards
+
+export function listBoards() {
+  return invoke<BoardsSnapshot>("list_boards");
+}
+
+export function onBoardsChanged(handler: (boards: BoardsSnapshot) => void): Promise<UnlistenFn> {
+  return listen<BoardsSnapshot>("boards-changed", (event) => handler(event.payload));
+}
+
+export function createBoardFolder(name: string, parentId: string | null) {
+  return invoke<BoardFolder>("create_board_folder", { name, parentId });
+}
+
+export function renameBoardFolder(id: string, name: string) {
+  return invoke<void>("rename_board_folder", { id, name });
+}
+
+export function moveBoardFolder(id: string, parentId: string | null) {
+  return invoke<void>("move_board_folder", { id, parentId });
+}
+
+export function deleteBoardFolder(id: string) {
+  return invoke<void>("delete_board_folder", { id });
+}
+
+export function createBoard(name: string, folderId: string | null) {
+  return invoke<Board>("create_board", { name, folderId });
+}
+
+export function renameBoard(id: string, name: string) {
+  return invoke<void>("rename_board", { id, name });
+}
+
+export function moveBoard(id: string, folderId: string | null) {
+  return invoke<void>("move_board", { id, folderId });
+}
+
+export function setBoardCover(id: string, pinId: string | null) {
+  return invoke<void>("set_board_cover", { id, pinId });
+}
+
+export function deleteBoard(id: string) {
+  return invoke<void>("delete_board", { id });
+}
+
+export function updatePin(id: string, title: string, note: string) {
+  return invoke<void>("update_pin", { id, title, note });
+}
+
+export function movePins(ids: string[], boardId: string) {
+  return invoke<void>("move_pins", { ids, boardId });
+}
+
+export function deletePins(ids: string[]) {
+  return invoke<void>("delete_pins", { ids });
+}
+
+/** An empty `boardId` saves to the last board used. */
+export function pinPage(id: number, boardId: string, fullPage: boolean) {
+  return invoke<Pin>("pin_page", { id, boardId, fullPage });
+}
+
+export function pinRegion(id: number, boardId: string) {
+  return invoke<Pin>("pin_region", { id, boardId });
+}
+
+export function pinElement(id: number, boardId: string) {
+  return invoke<Pin>("pin_element", { id, boardId });
+}
+
+export function pinLink(id: number, boardId: string) {
+  return invoke<Pin>("pin_link", { id, boardId });
+}
+
+export function pinImages(id: number, boardId: string, urls: string[]) {
+  return invoke<Pin[]>("pin_images", { id, boardId, urls });
+}
+
+/** JPEG data URLs by pin id. Pins without an image are left out. */
+export function boardThumbnails(ids: string[]) {
+  return invoke<Record<string, string>>("board_thumbnails", { ids });
+}
+
+/** The full PNG of a pin as a data URL. */
+export function boardImage(id: string) {
+  return invoke<string>("board_image", { id });
+}
+
+export function copyPinImage(id: string) {
+  return invoke<void>("copy_pin_image", { id });
+}
+
+export function savePinImage(id: string, path: string) {
+  return invoke<void>("save_pin_image", { id, path });
 }
 
 export function listPrices() {

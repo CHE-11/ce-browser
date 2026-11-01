@@ -84,6 +84,18 @@ Windows desktop browser built on Tauri 2 and WebView2. Each tab is its own page 
 - Copy text from an image with Windows OCR on the visible page or a dragged region
 - Clear cached files for the site in the current tab
 
+## Boards
+
+- Boards button in the address bar saves pins to a board: the visible area, the entire page, a dragged region, a page section, a link card, or images on the page
+- Page section outlines the element under the pointer; click to save it, Alt+scroll or `[` and `]` to pick the parent or child, Esc to cancel. The pin keeps the section's text and first link
+- Link card uses the page's Open Graph title, description, and image, or a screenshot when there is no image
+- Images on this page lets you pick several images at once; right-click an image on any page and choose Save image to board to save it to the last board used
+- `ce://boards` shows pins in a masonry grid, with nested folders that hold boards, an All pins view, and search over titles, notes, page text, and addresses
+- Create, rename, and delete folders and boards; drag boards into folders and pins onto boards in the sidebar
+- Select pins with Ctrl+click, Shift+click, or Ctrl+A to move or delete them together
+- Open a pin to see the full image, edit its title and note, move it, copy or save the image, open the source page, or make it the board cover
+- Stored in the profile as `boards.json`, with images in the `boards` folder, so they follow profile export and the sync folder
+
 ## Print
 
 - Print to PDF from the toolbar
@@ -162,6 +174,7 @@ Windows desktop browser built on Tauri 2 and WebView2. Each tab is its own page 
 
 - `ce://newtab`
 - `ce://bookmarks`
+- `ce://boards`
 - `ce://history`
 - `ce://downloads`
 - `ce://files`

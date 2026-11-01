@@ -16,6 +16,8 @@ import { TabMenu } from "@/components/TabsAddressAndBookmarks/Tabs/TabMenu";
 import { WorkspaceMenu } from "@/components/WorkspaceMenu";
 import { AdBlockerPopover } from "@features/BuiltInExtensions/ad-blocker/AdBlockerPopover";
 import { AssistantPopover } from "@features/BuiltInExtensions/assistant/Assistant";
+import { BoardImagesPopover } from "@features/BuiltInExtensions/boards/BoardImagesPopover";
+import { BoardsPopover } from "@features/BuiltInExtensions/boards/BoardsPopover";
 import { PageControlsPopover } from "@features/BuiltInExtensions/page-controls/PageControlsPopover";
 import { PageCapturePopover } from "@features/BuiltInExtensions/page-capture/PageCapturePopover";
 import { PasswordPopover } from "@features/BuiltInExtensions/password/Password";
@@ -116,6 +118,10 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <PrintPdfPopover params={params} />;
     case "page-capture":
       return <PageCapturePopover params={params} />;
+    case "boards":
+      return <BoardsPopover params={params} />;
+    case "board-images":
+      return <BoardImagesPopover params={params} />;
     case "media-hub":
       return <MediaHub />;
     case "media-grid":

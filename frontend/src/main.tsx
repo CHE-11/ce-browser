@@ -5,6 +5,7 @@ import { getUserStyles, onUserStylesChanged } from "./lib/browser-client";
 import { useRoute } from "./lib/route";
 import { applyUserStyles } from "./lib/user-styles";
 import { applyZoom, readZoom } from "./lib/zoom";
+import { BoardsPage } from "./features/Boards/Boards.page";
 import { BookmarksPage } from "./features/Bookmarks/Bookmarks.page";
 import { CaptureEditorPage } from "./features/CaptureEditor/CaptureEditor.page";
 import { BrowserPage } from "./features/Browser/Browser.page";
@@ -73,6 +74,8 @@ function App() {
       return <StoragePage params={route.params} />;
     case "capture-editor":
       return <CaptureEditorPage />;
+    case "boards":
+      return <BoardsPage params={route.params} />;
     case "whats-new":
       return <WhatsNewPage params={route.params} />;
     default:

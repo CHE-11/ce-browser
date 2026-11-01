@@ -1307,9 +1307,13 @@ fn add_page_items(
             entries.push(menu_command(environment, "Search image with Google Lens", move || {
                 crate::page_menu::search_image(&lens_app, id, &src)
             })?);
-            let (save_app, src) = (app.clone(), source);
+            let (save_app, src) = (app.clone(), source.clone());
             entries.push(menu_command(environment, "Save image to Downloads", move || {
                 crate::page_menu::save_image(&save_app, id, &src)
+            })?);
+            let (board_app, src) = (app.clone(), source);
+            entries.push(menu_command(environment, "Save image to board", move || {
+                crate::boards::save_menu_image(&board_app, id, &src)
             })?);
         }
         let items = args.MenuItems()?;

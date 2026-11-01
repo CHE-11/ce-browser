@@ -106,7 +106,7 @@ pub fn open_popup_at(app: &AppHandle, id: u32, x: i32, y: i32, kind: &str, param
 }
 
 /// Image bytes from an `http(s)` or `data:` address.
-fn image_bytes(source: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn image_bytes(source: &str) -> Result<Vec<u8>, String> {
     if let Some(rest) = source.strip_prefix("data:") {
         let (meta, data) = rest.split_once(',').ok_or("That image address is not readable.")?;
         if !meta.ends_with(";base64") {
