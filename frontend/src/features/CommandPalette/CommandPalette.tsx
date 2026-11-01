@@ -47,6 +47,8 @@ export function CommandPalette() {
       { id: "scripts", title: "Site scripts", hint: "Page", run: () => createTab("ce://scripts") },
       { id: "permissions", title: "Permissions", hint: "Page", run: () => createTab("ce://permissions") },
       { id: "shortcuts", title: "Keyboard shortcuts", hint: "Page", run: () => createTab("ce://shortcuts") },
+      { id: "rewrites", title: "Request rules", hint: "Page", run: () => createTab("ce://rewrites") },
+      { id: "storage", title: "Site storage", hint: "Page", run: () => createTab("ce://storage") },
       {
         id: "find",
         title: "Find in page",

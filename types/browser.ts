@@ -29,6 +29,8 @@ export type TabInfo = {
   changed: boolean;
   /** An InPrivate tab. It is not saved and it is left out of history. */
   ephemeral: boolean;
+  /** Page errors since the last navigation. */
+  errors: number;
 };
 
 export type SplitView = {
@@ -46,6 +48,33 @@ export type WindowTabs = {
   split: SplitView | null;
   /** Address of the open peek, if any. */
   peekUrl: string | null;
+  /** `phone`, `tablet`, `laptop`, or empty for the full page. */
+  device: string;
+};
+
+export type RewriteRule = {
+  id: number;
+  enabled: boolean;
+  contains: string;
+  action: "block" | "redirect" | "file";
+  target: string;
+};
+
+export type ExternalBrowser = {
+  id: string;
+  name: string;
+};
+
+export type SiteCookie = {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+};
+
+export type StoragePair = {
+  key: string;
+  value: string;
 };
 
 export type TabGroupColor = "grey" | "blue" | "red" | "yellow" | "green" | "pink" | "purple" | "cyan" | "orange";

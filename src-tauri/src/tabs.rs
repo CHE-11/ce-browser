@@ -67,6 +67,8 @@ pub struct TabInfo {
     pub changed: bool,
     /// An InPrivate tab. It is not saved and it is left out of history.
     pub ephemeral: bool,
+    /// Page errors since the last navigation. Not written into the session.
+    pub errors: u32,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -87,6 +89,8 @@ pub struct WindowTabs {
     pub split: Option<SplitInfo>,
     /// Address of the open peek, if any.
     pub peek_url: Option<String>,
+    /// `phone`, `tablet`, `laptop`, or empty for the full page.
+    pub device: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -250,6 +254,8 @@ struct WindowChrome {
     workspace: String,
     /// Active tab of each workspace this window has left, so switching back returns to it.
     active_by_workspace: HashMap<String, u32>,
+    /// `phone`, `tablet`, `laptop`, or empty.
+    device: String,
 }
 
 impl WindowChrome {
@@ -266,6 +272,7 @@ impl WindowChrome {
             split: None,
             workspace: DEFAULT_WORKSPACE.to_string(),
             active_by_workspace: HashMap::new(),
+            device: String::new(),
         }
     }
 }
@@ -542,6 +549,7 @@ impl TabsState {
                         ratio: split.ratio,
                     }),
                     peek_url: None,
+                    device: chrome.device.clone(),
                 })
                 .collect(),
             groups: self.groups.clone(),
@@ -904,6 +912,7 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                     watch_changes: false,
                     changed: false,
                     ephemeral: tab.ephemeral,
+                    errors: 0,
                 },
                 pending_url: Some(tab.url.clone()),
                 webview: None,
@@ -1449,6 +1458,66 @@ pub fn update_history(app: &AppHandle, id: u32, back: bool, forward: bool) {
     });
 }
 
+/// Keeps a device frame inside the page area and centers it.
+pub fn fit_device(page_w: u32, page_h: u32, want_w: u32, want_h: u32) -> (u32, u32, u32, u32) {
+    let page_w = page_w.max(1);
+    let page_h = page_h.max(1);
+    let width = want_w.min(page_w).max(1);
+    let height = want_h.min(page_h).max(1);
+    let x = page_w.saturating_sub(width) / 2;
+    let y = page_h.saturating_sub(height) / 2;
+    (x, y, width, height)
+}
+
+fn device_pixels(device: &str, page: PhysicalSize<u32>, scale: f64) -> Option<(u32, u32, u32, u32)> {
+    let (css_w, css_h) = match device {
+        "phone" => (390u32, 844u32),
+        "tablet" => (768, 1024),
+        "laptop" => (1280, 800),
+        _ => return None,
+    };
+    let want_w = (f64::from(css_w) * scale).round().max(1.0) as u32;
+    let want_h = (f64::from(css_h) * scale).round().max(1.0) as u32;
+    Some(fit_device(page.width, page.height, want_w, want_h))
+}
+
+pub fn set_device(app: &AppHandle, window: &str, device: &str) -> Result<(), String> {
+    let device = match device {
+        "" | "off" => String::new(),
+        "phone" | "tablet" | "laptop" => device.to_string(),
+        _ => return Err("Unknown device.".into()),
+    };
+    let found = with_state(app, |state| {
+        state.chrome_mut(window).map(|chrome| chrome.device = device)
+    });
+    if found.is_none() {
+        return Err("That window is not open.".into());
+    }
+    place_pages(app, window, true);
+    emit_tabs(app);
+    Ok(())
+}
+
+pub fn note_error(app: &AppHandle, id: u32) {
+    update(app, id, |tab| {
+        tab.info.errors = tab.info.errors.saturating_add(1);
+    });
+}
+
+pub fn clear_errors(app: &AppHandle, id: u32) {
+    let changed = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        if tab.info.errors == 0 {
+            return Some(false);
+        }
+        tab.info.errors = 0;
+        Some(true)
+    });
+    if changed == Some(true) {
+        emit_tabs(app);
+    }
+}
+
 pub fn update_url(app: &AppHandle, id: u32, raw: &str) {
     let url = paths::display_url(app, raw);
     let default_zoom = settings::get(app).page_zoom_factor();
@@ -1681,10 +1750,11 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         let active = state.active_of(window);
         let chrome = state.chrome(window)?;
         let fullscreen = chrome.fullscreen;
+        let device = chrome.device.clone();
         let previous = chrome.shown.clone();
-        let split = chrome
-            .split
-            .filter(|split| !fullscreen && active.is_some_and(|id| id == split.left || id == split.right));
+        let split = chrome.split.filter(|split| {
+            device.is_empty() && !fullscreen && active.is_some_and(|id| id == split.left || id == split.right)
+        });
         let ratio = split.map(|split| split.ratio).unwrap_or(0.5);
         let painted_view = |id: u32| {
             state
@@ -1735,9 +1805,9 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         if let Some(chrome) = state.chrome_mut(window) {
             chrome.shown = shown.clone();
         }
-        Some((shown, parked, changed, ratio, wake))
+        Some((shown, parked, changed, ratio, wake, device))
     });
-    let Some((shown, parked, changed, ratio, wake)) = plan else {
+    let Some((shown, parked, changed, ratio, wake, device)) = plan else {
         return;
     };
     for label in &wake {
@@ -1755,17 +1825,23 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
     let left_width = (((page_size.width as f64) * ratio).round() as i32 - gap / 2).max(1);
     let right_x = left_width + gap;
     let right_width = (page_size.width as i32 - right_x).max(1);
+    let fitted = device_pixels(&device, page_size, scale);
     for (label, slot) in &shown {
         let Some(webview) = app.get_webview(label) else {
             continue;
         };
-        let (x, width) = match slot {
-            Slot::Full => (0, page_size.width as i32),
-            Slot::Left => (0, left_width),
-            Slot::Right => (right_x, right_width),
+        let (x, y, width, height) = if let Some((dx, dy, width, height)) = fitted.filter(|_| matches!(slot, Slot::Full)) {
+            (dx as i32, dy as i32, width, height)
+        } else {
+            let (x, width) = match slot {
+                Slot::Full => (0, page_size.width as i32),
+                Slot::Left => (0, left_width),
+                Slot::Right => (right_x, right_width),
+            };
+            (x, 0, width as u32, page_size.height)
         };
-        let _ = webview.set_size(PhysicalSize::new(width as u32, page_size.height));
-        let _ = webview.set_position(PhysicalPosition::new(position.x + x, position.y));
+        let _ = webview.set_size(PhysicalSize::new(width, height));
+        let _ = webview.set_position(PhysicalPosition::new(position.x + x, position.y + y));
     }
     for label in parked {
         if let Some(webview) = app.get_webview(&label) {
@@ -3845,6 +3921,13 @@ pub fn run_zapper(app: &AppHandle, id: u32) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+pub fn run_inspector(app: &AppHandle, id: u32) -> Result<(), String> {
+    let webview = page_view(app, id).ok_or("This page is not loaded yet.")?;
+    webview
+        .eval(crate::page_rules::inspector_script())
+        .map_err(|error| error.to_string())
+}
+
 pub fn tab_page_url(app: &AppHandle, id: u32) -> Option<String> {
     with_state(app, |state| state.index_of(id).map(|index| state.tabs[index].info.url.clone()))
 }
@@ -3876,6 +3959,7 @@ mod tests {
                 watch_changes: false,
                 changed: false,
                 ephemeral: false,
+                errors: 0,
             },
             pending_url: None,
             webview: None,
@@ -3943,6 +4027,19 @@ mod tests {
         state.normalize_groups();
         assert!(state.tabs[0].info.group_id.is_none());
         assert!(state.groups.is_empty());
+    }
+
+    #[test]
+    fn a_device_frame_stays_inside_the_page() {
+        let (x, y, width, height) = fit_device(1000, 700, 1280, 800);
+        assert!(x + width <= 1000);
+        assert!(y + height <= 700);
+        assert_eq!(width, 1000);
+        assert_eq!(height, 700);
+        let (x, y, width, height) = fit_device(2000, 1400, 390, 844);
+        assert_eq!((width, height), (390, 844));
+        assert_eq!(x, (2000 - 390) / 2);
+        assert_eq!(y, (1400 - 844) / 2);
     }
 
     #[test]

@@ -18,7 +18,9 @@ import { PopupPage } from "./features/Popup/Popup.page";
 import { PrintEditorPage } from "./features/PrintEditor/PrintEditor.page";
 import { ReaderPage } from "./features/Reader/Reader.page";
 import { ScriptsPage } from "./features/Scripts/Scripts.page";
+import { RewritesPage } from "./features/Rewrites/Rewrites.page";
 import { ShortcutsPage } from "./features/Shortcuts/Shortcuts.page";
+import { StoragePage } from "./features/Storage/Storage.page";
 import { SettingsPage } from "./features/Settings/Settings.page";
 import "./index.css";
 
@@ -64,6 +66,10 @@ function App() {
       return <ScriptsPage params={route.params} />;
     case "shortcuts":
       return <ShortcutsPage />;
+    case "rewrites":
+      return <RewritesPage />;
+    case "storage":
+      return <StoragePage params={route.params} />;
     case "capture-editor":
       return <CaptureEditorPage />;
     default:

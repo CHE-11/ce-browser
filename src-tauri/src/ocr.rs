@@ -62,7 +62,7 @@ pub fn recognize_png(bytes: &[u8]) -> Result<String, String> {
     Ok(text)
 }
 
-fn copy_text(text: &str) -> Result<(), String> {
+pub(crate) fn copy_text(text: &str) -> Result<(), String> {
     use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
     use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
     use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};

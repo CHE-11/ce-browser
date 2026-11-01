@@ -1,9 +1,12 @@
+import { useEffect, useState } from "react";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "@/components/PopupFrame";
-import { closePopup, createEphemeralTab, createWorkspace, moveTabsToWorkspace, createTab, reload, duplicateTab, unpinTab, pinTab, setTabsMuted, addBookmark, exitSplit, splitWith, removeFromGroup, createGroup, addToGroup, sleepTab, sleepOtherTabs, neverSleepSite, closeSelectedTabs, closeTab, closeOtherTabs, closeTabsToRight, reopenClosedTab } from "@/lib/browser-client";
+import { closePopup, createEphemeralTab, createWorkspace, moveTabsToWorkspace, createTab, reload, duplicateTab, unpinTab, pinTab, setTabsMuted, addBookmark, exitSplit, splitWith, removeFromGroup, createGroup, addToGroup, sleepTab, sleepOtherTabs, neverSleepSite, closeSelectedTabs, closeTab, closeOtherTabs, closeTabsToRight, reopenClosedTab, installedBrowsers, openInBrowser } from "@/lib/browser-client";
+import type { ExternalBrowser } from "@type/browser";
 import { cn } from "@/lib/cn";
 import { groupColorClasses, GROUP_COLORS, groupLabel } from "@/lib/tab-rows";
 import { useTabs } from "@/lib/use-browser";
 import {
+  AppWindow,
   ArrowRightToLine,
   Columns2,
   Copy,
@@ -37,6 +40,10 @@ function Swatch({ id, color }: { id: string; color: string }) {
 
 export function TabMenu({ tabId }: TabMenuProps) {
   const snapshot = useTabs();
+  const [browsers, setBrowsers] = useState<ExternalBrowser[]>([]);
+  useEffect(() => {
+    void installedBrowsers().then(setBrowsers).catch(() => setBrowsers([]));
+  }, []);
   const index = snapshot.tabs.findIndex((tab) => tab.id === tabId);
   const tab = snapshot.tabs[index];
 
@@ -115,6 +122,19 @@ export function TabMenu({ tabId }: TabMenuProps) {
           disabled={tab.url === "ce://newtab"}
           onClick={run(() => addBookmark("bar", tab.title || tab.url, tab.url))}
         />
+        {browsers.length > 0 && (tab.url.startsWith("http://") || tab.url.startsWith("https://")) ? (
+          <>
+            {browsers.map((browser) => (
+              <PopupMenuItem
+                id={`tab-menu-browser-${browser.id}`}
+                key={browser.id}
+                icon={<AppWindow />}
+                label={`Open in ${browser.name}`}
+                onClick={run(() => openInBrowser(browser.id, tab.url))}
+              />
+            ))}
+          </>
+        ) : null}
         <PopupMenuSeparator id="tab-menu-separator-split" />
         {inSplit ? (
           <PopupMenuItem id="tab-menu-exit-split" icon={<Columns2 />} label="Exit split view" onClick={run(() => exitSplit())} />

@@ -1063,6 +1063,7 @@ const PROFILE_FILES: &[&str] = &[
     "containers.json",
     "keywords.json",
     "shortcuts.json",
+    "rewrite-rules.json",
     "window-icon.png",
 ];
 

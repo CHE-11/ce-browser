@@ -177,6 +177,11 @@ export function TabItem({
           {tab.changed ? (
             <span id={`${domId}-changed`} className="size-2 shrink-0 rounded-full bg-sky-400" title="This page changed" />
           ) : null}
+          {tab.errors > 0 ? (
+            <span id={`${domId}-errors`} className="shrink-0 rounded-full bg-rose-500 px-1.5 text-[10px] font-semibold text-white" title="Page errors">
+              {tab.errors > 99 ? "99+" : tab.errors}
+            </span>
+          ) : null}
           {tab.sleeping ? <Moon id={`${domId}-sleeping`} className="size-3 shrink-0 text-zinc-500" aria-label="Sleeping" /> : null}
           {audioButton}
           {tab.zoom !== 1 ? (

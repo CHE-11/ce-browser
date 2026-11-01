@@ -81,6 +81,105 @@ pub fn request_cookies(core: &ICoreWebView2, url: &str, done: impl FnOnce(String
 }
 
 /// Cookie header and user agent for a URL, from a webview that is not this thread.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SiteCookie {
+    pub name: String,
+    pub value: String,
+    pub domain: String,
+    pub path: String,
+}
+
+pub fn list_cookies(webview: &Webview, url: &str) -> Vec<SiteCookie> {
+    let (tx, rx) = mpsc::channel();
+    let url = url.to_string();
+    let posted = webview.with_webview(move |platform| {
+        let Ok(core) = core(&platform) else {
+            let _ = tx.send(Vec::new());
+            return;
+        };
+        let sender = tx.clone();
+        let started = (|| -> windows::core::Result<()> {
+            let manager = unsafe { core.cast::<ICoreWebView2_2>()?.CookieManager()? };
+            let handler = GetCookiesCompletedHandler::create(Box::new(move |_result, list| {
+                let _ = sender.send(read_cookie_list(list.as_ref()));
+                Ok(())
+            }));
+            unsafe { manager.GetCookies(&HSTRING::from(&url), &handler) }
+        })();
+        if started.is_err() {
+            let _ = tx.send(Vec::new());
+        }
+    });
+    if posted.is_err() {
+        return Vec::new();
+    }
+    rx.recv_timeout(Duration::from_secs(3)).unwrap_or_default()
+}
+
+pub fn put_cookie(webview: &Webview, name: String, value: String, domain: String, path: String) -> std::result::Result<(), String> {
+    let (tx, rx) = mpsc::channel();
+    let posted = webview.with_webview(move |platform| {
+        let result = (|| -> windows::core::Result<()> {
+            let core = core(&platform)?;
+            let manager = unsafe { core.cast::<ICoreWebView2_2>()?.CookieManager()? };
+            let cookie = unsafe {
+                manager.CreateCookie(
+                    &HSTRING::from(&name),
+                    &HSTRING::from(&value),
+                    &HSTRING::from(&domain),
+                    &HSTRING::from(&path),
+                )?
+            };
+            unsafe { manager.AddOrUpdateCookie(&cookie) }
+        })();
+        let _ = tx.send(result.map_err(|error| error.to_string()));
+    });
+    posted.map_err(|error| error.to_string())?;
+    rx.recv_timeout(Duration::from_secs(3))
+        .map_err(|_| "WebView2 did not answer.".to_string())?
+}
+
+pub fn delete_cookie(webview: &Webview, name: String, domain: String, path: String) -> std::result::Result<(), String> {
+    let (tx, rx) = mpsc::channel();
+    let posted = webview.with_webview(move |platform| {
+        let result = (|| -> windows::core::Result<()> {
+            let core = core(&platform)?;
+            let manager = unsafe { core.cast::<ICoreWebView2_2>()?.CookieManager()? };
+            unsafe { manager.DeleteCookiesWithDomainAndPath(&HSTRING::from(&name), &HSTRING::from(&domain), &HSTRING::from(&path)) }
+        })();
+        let _ = tx.send(result.map_err(|error| error.to_string()));
+    });
+    posted.map_err(|error| error.to_string())?;
+    rx.recv_timeout(Duration::from_secs(3))
+        .map_err(|_| "WebView2 did not answer.".to_string())?
+}
+
+fn read_cookie_list(list: Option<&ICoreWebView2CookieList>) -> Vec<SiteCookie> {
+    let Some(list) = list else {
+        return Vec::new();
+    };
+    unsafe {
+        let mut count = 0u32;
+        if list.Count(&mut count).is_err() {
+            return Vec::new();
+        }
+        let mut cookies = Vec::new();
+        for index in 0..count {
+            let Ok(cookie) = list.GetValueAtIndex(index) else {
+                continue;
+            };
+            cookies.push(SiteCookie {
+                name: read_pwstr(|value| cookie.Name(value)),
+                value: read_pwstr(|value| cookie.Value(value)),
+                domain: read_pwstr(|value| cookie.Domain(value)),
+                path: read_pwstr(|value| cookie.Path(value)),
+            });
+        }
+        cookies
+    }
+}
+
 pub fn session_for(webview: &Webview, url: &str) -> (String, String) {
     let (tx, rx) = mpsc::channel();
     let url = url.to_string();
@@ -390,6 +489,15 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                             });
                         }
                     }
+                    Some("ce-error") => {
+                        let app = message_app.clone();
+                        tauri::async_runtime::spawn(async move { tabs::note_error(&app, id) });
+                    }
+                    Some("ce-inspect") => {
+                        if let Some(text) = message.get("text").and_then(|value| value.as_str()) {
+                            let _ = crate::ocr::copy_text(text);
+                        }
+                    }
                     Some("ce-zap") => {
                         if let Some(selector) = message.get("selector").and_then(|value| value.as_str()) {
                             let app = message_app.clone();
@@ -509,6 +617,44 @@ fn attach_adblock(
                     .Request()
                     .map(|request| read_pwstr(|value| request.Uri(value)))
                     .unwrap_or_default();
+                if let Some(hit) = crate::rewrite::find(&uri, &crate::rewrite::list(&request_app)) {
+                    match hit {
+                        crate::rewrite::RewriteHit::Block => {
+                            let response = environment.CreateWebResourceResponse(
+                                None::<&IStream>,
+                                403,
+                                windows::core::w!("Blocked"),
+                                windows::core::w!(""),
+                            )?;
+                            args.SetResponse(&response)?;
+                            return Ok(());
+                        }
+                        crate::rewrite::RewriteHit::Redirect(target) => {
+                            if let Ok(request) = args.Request() {
+                                let _ = request.SetUri(&HSTRING::from(target));
+                            }
+                        }
+                        crate::rewrite::RewriteHit::File(path) => {
+                            let method = args
+                                .Request()
+                                .map(|request| read_pwstr(|value| request.Method(value)))
+                                .unwrap_or_default();
+                            if method.eq_ignore_ascii_case("GET")
+                                && let Some(bytes) = crate::rewrite::file_bytes(&path)
+                                && let Some(stream) = windows::Win32::UI::Shell::SHCreateMemStream(Some(&bytes))
+                            {
+                                let response = environment.CreateWebResourceResponse(
+                                    &stream,
+                                    200,
+                                    windows::core::w!("OK"),
+                                    windows::core::w!("Content-Type: application/octet-stream"),
+                                )?;
+                                args.SetResponse(&response)?;
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
                 let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
                 let _ = args.ResourceContext(&mut context);
                 let is_document = context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT;
@@ -553,6 +699,7 @@ fn attach_adblock(
             &NavigationStartingEventHandler::create(Box::new(move |sender, args| {
                 if let Some(args) = args {
                     let uri = read_pwstr(|value| args.Uri(value));
+                    tabs::clear_errors(&navigation_app, id);
                     if let Some(next) = crate::privacy::rewrite_navigation(&navigation_app, &uri) {
                         let _ = args.SetCancel(true);
                         let app = navigation_app.clone();

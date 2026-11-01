@@ -129,6 +129,18 @@ A tab group can use a **container**. The container has its own cookies, logins a
 
 An **ephemeral tab** is InPrivate. Right-click the new-tab button, or use the tab menu or the browser menu. It is not saved and it is left out of history. Ephemeral tabs share one private session, which is dropped when the last one closes.
 
+## Developer tools
+
+`ce://rewrites` holds request rules. A rule matches when the request URL contains its text. It can block the request, send it to another address, or answer a GET with a local file of up to 8 MB. Rules run before the ad blocker.
+
+Page controls can size the active page as a phone (390×844), a tablet (768×1024), or a laptop (1280×800). The page is centered. A split view is set aside until the device size is turned off. The choice lasts for that window.
+
+The tab menu and the browser menu can open the current site in Chrome, Firefox, or Edge when that browser is installed. `ce://` pages stay here.
+
+`ce://storage` lists the cookies and localStorage of the site in the tab. You can add and delete them. localStorage needs that site to be loaded.
+
+Page errors, unhandled rejections, and `console.error` put a count on the tab. It clears when the tab navigates and is not kept in the session. **Color and font** in page controls follows the pointer and copies the element's color, background, and font. Esc cancels.
+
 ## Data
 
 Each profile keeps its settings, session, bookmarks, downloads, history and extension list as JSON files in its own folder. The folder is named after the profile. The first profile is named "Default". The root folder is the sync folder when one is selected, otherwise `%APPDATA%\com.ce.browser`.

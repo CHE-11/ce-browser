@@ -53,12 +53,12 @@
 - [x] Local file browser at `ce://files` for quick previews.
 
 ## Developer tools
-- [ ] Request rewriting and blocking rules (a local mapping, like Requestly) through `WebResourceRequested`.
-- [ ] Responsive viewport toggle that sizes the tab webview to preset devices.
-- [ ] "Open in another browser" that launches the URL in installed Chrome, Firefox or Edge.
-- [ ] Cookie and localStorage editor per site at `ce://storage`.
-- [ ] Console error badge on the tab when the page logs errors.
-- [ ] Color picker and font inspector tools.
+- [x] Request rewriting and blocking rules (a local mapping, like Requestly) through `WebResourceRequested`.
+- [x] Responsive viewport toggle that sizes the tab webview to preset devices.
+- [x] "Open in another browser" that launches the URL in installed Chrome, Firefox or Edge.
+- [x] Cookie and localStorage editor per site at `ce://storage`.
+- [x] Console error badge on the tab when the page logs errors.
+- [x] Color picker and font inspector tools.
 
 ## Customization and UI
 - [ ] Drag-to-arrange toolbar items.

@@ -358,11 +358,17 @@ pub fn injection(app: &AppHandle, url: &str) -> String {
     }
     script.push('\n');
     script.push_str(&crate::privacy::fingerprint_script(app, url));
+    script.push('\n');
+    script.push_str(ERROR_JS);
     script
 }
 
 pub fn zapper_script() -> &'static str {
     ZAPPER_JS
+}
+
+pub fn inspector_script() -> &'static str {
+    INSPECTOR_JS
 }
 
 pub fn remember_speed(app: &AppHandle, page_url: &str, speed: f64) {
@@ -619,6 +625,81 @@ const INJECTION_JS: &str = r#"(function () {
   }
   window.ceApply = ceApply;
 })();"#;
+
+const ERROR_JS: &str = r#"(function () {
+  if (window.__ceErrors) return;
+  window.__ceErrors = true;
+  function report() {
+    try {
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.postMessage({ type: "ce-error" });
+      }
+    } catch (error) {}
+  }
+  window.addEventListener("error", report);
+  window.addEventListener("unhandledrejection", report);
+  var original = console.error;
+  console.error = function () {
+    report();
+    return original.apply(console, arguments);
+  };
+})();"#;
+
+const INSPECTOR_JS: &str = r##"(function () {
+  if (window.__ceInspect) return;
+  window.__ceInspect = true;
+  var box = document.createElement("div");
+  box.id = "ce-inspector";
+  box.style.cssText = "position:fixed;z-index:2147483647;pointer-events:none;max-width:320px;padding:6px 8px;border-radius:8px;background:#18181b;color:#e4e4e7;font:12px/1.4 sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.35)";
+  document.documentElement.appendChild(box);
+  var line = "";
+  function cssColor(value) {
+    var probe = document.createElement("canvas").getContext("2d");
+    if (!probe) return value;
+    probe.fillStyle = value;
+    return probe.fillStyle;
+  }
+  function describe(el) {
+    var style = getComputedStyle(el);
+    var color = cssColor(style.color);
+    var background = cssColor(style.backgroundColor);
+    return "color: " + color + "; background: " + background + "; font: " + style.fontWeight + " " + style.fontSize + " " + style.fontFamily;
+  }
+  function move(event) {
+    var el = event.target;
+    if (!el || el.id === "ce-inspector") return;
+    line = describe(el);
+    box.textContent = line;
+    box.style.left = Math.min(event.clientX + 12, window.innerWidth - 340) + "px";
+    box.style.top = Math.min(event.clientY + 16, window.innerHeight - 48) + "px";
+  }
+  function cleanup() {
+    box.remove();
+    document.removeEventListener("mousemove", move, true);
+    document.removeEventListener("click", click, true);
+    document.removeEventListener("keydown", key, true);
+    window.__ceInspect = false;
+  }
+  function click(event) {
+    if (event.target && event.target.id === "ce-inspector") return;
+    event.preventDefault();
+    event.stopPropagation();
+    var text = line;
+    cleanup();
+    if (text && window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage({ type: "ce-inspect", text: text });
+    }
+  }
+  function key(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cleanup();
+    }
+  }
+  document.addEventListener("mousemove", move, true);
+  document.addEventListener("click", click, true);
+  document.addEventListener("keydown", key, true);
+})();"##;
 
 const ZAPPER_JS: &str = r##"(function () {
   if (window.__ceZap) return;

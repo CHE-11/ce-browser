@@ -16,11 +16,14 @@ mod paths;
 mod privacy;
 mod peek;
 mod print;
+mod browsers;
+mod rewrite;
 mod profile_icons;
 mod profiles;
 mod session;
 mod settings;
 mod shortcuts;
+mod storage;
 mod sync;
 mod tab_sleep;
 mod tabs;
@@ -839,6 +842,66 @@ async fn start_zapper(app: AppHandle, id: u32) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn start_inspector(app: AppHandle, id: u32) -> Result<(), String> {
+    tabs::run_inspector(&app, id)
+}
+
+#[tauri::command]
+fn set_device(app: AppHandle, window: String, device: String) -> Result<(), String> {
+    tabs::set_device(&app, &window, &device)
+}
+
+#[tauri::command]
+fn list_rewrite_rules(app: AppHandle) -> Vec<rewrite::RewriteRule> {
+    rewrite::list(&app)
+}
+
+#[tauri::command]
+fn save_rewrite_rules(app: AppHandle, rules: Vec<rewrite::RewriteRule>) -> Result<Vec<rewrite::RewriteRule>, String> {
+    rewrite::save(&app, rules)
+}
+
+#[tauri::command]
+fn installed_browsers() -> Vec<browsers::ExternalBrowser> {
+    browsers::installed()
+}
+
+#[tauri::command]
+fn open_in_browser(kind: String, url: String) -> Result<(), String> {
+    browsers::open(&kind, &url)
+}
+
+#[tauri::command]
+async fn list_cookies(app: AppHandle, id: u32) -> Result<Vec<webview2::SiteCookie>, String> {
+    blocking(move || storage::cookies(&app, id)).await
+}
+
+#[tauri::command]
+async fn set_cookie(app: AppHandle, id: u32, name: String, value: String) -> Result<(), String> {
+    blocking(move || storage::set_cookie(&app, id, &name, &value)).await
+}
+
+#[tauri::command]
+async fn delete_cookie(app: AppHandle, id: u32, name: String, domain: String, path: String) -> Result<(), String> {
+    blocking(move || storage::delete_cookie(&app, id, &name, &domain, &path)).await
+}
+
+#[tauri::command]
+async fn list_local_storage(app: AppHandle, id: u32) -> Result<Vec<storage::StoragePair>, String> {
+    blocking(move || storage::local_items(&app, id)).await
+}
+
+#[tauri::command]
+async fn set_local_storage(app: AppHandle, id: u32, key: String, value: String) -> Result<(), String> {
+    blocking(move || storage::set_local(&app, id, &key, &value)).await
+}
+
+#[tauri::command]
+async fn delete_local_storage(app: AppHandle, id: u32, key: String) -> Result<(), String> {
+    blocking(move || storage::delete_local(&app, id, &key)).await
+}
+
+#[tauri::command]
 async fn set_tab_refresh(app: AppHandle, id: u32, secs: u32, watch: bool) -> Result<(), String> {
     tabs::set_refresh(&app, id, secs, watch)
 }
@@ -1016,6 +1079,7 @@ pub fn run() {
             }
             settings::init(&handle);
             page_rules::init(&handle);
+            rewrite::init(&handle);
             privacy::init(&handle);
             keywords::init(&handle);
             shortcuts::init(&handle);
@@ -1219,6 +1283,18 @@ pub fn run() {
             save_user_script,
             delete_user_script,
             start_zapper,
+            start_inspector,
+            set_device,
+            list_rewrite_rules,
+            save_rewrite_rules,
+            installed_browsers,
+            open_in_browser,
+            list_cookies,
+            set_cookie,
+            delete_cookie,
+            list_local_storage,
+            set_local_storage,
+            delete_local_storage,
             set_tab_refresh,
             open_reader,
             reader_page,

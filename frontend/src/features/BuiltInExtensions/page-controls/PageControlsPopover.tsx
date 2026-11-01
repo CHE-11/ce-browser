@@ -12,7 +12,9 @@ import {
   openReader,
   reload,
   saveSettings,
+  setDevice,
   setTabRefresh,
+  startInspector,
   startZapper,
   updateSiteControl,
 } from "@/lib/browser-client";
@@ -43,6 +45,8 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
   const settings = useSettings();
   const snapshot = useTabs();
   const live = snapshot.tabs.find((item) => item.id === tab.id);
+  const windowLabel = live?.window || "main";
+  const device = snapshot.windows.find((item) => item.label === windowLabel)?.device ?? "";
   const site = controlFor(rules, host);
   const [agent, setAgent] = useState(site.userAgent);
   const [error, setError] = useState<string | null>(null);
@@ -256,6 +260,26 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
           disabled={(live?.refreshSecs ?? 0) === 0}
           onChange={(watch) => void setTabRefresh(tab.id, live?.refreshSecs ?? 0, watch)}
         />
+        <div id="page-controls-device" className="flex gap-1 px-1 py-1">
+          {(
+            [
+              ["", "Off"],
+              ["phone", "Phone"],
+              ["tablet", "Tablet"],
+              ["laptop", "Laptop"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              id={`page-controls-device-${value || "off"}`}
+              key={value || "off"}
+              type="button"
+              className={`h-7 flex-1 rounded-md text-xs ${device === value ? "bg-sky-600 text-white" : "bg-zinc-800 text-zinc-300"}`}
+              onClick={() => void setDevice(windowLabel, value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <div id="page-controls-actions" className="flex flex-col gap-1 px-1 pt-1">
           <button
             id="page-controls-reader"
@@ -312,6 +336,36 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
             }}
           >
             Site permissions
+          </button>
+          <button
+            id="page-controls-inspect"
+            type="button"
+            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            onClick={() => {
+              void startInspector(tab.id).finally(() => closePopup());
+            }}
+          >
+            Color and font
+          </button>
+          <button
+            id="page-controls-storage"
+            type="button"
+            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            onClick={() => {
+              void createTab(`ce://storage?tab=${tab.id}`).finally(() => closePopup());
+            }}
+          >
+            Cookies and storage
+          </button>
+          <button
+            id="page-controls-rewrites"
+            type="button"
+            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            onClick={() => {
+              void createTab("ce://rewrites").finally(() => closePopup());
+            }}
+          >
+            Request rules
           </button>
           <button
             id="page-controls-scripts"

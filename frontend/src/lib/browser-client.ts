@@ -6,6 +6,10 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdblockStats,
   BookmarkNode,
+  ExternalBrowser,
+  RewriteRule,
+  SiteCookie,
+  StoragePair,
   BrowseResult,
   BookmarkTree,
   BrowserCommand,
@@ -219,6 +223,54 @@ export function showReaderOriginal() {
 
 export function startZapper(id: number) {
   return invoke<void>("start_zapper", { id });
+}
+
+export function startInspector(id: number) {
+  return invoke<void>("start_inspector", { id });
+}
+
+export function setDevice(window: string, device: string) {
+  return invoke<void>("set_device", { window, device });
+}
+
+export function listRewriteRules() {
+  return invoke<RewriteRule[]>("list_rewrite_rules");
+}
+
+export function saveRewriteRules(rules: RewriteRule[]) {
+  return invoke<RewriteRule[]>("save_rewrite_rules", { rules });
+}
+
+export function installedBrowsers() {
+  return invoke<ExternalBrowser[]>("installed_browsers");
+}
+
+export function openInBrowser(kind: string, url: string) {
+  return invoke<void>("open_in_browser", { kind, url });
+}
+
+export function listCookies(id: number) {
+  return invoke<SiteCookie[]>("list_cookies", { id });
+}
+
+export function setCookie(id: number, name: string, value: string) {
+  return invoke<void>("set_cookie", { id, name, value });
+}
+
+export function deleteCookie(id: number, name: string, domain: string, path: string) {
+  return invoke<void>("delete_cookie", { id, name, domain, path });
+}
+
+export function listLocalStorage(id: number) {
+  return invoke<StoragePair[]>("list_local_storage", { id });
+}
+
+export function setLocalStorage(id: number, key: string, value: string) {
+  return invoke<void>("set_local_storage", { id, key, value });
+}
+
+export function deleteLocalStorage(id: number, key: string) {
+  return invoke<void>("delete_local_storage", { id, key });
 }
 
 export function setTabsMuted(ids: number[], muted: boolean) {

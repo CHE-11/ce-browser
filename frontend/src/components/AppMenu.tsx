@@ -1,4 +1,5 @@
 import {
+  AppWindow,
   Bookmark,
   Code,
   Download,
@@ -22,10 +23,14 @@ import {
   createTab,
   getSettings,
   openDevtools,
+  installedBrowsers,
+  openInBrowser,
   reopenClosedTab,
   saveSettings,
   zoomTab,
 } from "../lib/browser-client";
+import { useEffect, useState } from "react";
+import type { ExternalBrowser } from "../../../types/browser";
 import { useTabs } from "../lib/use-browser";
 import { IconButton } from "./IconButton";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "./PopupFrame";
@@ -33,6 +38,11 @@ import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "./Popu
 export function AppMenu() {
   const snapshot = useTabs();
   const active = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
+  const [browsers, setBrowsers] = useState<ExternalBrowser[]>([]);
+  useEffect(() => {
+    void installedBrowsers().then(setBrowsers).catch(() => setBrowsers([]));
+  }, []);
+  const site = active && (active.url.startsWith("http://") || active.url.startsWith("https://")) ? active.url : "";
 
   const run = (action: () => Promise<unknown>) => () => {
     void action().finally(() => void closePopup());
@@ -82,6 +92,17 @@ export function AppMenu() {
         <PopupMenuItem id="app-menu-files" icon={<Folder />} label="Files" onClick={openPage("ce://files")} />
         <PopupMenuItem id="app-menu-history" icon={<History />} label="History" onClick={openPage("ce://history")} />
         <PopupMenuItem id="app-menu-extensions" icon={<Puzzle />} label="Extensions" onClick={openPage("ce://extensions")} />
+        {site
+          ? browsers.map((browser) => (
+              <PopupMenuItem
+                id={`app-menu-browser-${browser.id}`}
+                key={browser.id}
+                icon={<AppWindow />}
+                label={`Open in ${browser.name}`}
+                onClick={run(() => openInBrowser(browser.id, site))}
+              />
+            ))
+          : null}
         <PopupMenuSeparator id="app-menu-separator-2" />
         <div id="app-menu-zoom" className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm">
           <ZoomIn id="app-menu-zoom-icon" className="size-4 shrink-0 text-zinc-400" aria-hidden />
