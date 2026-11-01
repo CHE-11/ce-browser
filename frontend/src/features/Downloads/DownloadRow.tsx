@@ -12,6 +12,11 @@ type DownloadRowProps = {
   compact?: boolean;
 };
 
+function previewable(name: string) {
+  const ext = name.split(".").pop()?.toLowerCase();
+  return ext === "json" || ext === "csv" || ext === "md" || ext === "markdown" || ext === "log" || ext === "txt";
+}
+
 function statusText(item: DownloadItem) {
   const received = formatBytes(item.receivedBytes);
   const total = item.totalBytes ? formatBytes(item.totalBytes) : null;
@@ -55,7 +60,13 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
             completed ? "text-zinc-100 hover:underline" : "cursor-default text-zinc-300",
             (item.state === "cancelled" || item.state === "interrupted") && "line-through decoration-zinc-500",
           )}
-          onClick={() => void openDownload(item.id)}
+          onClick={() => {
+            if (previewable(item.fileName)) {
+              void createTab(`ce://files?path=${encodeURIComponent(item.path)}`);
+            } else {
+              void openDownload(item.id);
+            }
+          }}
         >
           {item.fileName}
         </button>

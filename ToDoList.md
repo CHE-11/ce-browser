@@ -47,10 +47,10 @@
 - [x] OCR an image or region on the page and copy the text.
 
 ## Downloads and files
-- [ ] Multi-connection download accelerator for large files.
-- [ ] Rename-on-download template, for example `{site}-{date}-{name}`.
-- [ ] Built-in viewers for JSON, CSV, Markdown and log files, with formatting and search.
-- [ ] Local file browser at `ce://files` for quick previews.
+- [x] Multi-connection download accelerator for large files.
+- [x] Rename-on-download template, for example `{site}-{date}-{name}`.
+- [x] Built-in viewers for JSON, CSV, Markdown and log files, with formatting and search.
+- [x] Local file browser at `ce://files` for quick previews.
 
 ## Developer tools
 - [ ] Request rewriting and blocking rules (a local mapping, like Requestly) through `WebResourceRequested`.

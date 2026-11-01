@@ -40,6 +40,7 @@ export function CommandPalette() {
       { id: "reopen", title: "Reopen closed tab", hint: "Action", run: () => reopenClosedTab() },
       { id: "bookmarks", title: "Bookmarks", hint: "Page", run: () => createTab("ce://bookmarks") },
       { id: "downloads", title: "Downloads", hint: "Page", run: () => createTab("ce://downloads") },
+      { id: "files", title: "Files", hint: "Page", run: () => createTab("ce://files") },
       { id: "history", title: "History", hint: "Page", run: () => createTab("ce://history") },
       { id: "settings", title: "Settings", hint: "Page", run: () => createTab("ce://settings") },
       { id: "extensions", title: "Extensions", hint: "Page", run: () => createTab("ce://extensions") },

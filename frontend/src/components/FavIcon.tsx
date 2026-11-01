@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Bookmark, Download, Globe, History, ImageDown, Puzzle, Settings, Sparkles } from "lucide-react";
+import { Bookmark, Download, Folder, Globe, History, ImageDown, Puzzle, Settings, Sparkles } from "lucide-react";
 import { cn } from "../lib/cn";
 import { faviconFor } from "../lib/format";
 
 const INTERNAL_ICONS: Record<string, typeof Globe> = {
   "ce://bookmarks": Bookmark,
   "ce://downloads": Download,
+  "ce://files": Folder,
   "ce://history": History,
   "ce://extensions": Puzzle,
   "ce://settings": Settings,

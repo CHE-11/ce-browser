@@ -2,6 +2,7 @@ import {
   Bookmark,
   Code,
   Download,
+  Folder,
   Glasses,
   History,
   LogOut,
@@ -78,6 +79,7 @@ export function AppMenu() {
           onClick={run(toggleVerticalTabs)}
         />
         <PopupMenuItem id="app-menu-downloads" icon={<Download />} label="Downloads" shortcut="Ctrl+J" onClick={openPage("ce://downloads")} />
+        <PopupMenuItem id="app-menu-files" icon={<Folder />} label="Files" onClick={openPage("ce://files")} />
         <PopupMenuItem id="app-menu-history" icon={<History />} label="History" onClick={openPage("ce://history")} />
         <PopupMenuItem id="app-menu-extensions" icon={<Puzzle />} label="Extensions" onClick={openPage("ce://extensions")} />
         <PopupMenuSeparator id="app-menu-separator-2" />

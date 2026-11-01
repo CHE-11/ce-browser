@@ -220,7 +220,31 @@ export type DownloadItem = {
   startedAt: number;
   finishedAt: number | null;
   canResume: boolean;
+  /** Saved with range requests instead of the single WebView2 download. */
+  accelerated: boolean;
+  ranges: { start: number; end: number; received: number }[];
 };
+
+export type LocalEntry = {
+  name: string;
+  path: string;
+  directory: boolean;
+  size: number;
+  kind: string;
+};
+
+export type BrowseResult =
+  | { type: "directory"; path: string; parent: string | null; entries: LocalEntry[] }
+  | {
+      type: "file";
+      path: string;
+      parent: string | null;
+      name: string;
+      kind: string;
+      text: string;
+      tooBig: boolean;
+      size: number;
+    };
 
 export type HistoryItem = {
   id: number;
@@ -262,6 +286,10 @@ export type BrowserSettings = {
   /** Empty means the system Downloads folder. */
   downloadDir: string;
   askWhereToSave: boolean;
+  /** Files of 8 MB or more use four connections when the server accepts ranges. */
+  accelerateDownloads: boolean;
+  /** Empty keeps the name the site suggested. */
+  downloadNameTemplate: string;
   showBookmarksBar: boolean;
   theme: string;
   colorMode: "dark" | "light" | "system";

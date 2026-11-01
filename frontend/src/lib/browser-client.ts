@@ -6,6 +6,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdblockStats,
   BookmarkNode,
+  BrowseResult,
   BookmarkTree,
   BrowserCommand,
   BrowserProfile,
@@ -650,6 +651,14 @@ export function removeDownload(id: number) {
 
 export function clearDownloads() {
   return invoke<void>("clear_downloads");
+}
+
+export function browseLocal(path?: string) {
+  return invoke<BrowseResult>("browse_local", { path });
+}
+
+export function openLocalFile(path: string) {
+  return invoke<void>("open_local_file", { path });
 }
 
 export function onDownloadsChanged(handler: (items: DownloadItem[]) => void): Promise<UnlistenFn> {

@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import { Bookmark, Download, History, Puzzle, Settings } from "lucide-react";
+import { Bookmark, Download, Folder, History, Puzzle, Settings } from "lucide-react";
 import { cn } from "../lib/cn";
 import { goToPage } from "../lib/route";
 import { useAppearanceFromSettings } from "../lib/use-browser";
@@ -7,6 +7,7 @@ import { useAppearanceFromSettings } from "../lib/use-browser";
 const NAV = [
   { page: "bookmarks", label: "Bookmarks", icon: Bookmark },
   { page: "downloads", label: "Downloads", icon: Download },
+  { page: "files", label: "Files", icon: Folder },
   { page: "history", label: "History", icon: History },
   { page: "extensions", label: "Extensions", icon: Puzzle },
   { page: "settings", label: "Settings", icon: Settings },

@@ -9,6 +9,7 @@ import { BookmarksPage } from "./features/Bookmarks/Bookmarks.page";
 import { CaptureEditorPage } from "./features/CaptureEditor/CaptureEditor.page";
 import { BrowserPage } from "./features/Browser/Browser.page";
 import { DownloadsPage } from "./features/Downloads/Downloads.page";
+import { FilesPage } from "./features/Files/Files.page";
 import { HistoryPage } from "./features/History/History.page";
 import { ExtensionsPage } from "./features/Extensions/Extensions.page";
 import { NewTabPage } from "./features/NewTab/NewTab.page";
@@ -44,6 +45,8 @@ function App() {
       return <BookmarksPage />;
     case "downloads":
       return <DownloadsPage />;
+    case "files":
+      return <FilesPage params={route.params} />;
     case "history":
       return <HistoryPage />;
     case "settings":

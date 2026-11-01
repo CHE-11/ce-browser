@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
 use tauri::webview::PlatformWebview;
@@ -43,6 +43,93 @@ pub fn read_pwstr(read: impl FnOnce(&mut PWSTR) -> windows::core::Result<()>) ->
 pub fn read_bool(read: impl FnOnce(&mut BOOL) -> windows::core::Result<()>) -> bool {
     let mut value = BOOL::default();
     read(&mut value).is_ok() && value.as_bool()
+}
+
+pub fn user_agent(core: &ICoreWebView2) -> String {
+    unsafe {
+        let Ok(settings) = core.Settings() else {
+            return String::new();
+        };
+        let Ok(settings) = settings.cast::<ICoreWebView2Settings2>() else {
+            return String::new();
+        };
+        read_pwstr(|value| settings.UserAgent(value))
+    }
+}
+
+/// Asks the webview for the cookies it would send to `url`. The callback runs on the webview thread.
+pub fn request_cookies(core: &ICoreWebView2, url: &str, done: impl FnOnce(String) + Send + 'static) {
+    let slot = Arc::new(Mutex::new(Some(done)));
+    let fallback = slot.clone();
+    let started = (|| -> windows::core::Result<()> {
+        let manager = unsafe { core.cast::<ICoreWebView2_2>()?.CookieManager()? };
+        let slot = slot.clone();
+        let handler = GetCookiesCompletedHandler::create(Box::new(move |result, list| {
+            let header = if result.is_ok() {
+                cookie_header(list.as_ref())
+            } else {
+                String::new()
+            };
+            fire(&slot, header);
+            Ok(())
+        }));
+        unsafe { manager.GetCookies(&HSTRING::from(url), &handler) }
+    })();
+    if started.is_err() {
+        fire(&fallback, String::new());
+    }
+}
+
+/// Cookie header and user agent for a URL, from a webview that is not this thread.
+pub fn session_for(webview: &Webview, url: &str) -> (String, String) {
+    let (tx, rx) = mpsc::channel();
+    let url = url.to_string();
+    let posted = webview.with_webview(move |platform| {
+        let Ok(core) = core(&platform) else {
+            let _ = tx.send((String::new(), String::new()));
+            return;
+        };
+        let agent = user_agent(&core);
+        let tx = tx.clone();
+        request_cookies(&core, &url, move |cookie| {
+            let _ = tx.send((cookie, agent));
+        });
+    });
+    if posted.is_err() {
+        return (String::new(), String::new());
+    }
+    rx.recv_timeout(Duration::from_secs(3)).unwrap_or_default()
+}
+
+fn fire(slot: &Mutex<Option<impl FnOnce(String)>>, header: String) {
+    if let Some(done) = slot.lock().ok().and_then(|mut guard| guard.take()) {
+        done(header);
+    }
+}
+
+fn cookie_header(list: Option<&ICoreWebView2CookieList>) -> String {
+    let Some(list) = list else {
+        return String::new();
+    };
+    unsafe {
+        let mut count = 0u32;
+        if list.Count(&mut count).is_err() {
+            return String::new();
+        }
+        let mut parts = Vec::new();
+        for index in 0..count {
+            let Ok(cookie) = list.GetValueAtIndex(index) else {
+                continue;
+            };
+            let name = read_pwstr(|value| cookie.Name(value));
+            let value = read_pwstr(|value| cookie.Value(value));
+            if name.is_empty() || name.contains([';', '\r', '\n']) {
+                continue;
+            }
+            parts.push(format!("{name}={value}"));
+        }
+        parts.join("; ")
+    }
 }
 
 fn key_down(key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> bool {
@@ -620,12 +707,13 @@ fn attach_downloads(app: &AppHandle, core: &ICoreWebView2) -> windows::core::Res
         return Ok(());
     };
     let download_app = app.clone();
+    let download_core = core.clone();
     let mut token = 0i64;
     unsafe {
         core4.add_DownloadStarting(
             &DownloadStartingEventHandler::create(Box::new(move |_, args| {
                 if let Some(args) = args {
-                    if let Err(error) = downloads::on_download_starting(&download_app, args) {
+                    if let Err(error) = downloads::on_download_starting(&download_app, &download_core, args) {
                         eprintln!("download: {error}");
                     }
                 }

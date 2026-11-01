@@ -699,6 +699,29 @@ export function SettingsPage() {
           <Row id="settings-ask-save" label="Ask where to save each file">
             <Toggle id="settings-ask-save-toggle" checked={settings.askWhereToSave} onChange={(value) => update({ askWhereToSave: value })} />
           </Row>
+          <Row id="settings-accelerate" label="Accelerate large downloads" hint="Files of 8 MB or more use 4 connections when the server allows it.">
+            <Toggle
+              id="settings-accelerate-toggle"
+              checked={settings.accelerateDownloads}
+              onChange={(value) => update({ accelerateDownloads: value })}
+            />
+          </Row>
+          <Row id="settings-download-name" label="File name" hint="Empty keeps the site's name. Tokens: {site} {date} {name} {ext}">
+            <input
+              id="settings-download-name-input"
+              defaultValue={settings.downloadNameTemplate}
+              key={settings.downloadNameTemplate}
+              placeholder="{site}-{date}-{name}"
+              spellCheck={false}
+              className="h-8 w-56 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm outline-none focus:border-sky-500"
+              onBlur={(event) => {
+                const next = event.target.value.trim();
+                if (next !== settings.downloadNameTemplate) {
+                  update({ downloadNameTemplate: next });
+                }
+              }}
+            />
+          </Row>
         </Section>
 
         <Section id="settings-tabs" title="Tabs">

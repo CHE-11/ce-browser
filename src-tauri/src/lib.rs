@@ -1,6 +1,8 @@
 mod adblock;
 mod answer;
+mod accelerator;
 mod keywords;
+mod library;
 mod bookmarks;
 mod capture;
 mod downloads;
@@ -606,6 +608,19 @@ fn list_downloads(app: AppHandle) -> Vec<DownloadItem> {
 }
 
 #[tauri::command]
+fn browse_local(app: AppHandle, path: Option<String>) -> Result<library::BrowseResult, String> {
+    let path = path.filter(|path| !path.trim().is_empty()).map(PathBuf::from).unwrap_or_else(|| {
+        settings::get(&app).download_dir(&app)
+    });
+    library::browse(&path)
+}
+
+#[tauri::command]
+fn open_local_file(path: String) -> Result<(), String> {
+    files::open_with_default(std::path::Path::new(&path))
+}
+
+#[tauri::command]
 async fn pause_download(app: AppHandle, id: u32) -> Result<(), String> {
     blocking(move || downloads::pause(&app, id)).await
 }
@@ -1165,6 +1180,8 @@ pub fn run() {
             import_bookmarks_html,
             export_bookmarks_html,
             list_downloads,
+            browse_local,
+            open_local_file,
             pause_download,
             resume_download,
             cancel_download,

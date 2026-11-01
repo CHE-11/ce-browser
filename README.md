@@ -82,6 +82,12 @@ The page-capture menu saves a PNG of the whole page or the visible area. **Regio
 
 Downloads go to your Downloads folder, or to a folder you choose in settings. An existing file is never overwritten: the new file gets a ` (1)` suffix. The toolbar button shows progress. Downloads can be paused, resumed, cancelled, opened and shown in Explorer. `ce://downloads` keeps the history.
 
+**Accelerate large downloads** is on by default. A file of 8 MB or more is fetched in 4 pieces when the server accepts ranges, using the cookies of the tab that started it. Smaller files, and servers that do not accept ranges, stay on the single download. Pause, resume, and cancel work for both. An accelerated file that was still running when the browser quit can be resumed from the shelf.
+
+**File name** in Settings > Downloads is empty by default, which keeps the name the site suggested. `{site}-{date}-{name}` builds a name from the host (without `www`), the date (`YYYY-MM-DD`), and the file stem. `{ext}` is the extension. The extension is kept when the template does not mention it. "Ask where to save" offers that name in the dialog.
+
+`ce://files` opens the download folder. You can go into a folder, go up, or open another folder. JSON is pretty-printed, CSV is a table, Markdown shows headings, lists, links, and code, and logs are lines. Search filters the table and highlights the other views. Previews stop at 2 MB. A finished JSON, CSV, Markdown, or log download opens here; other files open in their usual app.
+
 
 ## Page control
 

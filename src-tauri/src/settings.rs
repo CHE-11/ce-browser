@@ -36,6 +36,12 @@ pub struct BrowserSettings {
     /// Empty means the system Downloads folder.
     pub download_dir: String,
     pub ask_where_to_save: bool,
+    /// Large files use four connections when the server accepts ranges.
+    #[serde(default = "default_true")]
+    pub accelerate_downloads: bool,
+    /// Empty keeps the name the site suggested. Tokens: `{site}`, `{date}`, `{name}`, `{ext}`.
+    #[serde(default)]
+    pub download_name_template: String,
     pub show_bookmarks_bar: bool,
     pub theme: String,
     pub color_mode: String,
@@ -325,6 +331,8 @@ impl Default for BrowserSettings {
             pinned_tabs: Vec::new(),
             download_dir: String::new(),
             ask_where_to_save: false,
+            accelerate_downloads: true,
+            download_name_template: String::new(),
             show_bookmarks_bar: true,
             theme: "zinc".into(),
             color_mode: "dark".into(),
@@ -390,6 +398,12 @@ impl BrowserSettings {
         self.vertical_tabs_width = self.vertical_tabs_width.clamp(160, 400);
         self.tab_sleep = self.tab_sleep.normalize();
         self.https_exceptions = clean_hosts(&self.https_exceptions);
+        self.download_name_template = self
+            .download_name_template
+            .trim()
+            .chars()
+            .take(180)
+            .collect();
         self.sync_folder = folder_from_stored(&self.sync_folder);
         if self.sync_bookmarks_revision == 0
             && self.sync_extensions_revision == 0
@@ -752,6 +766,8 @@ mod tests {
         let loaded = loaded.normalize();
         assert!(loaded.adblock.enabled);
         assert!(loaded.adblock.allowed_sites.is_empty());
+        assert!(loaded.accelerate_downloads);
+        assert!(loaded.download_name_template.is_empty());
     }
 
     #[test]
