@@ -14,7 +14,7 @@ Windows-only desktop browser built on Tauri 2 and WebView2. One native window (`
 
 All webviews share one WebView2 data directory so cookies, logins and extensions are shared.
 
-- Frontend: `frontend/` — React 19, TypeScript, Tailwind 4, Vite 8. The `@` alias is `frontend/src`.
+- Frontend: `frontend/` — React 19, TypeScript, Tailwind 4, Vite 8. `@` is `frontend/src`. `@components`, `@features`, and `@lib` are the matching folders under it. `@type` is the repo `types/` folder. `@types/` is reserved by TypeScript, so it cannot be an import alias.
 - Backend: `src-tauri/` — Rust edition 2024, Tauri 2 with the `unstable` multi-webview feature. Commands are registered in `src-tauri/src/lib.rs`. WebView2 COM calls go through `webview2-com` inside `with_webview`, which runs on the main thread.
 - Shared IPC types: `types/browser.ts`. Do not put bridge types under `frontend/src` or inside the Rust crate.
 - Frontend wrappers: `frontend/src/lib/browser-client.ts`. Components call those functions, not `invoke` or `listen` directly.

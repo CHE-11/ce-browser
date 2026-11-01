@@ -10,9 +10,13 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
   resolve: {
-    alias: {
-      "@": path.resolve(rootDir, "src"),
-    },
+    alias: [
+      { find: "@components", replacement: path.resolve(rootDir, "src/components") },
+      { find: "@features", replacement: path.resolve(rootDir, "src/features") },
+      { find: "@lib", replacement: path.resolve(rootDir, "src/lib") },
+      { find: "@type", replacement: path.resolve(rootDir, "../types") },
+      { find: "@", replacement: path.resolve(rootDir, "src") },
+    ],
   },
   clearScreen: false,
   server: {
