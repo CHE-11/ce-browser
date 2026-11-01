@@ -289,6 +289,31 @@ pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview) {
         if let Err(error) = attach_accelerators(&app, &platform.controller(), Target::Ui) {
             eprintln!("WebView2 shortcuts for the browser UI: {error}");
         }
+        if let Ok(core) = core(&platform) {
+            let failed_app = app.clone();
+            let mut token = 0i64;
+            let handler = ProcessFailedEventHandler::create(Box::new(move |sender, args| {
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                let mut kind = COREWEBVIEW2_PROCESS_FAILED_KIND::default();
+                unsafe { args.ProcessFailedKind(&mut kind)? };
+                if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
+                    let app = failed_app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        crate::page_errors::browser_process_exited(&app)
+                    });
+                } else if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED
+                    && let Some(core) = sender
+                {
+                    let _ = unsafe { core.Reload() };
+                }
+                Ok(())
+            }));
+            if let Err(error) = unsafe { core.add_ProcessFailed(&handler, &mut token) } {
+                eprintln!("WebView2 crash events for the browser UI: {error}");
+            }
+        }
     });
 }
 
@@ -707,7 +732,161 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
     if let Err(error) = attach_adblock(app, platform, &core, id) {
         eprintln!("WebView2 ad blocker for tab {id}: {error}");
     }
+    if let Err(error) = attach_page_state(app, &core, id) {
+        eprintln!("WebView2 load and crash events for tab {id}: {error}");
+    }
     attach_downloads(app, &core)?;
+    Ok(())
+}
+
+fn process_failed_reason(reason: COREWEBVIEW2_PROCESS_FAILED_REASON) -> &'static str {
+    match reason {
+        COREWEBVIEW2_PROCESS_FAILED_REASON_OUT_OF_MEMORY => "The page ran out of memory.",
+        COREWEBVIEW2_PROCESS_FAILED_REASON_TERMINATED => "The page's process was ended.",
+        COREWEBVIEW2_PROCESS_FAILED_REASON_UNRESPONSIVE => "The page stopped responding.",
+        COREWEBVIEW2_PROCESS_FAILED_REASON_LAUNCH_FAILED => "The page's process could not start.",
+        COREWEBVIEW2_PROCESS_FAILED_REASON_CRASHED => "The page's process crashed.",
+        _ => "",
+    }
+}
+
+fn certificate_detail(certificate: &ICoreWebView2Certificate) -> String {
+    unsafe {
+        let subject = read_pwstr(|value| certificate.Subject(value));
+        let issuer = read_pwstr(|value| certificate.Issuer(value));
+        let mut valid_to = 0f64;
+        let _ = certificate.ValidTo(&mut valid_to);
+        let until = crate::page_errors::date_of(valid_to);
+        let mut parts = Vec::new();
+        if !subject.is_empty() {
+            parts.push(format!("Issued to {subject}."));
+        }
+        if !issuer.is_empty() {
+            parts.push(format!("Issued by {issuer}."));
+        }
+        if !until.is_empty() {
+            parts.push(format!("Valid until {until}."));
+        }
+        parts.join(" ")
+    }
+}
+
+/// Load progress, finished and failed navigations, certificate errors, and crashed or hung pages.
+fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows::core::Result<()> {
+    let mut token = 0i64;
+    unsafe {
+        let failed_app = app.clone();
+        core.add_ProcessFailed(
+            &ProcessFailedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                let mut kind = COREWEBVIEW2_PROCESS_FAILED_KIND::default();
+                args.ProcessFailedKind(&mut kind)?;
+                let app = failed_app.clone();
+                if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
+                    tauri::async_runtime::spawn(async move {
+                        crate::page_errors::browser_process_exited(&app)
+                    });
+                } else if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED {
+                    let detail = args
+                        .cast::<ICoreWebView2ProcessFailedEventArgs2>()
+                        .ok()
+                        .map(|args| {
+                            let mut reason = COREWEBVIEW2_PROCESS_FAILED_REASON::default();
+                            let _ = args.Reason(&mut reason);
+                            process_failed_reason(reason).to_string()
+                        })
+                        .unwrap_or_default();
+                    tauri::async_runtime::spawn(async move {
+                        tabs::set_failure(&app, id, "crashed", "RENDER_PROCESS_EXITED", detail)
+                    });
+                } else if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE {
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(error) = tabs::show_unresponsive(&app, id) {
+                            eprintln!("unresponsive page: {error}");
+                        }
+                    });
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+
+        let done_app = app.clone();
+        core.add_NavigationCompleted(
+            &NavigationCompletedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                let success = read_bool(|value| args.IsSuccess(value));
+                if success {
+                    tabs::set_progress(&done_app, id, 100);
+                    return Ok(());
+                }
+                let mut status = COREWEBVIEW2_WEB_ERROR_STATUS::default();
+                let _ = args.WebErrorStatus(&mut status);
+                let Some((kind, code)) = crate::page_errors::web_error(status) else {
+                    tabs::set_progress(&done_app, id, 100);
+                    return Ok(());
+                };
+                let app = done_app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if tabs::failure_of(&app, id).is_none() {
+                        tabs::set_failure(&app, id, kind, code, String::new());
+                    }
+                });
+                Ok(())
+            })),
+            &mut token,
+        )?;
+
+        if let Ok(core2) = core.cast::<ICoreWebView2_2>() {
+            let dom_app = app.clone();
+            core2.add_DOMContentLoaded(
+                &DOMContentLoadedEventHandler::create(Box::new(move |_, _| {
+                    tabs::set_progress(&dom_app, id, 70);
+                    Ok(())
+                })),
+                &mut token,
+            )?;
+        }
+
+        if let Ok(core14) = core.cast::<ICoreWebView2_14>() {
+            let certificate_app = app.clone();
+            core14.add_ServerCertificateErrorDetected(
+                &ServerCertificateErrorDetectedEventHandler::create(Box::new(move |_, args| {
+                    let Some(args) = args else {
+                        return Ok(());
+                    };
+                    let uri = read_pwstr(|value| args.RequestUri(value));
+                    if crate::page_errors::certificate_allowed(&uri) {
+                        args.SetAction(COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_ALWAYS_ALLOW)?;
+                        return Ok(());
+                    }
+                    args.SetAction(COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL)?;
+                    if !crate::page_errors::is_page_request(id, &uri) {
+                        return Ok(());
+                    }
+                    let mut status = COREWEBVIEW2_WEB_ERROR_STATUS::default();
+                    let _ = args.ErrorStatus(&mut status);
+                    let code = crate::page_errors::web_error(status)
+                        .map(|(_, code)| code)
+                        .unwrap_or("CERTIFICATE_IS_INVALID");
+                    let detail = args
+                        .ServerCertificate()
+                        .map(|certificate| certificate_detail(&certificate))
+                        .unwrap_or_default();
+                    let app = certificate_app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        tabs::set_failure(&app, id, "certificate", code, detail)
+                    });
+                    Ok(())
+                })),
+                &mut token,
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -826,6 +1005,8 @@ fn attach_adblock(
             &NavigationStartingEventHandler::create(Box::new(move |sender, args| {
                 if let Some(args) = args {
                     let uri = read_pwstr(|value| args.Uri(value));
+                    crate::page_errors::note_navigation(id, &uri);
+                    tabs::navigation_started(&navigation_app, id);
                     tabs::clear_errors(&navigation_app, id);
                     tabs::clear_accent(&navigation_app, id);
                     if let Some(next) = crate::privacy::rewrite_navigation(&navigation_app, &uri) {
@@ -852,6 +1033,7 @@ fn attach_adblock(
                 let Some(core) = sender else {
                     return Ok(());
                 };
+                tabs::set_progress(&content_app, id, 35);
                 let source = read_pwstr(|value| core.Source(value));
                 if source.starts_with("http") && crate::adblock::active_for(&source) {
                     let script = HSTRING::from(crate::adblock::cosmetic_script());

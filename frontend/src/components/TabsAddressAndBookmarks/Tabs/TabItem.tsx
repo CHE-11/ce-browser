@@ -1,5 +1,5 @@
 import type { DragEvent, MouseEvent } from "react";
-import { Glasses, LoaderCircle, Moon, Volume2, VolumeX, X } from "lucide-react";
+import { Glasses, Moon, TriangleAlert, Volume2, VolumeX, X } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
 import { setTabsMuted, selectTabRange, toggleTabSelection, activateTab } from "@/lib/browser-client";
 import { accentTint } from "@/lib/accent";
@@ -179,11 +179,18 @@ export function TabItem({
         />
       ) : null}
       <span id={`${domId}-icon-wrap`} className="relative inline-flex shrink-0">
-        {tab.loading ? (
-          <LoaderCircle id={`${domId}-loading`} className="size-4 shrink-0 animate-spin text-sky-400" aria-hidden />
+        {tab.failure ? (
+          <TriangleAlert id={`${domId}-failed`} className="size-4 shrink-0 text-amber-400" aria-label="Page failed to load" />
         ) : (
-          <FavIcon id={`${domId}-icon`} url={tab.url} src={tab.favicon} />
+          <FavIcon id={`${domId}-icon`} url={tab.url} src={tab.favicon} className={cn("transition-transform", tab.loading && "scale-75")} />
         )}
+        {tab.loading ? (
+          <span
+            id={`${domId}-loading`}
+            aria-hidden
+            className="pointer-events-none absolute -inset-0.5 animate-spin rounded-full border-2 border-sky-400/25 border-t-sky-400"
+          />
+        ) : null}
         {compact ? audioButton : null}
       </span>
       {compact ? null : (

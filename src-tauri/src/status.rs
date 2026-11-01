@@ -546,6 +546,22 @@ unsafe extern "system" {
     fn CloseHandle(handle: *mut c_void) -> i32;
     fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
     fn GetCurrentProcessId() -> u32;
+    fn TerminateProcess(process: *mut c_void, exit_code: u32) -> i32;
+}
+
+/// Ends one process. WebView2 then reports the renderer as gone and the tab shows its crash page.
+pub fn terminate(pid: u32) -> bool {
+    const PROCESS_TERMINATE: u32 = 0x0001;
+    if pid == 0 || pid == unsafe { GetCurrentProcessId() } {
+        return false;
+    }
+    let handle = unsafe { OpenProcess(PROCESS_TERMINATE, 0, pid) };
+    if invalid_handle(handle) {
+        return false;
+    }
+    let ended = unsafe { TerminateProcess(handle, 1) } != 0;
+    unsafe { CloseHandle(handle) };
+    ended
 }
 
 #[link(name = "psapi")]

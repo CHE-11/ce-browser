@@ -1,4 +1,5 @@
 import { FindBar } from "@/components/FindBar";
+import { PageFailure } from "@/components/PageFailure";
 import { SplitDivider } from "@/components/SplitDivider";
 import { SyncToast } from "@/components/SyncToast";
 import { AddressBar } from "@/components/TabsAddressAndBookmarks/Addressbar/AddressBar";
@@ -138,11 +139,24 @@ export function BrowserPage() {
           <VerticalTabs ref={sidebarRef} snapshot={snapshot} settings={settings} />
         ) : null}
         <div id="browser-page-area" className="relative flex min-w-0 flex-1 items-center justify-center bg-zinc-950">
-          {activeTab && !activeTab.loaded ? (
+          {activeTab && !activeTab.loaded && !activeTab.failure ? (
             <span id="browser-page-loading" className="text-sm text-zinc-500">
               Loading {activeTab.title || activeTab.url}
             </span>
           ) : null}
+          {splitShown && split
+            ? [
+                { id: split.left, style: { left: 0, width: `calc(${split.ratio * 100}% - 3px)` } },
+                { id: split.right, style: { right: 0, width: `calc(${(1 - split.ratio) * 100}% - 3px)` } },
+              ].map(({ id, style }) => {
+                const tab = snapshot.tabs.find((item) => item.id === id);
+                return tab?.failure ? (
+                  <PageFailure key={id} tab={tab} failure={tab.failure} className="absolute inset-y-0" style={style} />
+                ) : null;
+              })
+            : activeTab?.failure
+              ? <PageFailure tab={activeTab} failure={activeTab.failure} className="absolute inset-0" />
+              : null}
           {splitShown && split ? <SplitDivider split={split} activeId={snapshot.activeId} /> : null}
         </div>
         {showToolStrip ? (

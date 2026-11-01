@@ -128,6 +128,16 @@ export function stop(id: number) {
   return invoke<void>("stop", { id });
 }
 
+/** Ends the process of a page that stopped responding. The tab then offers Reload. */
+export function endPage(id: number) {
+  return invoke<void>("end_page", { id });
+}
+
+/** Loads the tab's failed address again, passing its certificate error for this session. */
+export function allowCertificate(id: number) {
+  return invoke<void>("allow_certificate", { id });
+}
+
 export function moveTab(id: number, index: number) {
   return invoke<void>("move_tab", { id, index });
 }

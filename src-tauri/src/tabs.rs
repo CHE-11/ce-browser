@@ -1734,6 +1734,102 @@ pub fn clear_errors(app: &AppHandle, id: u32) {
     }
 }
 
+/// A main-frame navigation began. A failure is cleared, so the page view shows again.
+/// Runs inside the WebView2 event on the main thread, so moving views is left to a task.
+pub fn navigation_started(app: &AppHandle, id: u32) {
+    let recovered = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        tab.info.progress = 10;
+        tab.info.failure.take().map(|_| tab.info.window.clone())
+    });
+    emit_tabs(app);
+    if let Some(window) = recovered {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            place_pages(&app, &window, true);
+            emit_tabs(&app);
+        });
+    }
+}
+
+/// Moves the load bar forward. It never goes back while one navigation runs.
+pub fn set_progress(app: &AppHandle, id: u32, progress: u8) {
+    let changed = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        if tab.info.progress >= progress || tab.info.progress >= 100 {
+            return None;
+        }
+        tab.info.progress = progress;
+        Some(())
+    });
+    if changed.is_some() {
+        emit_tabs(app);
+    }
+}
+
+/// The page view can't show this tab's page. The browser UI draws `kind` in its place.
+pub fn set_failure(app: &AppHandle, id: u32, kind: &str, code: &str, detail: String) {
+    let window = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        tab.info.failure = Some(TabFailure {
+            kind: kind.to_string(),
+            url: tab.info.url.clone(),
+            code: code.to_string(),
+            detail,
+        });
+        tab.info.progress = 100;
+        tab.info.loading = false;
+        Some(tab.info.window.clone())
+    });
+    if let Some(window) = window {
+        crate::thumbnails::forget(id);
+        place_pages(app, &window, true);
+        emit_tabs(app);
+    }
+}
+
+pub fn failure_of(app: &AppHandle, id: u32) -> Option<TabFailure> {
+    with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .find(|tab| tab.info.id == id)
+            .and_then(|tab| tab.info.failure.clone())
+    })
+}
+
+/// Asks whether to wait for or end a page that stopped answering. Only the page on screen asks.
+pub fn show_unresponsive(app: &AppHandle, id: u32) -> Result<(), String> {
+    let window = with_state(app, |state| {
+        let window = state.tab_window(id)?;
+        state.is_foreground(id).then_some(window)
+    });
+    let Some(window) = window else {
+        return Ok(());
+    };
+    if popup_kind(app, &window).as_deref() == Some("unresponsive") {
+        return Ok(());
+    }
+    let handle = app.get_window(&window).ok_or("The browser window is missing.")?;
+    let size = handle.inner_size().map_err(|error| error.to_string())?;
+    let scale = handle.scale_factor().unwrap_or(1.0);
+    let width = 400.0;
+    open_popup(
+        app,
+        &window,
+        PopupRequest {
+            kind: "unresponsive".into(),
+            x: (size.width as f64 / scale - width) / 2.0,
+            y: 120.0,
+            width,
+            height: 180.0,
+            params: format!("id={id}"),
+            focus: true,
+        },
+    )
+    .map(|_| ())
+}
+
 pub fn update_url(app: &AppHandle, id: u32, raw: &str) {
     let url = paths::display_url(app, raw);
     let default_zoom = settings::get(app).page_zoom_factor();
@@ -2000,20 +2096,33 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
                 && active.is_some_and(|id| id == split.left || id == split.right)
         });
         let ratio = split.map(|split| split.ratio).unwrap_or(0.5);
+        let failed = |id: u32| {
+            state
+                .tabs
+                .iter()
+                .any(|tab| tab.info.id == id && tab.info.failure.is_some())
+        };
+        // A tab that failed keeps its view off screen, so the browser UI behind can explain why.
         let painted_view = |id: u32| {
             state
                 .tabs
                 .iter()
-                .find(|tab| tab.info.id == id && tab.painted)
+                .find(|tab| tab.info.id == id && tab.painted && tab.info.failure.is_none())
                 .and_then(|tab| tab.webview.clone())
         };
         let paired = split.and_then(|split| {
-            Some(vec![
-                (painted_view(split.left)?, Slot::Left),
-                (painted_view(split.right)?, Slot::Right),
-            ])
+            match (painted_view(split.left), painted_view(split.right)) {
+                (Some(left), Some(right)) => Some(vec![(left, Slot::Left), (right, Slot::Right)]),
+                (Some(left), None) if failed(split.right) => Some(vec![(left, Slot::Left)]),
+                (None, Some(right)) if failed(split.left) => Some(vec![(right, Slot::Right)]),
+                (None, None) if failed(split.left) && failed(split.right) => Some(Vec::new()),
+                _ => None,
+            }
         });
         let shown = paired.unwrap_or_else(|| {
+            if active.is_some_and(failed) {
+                return Vec::new();
+            }
             let ready = active.and_then(painted_view);
             let fallback = || {
                 previous
@@ -2023,6 +2132,7 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
                         state.tabs.iter().any(|tab| {
                             tab.info.window == window
                                 && tab.painted
+                                && tab.info.failure.is_none()
                                 && tab.webview.as_ref() == Some(label)
                         })
                     })
@@ -2116,6 +2226,7 @@ fn retire_webview(app: &AppHandle, label: Option<String>) {
         .and_then(|id| id.parse().ok())
     {
         crate::adblock::forget(id);
+        crate::page_errors::forget_tab(id);
     }
     let Some(webview) = label.and_then(|label| app.get_webview(&label)) else {
         return;

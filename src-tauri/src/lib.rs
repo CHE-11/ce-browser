@@ -16,6 +16,7 @@ mod keywords;
 mod library;
 mod media;
 mod ocr;
+mod page_errors;
 mod page_rules;
 mod paths;
 mod peek;
@@ -160,6 +161,31 @@ fn get_adblock_stats(id: u32) -> Result<AdblockStats, String> {
 #[tauri::command]
 async fn stop(app: AppHandle, id: u32) {
     tabs::stop(&app, id);
+}
+
+/// Ends the renderer of a page that stopped responding. The tab then shows its crash page.
+#[tauri::command]
+async fn end_page(app: AppHandle, id: u32) -> Result<(), String> {
+    blocking(move || {
+        let pids = status::renderer_pids(&app, id);
+        if pids.is_empty() {
+            return Err("Couldn't find this page's process.".into());
+        }
+        let ended = pids.into_iter().filter(|pid| status::terminate(*pid)).count();
+        if ended == 0 {
+            return Err("Windows would not end this page's process.".into());
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Loads the failed page again, passing its certificate error for the rest of this session.
+#[tauri::command]
+async fn allow_certificate(app: AppHandle, id: u32) -> Result<(), String> {
+    let failure = tabs::failure_of(&app, id).ok_or("This page has no certificate error.")?;
+    page_errors::allow_certificate(&failure.url)?;
+    tabs::navigate(&app, id, &failure.url)
 }
 
 #[tauri::command]
@@ -1490,6 +1516,8 @@ pub fn run() {
             clear_site_cache,
             get_adblock_stats,
             stop,
+            end_page,
+            allow_certificate,
             move_tab,
             detach_tab,
             pin_tab,

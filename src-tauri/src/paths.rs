@@ -147,6 +147,10 @@ pub fn resolve_input(app: &AppHandle, input: &str, search_url: &str) -> Url {
     if let Some(page) = text.strip_prefix(INTERNAL_SCHEME) {
         return internal_url(app, page);
     }
+    // `?` in front always searches, even for text that looks like an address.
+    if let Some(query) = text.strip_prefix('?').map(str::trim).filter(|query| !query.is_empty()) {
+        return search(search_url, query);
+    }
     let has_scheme = [
         "http://",
         "https://",

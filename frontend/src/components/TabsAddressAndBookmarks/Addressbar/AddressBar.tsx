@@ -60,6 +60,7 @@ import { reorderToolbar, splitToolbar, toolbarPinned } from "../../../lib/toolba
 import { buildSuggestions, omniboxHeight } from "../../../lib/omnibox";
 import { flattenBookmarks } from "../../../lib/use-browser";
 import { IconButton } from "../../IconButton";
+import { LoadBar } from "../../LoadBar";
 import { ToolbarEntry } from "../../VerticalToolbar";
 import { WindowControls } from "../../WindowControls";
 
@@ -377,7 +378,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   return (
     <div
       id="address-bar"
-      className={cn("flex h-10 shrink-0 items-center gap-1 bg-zinc-900 px-2", windowControls && "pr-0")}
+      className={cn("relative flex h-10 shrink-0 items-center gap-1 bg-zinc-900 px-2", windowControls && "pr-0")}
       style={
         settings?.siteAccent && activeTab?.accent
           ? { backgroundColor: accentTint(activeTab.accent, 0.28) }
@@ -605,6 +606,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           <WindowControls />
         </>
       ) : null}
+      <LoadBar id="address-load-bar" progress={activeTab?.progress ?? 0} loading={activeTab?.loading ?? false} />
     </div>
   );
 }
