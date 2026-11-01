@@ -543,6 +543,12 @@ export type BrowserSettings = {
   tabCycleOrder: "strip" | "recent";
   /** In recent order, Ctrl+Tab shows a switcher with thumbnails until Ctrl is released. */
   tabSwitcher: boolean;
+  /** Windows draws this behind the tab strip and toolbars. */
+  windowBackdrop: "none" | "mica" | "acrylic";
+  /** Check for a new version at startup and once a day. */
+  autoUpdate: boolean;
+  /** Version that last ran. A newer running version opens ce://whats-new once. */
+  lastSeenVersion: string;
   /** Resting on a tab shows a small preview of its page. */
   tabHoverPreview: boolean;
 };
@@ -898,6 +904,13 @@ export type OmniboxSuggestion = {
 };
 
 /** Text matches on one page. `index` is the highlighted match, or -1. */
+export type BackdropSupport = {
+  mica: boolean;
+  acrylic: boolean;
+  /** The setting asks for a backdrop the open window was not created for. A restart shows it. */
+  restartNeeded: boolean;
+};
+
 export type FindResult = {
   count: number;
   index: number;

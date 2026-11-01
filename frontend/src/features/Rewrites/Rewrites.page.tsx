@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
+import { Route } from "lucide-react";
 import { listRewriteRules, saveRewriteRules } from "@/lib/browser-client";
 import { useAppearanceFromSettings } from "@/lib/use-browser";
 import { Button } from "@/components/Button";
+import { EmptyState } from "@/components/EmptyState";
+import { SkeletonRows } from "@/components/Skeleton";
 import type { RewriteRule } from "@type/browser";
 
 const EMPTY: RewriteRule = { id: 0, enabled: true, contains: "", action: "block", target: "" };
@@ -9,12 +12,16 @@ const EMPTY: RewriteRule = { id: 0, enabled: true, contains: "", action: "block"
 export function RewritesPage() {
   const ready = useAppearanceFromSettings();
   const [rules, setRules] = useState<RewriteRule[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [draft, setDraft] = useState<RewriteRule>(EMPTY);
   const [error, setError] = useState("");
 
   useEffect(() => {
     document.title = "Request rules";
-    void listRewriteRules().then(setRules).catch((reason: unknown) => setError(String(reason)));
+    void listRewriteRules()
+      .then(setRules)
+      .catch((reason: unknown) => setError(String(reason)))
+      .finally(() => setLoaded(true));
   }, []);
 
   const save = async (next: RewriteRule[]) => {
@@ -91,9 +98,19 @@ export function RewritesPage() {
         </p>
       ) : null}
       <ul id="rewrites-list" className="flex flex-col gap-2">
-        {rules.length === 0 ? (
-          <li id="rewrites-empty" className="text-sm text-zinc-500">
-            No rules yet.
+        {!loaded ? (
+          <li id="rewrites-loading">
+            <SkeletonRows id="rewrites-loading-rows" rows={3} />
+          </li>
+        ) : rules.length === 0 ? (
+          <li id="rewrites-empty">
+            <EmptyState
+              id="rewrites-empty-state"
+              icon={Route}
+              title="No request rules yet"
+              hint="Add one above to block a URL, send it somewhere else, or answer it with a file on this computer."
+              className="rounded-lg border border-dashed border-zinc-800"
+            />
           </li>
         ) : (
           rules.map((rule) => (

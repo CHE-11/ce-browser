@@ -1,15 +1,26 @@
 import { useEffect, useState } from "react";
-import { Check, Minus, Plus, RotateCcw } from "lucide-react";
-import { Button } from "@/components/Button";
+import { Check, Minus, Plus } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
 import { COLOR_MODE_OPTIONS, THEMES, resolveMode } from "@/lib/appearance";
 import { BOOKMARK_SIZE } from "@/lib/bookmark-size";
-import { getUserStyles, showUserStyles } from "@/lib/browser-client";
+import { backdropSupport, getUserStyles, showUserStyles } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, PAGE_ZOOM_LEVELS, stepPageZoom, ZOOM_STEP } from "@/lib/zoom";
+import type { BackdropSupport } from "@type/browser";
 import { SETTINGS_SECTIONS } from "./settings-sections";
-import { inputClass, matchesQuery, Row, Section, useReportMatch, useSectionMatches, useSettingVisible, useSettingsQuery, type SettingsSectionProps } from "./SettingsControls";
+import {
+  inputClass,
+  matchesQuery,
+  Row,
+  Section,
+  Segmented,
+  useReportMatch,
+  useSectionMatches,
+  useSettingVisible,
+  useSettingsQuery,
+  type SettingsSectionProps,
+} from "./SettingsControls";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-appearance")!;
 
@@ -64,6 +75,8 @@ const BOOKMARK_SIZE_ROWS: {
   },
 ];
 const MODE_LABEL = "Mode";
+const BACKDROP_LABEL = "Window backdrop";
+const BACKDROP_HINT = "Mica or Acrylic shows the desktop color through the tab strip and toolbars.";
 const THEME_LABEL = "Theme";
 const STYLES_LABEL = "Custom styles files";
 const STYLES_HINT =
@@ -94,6 +107,10 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
     ACCENT_HINT,
     MODE_LABEL,
     ...COLOR_MODE_OPTIONS.map((option) => option.label),
+    BACKDROP_LABEL,
+    BACKDROP_HINT,
+    "mica",
+    "acrylic",
     THEME_LABEL,
     ...THEMES.map((theme) => theme.label),
     STYLES_LABEL,
@@ -121,16 +138,17 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
 
   return (
     <Section id={section.id} title={section.title}>
-      <Row id="settings-site-accent" label={ACCENT_LABEL} hint={ACCENT_HINT}>
+      <Row id="settings-site-accent" setting="siteAccent" label={ACCENT_LABEL} hint={ACCENT_HINT}>
         <Toggle id="settings-site-accent-toggle" checked={settings.siteAccent} onChange={(value) => onUpdate({ siteAccent: value })} />
       </Row>
-      <Row id="settings-bookmarks-bar" label={BAR_LABEL} hint={BAR_HINT}>
+      <Row id="settings-bookmarks-bar" setting="showBookmarksBar" label={BAR_LABEL} hint={BAR_HINT}>
         <Toggle id="settings-bookmarks-bar-toggle" checked={settings.showBookmarksBar} onChange={(value) => onUpdate({ showBookmarksBar: value })} />
       </Row>
       {BOOKMARK_SIZE_ROWS.map((row) => (
         <RemSetting
           key={row.key}
           id={row.id}
+          setting={row.key}
           label={row.label}
           hint={row.hint}
           value={settings[row.key] ?? row.fallback}
@@ -139,7 +157,7 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
           onChange={(value) => onUpdate({ [row.key]: value })}
         />
       ))}
-      <Row id="settings-color-mode" label={MODE_LABEL} search={COLOR_MODE_OPTIONS.map((option) => option.label)}>
+      <Row id="settings-color-mode" setting="colorMode" label={MODE_LABEL} search={COLOR_MODE_OPTIONS.map((option) => option.label)}>
         <div id="settings-color-mode-options" className="flex rounded-md border border-zinc-700 p-0.5">
           {COLOR_MODE_OPTIONS.map((option) => (
             <button
@@ -157,10 +175,11 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
           ))}
         </div>
       </Row>
+      <BackdropRow settings={settings} onUpdate={onUpdate} />
       <ThemePicker settings={settings} onUpdate={onUpdate} />
       <UserStyles path={userCssPath} onError={onError} />
       <Row
-        id="settings-ui-zoom"
+        id="settings-ui-zoom" setting="uiZoom"
         label={UI_ZOOM_LABEL}
         hint={UI_ZOOM_HINT}
         search={[
@@ -170,14 +189,6 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
           `${settings.uiZoom}%`,
         ]}
       >
-        {settings.uiZoom !== DEFAULT_ZOOM ? (
-          <Button id="settings-ui-zoom-reset" size="xs" variant="outline" onClick={() => onUpdate({ uiZoom: DEFAULT_ZOOM })}>
-            <RotateCcw id="settings-ui-zoom-reset-icon" className="size-3.5" aria-hidden />
-            <span id="settings-ui-zoom-reset-label" className="text-xs text-zinc-400">
-              Reset
-            </span>
-          </Button>
-        ) : null}
         <IconButton
           id="settings-ui-zoom-out"
           label="Decrease browser UI size"
@@ -199,7 +210,7 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
         </IconButton>
       </Row>
       <Row
-        id="settings-page-zoom"
+        id="settings-page-zoom" setting="pageZoom"
         label={PAGE_ZOOM_LABEL}
         hint={PAGE_ZOOM_HINT}
         search={[
@@ -209,14 +220,6 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
           `${pageZoom}%`,
         ]}
       >
-        {pageZoom !== DEFAULT_ZOOM ? (
-          <Button id="settings-page-zoom-reset" size="xs" variant="outline" onClick={() => onUpdate({ pageZoom: DEFAULT_ZOOM })}>
-            <RotateCcw id="settings-page-zoom-reset-icon" className="size-3.5" aria-hidden />
-            <span id="settings-page-zoom-reset-label" className="text-xs text-zinc-400">
-              Reset
-            </span>
-          </Button>
-        ) : null}
         <IconButton
           id="settings-page-zoom-out"
           label="Decrease web page zoom"
@@ -243,6 +246,7 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
 
 type RemSettingProps = {
   id: string;
+  setting: RemSettingKey;
   label: string;
   hint: string;
   value: number;
@@ -252,7 +256,7 @@ type RemSettingProps = {
 };
 
 /** An exact size in rem. Saves on blur or Enter. */
-function RemSetting({ id, label, hint, value, fallback, limits, onChange }: RemSettingProps) {
+function RemSetting({ id, setting, label, hint, value, fallback, limits, onChange }: RemSettingProps) {
   const [draft, setDraft] = useState(String(value));
 
   useEffect(() => {
@@ -270,15 +274,7 @@ function RemSetting({ id, label, hint, value, fallback, limits, onChange }: RemS
   };
 
   return (
-    <Row id={id} label={label} hint={hint} search={["rem", String(value)]}>
-      {value !== fallback ? (
-        <Button id={`${id}-reset`} size="xs" variant="outline" onClick={() => onChange(fallback)}>
-          <RotateCcw id={`${id}-reset-icon`} className="size-3.5" aria-hidden />
-          <span id={`${id}-reset-label`} className="text-xs text-zinc-400">
-            Reset
-          </span>
-        </Button>
-      ) : null}
+    <Row id={id} label={label} hint={hint} search={["rem", String(value)]} setting={setting}>
       <input
         id={`${id}-input`}
         type="number"
@@ -299,6 +295,41 @@ function RemSetting({ id, label, hint, value, fallback, limits, onChange }: RemS
       <span id={`${id}-unit`} className="text-xs text-zinc-500">
         rem
       </span>
+    </Row>
+  );
+}
+
+function BackdropRow({ settings, onUpdate }: { settings: SettingsSectionProps["settings"]; onUpdate: SettingsSectionProps["onUpdate"] }) {
+  const [support, setSupport] = useState<BackdropSupport | null>(null);
+
+  useEffect(() => {
+    void backdropSupport()
+      .then(setSupport)
+      .catch(() => setSupport({ mica: false, acrylic: false, restartNeeded: false }));
+  }, [settings.windowBackdrop]);
+
+  const unavailable = support !== null && !support.mica && !support.acrylic;
+  const hint = unavailable
+    ? "This version of Windows can't draw a backdrop."
+    : support?.restartNeeded
+      ? "Restart ce-browser to show the backdrop."
+      : support && !support.mica
+        ? "Mica needs Windows 11. Acrylic works here."
+        : BACKDROP_HINT;
+  return (
+    <Row id="settings-backdrop" setting="windowBackdrop" label={BACKDROP_LABEL} hint={hint} search={["mica", "acrylic", "transparency"]}>
+      <Segmented
+        id="settings-backdrop-options"
+        label={BACKDROP_LABEL}
+        value={settings.windowBackdrop}
+        disabled={unavailable}
+        options={[
+          { value: "none", label: "None" },
+          ...(support?.mica ?? true ? [{ value: "mica" as const, label: "Mica" }] : []),
+          ...(support?.acrylic ?? true ? [{ value: "acrylic" as const, label: "Acrylic" }] : []),
+        ]}
+        onChange={(windowBackdrop) => onUpdate({ windowBackdrop })}
+      />
     </Row>
   );
 }

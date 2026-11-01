@@ -2,6 +2,7 @@ mod accelerator;
 mod accent;
 mod adblock;
 mod answer;
+mod backdrop;
 mod bookmark_health;
 mod bookmarks;
 mod browsers;
@@ -1310,6 +1311,17 @@ fn default_download_dir(app: AppHandle) -> String {
     BrowserSettings::default()
         .download_dir(&app)
         .to_string_lossy()
+/// Settings as a new profile gets them, so the settings page can mark changed values.
+#[tauri::command]
+fn default_settings() -> BrowserSettings {
+    BrowserSettings::default().normalize()
+}
+
+#[tauri::command]
+fn backdrop_support(app: AppHandle) -> backdrop::BackdropSupport {
+    backdrop::support(&app)
+}
+
         .into_owned()
 }
 
@@ -1753,6 +1765,8 @@ pub fn run() {
             reload_user_styles,
             show_user_styles,
             show_sync_folder,
+            default_settings,
+            backdrop_support,
             default_user_styles,
             create_sync_folder,
             select_sync_folder,

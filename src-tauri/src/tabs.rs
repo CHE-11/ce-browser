@@ -1458,7 +1458,7 @@ pub fn create_browser_window(app: &AppHandle, label: &str) -> Result<(), String>
     crate::profiles::apply_window_icon(app, &window);
     let size = window.inner_size().map_err(|error| error.to_string())?;
     let (r, g, b) = settings::page_surface(app);
-    let background = Color(r, g, b, 255);
+    let background = if backdrop { Color(0, 0, 0, 0) } else { Color(r, g, b, 255) };
     let _ = window.set_background_color(Some(background));
     let ui_app = app.clone();
     let host = label.to_string();
@@ -1473,16 +1473,22 @@ pub fn create_browser_window(app: &AppHandle, label: &str) -> Result<(), String>
                 }),
             LogicalPosition::new(0.0, 0.0),
             size,
+    // Mica and Acrylic only show through a window created transparent.
+    let backdrop = crate::backdrop::wanted(app).is_some();
         )
         .map_err(|error| error.to_string())?;
     webview2::attach_ui_hooks(app, &ui_view);
     let _ = window.set_focus();
     Ok(())
 }
+        .transparent(backdrop)
 
 fn allocate_window(app: &AppHandle) -> String {
     with_state(app, |state| {
         state.next_window += 1;
+    if backdrop {
+        crate::backdrop::note_transparent(label);
+    }
         let number = state.next_window;
         // `main-*` is listed in capabilities/default.json. A different prefix cannot drag or invoke.
         let label = format!("main-{number}");
@@ -1502,6 +1508,9 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
     .ok_or("That tab is no longer open.")?;
     let label = allocate_window(app);
     if let Err(error) = create_browser_window(app, &label) {
+    if backdrop {
+        crate::backdrop::apply_all(app);
+    }
         with_state(app, |state| {
             state.windows.retain(|window| window.label != label);
         });
@@ -1626,6 +1635,7 @@ fn update(app: &AppHandle, id: u32, change: impl FnOnce(&mut Tab)) {
     });
     if found {
         emit_tabs(app);
+    crate::backdrop::forget(label);
     }
 }
 
@@ -3269,7 +3279,7 @@ pub fn apply_page_background(app: &AppHandle) {
     });
     for (label, ui) in chrome {
         if let Some(window) = app.get_window(&label) {
-            let _ = window.set_background_color(Some(color));
+            let _ = window.set_background_color(Some(surface));
         }
         if let Some(webview) = app.get_webview(&ui) {
             let _ = webview.set_background_color(Some(color));
@@ -3281,7 +3291,7 @@ pub fn apply_page_background(app: &AppHandle) {
     let labels = with_state(app, |state| state.page_labels());
     for label in labels {
         if let Some(webview) = app.get_webview(&label) {
-            let _ = webview.set_background_color(Some(color));
+            let _ = webview.set_background_color(Some(surface));
         }
     }
 }
@@ -3447,6 +3457,10 @@ pub fn close_popup_label(app: &AppHandle, label: &str) {
 }
 
 pub fn resize_popup(
+    if app.try_state::<Tabs>().is_none() {
+        return;
+    }
+    crate::backdrop::apply_all(app);
     app: &AppHandle,
     window_label: &str,
     width: Option<f64>,
@@ -3455,6 +3469,7 @@ pub fn resize_popup(
     let (label, anchor_y, revealed) = with_state(app, |state| {
         let popup = &state.chrome(window_label)?.popup;
         let label = popup.label.clone()?;
+        let surface = if crate::backdrop::active(app, &label) { Color(0, 0, 0, 0) } else { color };
         Some((label, popup.anchor_y, popup.revealed))
     })
     .ok_or("No popup is open.")?;

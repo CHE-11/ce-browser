@@ -1,6 +1,8 @@
 import { Button } from "@/components/Button";
+import { EmptyState } from "@/components/EmptyState";
 import { ExtensionIcon } from "@/components/ExtensionIcon";
 import { PageShell } from "@/components/PageShell";
+import { Skeleton } from "@/components/Skeleton";
 import { Toggle } from "@/components/Toggle";
 import { installExtensionZip, installExtensionFolder, setExtensionEnabled, openExtensionOptions, removeExtension, saveSettings } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
@@ -13,7 +15,7 @@ import { BUILTIN_TOOLS } from "../BuiltInExtensions/builtin";
 
 
 export function ExtensionsPage() {
-  const { extensions, error: loadError } = useExtensions();
+  const { extensions, error: loadError, loaded } = useExtensions();
   const settings = useSettings();
   const [status, setStatus] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -82,11 +84,26 @@ export function ExtensionsPage() {
           </div>
         ) : null}
 
-        {extensions.length === 0 ? (
-          <div id="extensions-page-empty" className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-zinc-700 py-14 text-sm text-zinc-500">
-            <Puzzle id="extensions-page-empty-icon" className="size-8" aria-hidden />
-            No extensions installed yet.
+        {!loaded ? (
+          <div id="extensions-page-loading" className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            {[0, 1, 2, 3].map((index) => (
+              <Skeleton id={`extensions-page-loading-${index}`} key={index} className="h-32 rounded-lg" />
+            ))}
           </div>
+        ) : extensions.length === 0 ? (
+          <EmptyState
+            id="extensions-page-empty"
+            icon={Puzzle}
+            title="No extensions installed yet"
+            hint="Install a Chrome extension from a .zip or .crx file, or load an unpacked folder."
+            className="rounded-lg border border-dashed border-zinc-700"
+            action={
+              <Button id="extensions-page-empty-install" size="sm" disabled={busy} onClick={() => void install(installExtensionZip)}>
+                <FileArchive id="extensions-page-empty-install-icon" className="size-4" aria-hidden />
+                Install .zip or .crx
+              </Button>
+            }
+          />
         ) : (
           <div id="extensions-page-grid" className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {extensions.map((extension) => {

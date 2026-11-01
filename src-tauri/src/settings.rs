@@ -186,6 +186,15 @@ pub struct BrowserSettings {
     /// Resting on a tab shows a small preview of its page.
     #[serde(default = "default_true")]
     pub tab_hover_preview: bool,
+    /// `none`, `mica` or `acrylic`. Windows draws it behind the tab strip and toolbars.
+    #[serde(default = "default_backdrop")]
+    pub window_backdrop: String,
+    /// Check for a new version at startup and once a day.
+    #[serde(default = "default_true")]
+    pub auto_update: bool,
+    /// Version that last ran. A newer running version opens ce://whats-new once.
+    #[serde(default)]
+    pub last_seen_version: String,
 }
 
 const TAB_LAYOUTS: &[&str] = &["horizontal", "vertical"];
@@ -193,6 +202,12 @@ const TAB_CYCLE_ORDERS: &[&str] = &["strip", "recent"];
 
 fn default_tab_cycle_order() -> String {
     "strip".into()
+}
+
+const BACKDROPS: &[&str] = &["none", "mica", "acrylic"];
+
+fn default_backdrop() -> String {
+    "none".into()
 }
 
 fn default_true() -> bool {
@@ -492,6 +507,9 @@ impl Default for BrowserSettings {
             tab_hover_preview: true,
         }
     }
+            window_backdrop: default_backdrop(),
+            auto_update: true,
+            last_seen_version: String::new(),
 }
 
 impl BrowserSettings {
@@ -589,6 +607,10 @@ impl BrowserSettings {
         }
         self.vertical_tabs_width = self.vertical_tabs_width.clamp(160, 400);
         self.tab_sleep = self.tab_sleep.normalize();
+        if !BACKDROPS.contains(&self.window_backdrop.as_str()) {
+            self.window_backdrop = defaults.window_backdrop.clone();
+        }
+        self.last_seen_version = self.last_seen_version.trim().chars().take(40).collect();
         self.https_exceptions = clean_hosts(&self.https_exceptions);
         self.download_name_template = self
             .download_name_template
@@ -1203,3 +1225,28 @@ mod tests {
         assert_eq!(stored, dir.to_string_lossy());
     }
 }
+
+    #[test]
+    fn a_file_from_before_the_new_tab_and_window_options_keeps_its_values() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"searchEngine":"bing","theme":"nord"}"#).expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.search_engine, "bing");
+        assert_eq!(loaded.theme, "nord");
+        assert_eq!(loaded.tab_cycle_order, "strip");
+        assert!(loaded.tab_switcher);
+        assert_eq!(loaded.window_backdrop, "none");
+        assert!(loaded.auto_update);
+        assert_eq!(loaded.last_seen_version, "");
+    }
+
+    #[test]
+    fn unknown_tab_order_and_backdrop_values_fall_back() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"tabCycleOrder":"random","windowBackdrop":"glass"}"#).expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.tab_cycle_order, "strip");
+        assert_eq!(loaded.window_backdrop, "none");
+        let current = super::BrowserSettings::default().normalize();
+        assert_eq!(current.clone().normalize(), current);
+    }

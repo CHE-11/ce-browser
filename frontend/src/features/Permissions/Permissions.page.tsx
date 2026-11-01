@@ -1,4 +1,8 @@
 import { useEffect, useState } from "react";
+import { ShieldCheck } from "lucide-react";
+import { Button } from "@/components/Button";
+import { EmptyState } from "@/components/EmptyState";
+import { SkeletonRows } from "@/components/Skeleton";
 import { listPermissions, onPermissionsChanged, setPermission } from "@/lib/browser-client";
 import { useAppearanceFromSettings } from "@/lib/use-browser";
 import type { PermissionGrant } from "@type/browser";
@@ -51,13 +55,15 @@ export function PermissionsPage() {
           </p>
         ) : null}
         {grants === null ? (
-          <p id="permissions-loading" className="text-sm text-zinc-500">
-            Loading permissions
-          </p>
+          <SkeletonRows id="permissions-loading" rows={4} className="rounded-lg border border-zinc-800 p-4" />
         ) : grants.length === 0 ? (
-          <p id="permissions-empty" className="text-sm text-zinc-500">
-            No sites have asked for a permission yet.
-          </p>
+          <EmptyState
+            id="permissions-empty"
+            icon={ShieldCheck}
+            title="No sites have asked for a permission yet"
+            hint="When a site asks for your camera, microphone, location or notifications, it shows up here."
+            className="rounded-lg border border-dashed border-zinc-800"
+          />
         ) : (
           <ul id="permissions-list" className="flex flex-col divide-y divide-zinc-800 rounded-lg border border-zinc-800">
             {grants.map((grant) => {
@@ -72,17 +78,18 @@ export function PermissionsPage() {
                       {KIND_LABEL[grant.kind] ?? grant.kind} · {stateLabel(grant.state)}
                     </div>
                   </div>
-                  <button
+                  <Button
                     id={`${rowId}-revoke`}
-                    type="button"
+                    size="sm"
+                    variant="outline"
                     disabled={grant.state === "deny"}
-                    className="h-8 rounded-md border border-zinc-700 px-3 text-xs hover:bg-zinc-800 disabled:opacity-40"
+                    aria-label={`Revoke ${KIND_LABEL[grant.kind] ?? grant.kind} for ${grant.origin}`}
                     onClick={() => {
                       void setPermission(grant.origin, grant.kind, false).catch((reason: unknown) => setError(String(reason)));
                     }}
                   >
                     Revoke
-                  </button>
+                  </Button>
                 </li>
               );
             })}

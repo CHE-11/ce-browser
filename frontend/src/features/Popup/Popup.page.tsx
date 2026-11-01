@@ -34,6 +34,7 @@ import { TabHoverCard } from "@features/TabHover/TabHoverCard";
 import { UnresponsivePrompt } from "@features/PageRecovery/UnresponsivePrompt";
 import { SiteInfoPanel } from "@features/SiteInfo/SiteInfoPanel";
 import { FindAllPopover } from "@features/FindAll/FindAllPopover";
+import { ShortcutSheet } from "@features/Shortcuts/ShortcutSheet";
 import { NetworkPopover } from "@features/Network/NetworkPopover";
 import { DownloadsPanel } from "@features/Downloads/DownloadsPanel";
 import { MediaGrid } from "@features/Media/MediaGrid";
@@ -165,6 +166,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <SelectionTranslatePopover params={params} />;
     case "find-all":
       return <FindAllPopover params={params} />;
+    case "shortcut-sheet":
+      return <ShortcutSheet />;
     default:
       return <UnknownPopup />;
   }

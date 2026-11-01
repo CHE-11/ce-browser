@@ -1,14 +1,16 @@
 import { Button } from "@/components/Button";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ContextMenu";
 import { Dialog } from "@/components/Dialog";
+import { EmptyState } from "@/components/EmptyState";
 import { FavIcon } from "@/components/FavIcon";
+import { SkeletonRows } from "@/components/Skeleton";
 import { IconButton } from "@/components/IconButton";
 import { deleteBookmark, deleteBookmarks, moveBookmark, createTab, importBookmarksHtml, exportBookmarksHtml, updateBookmark, addBookmark, checkBookmarkHealth, onBookmarkHealth, openFolderAsGroup } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { hostOf } from "@/lib/format";
 import { useRoute } from "@/lib/route";
 import { BookmarkDropPlace, useAppearanceFromSettings, useBookmarks, findFolder, bookmarkRootsOf, bookmarkContains, BOOKMARK_DRAG_TYPE, bookmarkDropPlace, findBookmarkParent, listFolders } from "@/lib/use-browser";
-import { ChevronRight, Columns3, Search, LayoutGrid, List, Type, Upload, Download, Plus, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, Link2 } from "lucide-react";
+import { ChevronRight, Columns3, Search, SearchX, LayoutGrid, List, Type, Upload, Download, Plus, FolderOpen, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, Link2 } from "lucide-react";
 import { useRef, useState, useEffect, useMemo, useCallback, type DragEvent, type MouseEvent } from "react";
 import { BookmarkHealthProgress, BookmarkHealthReport, BookmarkNode, BookmarkTree } from "../../../../types/browser";
 
@@ -491,9 +493,7 @@ export function BookmarksPage() {
               {results.length} results for “{query.trim()}”
             </p>
             {rows.length === 0 ? (
-              <p id="bookmarks-page-empty" className="px-1 py-8 text-center text-sm text-zinc-500">
-                No bookmarks match that search.
-              </p>
+              <EmptyState id="bookmarks-page-empty" icon={SearchX} title="No bookmarks match that search" hint="Try part of the title or the address." />
             ) : (
               <BookmarkGrid
                 rows={rows}
@@ -512,10 +512,15 @@ export function BookmarksPage() {
               />
             )}
           </>
+        ) : !tree ? (
+          <SkeletonRows id="bookmarks-page-loading" rows={6} icon className="p-1" />
         ) : rows.length === 0 ? (
-          <p id="bookmarks-page-empty" className="px-1 py-8 text-center text-sm text-zinc-500">
-            This folder is empty. Drag bookmarks here or add one.
-          </p>
+          <EmptyState
+            id="bookmarks-page-empty"
+            icon={FolderOpen}
+            title="This folder is empty"
+            hint="Drag bookmarks here, or press Ctrl+D on a page to bookmark it."
+          />
         ) : (
           <BookmarkGrid
             rows={rows}

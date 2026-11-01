@@ -87,7 +87,7 @@ export function SearchSection({ settings, query, onUpdate, onMatch }: SettingsSe
 
   return (
     <Section id={section.id} title={section.title}>
-      <Row id="settings-search-engine" label="Search engine" hint={ENGINE_HINT} search={SEARCH_ENGINES.map((option) => option.label)}>
+      <Row id="settings-search-engine" setting="searchEngine" label="Search engine" hint={ENGINE_HINT} search={SEARCH_ENGINES.map((option) => option.label)}>
         <select
           id="settings-search-engine-select"
           value={engine}
@@ -110,7 +110,7 @@ export function SearchSection({ settings, query, onUpdate, onMatch }: SettingsSe
         </select>
       </Row>
       {customVisible ? (
-        <Row id="settings-search-custom" label={CUSTOM_LABEL} hint={CUSTOM_HINT} search={[customDraft]}>
+        <Row id="settings-search-custom" setting="customSearchUrl" label={CUSTOM_LABEL} hint={CUSTOM_HINT} search={[customDraft]}>
           <input
             id="settings-search-custom-input"
             value={customDraft}
@@ -128,7 +128,7 @@ export function SearchSection({ settings, query, onUpdate, onMatch }: SettingsSe
           />
         </Row>
       ) : null}
-      <Row id="settings-gestures" label={GESTURE_LABEL} hint={GESTURE_HINT}>
+      <Row id="settings-gestures" setting="mouseGestures" label={GESTURE_LABEL} hint={GESTURE_HINT}>
         <Toggle id="settings-gestures-toggle" checked={settings.mouseGestures} onChange={(mouseGestures) => onUpdate({ mouseGestures })} />
       </Row>
       <KeywordEditor keywords={keywords} draft={draft} setDraft={setDraft} onSave={save} />

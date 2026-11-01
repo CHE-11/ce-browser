@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, File, Folder, FolderOpen, Search } from "lucide-react";
+import { ChevronLeft, File, Folder, FolderOpen, Search, SearchX } from "lucide-react";
 import { Button } from "@components/Button";
+import { EmptyState } from "@components/EmptyState";
 import { PageShell } from "@components/PageShell";
+import { SkeletonRows } from "@components/Skeleton";
 import { browseLocal, chooseFolder, openLocalFile } from "@lib/browser-client";
 import { formatBytes } from "@lib/format";
 import type { BrowseResult, LocalEntry } from "@type/browser";
@@ -87,6 +89,7 @@ export function FilesPage({ params }: FilesPageProps) {
             {error}
           </p>
         ) : null}
+        {!result && !error ? <SkeletonRows id="files-page-loading" rows={8} icon /> : null}
         {result?.type === "directory" ? <DirectoryList entries={result.entries} query={query} onOpen={openPath} /> : null}
         {result?.type === "file" ? <FileView result={result} query={query} /> : null}
       </div>
@@ -106,10 +109,10 @@ function DirectoryList({
   const needle = query.trim().toLowerCase();
   const shown = needle ? entries.filter((entry) => entry.name.toLowerCase().includes(needle)) : entries;
   if (shown.length === 0) {
-    return (
-      <p id="files-page-empty" className="py-16 text-center text-sm text-zinc-500">
-        {needle ? "No files match that search." : "This folder is empty."}
-      </p>
+    return needle ? (
+      <EmptyState id="files-page-empty" icon={SearchX} title="No files match that search" />
+    ) : (
+      <EmptyState id="files-page-empty" icon={FolderOpen} title="This folder is empty" hint="Downloads saved here show up in this list." />
     );
   }
   return (

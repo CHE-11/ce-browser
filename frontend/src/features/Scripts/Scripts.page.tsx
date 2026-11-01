@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/Button";
+import { SkeletonRows } from "@/components/Skeleton";
 import { Toggle } from "@/components/Toggle";
 import { deleteUserScript, saveUserScript } from "@/lib/browser-client";
+import { cn } from "@/lib/cn";
+import { focusRow } from "@/lib/focus-ring";
 import { useAppearanceFromSettings, usePageRules } from "@/lib/use-browser";
 import type { UserScript } from "@type/browser";
 
@@ -54,17 +57,24 @@ export function ScriptsPage({ params }: ScriptsPageProps) {
         <button
           id="scripts-new"
           type="button"
-          className="h-8 rounded-md px-2 text-left text-sm text-sky-300 hover:bg-zinc-800"
+          className={cn("h-8 rounded-md px-2 text-left text-sm text-sky-300 hover:bg-zinc-800", focusRow)}
           onClick={() => setDraft(blank(host))}
         >
           New script
         </button>
+        {rules === null ? <SkeletonRows id="scripts-loading" rows={3} className="px-2 py-1" /> : null}
+        {rules && rules.scripts.length === 0 ? (
+          <p id="scripts-empty" className="px-2 py-3 text-xs leading-relaxed text-zinc-500">
+            No scripts yet. A script adds CSS or JavaScript to the sites you choose.
+          </p>
+        ) : null}
         {(rules?.scripts ?? []).map((script) => (
           <button
             id={`scripts-item-${script.id}`}
             key={script.id}
             type="button"
-            className="flex h-9 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-zinc-800"
+            aria-current={draft.id === script.id ? "true" : undefined}
+            className={cn("flex h-9 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-zinc-800", focusRow, draft.id === script.id && "bg-zinc-800")}
             onClick={() => setDraft(script)}
           >
             <span

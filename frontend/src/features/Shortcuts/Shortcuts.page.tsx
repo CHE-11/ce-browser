@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { listShortcuts, onShortcutsChanged, resetShortcut, resetShortcuts, saveShortcuts } from "@/lib/browser-client";
+import { Button } from "@/components/Button";
+import { SkeletonRows } from "@/components/Skeleton";
+import { cn } from "@/lib/cn";
+import { formatKeys, formatKeyToken } from "@/lib/shortcut-keys";
 import { useAppearanceFromSettings } from "@/lib/use-browser";
 import type { ShortcutBinding } from "@type/browser";
 
@@ -126,21 +130,22 @@ export function ShortcutsPage() {
               Record keeps the first key, then a second key within one second makes a chord. Esc still closes menus.
             </p>
           </div>
-          <button
+          <Button
             id="shortcuts-reset-all"
-            type="button"
-            className="h-8 rounded-md border border-zinc-700 px-3 text-xs hover:bg-zinc-800"
+            size="sm"
+            variant="outline"
             onClick={() => void resetShortcuts().then(setBindings).catch((reason: unknown) => setError(String(reason)))}
           >
             Reset all
-          </button>
+          </Button>
         </header>
         {error ? (
           <p id="shortcuts-error" className="text-sm text-red-300">
             {error}
           </p>
         ) : null}
-        <ul id="shortcuts-list" className="flex flex-col divide-y divide-zinc-800 rounded-lg border border-zinc-800">
+        {bindings === null && !error ? <SkeletonRows id="shortcuts-loading" rows={8} className="rounded-lg border border-zinc-800 p-4" /> : null}
+        <ul id="shortcuts-list" className={cn("flex flex-col divide-y divide-zinc-800 rounded-lg border border-zinc-800", bindings === null && "hidden")}>
           {(bindings ?? []).map((binding) => {
             const other = conflict(binding);
             return (
@@ -156,27 +161,33 @@ export function ShortcutsPage() {
                   ) : null}
                 </div>
                 <span id={`shortcut-${binding.action}-keys`} className="text-xs text-zinc-400">
-                  {recording === binding.action ? (first ? `${first} then…` : "Press a key") : binding.keys.join(" then ") || "Unbound"}
+                  {recording === binding.action
+                    ? first
+                      ? `${formatKeyToken(first)} then…`
+                      : "Press a key"
+                    : formatKeys(binding.keys) || "Unbound"}
                 </span>
-                <button
+                <Button
                   id={`shortcut-${binding.action}-record`}
-                  type="button"
-                  className="h-8 rounded-md border border-zinc-700 px-3 text-xs hover:bg-zinc-800"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`Record a shortcut for ${binding.label}`}
                   onClick={() => {
                     setFirst(null);
                     setRecording(binding.action);
                   }}
                 >
                   Record
-                </button>
-                <button
+                </Button>
+                <Button
                   id={`shortcut-${binding.action}-reset`}
-                  type="button"
-                  className="h-8 rounded-md px-2 text-xs text-zinc-400 hover:bg-zinc-800"
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Reset the shortcut for ${binding.label}`}
                   onClick={() => void resetShortcut(binding.action).then(setBindings)}
                 >
                   Reset
-                </button>
+                </Button>
               </li>
             );
           })}

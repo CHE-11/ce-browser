@@ -46,7 +46,7 @@ export function DownloadsSection({ settings, query, onUpdate, onMatch }: Setting
 
   return (
     <Section id={section.id} title={section.title}>
-      <Row id="settings-download-dir" label={LOCATION_LABEL} hint={locationHint} search={[settings.downloadDir ? "Default" : "", "Change"]}>
+      <Row id="settings-download-dir" setting="downloadDir" label={LOCATION_LABEL} hint={locationHint} search={[settings.downloadDir ? "Default" : "", "Change"]}>
         {settings.downloadDir ? (
           <Button id="settings-download-dir-reset" size="sm" variant="ghost" onClick={() => onUpdate({ downloadDir: "" })}>
             <RotateCcw id="settings-download-dir-reset-icon" className="size-3.5" aria-hidden />
@@ -66,17 +66,17 @@ export function DownloadsSection({ settings, query, onUpdate, onMatch }: Setting
           Change
         </Button>
       </Row>
-      <Row id="settings-ask-save" label={ASK_LABEL}>
+      <Row id="settings-ask-save" setting="askWhereToSave" label={ASK_LABEL}>
         <Toggle id="settings-ask-save-toggle" checked={settings.askWhereToSave} onChange={(value) => onUpdate({ askWhereToSave: value })} />
       </Row>
-      <Row id="settings-accelerate" label={ACCEL_LABEL} hint={ACCEL_HINT}>
+      <Row id="settings-accelerate" setting="accelerateDownloads" label={ACCEL_LABEL} hint={ACCEL_HINT}>
         <Toggle
           id="settings-accelerate-toggle"
           checked={settings.accelerateDownloads}
           onChange={(value) => onUpdate({ accelerateDownloads: value })}
         />
       </Row>
-      <Row id="settings-download-name" label={NAME_LABEL} hint={NAME_HINT} search={[settings.downloadNameTemplate, "{site}-{date}-{name}"]}>
+      <Row id="settings-download-name" setting="downloadNameTemplate" label={NAME_LABEL} hint={NAME_HINT} search={[settings.downloadNameTemplate, "{site}-{date}-{name}"]}>
         <input
           id="settings-download-name-input"
           defaultValue={settings.downloadNameTemplate}

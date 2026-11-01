@@ -44,7 +44,7 @@ export function ToolsSection({ settings, query, onUpdate, onMatch }: SettingsSec
 
   return (
     <Section id={section.id} title={section.title}>
-      <Row id="settings-translate-language" label={LANG_LABEL} hint={LANG_HINT}>
+      <Row id="settings-translate-language" setting="translateLanguage" label={LANG_LABEL} hint={LANG_HINT}>
         <input
           id="settings-translate-language-input"
           className={inputClass}
@@ -52,7 +52,7 @@ export function ToolsSection({ settings, query, onUpdate, onMatch }: SettingsSec
           onChange={(event) => onUpdate({ translateLanguage: event.target.value })}
         />
       </Row>
-      <Row id="settings-translate-url" label={URL_LABEL} hint={URL_HINT}>
+      <Row id="settings-translate-url" setting="translateUrl" label={URL_LABEL} hint={URL_HINT}>
         <input
           id="settings-translate-url-input"
           className={inputClass}
@@ -61,7 +61,7 @@ export function ToolsSection({ settings, query, onUpdate, onMatch }: SettingsSec
           onChange={(event) => onUpdate({ translateUrl: event.target.value })}
         />
       </Row>
-      <Row id="settings-assistant-endpoint" label={ENDPOINT_LABEL} hint={ENDPOINT_HINT}>
+      <Row id="settings-assistant-endpoint" setting="assistantEndpoint" label={ENDPOINT_LABEL} hint={ENDPOINT_HINT}>
         <input
           id="settings-assistant-endpoint-input"
           className={inputClass}
@@ -70,7 +70,7 @@ export function ToolsSection({ settings, query, onUpdate, onMatch }: SettingsSec
           onChange={(event) => onUpdate({ assistantEndpoint: event.target.value })}
         />
       </Row>
-      <Row id="settings-assistant-model" label={MODEL_LABEL}>
+      <Row id="settings-assistant-model" setting="assistantModel" label={MODEL_LABEL}>
         <input
           id="settings-assistant-model-input"
           className={inputClass}
@@ -79,7 +79,7 @@ export function ToolsSection({ settings, query, onUpdate, onMatch }: SettingsSec
           onChange={(event) => onUpdate({ assistantModel: event.target.value })}
         />
       </Row>
-      <Row id="settings-assistant-key" label={KEY_LABEL} hint={KEY_HINT}>
+      <Row id="settings-assistant-key" setting="assistantKey" label={KEY_LABEL} hint={KEY_HINT}>
         <input
           id="settings-assistant-key-input"
           className={inputClass}
@@ -89,7 +89,7 @@ export function ToolsSection({ settings, query, onUpdate, onMatch }: SettingsSec
           onChange={(event) => onUpdate({ assistantKey: event.target.value })}
         />
       </Row>
-      <Row id="settings-shopping-region" label={REGION_LABEL} hint={REGION_HINT} search={["coupons", "deals"]}>
+      <Row id="settings-shopping-region" setting="shoppingRegion" label={REGION_LABEL} hint={REGION_HINT} search={["coupons", "deals"]}>
         <input
           id="settings-shopping-region-input"
           className={inputClass}
@@ -98,7 +98,7 @@ export function ToolsSection({ settings, query, onUpdate, onMatch }: SettingsSec
           onChange={(event) => onUpdate({ shoppingRegion: event.target.value })}
         />
       </Row>
-      <Row id="settings-shopping-model" label={SHOPPING_MODEL_LABEL} hint={SHOPPING_MODEL_HINT} search={["coupons", "deals"]}>
+      <Row id="settings-shopping-model" setting="shoppingModel" label={SHOPPING_MODEL_LABEL} hint={SHOPPING_MODEL_HINT} search={["coupons", "deals"]}>
         <input
           id="settings-shopping-model-input"
           className={inputClass}

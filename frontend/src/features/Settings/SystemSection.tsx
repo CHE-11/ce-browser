@@ -22,7 +22,7 @@ export function SystemSection({ settings, query, onUpdate, onMatch }: SettingsSe
 
   return (
     <Section id={section.id} title={section.title}>
-      <Row id="settings-summon" label={HOTKEY_LABEL} hint={HOTKEY_HINT}>
+      <Row id="settings-summon" setting="summonHotkey" label={HOTKEY_LABEL} hint={HOTKEY_HINT}>
         <input
           id="settings-summon-input"
           className={inputClass}
@@ -36,7 +36,7 @@ export function SystemSection({ settings, query, onUpdate, onMatch }: SettingsSe
           Make default
         </Button>
       </Row>
-      <Row id="settings-battery" label={BATTERY_LABEL} hint={BATTERY_HINT}>
+      <Row id="settings-battery" setting="batterySaver" label={BATTERY_LABEL} hint={BATTERY_HINT}>
         <Toggle id="settings-battery-toggle" checked={settings.batterySaver} onChange={(value) => onUpdate({ batterySaver: value })} />
       </Row>
     </Section>

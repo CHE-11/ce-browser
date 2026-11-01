@@ -24,7 +24,7 @@ export function AdBlockSection({ settings, query, onUpdate, onMatch }: SettingsS
 
   return (
     <Section id={section.id} title={section.title}>
-      <Row id="settings-adblock-enabled" label={ENABLED_LABEL} hint={ENABLED_HINT}>
+      <Row id="settings-adblock-enabled" setting="adblock.enabled" label={ENABLED_LABEL} hint={ENABLED_HINT}>
         <Toggle
           id="settings-adblock-enabled-toggle"
           checked={settings.adblock.enabled}

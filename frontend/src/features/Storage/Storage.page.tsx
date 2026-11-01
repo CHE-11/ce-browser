@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { Globe } from "lucide-react";
+import { EmptyState } from "@/components/EmptyState";
+import { SkeletonRows } from "@/components/Skeleton";
 import { deleteCookie, deleteLocalStorage, listCookies, listLocalStorage, setCookie, setLocalStorage } from "@/lib/browser-client";
 import { useAppearanceFromSettings, useTabs } from "@/lib/use-browser";
 import { Button } from "@/components/Button";
@@ -15,6 +18,7 @@ export function StoragePage({ params }: StoragePageProps) {
   const tab = snapshot.tabs.find((item) => item.id === requested) ?? snapshot.tabs.find((item) => item.id === snapshot.activeId);
   const [cookies, setCookies] = useState<SiteCookie[]>([]);
   const [items, setItems] = useState<StoragePair[]>([]);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [cookieName, setCookieName] = useState("");
   const [cookieValue, setCookieValue] = useState("");
@@ -31,6 +35,7 @@ export function StoragePage({ params }: StoragePageProps) {
     }
     let gone = false;
     setError("");
+    setLoaded(false);
     void Promise.all([listCookies(tab.id), listLocalStorage(tab.id)])
       .then(([nextCookies, nextItems]) => {
         if (!gone) {
@@ -41,6 +46,11 @@ export function StoragePage({ params }: StoragePageProps) {
       .catch((reason: unknown) => {
         if (!gone) {
           setError(reason instanceof Error ? reason.message : "Couldn't read this site.");
+        }
+      })
+      .finally(() => {
+        if (!gone) {
+          setLoaded(true);
         }
       });
     return () => {
@@ -100,6 +110,14 @@ export function StoragePage({ params }: StoragePageProps) {
             Add
           </Button>
         </form>
+        {tab && !loaded ? <SkeletonRows id="storage-cookie-loading" rows={3} /> : null}
+        {!tab ? (
+          <EmptyState id="storage-no-site" icon={Globe} title="Open a site first" hint="Cookies and storage belong to the site in the tab you opened this page from." />
+        ) : loaded && cookies.length === 0 ? (
+          <p id="storage-cookie-empty" className="rounded-md border border-dashed border-zinc-800 px-3 py-4 text-center text-xs text-zinc-500">
+            This site has no cookies.
+          </p>
+        ) : null}
         <ul id="storage-cookie-list" className="flex flex-col gap-1">
           {cookies.map((cookie) => (
             <li id={`storage-cookie-${cookie.name}-${cookie.path}`} key={`${cookie.domain}-${cookie.path}-${cookie.name}`} className="flex items-center gap-2 rounded-md bg-zinc-900 px-3 py-2">
@@ -142,6 +160,12 @@ export function StoragePage({ params }: StoragePageProps) {
             Set
           </Button>
         </form>
+        {tab && !loaded ? <SkeletonRows id="storage-local-loading" rows={3} /> : null}
+        {tab && loaded && items.length === 0 ? (
+          <p id="storage-local-empty" className="rounded-md border border-dashed border-zinc-800 px-3 py-4 text-center text-xs text-zinc-500">
+            Nothing is saved in localStorage for this site.
+          </p>
+        ) : null}
         <ul id="storage-local-list" className="flex flex-col gap-1">
           {items.map((item) => (
             <li id={`storage-item-${item.key}`} key={item.key} className="flex items-center gap-2 rounded-md bg-zinc-900 px-3 py-2">

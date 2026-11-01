@@ -47,20 +47,20 @@ export function PrivacySection({ settings, query, onUpdate, onMatch }: SettingsS
 
   return (
     <Section id={section.id} title={section.title}>
-      <Row id="settings-strip-tracking" label={TRACKING_LABEL} hint={TRACKING_HINT}>
+      <Row id="settings-strip-tracking" setting="stripTracking" label={TRACKING_LABEL} hint={TRACKING_HINT}>
         <Toggle id="settings-strip-tracking-toggle" checked={settings.stripTracking} onChange={(stripTracking) => onUpdate({ stripTracking })} />
       </Row>
-      <Row id="settings-fingerprint" label={FINGERPRINT_LABEL} hint={FINGERPRINT_HINT}>
+      <Row id="settings-fingerprint" setting="fingerprintShield" label={FINGERPRINT_LABEL} hint={FINGERPRINT_HINT}>
         <Toggle
           id="settings-fingerprint-toggle"
           checked={settings.fingerprintShield}
           onChange={(fingerprintShield) => onUpdate({ fingerprintShield })}
         />
       </Row>
-      <Row id="settings-https-only" label={HTTPS_LABEL} hint={HTTPS_HINT}>
+      <Row id="settings-https-only" setting="httpsOnly" label={HTTPS_LABEL} hint={HTTPS_HINT}>
         <Toggle id="settings-https-only-toggle" checked={settings.httpsOnly} onChange={(httpsOnly) => onUpdate({ httpsOnly })} />
       </Row>
-      <Row id="settings-index-page-text" label={INDEX_LABEL} hint={INDEX_HINT}>
+      <Row id="settings-index-page-text" setting="indexPageText" label={INDEX_LABEL} hint={INDEX_HINT}>
         <Toggle
           id="settings-index-page-text-toggle"
           checked={settings.indexPageText}

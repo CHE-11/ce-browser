@@ -478,6 +478,22 @@ textarea {
   }
 }
 
+/* Mica or Acrylic behind the browser UI. Toolbars let it show through; page views stay opaque. */
+html[data-backdrop],
+html[data-backdrop] body,
+html[data-backdrop] #root,
+html[data-backdrop] #browser {
+  background: transparent !important;
+}
+
+html[data-backdrop] #browser .bg-zinc-950 {
+  background-color: color-mix(in oklab, var(--app-zinc-950) 45%, transparent);
+}
+
+html[data-backdrop] #browser .bg-zinc-900 {
+  background-color: color-mix(in oklab, var(--app-zinc-900) 60%, transparent);
+}
+
 @keyframes setting-focus {
   0%,
   60% {

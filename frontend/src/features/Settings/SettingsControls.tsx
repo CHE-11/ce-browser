@@ -1,7 +1,63 @@
 import { createContext, useContext, useEffect, type ReactNode } from "react";
+import { RotateCcw } from "lucide-react";
 import type { BrowserSettings } from "@type/browser";
+import { IconButton } from "@/components/IconButton";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
+
+/** A setting field, or a field inside one, such as `tabSleep.minutes`. */
+export type SettingPath = keyof BrowserSettings | `${keyof BrowserSettings}.${string}`;
+
+type SettingsValues = {
+  settings: BrowserSettings;
+  defaults: BrowserSettings | null;
+  onUpdate: (patch: Partial<BrowserSettings>) => void;
+};
+
+const SettingsValuesContext = createContext<SettingsValues | null>(null);
+
+export function SettingsValuesProvider({ value, children }: { value: SettingsValues; children: ReactNode }) {
+  return <SettingsValuesContext.Provider value={value}>{children}</SettingsValuesContext.Provider>;
+}
+
+function readPath(settings: BrowserSettings, path: SettingPath): unknown {
+  const [field, inner] = path.split(".") as [keyof BrowserSettings, string | undefined];
+  const value = settings[field];
+  if (inner === undefined) {
+    return value;
+  }
+  return value && typeof value === "object" ? (value as Record<string, unknown>)[inner] : undefined;
+}
+
+function sameValue(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** The change that puts `paths` back to their defaults. Nested fields keep their siblings. */
+export function resetPatch(settings: BrowserSettings, defaults: BrowserSettings, paths: SettingPath[]) {
+  const patch: Record<string, unknown> = {};
+  for (const path of paths) {
+    const [field, inner] = path.split(".") as [keyof BrowserSettings, string | undefined];
+    if (inner === undefined) {
+      patch[field] = defaults[field];
+      continue;
+    }
+    const base = (patch[field] ?? settings[field]) as Record<string, unknown>;
+    patch[field] = { ...base, [inner]: (defaults[field] as Record<string, unknown>)[inner] };
+  }
+  return patch as Partial<BrowserSettings>;
+}
+
+/** Whether any of `paths` differs from a new profile's value. */
+export function useSettingChanged(paths: SettingPath[] | undefined) {
+  const values = useContext(SettingsValuesContext);
+  if (!paths || !values?.defaults) {
+    return { changed: false, reset: undefined };
+  }
+  const { settings, defaults, onUpdate } = values;
+  const changed = paths.some((path) => !sameValue(readPath(settings, path), readPath(defaults, path)));
+  return { changed, reset: () => onUpdate(resetPatch(settings, defaults, paths)) };
+}
 
 /** A row of mutually exclusive buttons. */
 export function Segmented<T extends string>({
@@ -135,23 +191,30 @@ export function Row({
   label,
   hint,
   search,
+  setting,
   children,
 }: {
   id: string;
   label: string;
   hint?: string;
   search?: Array<string | undefined | null | false>;
+  /** Settings this row edits. A changed value gets a dot and a reset button. */
+  setting?: SettingPath | SettingPath[];
   children: ReactNode;
 }) {
   const visible = useSettingVisible(label, hint, ...(search ?? []));
+  const { changed, reset } = useSettingChanged(setting === undefined ? undefined : Array.isArray(setting) ? setting : [setting]);
   if (!visible) {
     return null;
   }
   return (
-    <div id={id} className="flex items-center justify-between gap-6 px-5 py-3">
+    <div id={id} className="group/row flex items-center justify-between gap-6 px-5 py-3">
       <div id={`${id}-text`} className="min-w-0">
-        <div id={`${id}-label`} className="text-sm text-zinc-100">
+        <div id={`${id}-label`} className="flex items-center gap-2 text-sm text-zinc-100">
           {label}
+          {changed ? (
+            <span id={`${id}-changed`} role="img" aria-label="Changed from default" title="Changed from default" className="size-1.5 shrink-0 rounded-full bg-sky-400" />
+          ) : null}
         </div>
         {hint ? (
           <div id={`${id}-hint`} className="text-xs text-zinc-500">
@@ -160,6 +223,16 @@ export function Row({
         ) : null}
       </div>
       <div id={`${id}-control`} className="flex w-80 shrink-0 items-center justify-end gap-2">
+        {changed && reset ? (
+          <IconButton
+            id={`${id}-reset`}
+            label={`Reset ${label} to default`}
+            className="size-7 opacity-60 hover:opacity-100 focus-visible:opacity-100 group-hover/row:opacity-100"
+            onClick={reset}
+          >
+            <RotateCcw id={`${id}-reset-icon`} aria-hidden />
+          </IconButton>
+        ) : null}
         {children}
       </div>
     </div>

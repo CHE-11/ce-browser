@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdblockStats,
+  BackdropSupport,
   BookmarkNode,
   ExternalBrowser,
   RewriteRule,
@@ -1070,6 +1071,15 @@ export function defaultDownloadDir() {
 export async function chooseFolder(title: string, defaultPath?: string) {
   const path = await open({ directory: true, multiple: false, title, defaultPath });
   return typeof path === "string" ? path : null;
+}
+
+/** Settings as a new profile gets them. */
+export function defaultSettings() {
+  return invoke<BrowserSettings>("default_settings");
+}
+
+export function backdropSupport() {
+  return invoke<BackdropSupport>("backdrop_support");
 }
 
 export function onSettingsChanged(handler: (settings: BrowserSettings) => void): Promise<UnlistenFn> {

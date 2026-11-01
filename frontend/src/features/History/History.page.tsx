@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { History, Search, Trash2 } from "lucide-react";
+import { History, Search, SearchX, Trash2 } from "lucide-react";
 import { Button } from "@/components/Button";
+import { EmptyState } from "@/components/EmptyState";
 import { FavIcon } from "@/components/FavIcon";
 import { IconButton } from "@/components/IconButton";
 import { PageShell } from "@/components/PageShell";
+import { SkeletonRows } from "@/components/Skeleton";
 import { createTab, removeHistory, clearHistory, searchHistory } from "@/lib/browser-client";
 import { hostOf } from "@/lib/format";
 import { absoluteTime, relativeTime } from "@/lib/time";
-import { useHistory } from "@/lib/use-browser";
+import { useHistoryState } from "@/lib/use-browser";
 import { HistoryHit, HistoryItem } from "../../../../types/browser";
 
 
@@ -74,7 +76,7 @@ function HistoryRow({ item, snippet }: { item: HistoryItem; snippet?: string }) 
 }
 
 export function HistoryPage() {
-  const history = useHistory();
+  const { history, loaded } = useHistoryState();
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<HistoryHit[] | null>(null);
   const [hitsFor, setHitsFor] = useState("");
@@ -151,11 +153,14 @@ export function HistoryPage() {
       }
     >
       <div id="history-page-list" className="mx-auto flex max-w-3xl flex-col gap-6">
-        {groups.length === 0 ? (
-          <div id="history-page-empty" className="flex flex-col items-center gap-3 py-20 text-sm text-zinc-500">
-            <History id="history-page-empty-icon" className="size-8" aria-hidden />
-            {query ? "No history matches that search." : "Pages you visit appear here."}
-          </div>
+        {!loaded ? (
+          <SkeletonRows id="history-page-loading" rows={8} icon />
+        ) : groups.length === 0 ? (
+          query ? (
+            <EmptyState id="history-page-empty" icon={SearchX} title="No history matches that search" hint="Search looks at titles, addresses and the text of pages you read." />
+          ) : (
+            <EmptyState id="history-page-empty" icon={History} title="No history yet" hint="Pages you visit appear here. InPrivate tabs are left out." />
+          )
         ) : (
           groups.map(([label, items]) => (
             <section key={label} id={`history-page-day-${label.replace(/\W+/g, "-")}`} className="flex flex-col gap-2">

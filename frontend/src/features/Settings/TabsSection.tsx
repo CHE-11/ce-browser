@@ -89,7 +89,7 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
 
   return (
     <Section id={section.id} title={section.title}>
-      <Row id="settings-tab-layout" label={LAYOUT_LABEL} hint={LAYOUT_HINT} search={["horizontal", "vertical"]}>
+      <Row id="settings-tab-layout" setting="tabLayout" label={LAYOUT_LABEL} hint={LAYOUT_HINT} search={["horizontal", "vertical"]}>
         <Segmented
           id="settings-tab-layout-options"
           label={LAYOUT_LABEL}
@@ -101,7 +101,7 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
           onChange={(tabLayout) => onUpdate({ tabLayout })}
         />
       </Row>
-      <Row id="settings-tab-cycle" label={CYCLE_LABEL} hint={CYCLE_HINT} search={["ctrl+tab", "recent", "strip order"]}>
+      <Row id="settings-tab-cycle" setting="tabCycleOrder" label={CYCLE_LABEL} hint={CYCLE_HINT} search={["ctrl+tab", "recent", "strip order"]}>
         <Segmented
           id="settings-tab-cycle-options"
           label={CYCLE_LABEL}
@@ -113,7 +113,7 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
           onChange={(tabCycleOrder) => onUpdate({ tabCycleOrder })}
         />
       </Row>
-      <Row id="settings-tab-switcher" label={SWITCHER_LABEL} hint={SWITCHER_HINT} search={["thumbnails", "overlay"]}>
+      <Row id="settings-tab-switcher" setting="tabSwitcher" label={SWITCHER_LABEL} hint={SWITCHER_HINT} search={["thumbnails", "overlay"]}>
         <Toggle
           id="settings-tab-switcher-toggle"
           checked={settings.tabSwitcher}
@@ -128,24 +128,24 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
           onChange={(tabHoverPreview) => onUpdate({ tabHoverPreview })}
         />
       </Row>
-      <Row id="settings-peek" label={PEEK_LABEL} hint={PEEK_HINT}>
+      <Row id="settings-peek" setting="peekOnShiftClick" label={PEEK_LABEL} hint={PEEK_HINT}>
         <Toggle id="settings-peek-toggle" checked={settings.peekOnShiftClick} onChange={(value) => onUpdate({ peekOnShiftClick: value })} />
       </Row>
-      <Row id="settings-mute-background" label={MUTE_LABEL} hint={MUTE_HINT}>
+      <Row id="settings-mute-background" setting="muteBackgroundTabs" label={MUTE_LABEL} hint={MUTE_HINT}>
         <Toggle
           id="settings-mute-background-toggle"
           checked={settings.muteBackgroundTabs}
           onChange={(value) => onUpdate({ muteBackgroundTabs: value })}
         />
       </Row>
-      <Row id="settings-sleep" label={SLEEP_LABEL} hint={SLEEP_HINT}>
+      <Row id="settings-sleep" setting="tabSleep.enabled" label={SLEEP_LABEL} hint={SLEEP_HINT}>
         <Toggle
           id="settings-sleep-toggle"
           checked={settings.tabSleep.enabled}
           onChange={(enabled) => onUpdate({ tabSleep: { ...settings.tabSleep, enabled } })}
         />
       </Row>
-      <Row id="settings-sleep-minutes" label={MINUTES_LABEL} hint={MINUTES_HINT} search={["minutes", sleepMinutesDraft]}>
+      <Row id="settings-sleep-minutes" setting="tabSleep.minutes" label={MINUTES_LABEL} hint={MINUTES_HINT} search={["minutes", sleepMinutesDraft]}>
         <input
           id="settings-sleep-minutes-input"
           type="number"

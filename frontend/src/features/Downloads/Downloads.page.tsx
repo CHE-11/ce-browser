@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
-import { Download, Search } from "lucide-react";
+import { Download, Search, SearchX } from "lucide-react";
 import { Button } from "@components/Button";
+import { EmptyState } from "@components/EmptyState";
+import { SkeletonRows } from "@components/Skeleton";
 import { DownloadRow } from "@features/Downloads/DownloadRow";
 import { PageShell } from "@components/PageShell";
 import { clearDownloads } from "@lib/browser-client";
-import { useDownloads } from "@lib/use-browser";
+import { useDownloadsState } from "@lib/use-browser";
 
 function dayLabel(ms: number) {
   const date = new Date(ms);
@@ -21,7 +23,7 @@ function dayLabel(ms: number) {
 }
 
 export function DownloadsPage() {
-  const downloads = useDownloads();
+  const { downloads, loaded } = useDownloadsState();
   const [query, setQuery] = useState("");
 
   const groups = useMemo(() => {
@@ -65,11 +67,14 @@ export function DownloadsPage() {
       }
     >
       <div id="downloads-page-list" className="mx-auto flex max-w-3xl flex-col gap-6">
-        {groups.length === 0 ? (
-          <div id="downloads-page-empty" className="flex flex-col items-center gap-3 py-20 text-sm text-zinc-500">
-            <Download id="downloads-page-empty-icon" className="size-8" aria-hidden />
-            {query ? "No downloads match that search." : "Files you download appear here."}
-          </div>
+        {!loaded ? (
+          <SkeletonRows id="downloads-page-loading" rows={5} icon />
+        ) : groups.length === 0 ? (
+          query ? (
+            <EmptyState id="downloads-page-empty" icon={SearchX} title="No downloads match that search" hint="Search looks at file names and addresses." />
+          ) : (
+            <EmptyState id="downloads-page-empty" icon={Download} title="No downloads yet" hint="Files you download appear here, with their progress and where they were saved." />
+          )
         ) : (
           groups.map(([label, items]) => (
             <section key={label} id={`downloads-page-day-${label.replace(/\W+/g, "-")}`} className="flex flex-col gap-2">

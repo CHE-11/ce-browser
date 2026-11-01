@@ -7,7 +7,7 @@ import { BookmarksBar } from "@/components/TabsAddressAndBookmarks/BookmarksBar/
 import { TabStrip } from "@/components/TabsAddressAndBookmarks/Tabs/TabStrip";
 import { VerticalTabs } from "@/components/TabsAddressAndBookmarks/Tabs/VerticalTabs";
 import { VerticalToolbar } from "@/components/VerticalToolbar";
-import { onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
+import { backdropSupport, onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
 import { leaveTab } from "@/lib/tab-hover";
 import { splitToolbar, toolbarPinned } from "@/lib/toolbar-pin";
 import { useTabs, useBookmarks, useDownloads, useHistory, useExtensions, useAppearanceFromSettings } from "@/lib/use-browser";
@@ -42,6 +42,33 @@ export function BrowserPage() {
     document.title = activeTab ? `${activeTab.title || activeTab.url} - ce-browser` : "ce-browser";
   }, [activeTab]);
 
+  const backdrop = settings?.windowBackdrop && settings.windowBackdrop !== "none" ? settings.windowBackdrop : null;
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!backdrop) {
+      delete root.dataset.backdrop;
+      return;
+    }
+    let cancelled = false;
+    void backdropSupport()
+      .then((support) => {
+        if (cancelled) {
+          return;
+        }
+        const drawn = !support.restartNeeded && (backdrop === "mica" ? support.mica : support.acrylic);
+        if (drawn) {
+          root.dataset.backdrop = backdrop;
+          document.getElementById("ce-page-background")?.remove();
+        } else {
+          delete root.dataset.backdrop;
+        }
+      })
+      .catch(() => delete root.dataset.backdrop);
+    return () => {
+      cancelled = true;
+    };
+  }, [backdrop]);
+
   useEffect(() => {
     if (hoverPreview === false) {
       leaveTab(true);
@@ -69,6 +96,9 @@ export function BrowserPage() {
           break;
         case "tab-search":
           centered("tab-search", 520, 480);
+          break;
+        case "shortcut-sheet":
+          centered("shortcut-sheet", Math.min(760, window.innerWidth - 32), 560);
           break;
         case "tab-switcher":
         case "tab-switcher-back": {

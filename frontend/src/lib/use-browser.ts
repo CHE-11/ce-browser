@@ -203,8 +203,13 @@ export function useDownloads() {
   return useDownloadsState().downloads;
 }
 
+export function useHistoryState() {
+  const { value, loaded } = useLiveValue(listHistory, onHistoryChanged);
+  return { history: value ?? [], loaded };
+}
+
 export function useHistory() {
-  return useLiveValue(listHistory, onHistoryChanged).value ?? [];
+  return useHistoryState().history;
 }
 
 export function useExtensions() {

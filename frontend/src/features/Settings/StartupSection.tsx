@@ -50,7 +50,7 @@ export function StartupSection({ settings, query, onUpdate, onMatch }: SettingsS
 
   return (
     <Section id={section.id} title={section.title}>
-      <Row id="settings-startup-mode" label={STARTUP_LABEL} search={[RESTORE_LABEL, HOME_OPTION_LABEL]}>
+      <Row id="settings-startup-mode" setting="startup" label={STARTUP_LABEL} search={[RESTORE_LABEL, HOME_OPTION_LABEL]}>
         <select
           id="settings-startup-mode-select"
           value={settings.startup}
@@ -65,7 +65,7 @@ export function StartupSection({ settings, query, onUpdate, onMatch }: SettingsS
           </option>
         </select>
       </Row>
-      <Row id="settings-home-page" label={HOME_LABEL} hint={HOME_HINT} search={[homeDraft, "ce://bookmarks"]}>
+      <Row id="settings-home-page" setting="homePage" label={HOME_LABEL} hint={HOME_HINT} search={[homeDraft, "ce://bookmarks"]}>
         <input
           id="settings-home-page-input"
           value={homeDraft}

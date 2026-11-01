@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, SearchX } from "lucide-react";
 import type { BrowserSettings } from "@type/browser";
+import { EmptyState } from "@/components/EmptyState";
 import { PageShell, type PageOutlineItem } from "@/components/PageShell";
-import { saveSettings } from "@/lib/browser-client";
+import { Skeleton, SkeletonRows } from "@/components/Skeleton";
+import { defaultSettings, saveSettings } from "@/lib/browser-client";
 import { useRoute } from "@/lib/route";
 import { useSettings } from "@/lib/use-browser";
 import { SETTINGS_INDEX } from "./settings-index";
@@ -12,7 +14,7 @@ import { DownloadsSection } from "./DownloadsSection";
 import { PrivacySection } from "./PrivacySection";
 import { ProfilesSection } from "./ProfilesSection";
 import { SearchSection } from "./SearchSection";
-import { SettingsQueryProvider } from "./SettingsControls";
+import { SettingsQueryProvider, SettingsValuesProvider } from "./SettingsControls";
 import { SETTINGS_SECTIONS } from "./settings-sections";
 import { StartupSection } from "./StartupSection";
 import { SyncSection } from "./SyncSection";
@@ -29,6 +31,13 @@ export function SettingsPage() {
     Object.fromEntries(SETTINGS_SECTIONS.map((section) => [section.id, true])),
   );
   const [activeId, setActiveId] = useState<string>(SETTINGS_SECTIONS[0].id);
+  const [defaults, setDefaults] = useState<BrowserSettings | null>(null);
+
+  useEffect(() => {
+    void defaultSettings()
+      .then(setDefaults)
+      .catch(() => setDefaults(null));
+  }, []);
 
   const onMatch = useCallback((id: string, matches: boolean) => {
     setMatched((current) => (current[id] === matches ? current : { ...current, [id]: matches }));
@@ -146,8 +155,13 @@ export function SettingsPage() {
   if (!settings) {
     return (
       <PageShell id="settings-page" page="settings" title="Settings" lockHorizontalScroll>
-        <div id="settings-page-loading" className="text-sm text-zinc-500">
-          Loading settings
+        <div id="settings-page-loading" role="status" aria-label="Loading settings" className="mx-auto flex max-w-3xl flex-col gap-6">
+          {[0, 1, 2].map((index) => (
+            <div id={`settings-page-loading-${index}`} key={index} className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-5">
+              <Skeleton id={`settings-page-loading-${index}-title`} className="mb-4 h-4 w-32" />
+              <SkeletonRows id={`settings-page-loading-${index}-rows`} rows={3} />
+            </div>
+          ))}
         </div>
       </PageShell>
     );
@@ -179,6 +193,7 @@ export function SettingsPage() {
       }
     >
       <SettingsQueryProvider query={query}>
+        <SettingsValuesProvider value={{ settings, defaults, onUpdate: update }}>
         <div id="settings-page-sections" className="mx-auto flex max-w-3xl flex-col gap-6 pb-10">
           {error ? (
             <div id="settings-page-error" className="rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">
@@ -186,9 +201,8 @@ export function SettingsPage() {
             </div>
           ) : null}
           {none ? (
-            <div id="settings-page-empty" className="py-20 text-center text-sm text-zinc-500">
-              No settings match that search.
-            </div>
+            <EmptyState id="settings-page-empty" icon={SearchX} title="No settings match that search" hint="Try a shorter word, such as zoom, tabs or privacy." />
+
           ) : null}
           <ProfilesSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} revision={profileRevision} />
           <SearchSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
@@ -209,6 +223,7 @@ export function SettingsPage() {
             onProfilesChanged={onProfilesChanged}
           />
         </div>
+        </SettingsValuesProvider>
       </SettingsQueryProvider>
     </PageShell>
   );
