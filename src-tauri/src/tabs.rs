@@ -24,6 +24,13 @@ const POPUP_TOGGLE_WINDOW: Duration = Duration::from_millis(400);
 const POPUP_REVEAL_FALLBACK: Duration = Duration::from_millis(1500);
 /// Extension pages cannot report a painted frame. Wait a couple of frames after load instead.
 const EXTENSION_POPUP_SETTLE: Duration = Duration::from_millis(32);
+/// Restored pinned tabs wait this long, so the selected page loads first.
+const PIN_LOAD_DELAY: Duration = Duration::from_millis(1500);
+/// Gap between two restored pinned tabs starting to load.
+const PIN_LOAD_GAP: Duration = Duration::from_millis(750);
+/// Longest wait for a loading page before the next restored pinned tab starts anyway.
+const PIN_LOAD_WAIT: Duration = Duration::from_secs(6);
+const PIN_QUIET_POLL: Duration = Duration::from_millis(200);
 const ZOOM_LEVELS: &[f64] = &[
     0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,
 ];
@@ -604,6 +611,20 @@ impl TabsState {
 
     fn chrome_mut(&mut self, label: &str) -> Option<&mut WindowChrome> {
         self.windows.iter_mut().find(|window| window.label == label)
+    }
+
+    fn page_loading(&self) -> bool {
+        self.tabs
+            .iter()
+            .any(|tab| tab.webview.is_some() && tab.info.loading)
+    }
+
+    /// First pinned tab, in strip order, that has no page view and is not in `skip`.
+    fn unloaded_pin(&self, skip: &[u32]) -> Option<u32> {
+        self.tabs
+            .iter()
+            .find(|tab| tab.info.pinned && tab.webview.is_none() && !skip.contains(&tab.info.id))
+            .map(|tab| tab.info.id)
     }
 
     fn tab_window(&self, id: u32) -> Option<String> {
@@ -3000,19 +3021,70 @@ pub fn set_pinned(app: &AppHandle, id: u32, pinned: bool) {
     }
 }
 
-/// Wakes every pinned tab that was suspended and loads any pinned tab that has no page view yet.
+/// Wakes every pinned tab that was suspended. A pinned tab with no page view yet loads too, one per
+/// call and only while no page is loading: each new page view holds up the window while it is built.
 pub fn wake_pinned(app: &AppHandle) {
-    let ids = with_state(app, |state| {
-        state
+    let (sleeping, missing) = with_state(app, |state| {
+        let sleeping: Vec<u32> = state
             .tabs
             .iter()
-            .filter(|tab| tab.info.pinned)
+            .filter(|tab| tab.info.pinned && tab.webview.is_some())
+            .filter(|tab| tab.info.sleeping || tab.hidden)
             .map(|tab| tab.info.id)
-            .collect::<Vec<_>>()
+            .collect();
+        let missing = if state.page_loading() {
+            None
+        } else {
+            state.unloaded_pin(&[])
+        };
+        (sleeping, missing)
     });
-    let changed = ids.into_iter().any(|id| ready_pinned(app, id));
+    let mut changed = false;
+    for id in sleeping.into_iter().chain(missing) {
+        changed |= ready_pinned(app, id);
+    }
     if changed {
         emit_tabs(app);
+    }
+}
+
+/// Restored pinned tabs start without a page view so the window opens at once. They load here in
+/// the background, one at a time, after the selected page has had its turn.
+fn load_pinned_later(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(PIN_LOAD_DELAY);
+        let mut tried = Vec::new();
+        loop {
+            wait_for_quiet(&app);
+            let Some(id) = with_state(&app, |state| state.unloaded_pin(&tried)) else {
+                return;
+            };
+            tried.push(id);
+            if ready_pinned(&app, id) {
+                emit_tabs(&app);
+            }
+            std::thread::sleep(PIN_LOAD_GAP);
+        }
+    });
+}
+
+/// Waits while a popup is open, since building a page view closes it, and while a page is still
+/// loading, up to `PIN_LOAD_WAIT`.
+fn wait_for_quiet(app: &AppHandle) {
+    let started = Instant::now();
+    loop {
+        let (popup, loading) = with_state(app, |state| {
+            let popup = state
+                .windows
+                .iter()
+                .any(|chrome| chrome.popup.label.is_some());
+            (popup, state.page_loading())
+        });
+        if !popup && (!loading || started.elapsed() >= PIN_LOAD_WAIT) {
+            return;
+        }
+        std::thread::sleep(PIN_QUIET_POLL);
     }
 }
 
@@ -4011,8 +4083,7 @@ pub fn restore(app: &AppHandle, restored: RestoreState) -> Result<(), String> {
                 background: true,
                 pinned: tab.pinned,
                 title: Some(tab.title),
-                // Pinned tabs load now so they are ready. Every other restored tab waits until it is selected.
-                lazy: !tab.pinned,
+                lazy: true,
                 window: WINDOW.to_string(),
                 workspace: tab.workspace,
                 muted: tab.muted,
@@ -4087,11 +4158,12 @@ pub fn restore(app: &AppHandle, restored: RestoreState) -> Result<(), String> {
             .or_else(|| ids.iter().find(|id| in_workspace(id)))
             .copied()
     });
-    wake_pinned(app);
-    match target {
+    let shown = match target {
         Some(id) => activate(app, id),
         None => create_tab(app, None, false, None).map(|_| ()),
-    }
+    };
+    load_pinned_later(app);
+    shown
 }
 
 fn clamp_ratio(ratio: f64) -> f64 {
@@ -5417,6 +5489,27 @@ mod tests {
         assert_eq!(state.tabs.len(), 2);
         assert!(!state.tabs[0].info.pinned);
         assert_eq!(state.tabs[0].info.url, "https://a.example");
+    }
+
+    #[test]
+    fn restored_pins_load_in_strip_order_and_skip_failures() {
+        let mut loaded = pinned_url("https://a.example", 1);
+        loaded.webview = Some("tab-1".into());
+        let mut loose = tab(4, None, DEFAULT_WORKSPACE);
+        loose.info.url = "https://loose.example".into();
+        let state = state(
+            vec![
+                loaded,
+                pinned_url("https://b.example", 2),
+                pinned_url("https://c.example", 3),
+                loose,
+            ],
+            &[],
+        );
+        assert_eq!(state.unloaded_pin(&[]), Some(2));
+        assert_eq!(state.unloaded_pin(&[2]), Some(3));
+        assert_eq!(state.unloaded_pin(&[2, 3]), None);
+        assert!(!state.page_loading());
     }
 
     #[test]

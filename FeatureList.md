@@ -7,7 +7,7 @@ Windows desktop browser built on Tauri 2 and WebView2. Each tab is its own page 
 - New, close, duplicate, and reopen the last closed tab (Ctrl+Shift+T)
 - Drag tabs to reorder them
 - Pinned tabs sit at the left, show only their icon, and survive Close other tabs
-- Session restore on startup, with pinned tabs first. Pinned tabs load immediately; other restored tabs load the first time you select them
+- Session restore on startup, with pinned tabs first. Pinned tabs load in the background one at a time right after the window opens; other restored tabs load the first time you select them
 - Startup can open the home page instead of the last session
 - Next and previous tab, and jump to a tab by number (Ctrl+1 through Ctrl+8, Ctrl+9 for the last)
 - Vertical tab sidebar, collapsible to icons and resizable from its right edge

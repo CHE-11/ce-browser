@@ -15,7 +15,7 @@ pnpm tauri dev
 
 Every tab is its own WebView2 page view, so a crashed or heavy page stays in its own tab. Tabs can be dragged to reorder, pinned, duplicated and reopened after closing (Ctrl+Shift+T). Pinned tabs sit at the left edge, show only their icon and survive "Close other tabs".
 
-On startup the browser restores the last session, pinned tabs first. Pinned tabs load immediately and never sleep. Other restored tabs load the first time you select them. Settings can switch startup to the home page instead.
+On startup the browser restores the last session, pinned tabs first. Pinned tabs load in the background one at a time right after the window opens, and never sleep. Other restored tabs load the first time you select them. Settings can switch startup to the home page instead.
 
 | Shortcut | Action |
 | --- | --- |
