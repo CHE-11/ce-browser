@@ -125,6 +125,7 @@ export function SettingsPage() {
   const [userCssPath, setUserCssPath] = useState("");
   const [sleepMinutesDraft, setSleepMinutesDraft] = useState("30");
   const [neverSleepDraft, setNeverSleepDraft] = useState("");
+  const [httpsDraft, setHttpsDraft] = useState("");
 
   useEffect(() => {
     if (settings) {
@@ -734,6 +735,84 @@ export function SettingsPage() {
                       }
                     >
                       <X id={`settings-never-sleep-${site}-remove-icon`} aria-hidden />
+                    </IconButton>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Section>
+
+        <Section id="settings-privacy" title="Privacy">
+          <Row id="settings-strip-tracking" label="Strip tracking parameters" hint="Removes utm, fbclid, gclid and similar from addresses and copied links.">
+            <Toggle
+              id="settings-strip-tracking-toggle"
+              checked={settings.stripTracking}
+              onChange={(stripTracking) => update({ stripTracking })}
+            />
+          </Row>
+          <Row id="settings-fingerprint" label="Fingerprint shield" hint="Adds stable noise to canvas, WebGL and audio reads. The noise resets when the browser exits.">
+            <Toggle
+              id="settings-fingerprint-toggle"
+              checked={settings.fingerprintShield}
+              onChange={(fingerprintShield) => update({ fingerprintShield })}
+            />
+          </Row>
+          <Row id="settings-https-only" label="HTTPS-only" hint="http pages load over https. Localhost is left alone.">
+            <Toggle id="settings-https-only-toggle" checked={settings.httpsOnly} onChange={(httpsOnly) => update({ httpsOnly })} />
+          </Row>
+          <div id="settings-https-exceptions" className="px-5 py-3">
+            <div id="settings-https-exceptions-label" className="text-sm text-zinc-100">
+              Sites that may use http
+            </div>
+            <div id="settings-https-exceptions-add" className="mb-2 mt-2 flex gap-2">
+              <input
+                id="settings-https-exceptions-input"
+                value={httpsDraft}
+                placeholder="example.com"
+                className={inputClass}
+                onChange={(event) => setHttpsDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && httpsDraft.trim()) {
+                    event.preventDefault();
+                    update({ httpsExceptions: [...settings.httpsExceptions, httpsDraft.trim()] });
+                    setHttpsDraft("");
+                  }
+                }}
+              />
+              <Button
+                id="settings-https-exceptions-add-button"
+                size="sm"
+                disabled={!httpsDraft.trim()}
+                onClick={() => {
+                  update({ httpsExceptions: [...settings.httpsExceptions, httpsDraft.trim()] });
+                  setHttpsDraft("");
+                }}
+              >
+                Add
+              </Button>
+            </div>
+            {settings.httpsExceptions.length === 0 ? (
+              <div id="settings-https-exceptions-empty" className="text-xs text-zinc-500">
+                No exceptions.
+              </div>
+            ) : (
+              <ul id="settings-https-exceptions-list" className="flex flex-col gap-1">
+                {settings.httpsExceptions.map((site) => (
+                  <li
+                    id={`settings-https-exception-${site}`}
+                    key={site}
+                    className="flex h-8 items-center justify-between rounded-md bg-zinc-950 pl-3 pr-1 text-sm"
+                  >
+                    <span id={`settings-https-exception-${site}-host`} className="truncate">
+                      {site}
+                    </span>
+                    <IconButton
+                      id={`settings-https-exception-${site}-remove`}
+                      label={`Require https on ${site}`}
+                      onClick={() => update({ httpsExceptions: settings.httpsExceptions.filter((item) => item !== site) })}
+                    >
+                      <X id={`settings-https-exception-${site}-remove-icon`} aria-hidden />
                     </IconButton>
                   </li>
                 ))}

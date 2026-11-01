@@ -88,6 +88,18 @@ pub struct BrowserSettings {
     /// Background tabs are suspended after a while.
     #[serde(default)]
     pub tab_sleep: TabSleepSettings,
+    /// Drop `utm_*` and other click identifiers from URLs.
+    #[serde(default = "default_true")]
+    pub strip_tracking: bool,
+    /// Add stable noise to canvas, WebGL and audio reads.
+    #[serde(default)]
+    pub fingerprint_shield: bool,
+    /// Load `http` pages over `https` unless the site is excepted.
+    #[serde(default)]
+    pub https_only: bool,
+    /// Hosts that may stay on `http`, lowercase and without a leading `www.`.
+    #[serde(default)]
+    pub https_exceptions: Vec<String>,
 }
 
 const TAB_LAYOUTS: &[&str] = &["horizontal", "vertical"];
@@ -331,6 +343,10 @@ impl Default for BrowserSettings {
             mute_background_tabs: false,
             peek_on_shift_click: true,
             tab_sleep: TabSleepSettings::default(),
+            strip_tracking: true,
+            fingerprint_shield: false,
+            https_only: false,
+            https_exceptions: Vec::new(),
         }
     }
 }
@@ -369,6 +385,7 @@ impl BrowserSettings {
         }
         self.vertical_tabs_width = self.vertical_tabs_width.clamp(160, 400);
         self.tab_sleep = self.tab_sleep.normalize();
+        self.https_exceptions = clean_hosts(&self.https_exceptions);
         self.sync_folder = folder_from_stored(&self.sync_folder);
         if self.sync_bookmarks_revision == 0
             && self.sync_extensions_revision == 0
@@ -632,6 +649,21 @@ fn snap_page_zoom(value: u32) -> u32 {
 }
 
 /// Drops blanks, duplicates and ids that cannot be an extension id.
+fn clean_hosts(hosts: &[String]) -> Vec<String> {
+    let mut kept = Vec::new();
+    for raw in hosts {
+        let host = sleep_site_key(raw);
+        if host.is_empty() || host.len() > 253 || host.chars().any(char::is_whitespace) || kept.contains(&host) {
+            continue;
+        }
+        kept.push(host);
+        if kept.len() >= 1000 {
+            break;
+        }
+    }
+    kept
+}
+
 fn toolbar_hidden(ids: &[String]) -> Vec<String> {
     let mut hidden = Vec::new();
     for id in ids {
@@ -716,6 +748,18 @@ mod tests {
         let loaded = loaded.normalize();
         assert!(loaded.adblock.enabled);
         assert!(loaded.adblock.allowed_sites.is_empty());
+    }
+
+    #[test]
+    #[test]
+    fn older_settings_get_privacy_defaults() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"searchEngine":"bing"}"#).expect("settings parse");
+        let loaded = loaded.normalize();
+        assert!(loaded.strip_tracking);
+        assert!(!loaded.fingerprint_shield);
+        assert!(!loaded.https_only);
+        assert!(loaded.https_exceptions.is_empty());
     }
 
     #[test]

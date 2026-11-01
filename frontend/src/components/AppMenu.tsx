@@ -2,6 +2,7 @@ import {
   Bookmark,
   Code,
   Download,
+  Glasses,
   History,
   LogOut,
   Minus,
@@ -16,6 +17,7 @@ import {
 import {
   closePopup,
   closeWindow,
+  createEphemeralTab,
   createTab,
   getSettings,
   openDevtools,
@@ -51,6 +53,7 @@ export function AppMenu() {
     <PopupFrame id="app-menu" ready={snapshot.loaded}>
       <PopupMenu id="app-menu-items" label="Browser menu">
         <PopupMenuItem id="app-menu-new-tab" icon={<SquarePlus />} label="New tab" shortcut="Ctrl+T" onClick={openPage("ce://newtab")} />
+        <PopupMenuItem id="app-menu-ephemeral" icon={<Glasses />} label="New ephemeral tab" onClick={run(() => createEphemeralTab())} />
         <PopupMenuItem
           id="app-menu-reopen"
           icon={<History />}

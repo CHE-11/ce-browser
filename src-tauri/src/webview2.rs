@@ -65,6 +65,8 @@ pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview) {
 /// The WebView2 environment already created for this profile. A second
 /// `CreateCoreWebView2EnvironmentWithOptions` for the same user-data folder
 /// waits forever, which is what froze the app when another window opened.
+pub type WebViewEnvironment = ICoreWebView2Environment;
+
 pub fn environment_of(webview: &Webview) -> Option<ICoreWebView2Environment> {
     let (tx, rx) = mpsc::channel();
     let queued = webview.with_webview(move |platform| {
@@ -427,6 +429,12 @@ fn attach_adblock(
                         windows::core::w!(""),
                     )?;
                     args.SetResponse(&response)?;
+                    return Ok(());
+                }
+                if let Ok(request) = args.Request() {
+                    if let Ok(headers) = request.Headers() {
+                        apply_referrer(&request_app, &page, &uri, &headers);
+                    }
                 }
                 Ok(())
             })),
@@ -438,6 +446,14 @@ fn attach_adblock(
             &NavigationStartingEventHandler::create(Box::new(move |sender, args| {
                 if let Some(args) = args {
                     let uri = read_pwstr(|value| args.Uri(value));
+                    if let Some(next) = crate::privacy::rewrite_navigation(&navigation_app, &uri) {
+                        let _ = args.SetCancel(true);
+                        let app = navigation_app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = tabs::navigate(&app, id, &next);
+                        });
+                        return Ok(());
+                    }
                     crate::adblock::page_started(&navigation_app, id, &uri);
                     if let Some(core) = sender {
                         apply_page_settings(&navigation_app, &core, &uri);
@@ -474,8 +490,92 @@ fn attach_adblock(
             })),
             &mut token,
         )?;
+
+        if let Ok(core2) = core.cast::<ICoreWebView2_2>() {
+            let response_app = app.clone();
+            core2.add_WebResourceResponseReceived(
+                &WebResourceResponseReceivedEventHandler::create(Box::new(move |_, args| {
+                    let Some(args) = args else {
+                        return Ok(());
+                    };
+                    let Ok(request) = args.Request() else {
+                        return Ok(());
+                    };
+                    let uri = read_pwstr(|value| request.Uri(value));
+                    let method = read_pwstr(|value| request.Method(value));
+                    let status = args
+                        .Response()
+                        .ok()
+                        .and_then(|response| {
+                            let mut code = 0i32;
+                            response.StatusCode(&mut code).ok().map(|_| code)
+                        });
+                    crate::privacy::record_request(&response_app, id, &method, &uri, "request", status);
+                    Ok(())
+                })),
+                &mut token,
+            )?;
+        }
+
+        let permission_app = app.clone();
+        core.add_PermissionRequested(
+            &PermissionRequestedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                let uri = read_pwstr(|value| args.Uri(value));
+                let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+                args.PermissionKind(&mut kind)?;
+                let Some(name) = permission_name(kind) else {
+                    return Ok(());
+                };
+                if let Some(allow) = crate::privacy::decision(&permission_app, &uri, name) {
+                    args.SetState(if allow {
+                        COREWEBVIEW2_PERMISSION_STATE_ALLOW
+                    } else {
+                        COREWEBVIEW2_PERMISSION_STATE_DENY
+                    })?;
+                } else {
+                    crate::privacy::note_request(&permission_app, &uri, name);
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
     }
     Ok(())
+}
+
+fn permission_name(kind: COREWEBVIEW2_PERMISSION_KIND) -> Option<&'static str> {
+    if kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA {
+        Some("camera")
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE {
+        Some("microphone")
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION {
+        Some("location")
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS {
+        Some("notifications")
+    } else {
+        None
+    }
+}
+
+fn apply_referrer(
+    app: &AppHandle,
+    page: &str,
+    request: &str,
+    headers: &ICoreWebView2HttpRequestHeaders,
+) {
+    let rule = crate::page_rules::control_for(app, page).referrer;
+    match crate::privacy::referrer_value(&rule, page, request) {
+        crate::privacy::ReferrerAction::Keep => {}
+        crate::privacy::ReferrerAction::Remove => {
+            let _ = unsafe { headers.RemoveHeader(windows::core::w!("Referer")) };
+        }
+        crate::privacy::ReferrerAction::Set(value) => {
+            let _ = unsafe { headers.SetHeader(windows::core::w!("Referer"), &HSTRING::from(value)) };
+        }
+    }
 }
 
 /// Sets the user agent and whether JavaScript runs for the page that is about to load.

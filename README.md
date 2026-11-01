@@ -86,6 +86,20 @@ The sliders button in the toolbar changes how the current site behaves. A rule f
 - **Auto-refresh** reloads that tab on an interval. **Notify when the page changes** puts a dot on the tab when the text differs.
 - **Site scripts** opens `ce://scripts`, where CSS and JavaScript can be saved for one site or for every site. `styles.css` still styles the browser itself.
 
+## Privacy
+
+Settings > Privacy holds three switches. **Strip tracking parameters** is on by default and removes `utm_*`, `fbclid`, `gclid` and similar from addresses and from links you copy. **Fingerprint shield** adds a little noise to canvas, WebGL and audio reads; each site gets the same noise until the browser exits. **HTTPS-only** loads `http` pages over `https`. Localhost stays on `http`, and a site can be excepted from the page-controls menu or from the list in settings.
+
+The page-controls menu also sets the **referrer** for the current site: browser default, never send, site only, or same site only.
+
+**Network log** in that menu lists the recent requests for the tab, with status codes. It is kept in memory only.
+
+`ce://permissions` lists camera, microphone, location and notification requests. Revoke blocks the next request from that site.
+
+A tab group can use a **container**. The container has its own cookies, logins and cache, in `%LOCALAPPDATA%\com.ce.browser\containers\<id>`. Extensions stay on the default profile. Changing a group's container loads its pages again.
+
+An **ephemeral tab** is InPrivate. Right-click the new-tab button, or use the tab menu or the browser menu. It is not saved and it is left out of history. Ephemeral tabs share one private session, which is dropped when the last one closes.
+
 ## Data
 
 Each profile keeps its settings, session, bookmarks, downloads, history and extension list as JSON files in its own folder. The folder is named after the profile. The first profile is named "Default". The root folder is the sync folder when one is selected, otherwise `%APPDATA%\com.ce.browser`.
@@ -100,6 +114,8 @@ Each profile keeps its settings, session, bookmarks, downloads, history and exte
     - history.json
     - session.json
     - settings.json
+    - containers.json
+    - permissions.json
     - site-controls.json
     - styles.css
   - Profile 2
@@ -110,6 +126,8 @@ Each profile keeps its settings, session, bookmarks, downloads, history and exte
     - history.json
     - session.json
     - settings.json
+    - containers.json
+    - permissions.json
     - site-controls.json
     - styles.css
 

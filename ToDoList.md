@@ -22,14 +22,14 @@
 - [x] Auto-refresh a tab on an interval, with an optional "notify when the page content changes" mode.
 
 ## Privacy and security
-- [ ] Containers: isolated cookie stores per tab group (WebView2 profiles via `CreateCoreWebView2ControllerOptions` with a profile name).
-- [ ] Ephemeral tabs: an InPrivate tab inside the normal window that wipes itself on close.
-- [ ] Fingerprinting shield: randomize the canvas, WebGL and audio fingerprint per site with an injected script.
-- [ ] Tracking-parameter stripper: remove `utm_*`, `fbclid`, `gclid` and similar from URLs before navigation and when copying.
-- [ ] Referrer control per site.
-- [ ] Permission dashboard at `ce://permissions`: every site's camera, microphone, location and notification grant, with one-click revoke.
-- [ ] Network request log per tab (`WebResourceRequested`), viewable without DevTools.
-- [ ] HTTPS-only mode with a per-site exception list.
+- [x] Containers: isolated cookie stores per tab group (WebView2 profiles via `CreateCoreWebView2ControllerOptions` with a profile name).
+- [x] Ephemeral tabs: an InPrivate tab inside the normal window that wipes itself on close.
+- [x] Fingerprinting shield: randomize the canvas, WebGL and audio fingerprint per site with an injected script.
+- [x] Tracking-parameter stripper: remove `utm_*`, `fbclid`, `gclid` and similar from URLs before navigation and when copying.
+- [x] Referrer control per site.
+- [x] Permission dashboard at `ce://permissions`: every site's camera, microphone, location and notification grant, with one-click revoke.
+- [x] Network request log per tab (`WebResourceRequested`), viewable without DevTools.
+- [x] HTTPS-only mode with a per-site exception list.
 
 ## Productivity
 - [ ] Command palette (Ctrl+K): fuzzy search across tabs, bookmarks, history, settings and built-in actions.

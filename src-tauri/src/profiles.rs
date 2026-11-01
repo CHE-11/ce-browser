@@ -1059,6 +1059,8 @@ const PROFILE_FILES: &[&str] = &[
     "session.json",
     "styles.css",
     "site-controls.json",
+    "permissions.json",
+    "containers.json",
     "window-icon.png",
 ];
 

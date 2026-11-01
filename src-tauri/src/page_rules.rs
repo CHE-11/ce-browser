@@ -50,6 +50,8 @@ pub struct SiteControl {
     pub block_fonts: bool,
     /// CSS selectors hidden by the element zapper.
     pub hidden: Vec<String>,
+    /// `default`, `none`, `origin` or `same-origin`.
+    pub referrer: String,
 }
 
 impl Default for SiteControl {
@@ -64,6 +66,7 @@ impl Default for SiteControl {
             block_images: false,
             block_fonts: false,
             hidden: Vec::new(),
+            referrer: "default".into(),
         }
     }
 }
@@ -75,6 +78,7 @@ impl SiteControl {
         self.user_agent = clean_agent(&self.user_agent);
         self.video_speed = snap_speed(self.video_speed);
         self.hidden = clean_selectors(self.hidden);
+        self.referrer = crate::privacy::normalize_referrer(&self.referrer);
         self
     }
 
@@ -92,6 +96,7 @@ impl SiteControl {
             || self.block_images
             || self.block_fonts
             || !self.hidden.is_empty()
+            || self.referrer != "default"
     }
 }
 
@@ -152,6 +157,7 @@ pub struct SitePatch {
     pub block_fonts: Option<bool>,
     pub hide: Option<String>,
     pub clear_hidden: Option<bool>,
+    pub referrer: Option<String>,
 }
 
 struct RulesState {
@@ -228,6 +234,9 @@ pub fn update_site(app: &AppHandle, host: &str, patch: SitePatch) -> Result<Page
     }
     if let Some(value) = patch.block_fonts {
         site.block_fonts = value;
+    }
+    if let Some(value) = patch.referrer {
+        site.referrer = value;
     }
     if patch.clear_hidden == Some(true) {
         site.hidden.clear();
@@ -342,7 +351,14 @@ pub fn injection(app: &AppHandle, url: &str) -> String {
         "styles": styles,
         "scripts": scripts,
     });
-    format!("{INJECTION_JS}\nceApply({spec});")
+    let mut script = format!("{INJECTION_JS}\nceApply({spec});");
+    if settings::get(app).strip_tracking {
+        script.push('\n');
+        script.push_str(&crate::privacy::copy_script());
+    }
+    script.push('\n');
+    script.push_str(&crate::privacy::fingerprint_script(app, url));
+    script
 }
 
 pub fn zapper_script() -> &'static str {

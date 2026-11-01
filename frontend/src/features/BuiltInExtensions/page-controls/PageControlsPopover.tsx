@@ -8,14 +8,16 @@ import { PopupFrame } from "@/components/PopupFrame";
 import {
   closePopup,
   createTab,
+  openPopupBelow,
   openReader,
   reload,
+  saveSettings,
   setTabRefresh,
   startZapper,
   updateSiteControl,
 } from "@/lib/browser-client";
-import { usePageRules, useTabs } from "@/lib/use-browser";
-import type { SitePatch } from "@type/browser";
+import { usePageRules, useSettings, useTabs } from "@/lib/use-browser";
+import type { ReferrerMode, SitePatch } from "@type/browser";
 
 type PageControlsPopoverProps = {
   params: URLSearchParams;
@@ -38,6 +40,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
   const tab = readPopoverTab(params);
   const host = params.get("host") || siteKey(tab.url);
   const rules = usePageRules();
+  const settings = useSettings();
   const snapshot = useTabs();
   const live = snapshot.tabs.find((item) => item.id === tab.id);
   const site = controlFor(rules, host);
@@ -167,6 +170,46 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
             }}
           />
         </label>
+        <label id="page-controls-referrer" className="flex items-center gap-3 px-2.5 py-1.5 text-sm">
+          <span id="page-controls-referrer-label" className="min-w-0 flex-1">
+            Referrer
+          </span>
+          <select
+            id="page-controls-referrer-select"
+            className="h-8 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm"
+            value={site.referrer}
+            onChange={(event) => apply({ referrer: event.target.value as ReferrerMode })}
+          >
+            <option id="page-controls-referrer-default" value="default">
+              Browser default
+            </option>
+            <option id="page-controls-referrer-none" value="none">
+              Never send
+            </option>
+            <option id="page-controls-referrer-origin" value="origin">
+              Site only
+            </option>
+            <option id="page-controls-referrer-same" value="same-origin">
+              Same site only
+            </option>
+          </select>
+        </label>
+        <OptionRow
+          id="page-controls-https"
+          label="Allow http on this site"
+          hint={settings?.httpsOnly ? "HTTPS-only is on" : "Turn on HTTPS-only in Settings"}
+          checked={settings?.httpsExceptions.includes(host) ?? false}
+          disabled={!settings?.httpsOnly}
+          onChange={(allow) => {
+            if (!settings) {
+              return;
+            }
+            const httpsExceptions = allow
+              ? [...settings.httpsExceptions, host]
+              : settings.httpsExceptions.filter((item) => item !== host);
+            void saveSettings({ ...settings, httpsExceptions });
+          }}
+        />
         <OptionRow
           id="page-controls-block-script"
           label="Block JavaScript"
@@ -245,6 +288,31 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
               Show hidden elements again
             </button>
           ) : null}
+          <button
+            id="page-controls-network"
+            type="button"
+            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            onClick={(event) =>
+              void openPopupBelow(event.currentTarget, {
+                kind: "network",
+                params: `id=${tab.id}`,
+                width: 440,
+                height: 480,
+              })
+            }
+          >
+            Network log
+          </button>
+          <button
+            id="page-controls-permissions"
+            type="button"
+            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            onClick={() => {
+              void createTab("ce://permissions").finally(() => closePopup());
+            }}
+          >
+            Site permissions
+          </button>
           <button
             id="page-controls-scripts"
             type="button"

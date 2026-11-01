@@ -12,6 +12,7 @@ import { HistoryPage } from "./features/History/History.page";
 import { ExtensionsPage } from "./features/Extensions/Extensions.page";
 import { NewTabPage } from "./features/NewTab/NewTab.page";
 import { PeekPage } from "./features/Peek/Peek.page";
+import { PermissionsPage } from "./features/Permissions/Permissions.page";
 import { PopupPage } from "./features/Popup/Popup.page";
 import { PrintEditorPage } from "./features/PrintEditor/PrintEditor.page";
 import { ReaderPage } from "./features/Reader/Reader.page";
@@ -53,6 +54,8 @@ function App() {
       return <PeekPage />;
     case "reader":
       return <ReaderPage />;
+    case "permissions":
+      return <PermissionsPage />;
     case "scripts":
       return <ScriptsPage params={route.params} />;
     default:

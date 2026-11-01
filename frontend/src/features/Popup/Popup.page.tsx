@@ -14,6 +14,7 @@ import { TabMenu } from "@/components/TabsAddressAndBookmarks/Tabs/TabMenu";
 import { WorkspaceMenu } from "@/components/WorkspaceMenu";
 import { AdBlockerPopover } from "@features/BuiltInExtensions/ad-blocker/AdBlockerPopover";
 import { PageControlsPopover } from "@features/BuiltInExtensions/page-controls/PageControlsPopover";
+import { NetworkPopover } from "@features/Network/NetworkPopover";
 import { PageCapturePopover } from "@features/BuiltInExtensions/page-capture/PageCapturePopover";
 import { PrintPdfPopover } from "@features/BuiltInExtensions/print-pdf/PrintPdfPopover";
 import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
@@ -87,6 +88,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <AdBlockerPopover params={params} />;
     case "page-controls":
       return <PageControlsPopover params={params} />;
+    case "network":
+      return <NetworkPopover tabId={Number(params.get("id"))} />;
     case "extension-pin":
       return <ExtensionPinMenu extensionId={params.get("id") ?? ""} />;
     case "tab-group":

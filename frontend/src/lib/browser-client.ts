@@ -24,8 +24,11 @@ import type {
   SyncStatus,
   ExtensionInfo,
   OmniboxState,
+  Container,
+  NetworkEntry,
   OmniboxSuggestion,
   PeekInfo,
+  PermissionGrant,
   PopupChange,
   PopupRequest,
   TabGroupColor,
@@ -146,6 +149,50 @@ export function reopenClosedTab() {
 /** `top` is the header height and `left` the vertical tab sidebar width, in CSS pixels. */
 export function setUiInsets(top: number, left: number) {
   return invoke<void>("set_ui_insets", { top, left });
+}
+
+export function createEphemeralTab() {
+  return invoke<number>("create_ephemeral_tab");
+}
+
+export function listContainers() {
+  return invoke<Container[]>("list_containers");
+}
+
+export function createContainer(name: string, color: string) {
+  return invoke<Container>("create_container", { name, color });
+}
+
+export function deleteContainer(id: string) {
+  return invoke<void>("delete_container", { id });
+}
+
+export function setGroupContainer(groupId: number, container: string) {
+  return invoke<void>("set_group_container", { groupId, container });
+}
+
+export function listPermissions() {
+  return invoke<PermissionGrant[]>("list_permissions");
+}
+
+export function setPermission(origin: string, kind: string, allow: boolean) {
+  return invoke<void>("set_permission", { origin, kind, allow });
+}
+
+export function onPermissionsChanged(handler: (grants: PermissionGrant[]) => void): Promise<UnlistenFn> {
+  return listen<PermissionGrant[]>("permissions-changed", (event) => handler(event.payload));
+}
+
+export function onContainersChanged(handler: (containers: Container[]) => void): Promise<UnlistenFn> {
+  return listen<Container[]>("containers-changed", (event) => handler(event.payload));
+}
+
+export function networkLog(id: number) {
+  return invoke<NetworkEntry[]>("network_log", { id });
+}
+
+export function clearNetworkLog(id: number) {
+  return invoke<void>("clear_network_log", { id });
 }
 
 export function setTabRefresh(id: number, secs: number, watch: boolean) {

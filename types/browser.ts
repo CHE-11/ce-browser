@@ -27,6 +27,8 @@ export type TabInfo = {
   watchChanges: boolean;
   /** The watched page changed since this tab was last selected. */
   changed: boolean;
+  /** An InPrivate tab. It is not saved and it is left out of history. */
+  ephemeral: boolean;
 };
 
 export type SplitView = {
@@ -54,6 +56,8 @@ export type TabGroup = {
   color: TabGroupColor;
   collapsed: boolean;
   window: string;
+  /** Empty uses the default profile. */
+  container: string;
 };
 
 export type Workspace = {
@@ -96,7 +100,11 @@ export type SiteControl = {
   blockFonts: boolean;
   /** CSS selectors hidden by the element zapper. */
   hidden: string[];
+  /** `default`, `none`, `origin` or `same-origin`. */
+  referrer: ReferrerMode;
 };
+
+export type ReferrerMode = "default" | "none" | "origin" | "same-origin";
 
 export type UserScript = {
   id: string;
@@ -127,6 +135,7 @@ export type SitePatch = {
   blockFonts?: boolean;
   hide?: string;
   clearHidden?: boolean;
+  referrer?: ReferrerMode;
 };
 
 export type PeekInfo = {
@@ -156,7 +165,8 @@ export type PopupKind =
   | "tab-group"
   | "tab-group-menu"
   | "workspaces"
-  | "page-controls";
+  | "page-controls"
+  | "network";
 
 export type PopupRequest = {
   kind: PopupKind;
@@ -276,6 +286,14 @@ export type BrowserSettings = {
   /** Shift+click on a link opens it in a peek instead of a new tab. */
   peekOnShiftClick: boolean;
   tabSleep: TabSleepSettings;
+  /** Drop `utm_*` and other click identifiers from URLs. */
+  stripTracking: boolean;
+  /** Add stable noise to canvas, WebGL and audio reads. */
+  fingerprintShield: boolean;
+  /** Load `http` pages over `https` unless the site is excepted. */
+  httpsOnly: boolean;
+  /** Hosts that may stay on `http`. */
+  httpsExceptions: string[];
 };
 
 export type TabSleepSettings = {
@@ -285,6 +303,26 @@ export type TabSleepSettings = {
   sleepPinned: boolean;
   /** Hosts that never sleep, lowercase and without a leading `www.`. */
   neverSleepSites: string[];
+};
+
+export type PermissionGrant = {
+  origin: string;
+  kind: "camera" | "microphone" | "location" | "notifications" | string;
+  /** `allow`, `deny`, or `asked` when the browser prompt was left to run. */
+  state: "allow" | "deny" | "asked" | string;
+};
+
+export type Container = {
+  id: string;
+  name: string;
+  color: TabGroupColor;
+};
+
+export type NetworkEntry = {
+  method: string;
+  url: string;
+  kind: string;
+  status: number | null;
 };
 
 export type AdblockSettings = {

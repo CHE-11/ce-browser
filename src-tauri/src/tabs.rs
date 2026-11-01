@@ -65,6 +65,8 @@ pub struct TabInfo {
     pub watch_changes: bool,
     /// The watched page changed since this tab was last selected.
     pub changed: bool,
+    /// An InPrivate tab. It is not saved and it is left out of history.
+    pub ephemeral: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -95,6 +97,8 @@ pub struct TabGroup {
     pub color: String,
     pub collapsed: bool,
     pub window: String,
+    /// Empty uses the default profile. Otherwise a container id.
+    pub container: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -156,6 +160,10 @@ fn group_color(raw: &str) -> String {
     } else {
         "grey".to_string()
     }
+}
+
+pub fn group_color_owned(raw: &str) -> String {
+    group_color(raw)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -676,6 +684,63 @@ pub fn emit_tabs(app: &AppHandle) {
 
 /// Settings every webview shares. WebView2 refuses to create a webview whose environment
 /// options differ from another webview that uses the same profile folder.
+/// Page view for one tab. A container uses its own user-data folder. An ephemeral tab is InPrivate.
+fn page_builder(app: &AppHandle, id: u32, label: &str, url: WebviewUrl) -> WebviewBuilder<Wry> {
+    let (container, ephemeral) = with_state(app, |state| {
+        let Some(tab) = state.tabs.iter().find(|tab| tab.info.id == id) else {
+            return (None, false);
+        };
+        let container = tab.info.group_id.and_then(|group| {
+            state
+                .groups
+                .iter()
+                .find(|item| item.id == group)
+                .map(|item| item.container.clone())
+                .filter(|container| !container.is_empty())
+        });
+        (container, tab.info.ephemeral)
+    });
+    if let Some(container) = container {
+        let dir = crate::privacy::container_dir(app, &container);
+        let mut builder = WebviewBuilder::new(label, url)
+            .data_directory(dir)
+            .browser_extensions_enabled(false)
+            .zoom_hotkeys_enabled(false);
+        if let Some(environment) = container_environment(app, &container) {
+            builder = builder.with_environment(environment);
+        }
+        return builder;
+    }
+    let mut builder = base_builder(app, label, url);
+    if ephemeral {
+        builder = builder.incognito(true);
+    }
+    builder
+}
+
+fn container_environment(app: &AppHandle, container: &str) -> Option<webview2::WebViewEnvironment> {
+    let labels = with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .filter(|tab| {
+                tab.info.group_id.is_some_and(|group| {
+                    state
+                        .groups
+                        .iter()
+                        .any(|item| item.id == group && item.container == container)
+                })
+            })
+            .filter_map(|tab| tab.webview.clone())
+            .collect::<Vec<_>>()
+    });
+    labels.iter().find_map(|label| {
+        app.get_webview(label)
+            .as_ref()
+            .and_then(webview2::environment_of)
+    })
+}
+
 pub fn base_builder(app: &AppHandle, label: &str, url: WebviewUrl) -> WebviewBuilder<Wry> {
     let mut builder = WebviewBuilder::new(label, url)
         .data_directory(paths::profile_dir(app))
@@ -711,6 +776,7 @@ pub struct OpenTab {
     pub workspace: String,
     pub group: Option<u32>,
     pub muted: bool,
+    pub ephemeral: bool,
 }
 
 impl OpenTab {
@@ -726,6 +792,7 @@ impl OpenTab {
             workspace: String::new(),
             group: None,
             muted: false,
+            ephemeral: false,
         }
     }
 }
@@ -836,6 +903,7 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                     refresh_secs: 0,
                     watch_changes: false,
                     changed: false,
+                    ephemeral: tab.ephemeral,
                 },
                 pending_url: Some(tab.url.clone()),
                 webview: None,
@@ -915,7 +983,7 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
     let load_app = app.clone();
     let title_app = app.clone();
     let window_app = app.clone();
-    let builder = base_builder(app, label, WebviewUrl::External(url))
+    let builder = page_builder(app, id, label, WebviewUrl::External(url))
         .background_color(color)
         .focused(false)
         .initialization_script(page_background_script(app))
@@ -1400,6 +1468,9 @@ fn remember_visit(app: &AppHandle, id: u32) {
         } else {
             String::new()
         };
+        if tab.info.ephemeral {
+            return None;
+        }
         Some((tab.info.url.clone(), title))
     }) else {
         return;
@@ -2646,6 +2717,7 @@ pub fn session_tabs(app: &AppHandle) -> SessionState {
         let tabs = state
             .tabs
             .iter()
+            .filter(|tab| !tab.info.ephemeral)
             .map(|tab| SessionTab {
                 url: tab.info.url.clone(),
                 title: tab.info.title.clone(),
@@ -2738,6 +2810,9 @@ pub fn restore(app: &AppHandle, restored: RestoreState) -> Result<(), String> {
             .map(|mut group| {
                 group.color = group_color(&group.color);
                 group.window = WINDOW.to_string();
+                if !crate::privacy::known_container(app, &group.container) {
+                    group.container.clear();
+                }
                 group
             })
             .collect();
@@ -3186,6 +3261,7 @@ pub fn create_group(app: &AppHandle, ids: &[u32]) -> Result<u32, String> {
             color: (*color).to_string(),
             collapsed: false,
             window,
+            container: String::new(),
         });
         for member in &members {
             if let Some(tab) = state.tab_mut(*member) {
@@ -3540,6 +3616,104 @@ pub fn move_tabs_to_workspace(app: &AppHandle, ids: &[u32], workspace: &str) -> 
     Ok(())
 }
 
+pub fn create_ephemeral_tab(app: &AppHandle, window: &str) -> Result<u32, String> {
+    let url = resolve(app, paths::NEW_TAB);
+    open(
+        app,
+        OpenTab {
+            ephemeral: true,
+            window: window.to_string(),
+            ..OpenTab::new(url)
+        },
+    )
+}
+
+/// Tabs in this group load again, because a page view cannot change profile after it is created.
+pub fn set_group_container(app: &AppHandle, group_id: u32, container: &str) -> Result<(), String> {
+    if !crate::privacy::known_container(app, container) {
+        return Err("That container no longer exists.".into());
+    }
+    let ids = with_state(app, |state| {
+        let group = state
+            .groups
+            .iter_mut()
+            .find(|group| group.id == group_id)
+            .ok_or("That group no longer exists.")?;
+        group.container = container.to_string();
+        Ok::<Vec<u32>, String>(
+            state
+                .tabs
+                .iter()
+                .filter(|tab| tab.info.group_id == Some(group_id))
+                .map(|tab| tab.info.id)
+                .collect(),
+        )
+    })?;
+    for id in ids {
+        rebuild_page(app, id)?;
+    }
+    emit_tabs(app);
+    Ok(())
+}
+
+pub fn clear_container(app: &AppHandle, container: &str) {
+    let ids = with_state(app, |state| {
+        let group_ids: Vec<u32> = state
+            .groups
+            .iter()
+            .filter(|group| group.container == container)
+            .map(|group| group.id)
+            .collect();
+        for group in &mut state.groups {
+            if group.container == container {
+                group.container.clear();
+            }
+        }
+        state
+            .tabs
+            .iter()
+            .filter(|tab| tab.info.group_id.is_some_and(|id| group_ids.contains(&id)))
+            .map(|tab| tab.info.id)
+            .collect::<Vec<_>>()
+    });
+    for id in ids {
+        let _ = rebuild_page(app, id);
+    }
+    emit_tabs(app);
+}
+
+fn rebuild_page(app: &AppHandle, id: u32) -> Result<(), String> {
+    let saved = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        let webview = tab.webview.take();
+        let url = tab.info.url.clone();
+        let window = tab.info.window.clone();
+        tab.info.loaded = false;
+        tab.info.loading = false;
+        tab.painted = false;
+        tab.hidden = false;
+        tab.info.sleeping = false;
+        Some((webview, url, window))
+    });
+    let Some((webview, url, window)) = saved else {
+        return Ok(());
+    };
+    retire_webview(app, webview);
+    let resolved = resolve(app, &url);
+    with_state(app, |state| {
+        if let Some(tab) = state.tab_mut(id) {
+            tab.pending_url = Some(resolved);
+        }
+    });
+    let active = with_state(app, |state| state.active_of(&window) == Some(id));
+    if active {
+        ensure_webview(app, id)?;
+        place_pages(app, &window, true);
+        focus_active(app, &window);
+    }
+    Ok(())
+}
+
 const REFRESH_CHOICES: &[u32] = &[0, 15, 30, 60, 300, 900];
 
 pub fn set_refresh(app: &AppHandle, id: u32, secs: u32, watch: bool) -> Result<(), String> {
@@ -3672,6 +3846,7 @@ mod tests {
                 refresh_secs: 0,
                 watch_changes: false,
                 changed: false,
+                ephemeral: false,
             },
             pending_url: None,
             webview: None,
@@ -3703,6 +3878,7 @@ mod tests {
                     color: "blue".into(),
                     collapsed: false,
                     window: WINDOW.into(),
+                    container: String::new(),
                 })
                 .collect(),
             next_group: 10,

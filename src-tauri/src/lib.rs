@@ -7,6 +7,7 @@ mod extensions;
 mod files;
 mod page_rules;
 mod paths;
+mod privacy;
 mod peek;
 mod print;
 mod profile_icons;
@@ -598,6 +599,51 @@ async fn open_extension_options(app: AppHandle, id: String) -> Result<u32, Strin
 // Settings
 
 #[tauri::command]
+fn list_permissions(app: AppHandle) -> Vec<privacy::PermissionGrant> {
+    privacy::grants(&app)
+}
+
+#[tauri::command]
+fn set_permission(app: AppHandle, origin: String, kind: String, allow: bool) -> Result<(), String> {
+    privacy::set_permission(&app, &origin, &kind, allow)
+}
+
+#[tauri::command]
+fn list_containers(app: AppHandle) -> Vec<privacy::Container> {
+    privacy::containers(&app)
+}
+
+#[tauri::command]
+fn create_container(app: AppHandle, name: String, color: String) -> Result<privacy::Container, String> {
+    privacy::create_container(&app, &name, &color)
+}
+
+#[tauri::command]
+fn delete_container(app: AppHandle, id: String) -> Result<(), String> {
+    privacy::delete_container(&app, &id)
+}
+
+#[tauri::command]
+async fn set_group_container(app: AppHandle, group_id: u32, container: String) -> Result<(), String> {
+    tabs::set_group_container(&app, group_id, &container)
+}
+
+#[tauri::command]
+async fn create_ephemeral_tab(app: AppHandle, window: Window) -> Result<u32, String> {
+    tabs::create_ephemeral_tab(&app, window.label())
+}
+
+#[tauri::command]
+fn network_log(app: AppHandle, id: u32) -> Vec<privacy::NetworkEntry> {
+    privacy::network_log(&app, id)
+}
+
+#[tauri::command]
+fn clear_network_log(app: AppHandle, id: u32) {
+    privacy::clear_network_log(&app, id);
+}
+
+#[tauri::command]
 fn get_page_rules(app: AppHandle) -> page_rules::PageRules {
     page_rules::get(&app)
 }
@@ -804,6 +850,7 @@ pub fn run() {
             }
             settings::init(&handle);
             page_rules::init(&handle);
+            privacy::init(&handle);
             if let Err(error) = user_styles::ensure(&handle) {
                 eprintln!("user styles: {error}");
             }
@@ -966,6 +1013,15 @@ pub fn run() {
             set_extension_enabled,
             remove_extension,
             open_extension_options,
+            list_permissions,
+            set_permission,
+            list_containers,
+            create_container,
+            delete_container,
+            set_group_container,
+            create_ephemeral_tab,
+            network_log,
+            clear_network_log,
             get_page_rules,
             update_site_control,
             save_user_script,

@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import type { BrowserSettings } from "../../../../../types/browser";
-import { createTab, saveSettings } from "../../../lib/browser-client";
+import { createEphemeralTab, createTab, saveSettings } from "../../../lib/browser-client";
 import { cn } from "../../../lib/cn";
 import { useTabDrag } from "../../../lib/tab-drag";
 import { buildTabRows } from "../../../lib/tab-rows";
@@ -81,10 +81,14 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
         <button
           id="vertical-tabs-new"
           type="button"
-          title="New tab (Ctrl+T)"
           aria-label="New tab"
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          title="New tab (Ctrl+T). Right-click for an ephemeral tab."
           onClick={() => void createTab()}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            void createEphemeralTab();
+          }}
         >
           <Plus id="vertical-tabs-new-icon" className="size-4" aria-hidden />
         </button>

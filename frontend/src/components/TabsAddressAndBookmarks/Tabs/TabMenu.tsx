@@ -1,5 +1,5 @@
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "@/components/PopupFrame";
-import { closePopup, createWorkspace, moveTabsToWorkspace, createTab, reload, duplicateTab, unpinTab, pinTab, setTabsMuted, addBookmark, exitSplit, splitWith, removeFromGroup, createGroup, addToGroup, sleepTab, sleepOtherTabs, neverSleepSite, closeSelectedTabs, closeTab, closeOtherTabs, closeTabsToRight, reopenClosedTab } from "@/lib/browser-client";
+import { closePopup, createEphemeralTab, createWorkspace, moveTabsToWorkspace, createTab, reload, duplicateTab, unpinTab, pinTab, setTabsMuted, addBookmark, exitSplit, splitWith, removeFromGroup, createGroup, addToGroup, sleepTab, sleepOtherTabs, neverSleepSite, closeSelectedTabs, closeTab, closeOtherTabs, closeTabsToRight, reopenClosedTab } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { groupColorClasses, GROUP_COLORS, groupLabel } from "@/lib/tab-rows";
 import { useTabs } from "@/lib/use-browser";
@@ -15,6 +15,7 @@ import {
   MoonStar,
   Pin,
   PinOff,
+  Glasses,
   Plus,
   RotateCw,
   Star,
@@ -86,6 +87,12 @@ export function TabMenu({ tabId }: TabMenuProps) {
           icon={<Plus />}
           label="New tab to the right"
           onClick={run(() => createTab(undefined, false, index + 1))}
+        />
+        <PopupMenuItem
+          id="tab-menu-ephemeral"
+          icon={<Glasses />}
+          label="New ephemeral tab"
+          onClick={run(() => createEphemeralTab())}
         />
         <PopupMenuSeparator id="tab-menu-separator-1" />
         <PopupMenuItem id="tab-menu-reload" icon={<RotateCw />} label="Reload" shortcut="Ctrl+R" onClick={run(() => reload(tab.id))} />

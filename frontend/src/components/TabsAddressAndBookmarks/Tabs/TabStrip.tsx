@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { Plus } from "lucide-react";
-import { createTab } from "@/lib/browser-client";
+import { createEphemeralTab, createTab } from "@/lib/browser-client";
 import { useTabDrag } from "@/lib/tab-drag";
 import { buildTabRows } from "@/lib/tab-rows";
 import type { WindowTabsState } from "@/lib/use-browser";
@@ -44,10 +44,14 @@ export function TabStrip({ snapshot }: TabStripProps) {
         <button
           id="tab-strip-new"
           type="button"
-          title="New tab (Ctrl+T)"
+          title="New tab (Ctrl+T). Right-click for an ephemeral tab."
           aria-label="New tab"
           className="mb-1 ml-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
           onClick={() => void createTab()}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            void createEphemeralTab();
+          }}
         >
           <Plus id="tab-strip-new-icon" className="size-4" aria-hidden />
         </button>

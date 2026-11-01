@@ -1,5 +1,5 @@
 import type { DragEvent, MouseEvent } from "react";
-import { LoaderCircle, Moon, Volume2, VolumeX, X } from "lucide-react";
+import { Glasses, LoaderCircle, Moon, Volume2, VolumeX, X } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
 import { setTabsMuted, selectTabRange, toggleTabSelection, activateTab } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
@@ -171,6 +171,9 @@ export function TabItem({
           <span id={`${domId}-title`} className="min-w-0 flex-1 truncate">
             {tab.title || tab.url}
           </span>
+          {tab.ephemeral ? (
+            <Glasses id={`${domId}-ephemeral`} className="size-3 shrink-0 text-violet-300" aria-label="Ephemeral tab" />
+          ) : null}
           {tab.changed ? (
             <span id={`${domId}-changed`} className="size-2 shrink-0 rounded-full bg-sky-400" title="This page changed" />
           ) : null}

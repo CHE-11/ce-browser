@@ -46,6 +46,7 @@ pub struct SessionGroupFile {
     pub name: String,
     pub color: String,
     pub collapsed: bool,
+    pub container: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -123,6 +124,7 @@ pub fn save_now(app: &AppHandle) -> Result<(), String> {
                 name: group.name,
                 color: group.color,
                 collapsed: group.collapsed,
+                container: group.container,
             })
             .collect(),
         workspaces: saved.workspaces,
@@ -200,6 +202,7 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
                 name: group.name,
                 color: group.color,
                 collapsed: group.collapsed,
+                container: group.container,
                 window: tabs::WINDOW.to_string(),
             })
             .collect()
