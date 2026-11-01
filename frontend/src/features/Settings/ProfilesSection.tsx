@@ -1,0 +1,370 @@
+import { useEffect, useState } from "react";
+import { ImagePlus } from "lucide-react";
+import type { BrowserProfile, ProfileIconChoice } from "@type/browser";
+import { Button } from "@/components/Button";
+import { cn } from "@/lib/cn";
+import {
+  createProfile,
+  deleteProfile,
+  installProfileShortcut,
+  listProfileIcons,
+  listProfiles,
+  openProfile,
+  pickProfileIcon,
+  pinProfileTaskbar,
+  setProfileIcon,
+  unpinProfileTaskbar,
+} from "@/lib/browser-client";
+import { SETTINGS_SECTIONS } from "./settings-sections";
+import { inputClass, matchesQuery, Row, Section, useReportMatch, useSettingVisible, type SettingsSectionProps } from "./SettingsControls";
+
+const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-profiles")!;
+
+const NEW_PROFILE_HINT =
+  "Each profile has its own bookmarks, history, extensions, and settings, kept in a folder named after the profile (Default for the first one) in the sync folder or in app data. Its icon is used for a separate Start menu item and taskbar button.";
+
+function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], iconOpen: boolean) {
+  const terms = [
+    profile.name,
+    profile.current ? "This window" : "",
+    profile.taskbar
+      ? "Pinned to the taskbar."
+      : profile.startMenu
+        ? "Start menu item installed. Pin it for a taskbar button."
+        : "No Start menu item yet.",
+    "Change icon",
+  ];
+  if (!profile.current) {
+    terms.push("Open");
+  }
+  terms.push(profile.taskbar ? "Unpin" : "Pin to taskbar");
+  if (!profile.startMenu) {
+    terms.push("Add to Start");
+  }
+  if (profile.id !== "default" && !profile.current) {
+    terms.push("Remove");
+  }
+  if (iconOpen) {
+    terms.push(
+      profile.current
+        ? "This window, the Start menu, and the taskbar button use this icon."
+        : "The Start menu and taskbar shortcut update now. That profile's window uses the icon the next time it opens.",
+      "Choose an image",
+      "Image",
+      ...icons.flatMap((choice) => [choice.label, choice.id]),
+    );
+  }
+  return terms;
+}
+
+export function ProfilesSection({ settings, query, onError, onMatch, revision }: SettingsSectionProps & { revision: number }) {
+  const [profiles, setProfiles] = useState<BrowserProfile[]>([]);
+  const [profileIcons, setProfileIcons] = useState<ProfileIconChoice[]>([]);
+  const [profileName, setProfileName] = useState("");
+  const [profileWorking, setProfileWorking] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [iconProfile, setIconProfile] = useState<string | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    void listProfiles()
+      .then((next) => {
+        if (!disposed) {
+          setProfiles(next);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!disposed) {
+          onError(String(reason));
+        }
+      });
+    void listProfileIcons()
+      .then((next) => {
+        if (!disposed) {
+          setProfileIcons(next);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!disposed) {
+          onError(String(reason));
+        }
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [onError, revision, settings.syncFolder]);
+
+  const pending = profiles.find((profile) => profile.id === pendingDelete);
+  const confirmText = pendingDelete
+    ? `Remove ${pending?.name ?? "this profile"}? Its bookmarks, history, extensions, settings, and Start menu item are deleted.`
+    : "";
+  const visible = matchesQuery(
+    query,
+    section.title,
+    "New profile",
+    NEW_PROFILE_HINT,
+    "Create",
+    profileName,
+    ...profiles.flatMap((profile) => profileTerms(profile, profileIcons, iconProfile === profile.id)),
+    confirmText,
+    pendingDelete ? "Cancel" : "",
+  );
+  useReportMatch(section.id, visible, onMatch);
+
+  const runProfiles = (work: () => Promise<BrowserProfile[] | void>) => {
+    setProfileWorking(true);
+    onError(null);
+    void work()
+      .then((next) => {
+        if (next) {
+          setProfiles(next);
+        }
+      })
+      .catch((reason: unknown) => {
+        onError(String(reason));
+        void listProfiles().then(setProfiles).catch(() => undefined);
+      })
+      .finally(() => setProfileWorking(false));
+  };
+
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <Section id={section.id} title={section.title}>
+      <Row id="settings-profiles-new" label="New profile" hint={NEW_PROFILE_HINT} search={["Create", profileName]}>
+        <input
+          id="settings-profiles-name"
+          value={profileName}
+          placeholder="Work"
+          className={`${inputClass} min-w-0 flex-1`}
+          onChange={(event) => setProfileName(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && profileName.trim() && !profileWorking) {
+              const name = profileName.trim();
+              setProfileName("");
+              runProfiles(() => createProfile(name));
+            }
+          }}
+        />
+        <Button
+          id="settings-profiles-create"
+          size="sm"
+          disabled={profileWorking || !profileName.trim()}
+          onClick={() => {
+            const name = profileName.trim();
+            setProfileName("");
+            runProfiles(() => createProfile(name));
+          }}
+        >
+          Create
+        </Button>
+      </Row>
+      {profiles.map((profile) => (
+        <ProfileCard
+          key={profile.id}
+          profile={profile}
+          icons={profileIcons}
+          iconOpen={iconProfile === profile.id}
+          working={profileWorking}
+          onToggleIcons={() => setIconProfile((current) => (current === profile.id ? null : profile.id))}
+          onOpen={() => runProfiles(() => openProfile(profile.id))}
+          onPin={() => runProfiles(() => pinProfileTaskbar(profile.id))}
+          onUnpin={() => runProfiles(() => unpinProfileTaskbar(profile.id))}
+          onShortcut={() => runProfiles(() => installProfileShortcut(profile.id))}
+          onRemove={() => setPendingDelete(profile.id)}
+          onChooseIcon={(iconId, path) => runProfiles(() => setProfileIcon(profile.id, iconId, path))}
+          onPickFile={() =>
+            void pickProfileIcon().then((path) => {
+              if (path) {
+                runProfiles(() => setProfileIcon(profile.id, "custom", path));
+              }
+            })
+          }
+        />
+      ))}
+      {pendingDelete ? (
+        <DeleteConfirm
+          text={confirmText}
+          onCancel={() => setPendingDelete(null)}
+          onRemove={() => {
+            const id = pendingDelete;
+            setPendingDelete(null);
+            if (id) {
+              runProfiles(() => deleteProfile(id));
+            }
+          }}
+        />
+      ) : null}
+    </Section>
+  );
+}
+
+function ProfileCard({
+  profile,
+  icons,
+  iconOpen,
+  working,
+  onToggleIcons,
+  onOpen,
+  onPin,
+  onUnpin,
+  onShortcut,
+  onRemove,
+  onChooseIcon,
+  onPickFile,
+}: {
+  profile: BrowserProfile;
+  icons: ProfileIconChoice[];
+  iconOpen: boolean;
+  working: boolean;
+  onToggleIcons: () => void;
+  onOpen: () => void;
+  onPin: () => void;
+  onUnpin: () => void;
+  onShortcut: () => void;
+  onRemove: () => void;
+  onChooseIcon: (iconId: string, path?: string) => void;
+  onPickFile: () => void;
+}) {
+  const visible = useSettingVisible(...profileTerms(profile, icons, iconOpen));
+  if (!visible) {
+    return null;
+  }
+  return (
+    <div id={`settings-profile-${profile.id}`} className="flex flex-col gap-3 px-5 py-3">
+      <div id={`settings-profile-${profile.id}-row`} className="flex items-center justify-between gap-6">
+        <div id={`settings-profile-${profile.id}-text`} className="flex min-w-0 items-center gap-3">
+          <button
+            id={`settings-profile-${profile.id}-icon`}
+            type="button"
+            title="Change icon"
+            aria-label={`Change icon for ${profile.name}`}
+            className={cn(
+              "size-9 shrink-0 overflow-hidden rounded-md border",
+              iconOpen ? "border-sky-500 ring-1 ring-sky-500" : "border-zinc-700 hover:border-zinc-500",
+            )}
+            onClick={onToggleIcons}
+          >
+            <img id={`settings-profile-${profile.id}-icon-image`} src={profile.icon || "/icon.png"} alt="" className="size-full" />
+          </button>
+          <div id={`settings-profile-${profile.id}-copy`} className="min-w-0">
+            <div id={`settings-profile-${profile.id}-name`} className="truncate text-sm text-zinc-100">
+              {profile.name}
+              {profile.current ? " · This window" : ""}
+            </div>
+            <div id={`settings-profile-${profile.id}-hint`} className="text-xs text-zinc-500">
+              {profile.taskbar
+                ? "Pinned to the taskbar."
+                : profile.startMenu
+                  ? "Start menu item installed. Pin it for a taskbar button."
+                  : "No Start menu item yet."}
+            </div>
+          </div>
+        </div>
+        <div id={`settings-profile-${profile.id}-actions`} className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {!profile.current ? (
+            <Button id={`settings-profile-${profile.id}-open`} size="sm" disabled={working} onClick={onOpen}>
+              Open
+            </Button>
+          ) : null}
+          {profile.taskbar ? (
+            <Button id={`settings-profile-${profile.id}-unpin`} size="sm" disabled={working} onClick={onUnpin}>
+              Unpin
+            </Button>
+          ) : (
+            <Button id={`settings-profile-${profile.id}-pin`} size="sm" disabled={working} onClick={onPin}>
+              Pin to taskbar
+            </Button>
+          )}
+          {!profile.startMenu ? (
+            <Button id={`settings-profile-${profile.id}-shortcut`} size="sm" disabled={working} onClick={onShortcut}>
+              Add to Start
+            </Button>
+          ) : null}
+          {profile.id !== "default" && !profile.current ? (
+            <Button id={`settings-profile-${profile.id}-remove`} size="sm" variant="ghost" disabled={working} onClick={onRemove}>
+              Remove
+            </Button>
+          ) : null}
+        </div>
+      </div>
+      {iconOpen ? (
+        <div id={`settings-profile-${profile.id}-icons`} className="flex flex-col gap-2 pl-12">
+          <p id={`settings-profile-${profile.id}-icons-hint`} className="text-xs text-zinc-500">
+            {profile.current
+              ? "This window, the Start menu, and the taskbar button use this icon."
+              : "The Start menu and taskbar shortcut update now. That profile's window uses the icon the next time it opens."}
+          </p>
+          <div id={`settings-profile-${profile.id}-icon-grid`} className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+            {icons.map((choice) => {
+              const selected = profile.iconId === choice.id;
+              return (
+                <button
+                  key={choice.id}
+                  id={`settings-profile-${profile.id}-icon-${choice.id}`}
+                  type="button"
+                  title={choice.label}
+                  disabled={working}
+                  className={cn(
+                    "flex flex-col items-center gap-1 rounded-md border p-1.5",
+                    selected ? "border-sky-500 ring-1 ring-sky-500" : "border-zinc-700 hover:border-zinc-500",
+                  )}
+                  onClick={() => onChooseIcon(choice.id)}
+                >
+                  <img id={`settings-profile-${profile.id}-icon-${choice.id}-image`} src={choice.icon} alt="" className="size-10 rounded" />
+                  <span id={`settings-profile-${profile.id}-icon-${choice.id}-label`} className="truncate text-[11px] text-zinc-400">
+                    {choice.label}
+                  </span>
+                </button>
+              );
+            })}
+            <button
+              id={`settings-profile-${profile.id}-icon-file`}
+              type="button"
+              title="Choose an image"
+              disabled={working}
+              className={cn(
+                "flex flex-col items-center gap-1 rounded-md border p-1.5",
+                profile.iconId === "custom" ? "border-sky-500 ring-1 ring-sky-500" : "border-zinc-700 hover:border-zinc-500",
+              )}
+              onClick={onPickFile}
+            >
+              {profile.iconId === "custom" ? (
+                <img id={`settings-profile-${profile.id}-icon-file-image`} src={profile.icon || "/icon.png"} alt="" className="size-10 rounded" />
+              ) : (
+                <ImagePlus id={`settings-profile-${profile.id}-icon-file-image`} className="size-10 p-2 text-zinc-300" aria-hidden />
+              )}
+              <span id={`settings-profile-${profile.id}-icon-file-label`} className="truncate text-[11px] text-zinc-400">
+                Image
+              </span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DeleteConfirm({ text, onCancel, onRemove }: { text: string; onCancel: () => void; onRemove: () => void }) {
+  const visible = useSettingVisible("Remove", "Cancel", text);
+  if (!visible) {
+    return null;
+  }
+  return (
+    <div id="settings-profiles-confirm" className="flex flex-col gap-3 px-5 py-3">
+      <p id="settings-profiles-confirm-text" className="text-sm text-zinc-200">
+        {text}
+      </p>
+      <div id="settings-profiles-confirm-actions" className="flex justify-end gap-2">
+        <Button id="settings-profiles-confirm-cancel" size="sm" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button id="settings-profiles-confirm-remove" size="sm" variant="destructive" onClick={onRemove}>
+          Remove
+        </Button>
+      </div>
+    </div>
+  );
+}

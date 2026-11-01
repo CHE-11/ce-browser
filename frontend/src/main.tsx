@@ -12,7 +12,6 @@ import { DownloadsPage } from "./features/Downloads/Downloads.page";
 import { FilesPage } from "./features/Files/Files.page";
 import { HistoryPage } from "./features/History/History.page";
 import { ExtensionsPage } from "./features/Extensions/Extensions.page";
-import { NewTabPage } from "./features/NewTab/NewTab.page";
 import { PeekPage } from "./features/Peek/Peek.page";
 import { PermissionsPage } from "./features/Permissions/Permissions.page";
 import { PopupPage } from "./features/Popup/Popup.page";
@@ -68,7 +67,7 @@ function App() {
     case "capture-editor":
       return <CaptureEditorPage />;
     default:
-      return <NewTabPage />;
+      return <BookmarksPage />;
   }
 }
 
