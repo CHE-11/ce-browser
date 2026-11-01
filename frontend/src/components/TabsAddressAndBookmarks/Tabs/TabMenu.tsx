@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "@/components/PopupFrame";
-import { closePopup, createEphemeralTab, createWorkspace, moveTabsToWorkspace, createTab, reload, duplicateTab, unpinTab, pinTab, setTabsMuted, addBookmark, exitSplit, splitWith, removeFromGroup, createGroup, addToGroup, sleepTab, sleepOtherTabs, neverSleepSite, closeSelectedTabs, closeTab, closeOtherTabs, closeTabsToRight, reopenClosedTab, installedBrowsers, openInBrowser } from "@/lib/browser-client";
+import { closePopup, createEphemeralTab, createWorkspace, moveTabsToWorkspace, createTab, reload, duplicateTab, unpinTab, pinTab, setTabsMuted, addBookmark, exitSplit, splitWith, removeFromGroup, createGroup, addToGroup, sleepTab, sleepOtherTabs, neverSleepSite, closeSelectedTabs, closeTab, closeOtherTabs, closeTabsToRight, reopenClosedTab, installedBrowsers, installSite, openInBrowser } from "@/lib/browser-client";
 import type { ExternalBrowser } from "@type/browser";
 import { cn } from "@/lib/cn";
 import { groupColorClasses, GROUP_COLORS, groupLabel } from "@/lib/tab-rows";
 import { useTabs } from "@/lib/use-browser";
 import {
   AppWindow,
+  AppWindowMac,
   ArrowRightToLine,
   Columns2,
   Copy,
@@ -115,6 +116,14 @@ export function TabMenu({ tabId }: TabMenuProps) {
           label={allMuted ? (grouped ? "Unmute tabs" : "Unmute tab") : grouped ? "Mute tabs" : "Mute tab"}
           onClick={run(() => setTabsMuted(targets, !allMuted))}
         />
+        {(tab.url.startsWith("http://") || tab.url.startsWith("https://")) ? (
+          <PopupMenuItem
+            id="tab-menu-install-site"
+            icon={<AppWindowMac />}
+            label="Install site"
+            onClick={run(() => installSite(tab.id))}
+          />
+        ) : null}
         <PopupMenuItem
           id="tab-menu-bookmark"
           icon={<Star />}

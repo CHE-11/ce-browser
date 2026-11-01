@@ -271,6 +271,14 @@ export function askPage(id: number, question: string) {
   return invoke<string>("ask_page", { id, question });
 }
 
+export function installSite(id: number) {
+  return invoke<void>("install_site", { id });
+}
+
+export function openDefaultApps() {
+  return invoke<void>("open_default_apps");
+}
+
 export function setDevice(window: string, device: string) {
   return invoke<void>("set_device", { window, device });
 }

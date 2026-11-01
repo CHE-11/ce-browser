@@ -161,6 +161,20 @@ Drag a pinned icon on the address bar onto another to reorder the built-in tools
 
 **Assistant** summarizes the page or answers a question about it. Settings > Tools holds an OpenAI-compatible endpoint, a model name, and an API key. A local server such as `http://127.0.0.1:11434/v1` can omit the key. The key stays on this computer and is not copied into the sync folder.
 
+## System
+
+**Install site** in the tab menu adds a Start menu shortcut for that website. Opening it shows one window, with the site's name and icon, and Windows can give it a separate taskbar button.
+
+Ctrl+Alt+Space restores the browser and focuses the address bar. Change it under Settings > System. The shortcut is read when the browser starts.
+
+A finished download shows a Windows toast. Activating it opens the file. A site can raise a toast only after its notification permission is allow.
+
+ce-browser registers for `http`, `https`, and HTML files. **Make default** opens Windows settings so you can confirm. A website address on the command line opens in the running window.
+
+The tray icon lists recent tabs, Show, Quick search, and Quit. Clicking it shows the window.
+
+**Battery saver** is on by default. On battery, background tabs sleep after a few seconds and the visible page stays near 30 frames a second. Plugged in, the normal sleep delay returns.
+
 ## Data
 
 Each profile keeps its settings, session, bookmarks, downloads, history and extension list as JSON files in its own folder. The folder is named after the profile. The first profile is named "Default". The root folder is the sync folder when one is selected, otherwise `%APPDATA%\com.ce.browser`.

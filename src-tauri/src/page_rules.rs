@@ -362,6 +362,10 @@ pub fn injection(app: &AppHandle, url: &str) -> String {
     script.push_str(ERROR_JS);
     script.push('\n');
     script.push_str(THEME_JS);
+    if crate::privacy::decision(app, url, "notifications") == Some(true) {
+        script.push('\n');
+        script.push_str(crate::system::NOTIFY_JS);
+    }
     script
 }
 

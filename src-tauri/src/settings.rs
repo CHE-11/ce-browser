@@ -93,6 +93,12 @@ pub struct BrowserSettings {
     /// Kept on this computer. The sync folder does not receive it.
     #[serde(default)]
     pub assistant_key: String,
+    /// Restores the window and focuses the address bar. Default is Ctrl+Alt+Space.
+    #[serde(default = "default_hotkey")]
+    pub summon_hotkey: String,
+    /// On battery, background tabs sleep sooner and the visible page stays near 30 frames a second.
+    #[serde(default = "default_true")]
+    pub battery_saver: bool,
     /// Built-in ad blocker. An older file omits this, so blocking starts on with no paused sites.
     #[serde(default)]
     pub adblock: AdblockSettings,
@@ -151,6 +157,10 @@ fn default_assistant_endpoint() -> String {
 
 fn default_assistant_model() -> String {
     "llama3.2".into()
+}
+
+fn default_hotkey() -> String {
+    crate::system::DEFAULT_HOTKEY.into()
 }
 
 fn default_vertical_tabs_width() -> u32 {
@@ -390,6 +400,8 @@ impl Default for BrowserSettings {
             assistant_endpoint: default_assistant_endpoint(),
             assistant_model: default_assistant_model(),
             assistant_key: String::new(),
+            summon_hotkey: default_hotkey(),
+            battery_saver: true,
             adblock: AdblockSettings::default(),
             tab_layout: "horizontal".into(),
             vertical_tabs_collapsed: false,
@@ -444,6 +456,9 @@ impl BrowserSettings {
         }
         if self.assistant_model.trim().is_empty() {
             self.assistant_model = default_assistant_model();
+        }
+        if hotkey_blank(&self.summon_hotkey) {
+            self.summon_hotkey = default_hotkey();
         }
         self.adblock = self.adblock.normalize();
         if !TAB_LAYOUTS.contains(&self.tab_layout.as_str()) {
@@ -737,7 +752,11 @@ fn clean_hosts(hosts: &[String]) -> Vec<String> {
 }
 
 /// Saved ids that are still available, in that order, then any available id the list does not mention.
-pub fn clean_language(language: &str) -> String {
+pub fn hotkey_blank(token: &str) -> bool {
+    token.trim().is_empty() || crate::system::hotkey_mods(token).is_none()
+}
+
+fn clean_language(language: &str) -> String {
     let cleaned: String = language
         .chars()
         .filter(|character| character.is_ascii_alphanumeric() || *character == '-')

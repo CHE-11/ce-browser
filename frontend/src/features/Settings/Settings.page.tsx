@@ -14,6 +14,7 @@ import { SettingsQueryProvider } from "./SettingsControls";
 import { SETTINGS_SECTIONS } from "./settings-sections";
 import { StartupSection } from "./StartupSection";
 import { SyncSection } from "./SyncSection";
+import { SystemSection } from "./SystemSection";
 import { TabsSection } from "./TabsSection";
 import { ToolsSection } from "./ToolsSection";
 
@@ -172,6 +173,7 @@ export function SettingsPage() {
           <AdBlockSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <AppearanceSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <ToolsSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          <SystemSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <SyncSection
             settings={settings}
             query={query}

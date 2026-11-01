@@ -372,6 +372,10 @@ export type BrowserSettings = {
   assistantModel: string;
   /** Kept on this computer. Sync does not copy it. */
   assistantKey: string;
+  /** Restores the window and focuses the address bar. */
+  summonHotkey: string;
+  /** On battery, background tabs sleep sooner and the visible page stays near 30 frames a second. */
+  batterySaver: boolean;
   /** Built-in ad blocker. */
   adblock: AdblockSettings;
   /** `horizontal` puts tabs above the address bar, `vertical` in a sidebar on the left. */

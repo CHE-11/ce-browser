@@ -24,6 +24,7 @@ mod profiles;
 mod session;
 mod settings;
 mod shortcuts;
+mod system;
 mod storage;
 mod sync;
 mod tab_sleep;
@@ -899,6 +900,16 @@ async fn ask_page(app: AppHandle, id: u32, question: String) -> Result<String, S
 }
 
 #[tauri::command]
+fn install_site(app: AppHandle, id: u32) -> Result<(), String> {
+    system::install_site(&app, id)
+}
+
+#[tauri::command]
+fn open_default_apps() -> Result<(), String> {
+    system::open_default_settings()
+}
+
+#[tauri::command]
 fn set_device(app: AppHandle, window: String, device: String) -> Result<(), String> {
     tabs::set_device(&app, &window, &device)
 }
@@ -1119,6 +1130,7 @@ fn build_window(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    system::read_args();
     profiles::read_args();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -1147,11 +1159,13 @@ pub fn run() {
             session::init(&handle);
             tab_sleep::init(&handle);
             build_window(&handle)?;
+            system::start(&handle);
 
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = session::restore(&handle) {
                     eprintln!("session restore: {error}");
                 }
+                system::apply_launch(&handle);
                 let extensions_app = handle.clone();
                 let _ = tauri::async_runtime::spawn_blocking(move || {
                     if let Err(error) = extensions::sync_on_startup(&extensions_app) {
@@ -1346,6 +1360,8 @@ pub fn run() {
             track_price,
             check_prices,
             ask_page,
+            install_site,
+            open_default_apps,
             set_device,
             list_rewrite_rules,
             save_rewrite_rules,

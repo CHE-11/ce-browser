@@ -141,6 +141,7 @@ pub fn init(app: &AppHandle) {
     };
     let _ = ACTIVE.set(id.clone());
     if !hold_profile_mutex(&id) {
+        crate::system::write_handoff(app);
         focus_profile_window(&id);
         std::process::exit(0);
     }
@@ -167,19 +168,31 @@ pub fn set_process_identity() -> Result<(), String> {
 
 pub fn mark_window(window: &tauri::Window) -> Result<(), String> {
     let id = active_id();
+    mark_model(
+        window,
+        &app_model_id(&id),
+        &relaunch_command(&id),
+        &relaunch_icon(window.app_handle(), &id),
+    )
+}
+
+pub fn mark_model(window: &tauri::Window, model: &str, relaunch: &str, icon: &str) -> Result<(), String> {
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
     com_init();
     unsafe {
         let store: IPropertyStore = SHGetPropertyStoreForWindow(hwnd).map_err(win_err)?;
-        set_text(&store, app_model_key(5), &app_model_id(&id))?;
-        set_text(&store, app_model_key(2), &relaunch_command(&id))?;
-        let icon = relaunch_icon(window.app_handle(), &id);
+        set_text(&store, app_model_key(5), model)?;
+        set_text(&store, app_model_key(2), relaunch)?;
         if !icon.is_empty() {
-            set_text(&store, app_model_key(3), &icon)?;
+            set_text(&store, app_model_key(3), icon)?;
         }
         store.Commit().map_err(win_err)?;
     }
     Ok(())
+}
+
+pub fn focus_running() {
+    focus_profile_window(&active_id());
 }
 
 pub fn list(app: &AppHandle) -> Vec<ProfileInfo> {
@@ -699,23 +712,37 @@ fn unique_id(file: &ProfilesFile, name: &str) -> String {
 }
 
 fn install_shortcut(id: &str, name: &str, icon: Option<&Path>) -> Result<PathBuf, String> {
-    com_init();
-    let programs = programs_dir()?;
     let label = if id == DEFAULT_ID {
         "ce-browser.lnk".to_string()
     } else {
         format!("ce-browser {name}.lnk")
     };
-    let path = files::unique_path(&programs, &label);
+    let arguments = if id == DEFAULT_ID {
+        String::new()
+    } else {
+        format!("--profile {id}")
+    };
+    install_link(&label, &arguments, name, icon, &app_model_id(id))
+}
+
+pub fn install_link(
+    file_name: &str,
+    arguments: &str,
+    description: &str,
+    icon: Option<&Path>,
+    model: &str,
+) -> Result<PathBuf, String> {
+    com_init();
+    let programs = programs_dir()?;
+    let path = files::unique_path(&programs, file_name);
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let exe_text = exe.display().to_string();
     unsafe {
         let link: IShellLinkW =
             CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(win_err)?;
         link.SetPath(&HSTRING::from(&exe_text)).map_err(win_err)?;
-        link.SetArguments(&HSTRING::from(format!("--profile {id}")))
-            .map_err(win_err)?;
-        link.SetDescription(&HSTRING::from(name)).map_err(win_err)?;
+        link.SetArguments(&HSTRING::from(arguments)).map_err(win_err)?;
+        link.SetDescription(&HSTRING::from(description)).map_err(win_err)?;
         let icon_path = icon
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| exe_text.clone());
@@ -726,7 +753,7 @@ fn install_shortcut(id: &str, name: &str, icon: Option<&Path>) -> Result<PathBuf
                 .map_err(win_err)?;
         }
         let store: IPropertyStore = link.cast().map_err(win_err)?;
-        set_text(&store, app_model_key(5), &app_model_id(id))?;
+        set_text(&store, app_model_key(5), model)?;
         store.Commit().map_err(win_err)?;
         let file: IPersistFile = link.cast().map_err(win_err)?;
         file.Save(&HSTRING::from(path.as_os_str()), true)
@@ -970,6 +997,10 @@ fn relaunch_command(id: &str) -> String {
     } else {
         format!("\"{}\" --profile {id}", exe.display())
     }
+}
+
+pub fn current_model_id() -> String {
+    app_model_id(&active_id())
 }
 
 fn app_model_id(id: &str) -> String {

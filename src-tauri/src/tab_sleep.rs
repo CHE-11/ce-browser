@@ -16,11 +16,16 @@ pub fn init(app: &AppHandle) {
             std::thread::sleep(TICK);
             ticks += 1;
             refresh_due(&app);
-            if ticks.is_multiple_of(SLEEP_EVERY) {
+            crate::system::apply_launch(&app);
+            if ticks.is_multiple_of(5) {
+                crate::system::refresh_tray(&app);
+            }
+            if crate::system::saver_active(&app) || ticks.is_multiple_of(SLEEP_EVERY) {
                 for id in tabs::sleep_candidates(&app) {
                     let _ = tabs::sleep_tab(&app, id);
                 }
             }
+            crate::system::sync_frames(&app);
         }
     });
 }

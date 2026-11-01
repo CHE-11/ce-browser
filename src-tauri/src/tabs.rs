@@ -1270,6 +1270,44 @@ pub fn open_beside(app: &AppHandle, opener: u32, url: Url, background: bool) -> 
 }
 
 /// Opens another browser window in this process. Page views share the profile folder.
+/// A window of its own for an installed site, then one tab at that address.
+pub fn open_site_window(app: &AppHandle, title: &str, url: &str) -> Result<String, String> {
+    let label = allocate_window(app);
+    if let Err(error) = create_browser_window(app, &label) {
+        with_state(app, |state| {
+            state.windows.retain(|window| window.label != label);
+        });
+        return Err(error);
+    }
+    if let Some(window) = app.get_window(&label) {
+        let _ = window.set_title(title);
+    }
+    let _ = create_tab_on(app, &label, Some(url.to_string()), false, None);
+    Ok(label)
+}
+
+pub fn show_main(app: &AppHandle) {
+    if let Some(window) = app.get_window(WINDOW) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    send_command(app, WINDOW, "focus-address");
+}
+
+pub fn recent_tabs(app: &AppHandle) -> Vec<(u32, String)> {
+    snapshot(app)
+        .tabs
+        .into_iter()
+        .filter(|tab| tab.url.starts_with("http://") || tab.url.starts_with("https://"))
+        .take(8)
+        .map(|tab| {
+            let title = if tab.title.is_empty() { tab.url } else { tab.title };
+            (tab.id, title)
+        })
+        .collect()
+}
+
 pub fn create_browser_window(app: &AppHandle, label: &str) -> Result<(), String> {
     let ui = with_state(app, |state| {
         state.chrome(label).map(|chrome| chrome.ui.clone())
@@ -3123,7 +3161,11 @@ pub fn sleep_candidates(app: &AppHandle) -> Vec<u32> {
     if !sleep.enabled {
         return Vec::new();
     }
-    let after = Duration::from_secs(u64::from(sleep.minutes) * 60);
+    let after = if crate::system::saver_active(app) {
+        Duration::from_secs(5)
+    } else {
+        Duration::from_secs(u64::from(sleep.minutes) * 60)
+    };
     with_state(app, |state| {
         let shown = state.shown_labels();
         state

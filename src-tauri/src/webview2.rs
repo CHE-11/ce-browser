@@ -506,6 +506,14 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                             });
                         }
                     }
+                    Some("ce-notify") => {
+                        let title = message.get("title").and_then(|value| value.as_str()).unwrap_or("Notification");
+                        let body = message.get("body").and_then(|value| value.as_str()).unwrap_or("");
+                        let page = tabs::tab_page_url(&message_app, id).unwrap_or_default();
+                        if crate::privacy::decision(&message_app, &page, "notifications") == Some(true) {
+                            crate::system::toast(title, body, "");
+                        }
+                    }
                     Some("ce-theme") => {
                         let color = message.get("color").and_then(|value| value.as_str()).unwrap_or("").to_string();
                         let app = message_app.clone();

@@ -73,12 +73,12 @@
 - [x] AI assistant panel: summarize the page or ask questions about it, using a user-provided API key or a local model endpoint.
 
 ## System integration (Windows)
-- [ ] Install any site as a standalone app window with its own taskbar icon.
-- [ ] Global hotkey to summon the browser or a quick-search popup from anywhere in Windows.
-- [ ] Native Windows toast notifications for downloads and site notifications.
-- [ ] Default browser registration for `http`, `https` and `.html`.
-- [ ] Tray icon with recent tabs and quick search.
-- [ ] Battery saver: on battery power, throttle background tabs and cap frame rate.
+- [x] Install any site as a standalone app window with its own taskbar icon.
+- [x] Global hotkey to summon the browser or a quick-search popup from anywhere in Windows.
+- [x] Native Windows toast notifications for downloads and site notifications.
+- [x] Default browser registration for `http`, `https` and `.html`.
+- [x] Tray icon with recent tabs and quick search.
+- [x] Battery saver: on battery power, throttle background tabs and cap frame rate.
 
 ## Data and sync
 - [ ] Encrypted export and import of a full profile as one file.
