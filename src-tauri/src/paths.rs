@@ -79,6 +79,21 @@ pub fn extensions_dir(app: &AppHandle) -> PathBuf {
     data_dir(app).join("extensions")
 }
 
+/// Exe that shortcuts, relaunch commands and the browser registration start. A dev build only
+/// works while the Vite server runs, so it points them at the release build beside it when one exists.
+pub fn launch_exe() -> std::io::Result<PathBuf> {
+    let exe = std::env::current_exe()?;
+    if !tauri::is_dev() {
+        return Ok(exe);
+    }
+    let release = exe
+        .parent()
+        .and_then(|dir| dir.parent())
+        .zip(exe.file_name())
+        .map(|(target, name)| target.join("release").join(name));
+    Ok(release.filter(|path| path.is_file()).unwrap_or(exe))
+}
+
 /// Origin that serves the React app: the Vite server in dev, `tauri.localhost` in a build.
 pub fn app_origin(app: &AppHandle) -> Url {
     if tauri::is_dev() {
@@ -103,8 +118,7 @@ pub fn display_url(app: &AppHandle, raw: &str) -> String {
     let Ok(url) = Url::parse(raw) else {
         return raw.to_string();
     };
-    let origin = app_origin(app);
-    if url.origin() == origin.origin() {
+    if is_app_url(&app_origin(app), &url) {
         let page = url
             .fragment()
             .map(|fragment| fragment.trim_start_matches('/'))
@@ -113,6 +127,15 @@ pub fn display_url(app: &AppHandle, raw: &str) -> String {
         return format!("{INTERNAL_SCHEME}{page}");
     }
     raw.to_string()
+}
+
+/// Matches the app origin over `http` or `https`. HTTPS-only mode used to upgrade
+/// `http://tauri.localhost`, so saved tabs can hold the `https` form, which serves nothing.
+fn is_app_url(origin: &Url, url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
+        && url.host_str().is_some()
+        && url.host_str() == origin.host_str()
+        && url.port() == origin.port()
 }
 
 /// Address bar text -> a URL to load. Anything that does not look like an address is a search.
@@ -137,6 +160,12 @@ pub fn resolve_input(app: &AppHandle, input: &str, search_url: &str) -> Url {
     .any(|scheme| text.to_ascii_lowercase().starts_with(scheme));
     if has_scheme {
         if let Ok(url) = Url::parse(text) {
+            let origin = app_origin(app);
+            if is_app_url(&origin, &url) && url.scheme() != origin.scheme() {
+                let mut fixed = url;
+                let _ = fixed.set_scheme(origin.scheme());
+                return fixed;
+            }
             return url;
         }
     }

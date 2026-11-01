@@ -285,7 +285,7 @@ fn save_site_icon(app: &AppHandle, id: &str, favicon: Option<&str>) -> Option<Pa
 
 pub fn mark_site_window(app: &AppHandle, window: &tauri::Window, id: &str) {
     let model = format!("com.ce.browser.site.{id}");
-    let relaunch = std::env::current_exe()
+    let relaunch = paths::launch_exe()
         .map(|exe| format!("\"{}\" --app {id}", exe.display()))
         .unwrap_or_default();
     let icon = paths::data_dir(app).join("apps").join(format!("{id}.ico"));
@@ -465,7 +465,7 @@ fn xml_escape(text: &str) -> String {
 }
 
 pub fn register_browser() -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let exe = paths::launch_exe().map_err(|error| error.to_string())?;
     let command = format!("\"{}\" \"%1\"", exe.display());
     set_key(r"Software\Classes\ce-browser", "", "ce-browser")?;
     set_key(

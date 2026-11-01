@@ -201,10 +201,6 @@ pub fn mark_model(
     Ok(())
 }
 
-pub fn focus_running() {
-    focus_profile_window(&active_id());
-}
-
 pub fn list(app: &AppHandle) -> Vec<ProfileInfo> {
     let current = active_id();
     let pinned = taskbar_ids();
@@ -775,7 +771,7 @@ pub fn install_link(
     com_init();
     let programs = programs_dir()?;
     let path = files::unique_path(&programs, file_name);
-    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let exe = paths::launch_exe().map_err(|error| error.to_string())?;
     let exe_text = exe.display().to_string();
     unsafe {
         let link: IShellLinkW =
@@ -856,7 +852,7 @@ fn relaunch_icon(app: &AppHandle, id: &str) -> String {
     {
         return format!("{},0", path.display());
     }
-    std::env::current_exe()
+    paths::launch_exe()
         .map(|exe| format!("{},0", exe.display()))
         .unwrap_or_default()
 }
@@ -897,7 +893,7 @@ fn refresh_shell_icons(app: &AppHandle, profile: &ProfileRecord) -> Result<(), S
 fn update_link_icon(link_path: &Path, icon: Option<&Path>) -> Result<(), String> {
     let icon_path = match icon {
         Some(path) => path.display().to_string(),
-        None => std::env::current_exe()
+        None => paths::launch_exe()
             .map_err(|error| error.to_string())?
             .display()
             .to_string(),
@@ -915,6 +911,133 @@ fn update_link_icon(link_path: &Path, icon: Option<&Path>) -> Result<(), String>
             .map_err(win_err)?;
     }
     notify_item(link_path);
+    Ok(())
+}
+
+/// Points Start menu and taskbar shortcuts made by a dev build (or an exe that no longer exists)
+/// at this exe, and drops duplicate taskbar pins of one profile.
+pub fn repair_shortcuts() {
+    let Ok(exe) = paths::launch_exe() else {
+        return;
+    };
+    if let Ok(programs) = programs_dir() {
+        for path in link_files(&programs) {
+            if let Err(error) = retarget_link(&path, &exe) {
+                eprintln!("shortcut repair: {error}");
+            }
+        }
+    }
+    let Some(taskbar) = taskbar_dir() else {
+        return;
+    };
+    let mut links = link_files(&taskbar);
+    links.sort_by_key(|path| path.as_os_str().len());
+    let mut kept: Vec<String> = Vec::new();
+    for path in links {
+        if let Some(id) = shortcut_profile_id(&path) {
+            if kept.contains(&id) {
+                if let Ok(target) = link_target(&path) {
+                    if stale_exe(&target, &exe) || target == exe {
+                        let _ = fs::remove_file(&path);
+                        notify_item(&path);
+                        continue;
+                    }
+                }
+            } else {
+                kept.push(id);
+            }
+        }
+        if let Err(error) = retarget_link(&path, &exe) {
+            eprintln!("shortcut repair: {error}");
+        }
+    }
+}
+
+fn link_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("lnk"))
+        })
+        .collect()
+}
+
+/// A ce-browser exe other than `exe` that is gone or sits in a `debug` build folder.
+fn stale_exe(target: &Path, exe: &Path) -> bool {
+    let same_name = target
+        .file_name()
+        .zip(exe.file_name())
+        .is_some_and(|(left, right)| left.eq_ignore_ascii_case(right));
+    if !same_name || target == exe {
+        return false;
+    }
+    let debug_build = target
+        .parent()
+        .and_then(|dir| dir.file_name())
+        .is_some_and(|name| name.eq_ignore_ascii_case("debug"));
+    debug_build || !target.is_file()
+}
+
+fn link_target(path: &Path) -> Result<PathBuf, String> {
+    com_init();
+    unsafe {
+        let link: IShellLinkW =
+            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(win_err)?;
+        let file: IPersistFile = link.cast().map_err(win_err)?;
+        file.Load(&HSTRING::from(path.as_os_str()), STGM_READ)
+            .map_err(win_err)?;
+        let mut buffer = [0u16; 1024];
+        link.GetPath(&mut buffer, std::ptr::null_mut(), 0)
+            .map_err(win_err)?;
+        Ok(PathBuf::from(wide_string(&buffer)))
+    }
+}
+
+fn retarget_link(path: &Path, exe: &Path) -> Result<(), String> {
+    com_init();
+    unsafe {
+        let link: IShellLinkW =
+            CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(win_err)?;
+        let file: IPersistFile = link.cast().map_err(win_err)?;
+        file.Load(&HSTRING::from(path.as_os_str()), STGM_READWRITE)
+            .map_err(win_err)?;
+        let mut buffer = [0u16; 1024];
+        link.GetPath(&mut buffer, std::ptr::null_mut(), 0)
+            .map_err(win_err)?;
+        let target = PathBuf::from(wide_string(&buffer));
+        if !stale_exe(&target, exe) {
+            return Ok(());
+        }
+        link.SetPath(&HSTRING::from(exe.as_os_str()))
+            .map_err(win_err)?;
+        if let Some(directory) = exe.parent() {
+            link.SetWorkingDirectory(&HSTRING::from(directory.as_os_str()))
+                .map_err(win_err)?;
+        }
+        let mut icon = [0u16; 1024];
+        let mut index = 0;
+        link.GetIconLocation(&mut icon, &mut index)
+            .map_err(win_err)?;
+        let icon = wide_string(&icon);
+        if icon.is_empty() || Path::new(&icon) == target {
+            link.SetIconLocation(&HSTRING::from(exe.as_os_str()), 0)
+                .map_err(win_err)?;
+        }
+        let mut arguments = [0u16; 1024];
+        link.GetArguments(&mut arguments).map_err(win_err)?;
+        if profile_id_from_args(&wide_string(&arguments)).as_deref() == Some(DEFAULT_ID) {
+            link.SetArguments(&HSTRING::new()).map_err(win_err)?;
+        }
+        file.Save(&HSTRING::from(path.as_os_str()), true)
+            .map_err(win_err)?;
+    }
+    notify_item(path);
     Ok(())
 }
 
@@ -1031,7 +1154,7 @@ fn wide_string(buf: &[u16]) -> String {
 }
 
 fn relaunch_command(id: &str) -> String {
-    let Ok(exe) = std::env::current_exe() else {
+    let Ok(exe) = paths::launch_exe() else {
         return String::new();
     };
     if id == DEFAULT_ID {
@@ -1508,8 +1631,21 @@ mod tests {
 
     use super::{
         ProfilesFile, migrate_layout, profile_child_dir, purge_profile_storage, read_profiles_file,
-        remove_profile_dir, safe_profile_id,
+        remove_profile_dir, safe_profile_id, stale_exe,
     };
+
+    #[test]
+    fn shortcuts_to_a_dev_build_are_stale() {
+        let release = std::env::current_exe().unwrap();
+        let name = release.file_name().unwrap();
+        let debug = std::path::Path::new(r"C:\repo\target\debug").join(name);
+        let missing = std::path::Path::new(r"C:\gone\nowhere").join(name);
+        let other_app = std::path::Path::new(r"C:\repo\target\debug\ce-git.exe");
+        assert!(stale_exe(&debug, &release));
+        assert!(stale_exe(&missing, &release));
+        assert!(!stale_exe(&release, &release));
+        assert!(!stale_exe(other_app, &release));
+    }
 
     fn registry(root: &std::path::Path) -> ProfilesFile {
         read_profiles_file(&root.join("profiles.json"))

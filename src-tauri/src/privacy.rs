@@ -379,11 +379,14 @@ pub fn https_exception(settings: &settings::BrowserSettings, url: &Url) -> bool 
         .any(|site| host == *site || host.ends_with(&format!(".{site}")))
 }
 
+/// `*.localhost` covers `tauri.localhost`, which serves the `ce://` pages over plain HTTP.
 fn local_host(url: &Url) -> bool {
     matches!(
         url.host_str(),
         Some("localhost" | "127.0.0.1" | "[::1]" | "::1")
-    )
+    ) || url
+        .host_str()
+        .is_some_and(|host| host.to_ascii_lowercase().ends_with(".localhost"))
 }
 
 pub fn record_request(
@@ -619,6 +622,7 @@ mod tests {
     fn localhost_is_not_upgraded() {
         assert!(rewrite(&settings(), "http://localhost:1420/").is_none());
         assert!(rewrite(&settings(), "http://127.0.0.1/x").is_none());
+        assert!(rewrite(&settings(), "http://tauri.localhost/#/newtab").is_none());
     }
 
     #[test]

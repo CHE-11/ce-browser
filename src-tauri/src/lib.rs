@@ -1247,6 +1247,9 @@ pub fn run() {
             let handle = app.handle().clone();
             sync::attach(&handle);
             profiles::init(&handle);
+            if !tauri::is_dev() {
+                std::thread::spawn(profiles::repair_shortcuts);
+            }
             if let Err(error) = profiles::set_process_identity() {
                 eprintln!("profile identity: {error}");
             }
