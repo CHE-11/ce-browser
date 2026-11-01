@@ -478,6 +478,22 @@ textarea {
   }
 }
 
+@keyframes setting-focus {
+  0%,
+  60% {
+    background-color: color-mix(in oklab, var(--app-sky-500) 18%, transparent);
+    box-shadow: inset 3px 0 0 var(--app-sky-500);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 3px 0 0 transparent;
+  }
+}
+
+[data-setting-focus="true"] {
+  animation: setting-focus 2.2s ease-out;
+}
+
 /* Tabs opening, closing, moving and groups collapsing. Only named tabs and chips move; the rest of the UI swaps at once. */
 ::view-transition-group(*) {
   animation-duration: 160ms;

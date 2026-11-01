@@ -33,6 +33,7 @@ import type {
   PageTechnologies,
   PageToolRequest,
   SiteFavicon,
+  SiteInfo,
   SitePatch,
   UserScript,
   PdfOptions,
@@ -897,9 +898,21 @@ export function clearHistory() {
   return invoke<void>("clear_history");
 }
 
-/** The next visit to `url` began with the address typed into the address bar. */
-export function noteTyped(url: string) {
-  return invoke<void>("note_typed", { url });
+/** The next visit to what `text` resolves to began with the address typed into the address bar. */
+export function noteTyped(text: string) {
+  return invoke<void>("note_typed", { text });
+}
+
+export function siteInfo(id: number) {
+  return invoke<SiteInfo>("site_info", { id });
+}
+
+export function sendOmniboxRemove(index: number) {
+  return emit("omnibox-remove", index);
+}
+
+export function onOmniboxRemove(handler: (index: number) => void): Promise<UnlistenFn> {
+  return listen<number>("omnibox-remove", (event) => handler(event.payload));
 }
 
 export function onHistoryChanged(handler: (items: HistoryItem[]) => void): Promise<UnlistenFn> {

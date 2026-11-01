@@ -31,6 +31,7 @@ import { TabSearch } from "@features/TabSearch/TabSearch";
 import { TabSwitcher } from "@features/TabSwitcher/TabSwitcher";
 import { TabHoverCard } from "@features/TabHover/TabHoverCard";
 import { UnresponsivePrompt } from "@features/PageRecovery/UnresponsivePrompt";
+import { SiteInfoPanel } from "@features/SiteInfo/SiteInfoPanel";
 import { NetworkPopover } from "@features/Network/NetworkPopover";
 import { DownloadsPanel } from "@features/Downloads/DownloadsPanel";
 import { MediaGrid } from "@features/Media/MediaGrid";
@@ -156,6 +157,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <TabHoverCard tabId={Number(params.get("id"))} />;
     case "unresponsive":
       return <UnresponsivePrompt tabId={Number(params.get("id"))} />;
+    case "site-info":
+      return <SiteInfoPanel tabId={Number(params.get("id"))} />;
     default:
       return <UnknownPopup />;
   }

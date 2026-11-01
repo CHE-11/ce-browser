@@ -885,6 +885,40 @@ export type OmniboxSuggestion = {
   url: string;
   /** Set for `tab` suggestions: switching selects the open tab. */
   tabId?: number;
+  /** Name of the other workspace an open tab is in. */
+  workspace?: string;
+  /** Set for `history` suggestions, so Shift+Delete can remove the entry. */
+  historyId?: number;
+};
+
+export type CertificateInfo = {
+  subject: string;
+  issuer: string;
+  /** Seconds since 1970. */
+  validFrom: number;
+  validTo: number;
+  /** For example `TLS 1.3`. */
+  protocol: string;
+  cipher: string;
+  keyExchange: string;
+};
+
+/** Connection, permissions and stored data for the site in one tab. */
+export type SiteInfo = {
+  url: string;
+  host: string;
+  /** `https://example.com`. Empty for pages that are not http or https. */
+  origin: string;
+  security: "secure" | "neutral" | "insecure" | "insecure-broken" | "unknown" | string;
+  certificate: CertificateInfo | null;
+  /** The certificate error for this host was passed this session. */
+  certificateException: boolean;
+  permissions: PermissionGrant[];
+  /** Null when the page is not loaded. */
+  cookies: number | null;
+  /** Bytes in local storage, IndexedDB and caches. Null when unknown. */
+  storageBytes: number | null;
+  adsBlocked: number;
 };
 
 export type OmniboxState = {

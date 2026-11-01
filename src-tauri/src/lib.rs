@@ -30,6 +30,7 @@ mod session;
 mod settings;
 mod shopping;
 mod shortcuts;
+mod site_info;
 mod status;
 mod storage;
 mod sync;
@@ -862,9 +863,15 @@ async fn clear_history(app: AppHandle, window: Window) {
     );
 }
 
+/// `text` is what was typed into the address bar. It is resolved the way navigation resolves it.
 #[tauri::command]
-fn note_typed(url: String) {
-    history::note_typed(&url);
+fn note_typed(app: AppHandle, text: String) {
+    history::note_typed(tabs::resolve(&app, &text).as_str());
+}
+
+#[tauri::command]
+async fn site_info(app: AppHandle, id: u32) -> Result<site_info::SiteInfo, String> {
+    blocking(move || site_info::site_info(&app, id)).await
 }
 
 // Extensions. Every call waits for WebView2 on the main thread, so they run on the blocking pool.
@@ -1531,6 +1538,7 @@ pub fn run() {
             undo_action,
             dismiss_toast,
             note_typed,
+            site_info,
             set_ui_insets,
             set_tabs_muted,
             toggle_selected_muted,

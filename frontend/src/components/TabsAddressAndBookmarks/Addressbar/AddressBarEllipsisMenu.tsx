@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { AppWindow, Calculator, Globe, History, Search, Star } from "lucide-react";
+import { AppWindow, Calculator, Globe, History, Search, Star, X } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
-import { onOmniboxState, sendOmniboxReady, sendOmniboxPick } from "@/lib/browser-client";
+import { onOmniboxState, sendOmniboxReady, sendOmniboxPick, sendOmniboxRemove } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { OMNIBOX_ROW_HEIGHT } from "@/lib/omnibox";
 import { usePopupPainted } from "@/lib/popup-ready";
@@ -54,7 +54,7 @@ export function AddressBarEllipsisMenu() {
             aria-selected={index === state.selected}
             style={{ height: OMNIBOX_ROW_HEIGHT }}
             className={cn(
-              "mx-1.5 flex cursor-default items-center gap-3 rounded-lg px-2.5 text-sm",
+              "group mx-1.5 flex cursor-default items-center gap-3 rounded-lg px-2.5 text-sm",
               index === state.selected ? "bg-zinc-800" : "hover:bg-zinc-800/60",
             )}
             onMouseDown={(event) => {
@@ -77,11 +77,36 @@ export function AddressBarEllipsisMenu() {
             ) : (
               <span id={`${domId}-spacer`} className="flex-1" />
             )}
-            <span id={`${domId}-kind`} className="flex shrink-0 items-center gap-1 text-xs text-zinc-500">
+            <span
+              id={`${domId}-kind`}
+              className={cn(
+                "flex shrink-0 items-center gap-1 text-xs",
+                suggestion.kind === "tab" ? "rounded-full bg-sky-500/15 px-2 py-0.5 text-sky-300" : "text-zinc-500",
+                suggestion.kind === "history" && suggestion.historyId !== undefined && "group-hover:hidden",
+              )}
+            >
               {suggestion.kind === "tab" ? <AppWindow id={`${domId}-kind-icon`} className="size-3" aria-hidden /> : null}
               {suggestion.kind === "history" ? <History id={`${domId}-kind-icon`} className="size-3" aria-hidden /> : null}
               {KIND_LABEL[suggestion.kind]}
+              {suggestion.kind === "tab" && suggestion.workspace ? ` in ${suggestion.workspace}` : ""}
             </span>
+            {suggestion.kind === "history" && suggestion.historyId !== undefined ? (
+              <button
+                id={`${domId}-remove`}
+                type="button"
+                tabIndex={-1}
+                title="Remove from history (Shift+Delete)"
+                aria-label={`Remove ${suggestion.title} from history`}
+                className="hidden size-6 shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100 group-hover:inline-flex"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void sendOmniboxRemove(index);
+                }}
+              >
+                <X id={`${domId}-remove-icon`} className="size-3.5" aria-hidden />
+              </button>
+            ) : null}
           </div>
         );
       })}

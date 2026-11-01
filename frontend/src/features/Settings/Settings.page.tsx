@@ -3,7 +3,9 @@ import { Search } from "lucide-react";
 import type { BrowserSettings } from "@type/browser";
 import { PageShell, type PageOutlineItem } from "@/components/PageShell";
 import { saveSettings } from "@/lib/browser-client";
+import { useRoute } from "@/lib/route";
 import { useSettings } from "@/lib/use-browser";
+import { SETTINGS_INDEX } from "./settings-index";
 import { AdBlockSection } from "./AdBlockSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { DownloadsSection } from "./DownloadsSection";
@@ -117,6 +119,29 @@ export function SettingsPage() {
   useEffect(() => {
     document.getElementById("settings-page-body")?.scrollTo({ top: 0 });
   }, [needle]);
+
+  const route = useRoute();
+  const focusId = route.kind === "page" ? route.params.get("focus") : null;
+  useEffect(() => {
+    if (!loaded || !focusId) {
+      return;
+    }
+    let timer = 0;
+    const frame = window.requestAnimationFrame(() => {
+      const entry = SETTINGS_INDEX.find((item) => item.id === focusId);
+      const target = document.getElementById(focusId) ?? (entry ? document.getElementById(entry.section) : null);
+      if (!target) {
+        return;
+      }
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.dataset.settingFocus = "true";
+      timer = window.setTimeout(() => delete target.dataset.settingFocus, 2200);
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [focusId, loaded]);
 
   if (!settings) {
     return (

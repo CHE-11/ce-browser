@@ -1732,6 +1732,49 @@ fn frame_sources(extended: &ICoreWebView2ProcessExtendedInfo) -> Vec<String> {
     }
 }
 
+/// The page's security state from DevTools: overall state, protocol, cipher, and the
+/// certificate's names and dates. Waits on the main thread, so call it from a worker thread.
+pub fn security_state(webview: &Webview) -> Option<serde_json::Value> {
+    const EVENT: &str = "Security.visibleSecurityStateChanged";
+    let (tx, rx) = mpsc::channel::<String>();
+    let (token_tx, token_rx) = mpsc::channel::<i64>();
+    webview
+        .with_webview(move |platform| {
+            let Ok(core) = core(&platform) else {
+                return;
+            };
+            let Ok(receiver) = (unsafe { core.GetDevToolsProtocolEventReceiver(&HSTRING::from(EVENT)) })
+            else {
+                return;
+            };
+            let sender = tx.clone();
+            let handler = DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, args| {
+                if let Some(args) = args {
+                    let _ = sender.send(read_pwstr(|value| unsafe { args.ParameterObjectAsJson(value) }));
+                }
+                Ok(())
+            }));
+            let mut token = 0i64;
+            if unsafe { receiver.add_DevToolsProtocolEventReceived(&handler, &mut token) }.is_ok() {
+                let _ = token_tx.send(token);
+            }
+        })
+        .ok()?;
+    let token = token_rx.recv_timeout(Duration::from_secs(2)).ok()?;
+    let timeout = Duration::from_secs(2);
+    let _ = call_cdp_json(webview, "Security.enable", "{}", timeout, "security");
+    let state = rx.recv_timeout(Duration::from_millis(1500)).ok();
+    let _ = call_cdp_json(webview, "Security.disable", "{}", timeout, "security");
+    let _ = webview.with_webview(move |platform| {
+        if let Ok(core) = core(&platform)
+            && let Ok(receiver) = unsafe { core.GetDevToolsProtocolEventReceiver(&HSTRING::from(EVENT)) }
+        {
+            let _ = unsafe { receiver.remove_DevToolsProtocolEventReceived(token) };
+        }
+    });
+    serde_json::from_str(&state?).ok()
+}
+
 /// JavaScript heap of one page, used when its renderer process cannot be matched.
 pub fn js_heap_used(webview: &Webview) -> Option<u64> {
     let timeout = Duration::from_millis(400);

@@ -8,6 +8,7 @@ import {
   EllipsisVertical,
   History,
   House,
+  Info,
   Lock,
   PanelRight,
   Puzzle,
@@ -26,9 +27,7 @@ import type {
   HistoryItem,
   OmniboxState,
   OmniboxSuggestion,
-  SplitView,
   TabInfo,
-  TabsSnapshot,
 } from "../../../../../types/browser";
 import {
   activateTab,
@@ -38,12 +37,15 @@ import {
   goBack,
   goForward,
   navigate,
+  noteTyped,
   omniboxExtra,
+  removeHistory,
   searchHistory,
   onBrowserCommand,
   onDownloadStarted,
   onOmniboxPick,
   onOmniboxReady,
+  onOmniboxRemove,
   onPopupChanged,
   openPopup,
   openPopupBelow,
@@ -57,15 +59,16 @@ import {
 import { accentTint } from "../../../lib/accent";
 import { cn } from "../../../lib/cn";
 import { reorderToolbar, splitToolbar, toolbarPinned } from "../../../lib/toolbar-pin";
-import { buildSuggestions, omniboxHeight } from "../../../lib/omnibox";
-import { flattenBookmarks } from "../../../lib/use-browser";
+import { buildSuggestions, inlineCompletion, looksLikeUrl, omniboxHeight } from "../../../lib/omnibox";
+import { flattenBookmarks, type WindowTabsState } from "../../../lib/use-browser";
+import { focusRing } from "../../../lib/focus-ring";
 import { IconButton } from "../../IconButton";
 import { LoadBar } from "../../LoadBar";
 import { ToolbarEntry } from "../../VerticalToolbar";
 import { WindowControls } from "../../WindowControls";
 
 type AddressBarProps = {
-  snapshot: TabsSnapshot & { split?: SplitView | null };
+  snapshot: WindowTabsState;
   bookmarks: BookmarkTree | null;
   downloads: DownloadItem[];
   history: HistoryItem[];
@@ -121,6 +124,18 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const omniboxRef = useRef(omnibox);
   const popupOpenRef = useRef(false);
   const blurTimer = useRef<number | null>(null);
+  /** What the user typed. Anything after it in `text` is an inline completion. */
+  const typedRef = useRef("");
+  const completionRange = useRef<[number, number] | null>(null);
+  const [selectionTick, setSelectionTick] = useState(0);
+
+  useLayoutEffect(() => {
+    const range = completionRange.current;
+    if (range && inputRef.current) {
+      inputRef.current.setSelectionRange(range[0], range[1], "backward");
+      completionRange.current = null;
+    }
+  }, [text, selectionTick]);
 
   const bookmarkLinks = useMemo(() => flattenBookmarks(bookmarks), [bookmarks]);
   const bookmarked = !!activeTab && bookmarkLinks.some((link) => link.url === activeTab.url);
@@ -195,6 +210,9 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         return;
       }
       finishEditing();
+      if (target.kind === "url" && looksLikeUrl(target.url)) {
+        void noteTyped(target.url);
+      }
       if (target.kind === "tab" && target.tabId !== undefined) {
         void activateTab(target.tabId);
       } else if (inNewTab || activeId === null) {
@@ -210,12 +228,38 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const pickRef = useRef(pick);
   pickRef.current = pick;
 
+  /** Shift+Delete or the row's remove button: drops a history suggestion and its history entry. */
+  const removeSuggestion = useCallback(
+    (index: number) => {
+      const { suggestions, selected } = omniboxRef.current;
+      const suggestion = suggestions[index];
+      if (!suggestion || suggestion.kind !== "history" || suggestion.historyId === undefined) {
+        return false;
+      }
+      void removeHistory(suggestion.historyId);
+      const next = suggestions.filter((_, at) => at !== index);
+      if (next.length === 0) {
+        hideOmnibox();
+      } else {
+        showOmnibox({ suggestions: next, selected: Math.min(selected, next.length - 1) });
+      }
+      return true;
+    },
+    [hideOmnibox, showOmnibox],
+  );
+  const removeRef = useRef(removeSuggestion);
+  removeRef.current = removeSuggestion;
+
   useEffect(() => {
     const unlisteners = [
       onOmniboxReady(() => {
         void sendOmniboxState(omniboxRef.current);
       }),
       onOmniboxPick((suggestion) => pickRef.current(suggestion)),
+      onOmniboxRemove((index) => {
+        removeRef.current(index);
+        inputRef.current?.focus();
+      }),
       onPopupChanged((change) => {
         if (change.kind !== "omnibox") {
           popupOpenRef.current = false;
@@ -262,10 +306,27 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     void openPopupBelow(anchor, { kind: "bookmark-edit", params: params.toString(), width: 340, height: 236 });
   }
 
-  const onChange = (value: string) => {
-    setText(value);
+  const onChange = (value: string, inserted: boolean) => {
+    typedRef.current = value;
+    const input = inputRef.current;
+    const atEnd = !input || input.selectionStart === value.length;
+    const completion = inserted && atEnd ? inlineCompletion(value, history, bookmarkLinks) : null;
+    if (completion) {
+      completionRange.current = [value.length, completion.length];
+      setSelectionTick((tick) => tick + 1);
+    }
+    setText(completion ?? value);
     setEditing(true);
-    const suggestions = buildSuggestions(value, bookmarkLinks, history, snapshot.tabs, activeId);
+    const suggestions = buildSuggestions(
+      value,
+      bookmarkLinks,
+      history,
+      snapshot.windowTabs,
+      activeId,
+      snapshot.workspaces,
+      snapshot.workspace,
+      completion,
+    );
     if (suggestions.length === 0) {
       hideOmnibox();
     } else {
@@ -274,7 +335,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     const asked = value;
     if (asked.trim()) {
       void searchHistory(asked).then((hits) => {
-        if (inputRef.current?.value !== asked || hits.length === 0) {
+        if (typedRef.current !== asked || hits.length === 0) {
           return;
         }
         const current = omniboxRef.current.suggestions;
@@ -282,7 +343,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         const extra = hits
           .filter((hit) => !seen.has(hit.url))
           .slice(0, 4)
-          .map((hit) => ({ kind: "history" as const, title: hit.title || hit.url, url: hit.url }));
+          .map((hit) => ({ kind: "history" as const, title: hit.title || hit.url, url: hit.url, historyId: hit.id }));
         if (extra.length === 0) {
           return;
         }
@@ -290,7 +351,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       });
     }
     void omniboxExtra(asked).then((extra) => {
-      if (!extra || inputRef.current?.value !== asked) {
+      if (!extra || typedRef.current !== asked) {
         return;
       }
       const row = {
@@ -321,6 +382,12 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Delete" && event.shiftKey && omniboxRef.current.suggestions.length > 0) {
+      if (removeSuggestion(omniboxRef.current.selected)) {
+        event.preventDefault();
+      }
+      return;
+    }
     if (event.key === "ArrowDown") {
       event.preventDefault();
       moveSelection(1);
@@ -374,6 +441,33 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   };
   const secure = activeTab?.url.startsWith("https://");
   const insecure = activeTab?.url.startsWith("http://");
+  const emphasis = useMemo(() => {
+    if (editing || !activeTab || text !== activeTab.url) {
+      return null;
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(activeTab.url);
+    } catch {
+      return null;
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return null;
+    }
+    const host = parsed.hostname;
+    const hostAt = activeTab.url.toLowerCase().indexOf(host, activeTab.url.indexOf("//") + 2);
+    if (!host || hostAt < 0) {
+      return null;
+    }
+    const site = activeTab.site && host.endsWith(activeTab.site) ? activeTab.site : host;
+    const afterHost = activeTab.url.slice(hostAt + host.length);
+    return {
+      scheme: parsed.protocol === "http:" ? "http://" : "",
+      sub: host.slice(0, host.length - site.length),
+      site,
+      rest: afterHost === "/" ? "" : afterHost,
+    };
+  }, [activeTab, editing, text]);
 
   return (
     <div
@@ -435,22 +529,73 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       >
         {editing || !activeTab || activeTab.url === "ce://newtab" ? (
           <Search id="address-field-search" className="size-3.5 shrink-0 text-zinc-400" aria-hidden />
-        ) : secure ? (
-          <Lock id="address-field-secure" className="size-3.5 shrink-0 text-zinc-400" aria-label="Secure connection" />
-        ) : insecure ? (
-          <TriangleAlert id="address-field-insecure" className="size-3.5 shrink-0 text-amber-400" aria-label="Not secure" />
         ) : (
-          <Search id="address-field-search" className="size-3.5 shrink-0 text-zinc-400" aria-hidden />
+          <button
+            id="address-site-info"
+            type="button"
+            title={secure ? "Connection is secure. View site information" : insecure ? "Not secure. View site information" : "View site information"}
+            aria-label="Site information"
+            aria-haspopup="dialog"
+            className={cn(
+              "-ml-1.5 inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-1.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100",
+              focusRing,
+              insecure && "text-amber-400",
+            )}
+            onClick={(event) => {
+              const anchor = fieldRef.current ?? event.currentTarget;
+              const rect = anchor.getBoundingClientRect();
+              void openPopup({ kind: "site-info", params: `id=${activeTab.id}`, x: rect.left, y: rect.bottom + 4, width: 360, height: 480 });
+            }}
+          >
+            {secure || activeTab.url.startsWith("ce://") ? (
+              <Lock id="address-field-secure" className="size-3.5" aria-hidden />
+            ) : insecure ? (
+              <>
+                <TriangleAlert id="address-field-insecure" className="size-3.5" aria-hidden />
+                <span id="address-field-insecure-label" className="text-[11px]">
+                  Not secure
+                </span>
+              </>
+            ) : (
+              <Info id="address-field-info" className="size-3.5" aria-hidden />
+            )}
+          </button>
         )}
-        <input
+        <div id="address-input-wrap" className="relative flex min-w-0 flex-1 items-center">
+          {emphasis ? (
+            <div id="address-display" aria-hidden className="pointer-events-none absolute inset-0 flex items-center overflow-hidden whitespace-pre text-sm">
+              {emphasis.scheme ? (
+                <span id="address-display-scheme" className="text-zinc-500">
+                  {emphasis.scheme}
+                </span>
+              ) : null}
+              <span id="address-display-sub" className="text-zinc-400">
+                {emphasis.sub}
+              </span>
+              <span id="address-display-site" className="font-medium text-zinc-100">
+                {emphasis.site}
+              </span>
+              <span id="address-display-rest" className="truncate text-zinc-500">
+                {emphasis.rest}
+              </span>
+            </div>
+          ) : null}
+          <input
           id="address-input"
           ref={inputRef}
           value={text}
           spellCheck={false}
           autoComplete="off"
           placeholder="Search or enter address"
-          className="min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-          onChange={(event) => onChange(event.target.value)}
+          aria-label="Address and search bar"
+          className={cn(
+            "min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-500",
+            emphasis && "text-transparent caret-transparent",
+          )}
+          onChange={(event) => {
+            const inputType = (event.nativeEvent as InputEvent).inputType ?? "";
+            onChange(event.target.value, inputType.startsWith("insert"));
+          }}
           onKeyDown={onKeyDown}
           onFocus={(event) => {
             if (blurTimer.current !== null) {
@@ -467,7 +612,8 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
               hideOmnibox();
             }, 250);
           }}
-        />
+          />
+        </div>
         {activeTab && activeTab.zoom !== 1 ? (
           <span id="address-zoom" className="shrink-0 rounded bg-zinc-700 px-1.5 text-[11px] text-zinc-300">
             {Math.round(activeTab.zoom * 100)}%
