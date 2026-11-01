@@ -86,7 +86,13 @@ function PopupContent({ popup, params }: PopupPageProps) {
     case "bookmark-edit":
       return <BookmarkEditor url={params.get("url") ?? ""} title={params.get("title") ?? ""} />;
     case "bookmark-folder":
-      return <BookmarkFolderMenu folderId={params.get("id") ?? "bar"} dragOpened={params.get("drag") === "1"} />;
+      return (
+        <BookmarkFolderMenu
+          folderId={params.get("id") ?? "bar"}
+          left={Number(params.get("left")) || 0}
+          dragOpened={params.get("drag") === "1"}
+        />
+      );
     case "bookmarks-bar-menu":
       return (
         <BookmarksBarMenu

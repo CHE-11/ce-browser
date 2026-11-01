@@ -522,6 +522,15 @@ async fn resize_popup(
 }
 
 #[tauri::command]
+async fn set_popup_shape(
+    app: AppHandle,
+    window: Window,
+    shape: Vec<tabs::PopupRect>,
+) -> Result<(), String> {
+    tabs::set_popup_shape(&app, window.label(), shape)
+}
+
+#[tauri::command]
 async fn popup_painted(app: AppHandle, window: Window) {
     tabs::popup_painted(&app, window.label());
 }
@@ -1796,6 +1805,7 @@ pub fn run() {
             open_popup,
             close_popup,
             resize_popup,
+            set_popup_shape,
             popup_painted,
             capture_page_png,
             copy_page_png,

@@ -1,7 +1,7 @@
 import { useRef, type MouseEvent } from "react";
 import { ChevronsRight, Folder } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
-import { createTab, navigate, openPopupBelow, openPopup, closePopup } from "@/lib/browser-client";
+import { createTab, navigate, openPopup, closePopup } from "@/lib/browser-client";
 import { BOOKMARK_DROP_END, useBookmarkDrag } from "@/lib/bookmark-drag";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { cn } from "@/lib/cn";
@@ -26,7 +26,26 @@ const itemClass = cn(
 );
 const iconClass = "size-[1.2em] shrink-0";
 
-const FOLDER_POPUP = { kind: "bookmark-folder", width: 300, height: 360 } as const;
+/** The backend keeps a popup this far inside the window. */
+const POPUP_INSET = 4;
+
+/** The folder popup spans the window below `element` so submenus can open beside it. */
+function openFolderPopup(element: HTMLElement, node: BookmarkNode, dragOpened = false) {
+  const rect = element.getBoundingClientRect();
+  const params = new URLSearchParams({ id: node.id, left: String(Math.round(rect.left - POPUP_INSET)) });
+  if (dragOpened) {
+    params.set("drag", "1");
+  }
+  return openPopup({
+    kind: "bookmark-folder",
+    params: params.toString(),
+    x: POPUP_INSET,
+    y: rect.bottom + 4,
+    width: window.innerWidth - POPUP_INSET * 2,
+    height: window.innerHeight,
+    focus: !dragOpened,
+  });
+}
 
 export function openBookmarkLink(url: string, activeId: number | null, event?: MouseEvent) {
   const background = !!event && (event.ctrlKey || event.button === 1);
@@ -49,11 +68,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding }: BookmarksBar
       return;
     }
     dragOpened.current = node.id;
-    void openPopupBelow(
-      element,
-      { ...FOLDER_POPUP, params: `id=${encodeURIComponent(node.id)}&drag=1`, focus: false },
-      "start",
-    );
+    void openFolderPopup(element, node, true);
   };
 
   const closeDragPopup = () => {
@@ -75,7 +90,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding }: BookmarksBar
       drag.dragged.current = false;
       return;
     }
-    void openPopupBelow(event.currentTarget, { ...FOLDER_POPUP, params: `id=${encodeURIComponent(node.id)}` }, "start");
+    void openFolderPopup(event.currentTarget, node);
   };
 
   const openBarMenu = (event: MouseEvent, node?: BookmarkNode) => {

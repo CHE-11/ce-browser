@@ -262,6 +262,16 @@ fn default_true() -> bool {
     true
 }
 
+/// Logical px inside the popup.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PopupRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 struct Tab {
     info: TabInfo,
     /// Loaded when the page view is created: restored tabs wait until they are selected.
@@ -355,6 +365,8 @@ struct Popup {
     anchor_x: f64,
     anchor_y: f64,
     revealed: bool,
+    /// Parts of the popup that are drawn. Empty means all of it.
+    shape: Vec<PopupRect>,
     closed_key: Option<String>,
     closed_at: Option<Instant>,
 }
@@ -3535,6 +3547,7 @@ pub fn open_popup(
         popup.anchor_x = x;
         popup.anchor_y = y;
         popup.revealed = false;
+        popup.shape.clear();
         Some(label)
     })
     .ok_or("The browser window is missing.")?;
@@ -3602,6 +3615,7 @@ pub fn close_window_popup(app: &AppHandle, window_label: &str) {
         popup.kind = None;
         popup.params = None;
         popup.revealed = false;
+        popup.shape.clear();
         Some(label)
     });
     if let Some(label) = label {
@@ -3666,6 +3680,23 @@ pub fn resize_popup(
     Ok(())
 }
 
+/// Draws only `shape` of the popup. The rest shows, and passes clicks to, the window below.
+pub fn set_popup_shape(
+    app: &AppHandle,
+    window_label: &str,
+    shape: Vec<PopupRect>,
+) -> Result<(), String> {
+    let label = with_state(app, |state| {
+        let popup = &mut state.chrome_mut(window_label)?.popup;
+        popup.shape = shape;
+        popup.label.clone()
+    })
+    .ok_or("No popup is open.")?;
+    let webview = app.get_webview(&label).ok_or("No popup is open.")?;
+    round_open_popup(app, &webview);
+    Ok(())
+}
+
 /// The popup page has drawn its first complete frame offscreen: data loaded, theme applied
 /// and height reported. Move it into place.
 pub fn popup_painted(app: &AppHandle, window_label: &str) {
@@ -3716,11 +3747,12 @@ fn round_open_popup(app: &AppHandle, webview: &Webview) {
                 (
                     window.label.clone(),
                     window.popup.kind.as_deref() == Some("extension"),
+                    window.popup.shape.clone(),
                 )
             })
         })
     });
-    let Some((window_label, extension)) = owner else {
+    let Some((window_label, extension, shape)) = owner else {
         return;
     };
     if extension {
@@ -3733,10 +3765,20 @@ fn round_open_popup(app: &AppHandle, webview: &Webview) {
         return;
     };
     let scale = window.scale_factor().unwrap_or(1.0);
+    let shape = shape
+        .iter()
+        .map(|rect| windows::Win32::Foundation::RECT {
+            left: (rect.x * scale).round() as i32,
+            top: (rect.y * scale).round() as i32,
+            right: ((rect.x + rect.width) * scale).round() as i32,
+            bottom: ((rect.y + rect.height) * scale).round() as i32,
+        })
+        .collect();
     webview2::round_popup(
         webview,
         main.0 as isize,
         (12.0 * scale).round().max(1.0) as i32,
+        shape,
     );
 }
 
@@ -3819,7 +3861,7 @@ pub fn show_toast(app: &AppHandle, window_label: &str, params: &str) -> Result<(
         Ok(webview) => {
             if let Ok(main) = window.hwnd() {
                 let scale = window.scale_factor().unwrap_or(1.0);
-                webview2::round_popup(&webview, main.0 as isize, (10.0 * scale).round().max(1.0) as i32);
+                webview2::round_popup(&webview, main.0 as isize, (10.0 * scale).round().max(1.0) as i32, Vec::new());
             }
             Ok(())
         }

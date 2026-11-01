@@ -3,6 +3,9 @@ import { closePopup, resizePopup } from "../lib/browser-client";
 import { cn } from "../lib/cn";
 import { usePopupPainted } from "../lib/popup-ready";
 
+/** Background, corners and border every popup surface shares. */
+export const popupSurfaceClass = "overflow-hidden rounded-xl bg-zinc-900 text-zinc-100 ring-1 ring-inset ring-zinc-700";
+
 type PopupFrameProps = {
   id: string;
   children: ReactNode;
@@ -53,10 +56,7 @@ export function PopupFrame({ id, children, className, fit = true, maxHeight = 64
   return (
     <div
       id={id}
-      className={cn(
-        "flex h-full flex-col overflow-hidden rounded-xl bg-zinc-900 text-zinc-100 ring-1 ring-inset ring-zinc-700",
-        className,
-      )}
+      className={cn("flex h-full flex-col", popupSurfaceClass, className)}
       onContextMenu={(event) => event.preventDefault()}
     >
       <div id={`${id}-scroller`} className="min-h-0 flex-1 overflow-y-auto">

@@ -62,6 +62,7 @@ import type {
   PeekInfo,
   PermissionGrant,
   PopupChange,
+  PopupRect,
   PopupRequest,
   TabGroupColor,
   TabsSnapshot,
@@ -711,6 +712,11 @@ export function closePopup() {
 
 export function resizePopup(height: number, width?: number) {
   return invoke<void>("resize_popup", { height, width });
+}
+
+/** Draws only these parts of the popup. The rest shows, and passes clicks to, the page below. */
+export function setPopupShape(shape: PopupRect[]) {
+  return invoke<void>("set_popup_shape", { shape });
 }
 
 /** Tells the backend this popup has drawn its first complete frame and can be shown. */

@@ -349,6 +349,14 @@ export type PopupRequest = {
   focus?: boolean;
 };
 
+/** Logical px inside the popup. */
+export type PopupRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type PopupChange = {
   kind: PopupKind | null;
   params: string | null;

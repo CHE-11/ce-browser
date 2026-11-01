@@ -6,7 +6,9 @@ use tauri::{AppHandle, Webview};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::*;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};
-use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn};
+use windows::Win32::Graphics::Gdi::{
+    CombineRgn, CreateRoundRectRgn, DeleteObject, HGDIOBJ, HRGN, RGN_OR, SetWindowRgn,
+};
 use windows::Win32::System::Com::IStream;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
@@ -345,8 +347,10 @@ pub fn environment_of(webview: &Webview) -> Option<ICoreWebView2Environment> {
     rx.recv().ok().map(MainThread::into_inner)
 }
 
-/// Clips the popup's own window to a rounded rectangle. The main window is left alone.
-pub fn round_popup(webview: &Webview, main: isize, radius: i32) {
+/// Clips the popup's own window to rounded rectangles. `shape` is in physical pixels of the
+/// popup; empty means the whole popup. Outside the shape the window below shows and takes the
+/// mouse. The main window is left alone.
+pub fn round_popup(webview: &Webview, main: isize, radius: i32, shape: Vec<RECT>) {
     let radius = radius.max(1);
     let _ = webview.with_webview(move |platform| {
         let main = HWND(main as *mut std::ffi::c_void);
@@ -366,11 +370,12 @@ pub fn round_popup(webview: &Webview, main: isize, radius: i32) {
         let Some((width, height)) = client_size(hwnd) else {
             return;
         };
-        clip_round(hwnd, radius);
+        clip_round(hwnd, radius, &shape);
         let clip = Clip {
             radius,
             width,
             height,
+            shape,
         };
         let _ = unsafe {
             EnumChildWindows(
@@ -386,13 +391,14 @@ struct Clip {
     radius: i32,
     width: i32,
     height: i32,
+    shape: Vec<RECT>,
 }
 
 unsafe extern "system" fn clip_matching_child(child: HWND, param: LPARAM) -> BOOL {
     let clip = unsafe { &*(param.0 as *const Clip) };
     if let Some((width, height)) = client_size(child) {
         if (width - clip.width).abs() <= 8 && (height - clip.height).abs() <= 8 {
-            clip_round(child, clip.radius);
+            clip_round(child, clip.radius, &clip.shape);
         }
     }
     BOOL(1)
@@ -412,15 +418,37 @@ fn client_size(hwnd: HWND) -> Option<(i32, i32)> {
     }
 }
 
-fn clip_round(hwnd: HWND, radius: i32) {
+fn clip_round(hwnd: HWND, radius: i32, shape: &[RECT]) {
     let Some((width, height)) = client_size(hwnd) else {
         return;
     };
+    let whole = [RECT {
+        left: 0,
+        top: 0,
+        right: width,
+        bottom: height,
+    }];
+    let rects = if shape.is_empty() { &whole[..] } else { shape };
     let diameter = radius.max(1).saturating_mul(2);
-    let region = unsafe { CreateRoundRectRgn(0, 0, width + 1, height + 1, diameter, diameter) };
-    if region.0.is_null() {
-        return;
+    let mut region: Option<HRGN> = None;
+    for rect in rects {
+        let part = unsafe {
+            CreateRoundRectRgn(rect.left, rect.top, rect.right + 1, rect.bottom + 1, diameter, diameter)
+        };
+        if part.0.is_null() {
+            continue;
+        }
+        match region {
+            None => region = Some(part),
+            Some(total) => {
+                let _ = unsafe { CombineRgn(Some(total), Some(total), Some(part), RGN_OR) };
+                let _ = unsafe { DeleteObject(HGDIOBJ(part.0)) };
+            }
+        }
     }
+    let Some(region) = region else {
+        return;
+    };
     if unsafe { SetWindowRgn(hwnd, Some(region), true) } == 0 {
         let _ = unsafe { DeleteObject(HGDIOBJ(region.0)) };
     }
