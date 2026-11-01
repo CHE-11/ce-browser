@@ -8,6 +8,8 @@ import type {
   BookmarkNode,
   ExternalBrowser,
   RewriteRule,
+  ProductPrice,
+  ReadingStats,
   SiteCookie,
   StoragePair,
   BrowseResult,
@@ -227,6 +229,46 @@ export function startZapper(id: number) {
 
 export function startInspector(id: number) {
   return invoke<void>("start_inspector", { id });
+}
+
+export function translationActive(id: number) {
+  return invoke<boolean>("translation_active", { id });
+}
+
+export function translatePage(id: number, language: string) {
+  return invoke<void>("translate_page", { id, language });
+}
+
+export function restoreTranslation(id: number) {
+  return invoke<void>("restore_translation", { id });
+}
+
+export function generatePassword(length: number, upper: boolean, lower: boolean, digits: boolean, symbols: boolean) {
+  return invoke<string>("generate_password", { length, upper, lower, digits, symbols });
+}
+
+export function waybackUrl(save: boolean, url: string) {
+  return invoke<string>("wayback_url", { save, url });
+}
+
+export function readingStats(id: number) {
+  return invoke<ReadingStats>("reading_stats", { id });
+}
+
+export function listPrices() {
+  return invoke<ProductPrice[]>("list_prices");
+}
+
+export function trackPrice(id: number) {
+  return invoke<ProductPrice>("track_price", { id });
+}
+
+export function checkPrices() {
+  return invoke<ProductPrice[]>("check_prices");
+}
+
+export function askPage(id: number, question: string) {
+  return invoke<string>("ask_page", { id, question });
 }
 
 export function setDevice(window: string, device: string) {

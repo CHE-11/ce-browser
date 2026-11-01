@@ -28,6 +28,7 @@ mod storage;
 mod sync;
 mod tab_sleep;
 mod tabs;
+mod tools;
 mod user_styles;
 mod webview2;
 mod what_runs;
@@ -848,6 +849,56 @@ async fn start_inspector(app: AppHandle, id: u32) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn translation_active(id: u32) -> bool {
+    tools::translated_now(id)
+}
+
+#[tauri::command]
+async fn translate_page(app: AppHandle, id: u32, language: String) -> Result<(), String> {
+    blocking(move || tools::translate_page(&app, id, &language)).await
+}
+
+#[tauri::command]
+async fn restore_translation(app: AppHandle, id: u32) -> Result<(), String> {
+    blocking(move || tools::restore_page(&app, id)).await
+}
+
+#[tauri::command]
+fn generate_password(length: usize, upper: bool, lower: bool, digits: bool, symbols: bool) -> Result<String, String> {
+    tools::random_password(length, upper, lower, digits, symbols)
+}
+
+#[tauri::command]
+fn wayback_url(save: bool, url: String) -> Result<String, String> {
+    tools::wayback_url(save, &url)
+}
+
+#[tauri::command]
+async fn reading_stats(app: AppHandle, id: u32) -> Result<tools::ReadingStats, String> {
+    blocking(move || tools::page_reading(&app, id)).await
+}
+
+#[tauri::command]
+fn list_prices(app: AppHandle) -> Vec<tools::ProductPrice> {
+    tools::list_prices(&app)
+}
+
+#[tauri::command]
+async fn track_price(app: AppHandle, id: u32) -> Result<tools::ProductPrice, String> {
+    blocking(move || tools::track_price(&app, id)).await
+}
+
+#[tauri::command]
+async fn check_prices(app: AppHandle) -> Result<Vec<tools::ProductPrice>, String> {
+    blocking(move || tools::check_prices(&app)).await
+}
+
+#[tauri::command]
+async fn ask_page(app: AppHandle, id: u32, question: String) -> Result<String, String> {
+    blocking(move || tools::ask_page(&app, id, &question)).await
+}
+
+#[tauri::command]
 fn set_device(app: AppHandle, window: String, device: String) -> Result<(), String> {
     tabs::set_device(&app, &window, &device)
 }
@@ -1285,6 +1336,16 @@ pub fn run() {
             delete_user_script,
             start_zapper,
             start_inspector,
+            translation_active,
+            translate_page,
+            restore_translation,
+            generate_password,
+            wayback_url,
+            reading_stats,
+            list_prices,
+            track_price,
+            check_prices,
+            ask_page,
             set_device,
             list_rewrite_rules,
             save_rewrite_rules,

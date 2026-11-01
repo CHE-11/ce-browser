@@ -74,6 +74,24 @@ export type SiteCookie = {
   path: string;
 };
 
+export type ReadingStats = {
+  words: number;
+  minutes: number;
+  ease: number;
+};
+
+export type ProductPrice = {
+  url: string;
+  title: string;
+  price: number;
+  currency: string;
+  availability: string;
+  previousPrice: number | null;
+  previousAvailability: string;
+  dropped: boolean;
+  stockChanged: boolean;
+};
+
 export type StoragePair = {
   key: string;
   value: string;
@@ -200,7 +218,13 @@ export type PopupKind =
   | "tab-group-menu"
   | "workspaces"
   | "page-controls"
-  | "network";
+  | "network"
+  | "translate"
+  | "password"
+  | "price"
+  | "wayback"
+  | "reading"
+  | "assistant";
 
 export type PopupRequest = {
   kind: PopupKind;
@@ -339,6 +363,15 @@ export type BrowserSettings = {
   toolbarOrder: string[];
   /** Tint the active tab and address bar from the site's color. */
   siteAccent: boolean;
+  /** Target language code for the translate tool. */
+  translateLanguage: string;
+  /** Provider URL. `%s` is the text and `%t` is the language. */
+  translateUrl: string;
+  /** OpenAI-compatible base URL. */
+  assistantEndpoint: string;
+  assistantModel: string;
+  /** Kept on this computer. Sync does not copy it. */
+  assistantKey: string;
   /** Built-in ad blocker. */
   adblock: AdblockSettings;
   /** `horizontal` puts tabs above the address bar, `vertical` in a sidebar on the left. */

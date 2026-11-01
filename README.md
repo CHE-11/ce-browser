@@ -147,6 +147,20 @@ Drag a pinned icon on the address bar onto another to reorder the built-in tools
 
 **Site accent** in Settings > Appearance is on by default. The active tab and the address bar take a tint from the site's theme color, or from its favicon when the page has no theme color. Other tabs for that site show a thin edge in the same color.
 
+## Tools
+
+**Translate** replaces the article text on the page. Show original, or click the icon again, reloads the page. Settings > Tools sets the language and the provider URL. `%s` is the text and `%t` is the language. The default provider needs no key.
+
+**Password** builds a password on this computer and copies it. The length and the character types are chosen in the popup.
+
+**Prices** reads a product price from the page and remembers it in `prices.json`. Check updates a tracked product when that page is open, and marks a lower price or a stock change.
+
+**Wayback** opens the current site in the Internet Archive, or asks the archive to save it.
+
+**Reading** shows the word count, the minutes at 200 words a minute, and a reading-ease score.
+
+**Assistant** summarizes the page or answers a question about it. Settings > Tools holds an OpenAI-compatible endpoint, a model name, and an API key. A local server such as `http://127.0.0.1:11434/v1` can omit the key. The key stays on this computer and is not copied into the sync folder.
+
 ## Data
 
 Each profile keeps its settings, session, bookmarks, downloads, history and extension list as JSON files in its own folder. The folder is named after the profile. The first profile is named "Default". The root folder is the sync folder when one is selected, otherwise `%APPDATA%\com.ce.browser`.

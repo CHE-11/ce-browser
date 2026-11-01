@@ -11,6 +11,12 @@ export const DEFAULT_TOOLBAR = [
   "what-runs",
   "ad-blocker",
   "page-controls",
+  "translate",
+  "password",
+  "price",
+  "wayback",
+  "reading",
+  "assistant",
 ];
 
 /** Saved ids that are still pinned, then any pinned id the saved list does not mention. */

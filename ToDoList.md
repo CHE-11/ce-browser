@@ -65,12 +65,12 @@
 - [x] Per-site accent color: tint the tab and toolbar from the site's theme color or favicon.
 
 ## Built-in extensions (new toolbar tools)
-- [ ] Translate page inline through a configurable provider.
-- [ ] Password generator.
-- [ ] Price and stock tracker for product pages.
-- [ ] Wayback lookup: open the current URL in the Internet Archive, or save it there.
-- [ ] Word count, reading time and readability score for the current page.
-- [ ] AI assistant panel: summarize the page or ask questions about it, using a user-provided API key or a local model endpoint.
+- [x] Translate page inline through a configurable provider.
+- [x] Password generator.
+- [x] Price and stock tracker for product pages.
+- [x] Wayback lookup: open the current URL in the Internet Archive, or save it there.
+- [x] Word count, reading time and readability score for the current page.
+- [x] AI assistant panel: summarize the page or ask questions about it, using a user-provided API key or a local model endpoint.
 
 ## System integration (Windows)
 - [ ] Install any site as a standalone app window with its own taskbar icon.

@@ -15,6 +15,7 @@ import { SETTINGS_SECTIONS } from "./settings-sections";
 import { StartupSection } from "./StartupSection";
 import { SyncSection } from "./SyncSection";
 import { TabsSection } from "./TabsSection";
+import { ToolsSection } from "./ToolsSection";
 
 export function SettingsPage() {
   const settings = useSettings();
@@ -170,6 +171,7 @@ export function SettingsPage() {
           <PrivacySection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <AdBlockSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <AppearanceSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          <ToolsSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <SyncSection
             settings={settings}
             query={query}

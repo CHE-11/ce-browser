@@ -1,4 +1,4 @@
-import { Clapperboard, Eraser, ImageDown, Layers, Printer, Shield, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { Archive, BookOpen, Clapperboard, Eraser, ImageDown, KeyRound, Languages, Layers, Printer, Shield, SlidersHorizontal, Sparkles, Tags, type LucideIcon } from "lucide-react";
 
 export type BuiltinTool = {
   id: string;
@@ -50,6 +50,42 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Page controls",
     description: "Change dark mode, scripts, media and other behavior for this site.",
     icon: SlidersHorizontal,
+  },
+  {
+    id: "translate",
+    name: "Translate",
+    description: "Translate the page in place.",
+    icon: Languages,
+  },
+  {
+    id: "password",
+    name: "Password",
+    description: "Generate a password on this computer.",
+    icon: KeyRound,
+  },
+  {
+    id: "price",
+    name: "Prices",
+    description: "Track a product's price and stock.",
+    icon: Tags,
+  },
+  {
+    id: "wayback",
+    name: "Wayback",
+    description: "Open or save the page in the Internet Archive.",
+    icon: Archive,
+  },
+  {
+    id: "reading",
+    name: "Reading",
+    description: "Word count, reading time and reading ease.",
+    icon: BookOpen,
+  },
+  {
+    id: "assistant",
+    name: "Assistant",
+    description: "Summarize the page or ask about it.",
+    icon: Sparkles,
   },
 ];
 

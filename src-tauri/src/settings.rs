@@ -79,6 +79,20 @@ pub struct BrowserSettings {
     /// Tint the active tab and address bar from the site's theme color or favicon.
     #[serde(default = "default_true")]
     pub site_accent: bool,
+    /// Target language for the translate tool. `%t` in the provider URL.
+    #[serde(default = "default_translate_language")]
+    pub translate_language: String,
+    /// Provider URL. `%s` is the text and `%t` is the language code.
+    #[serde(default = "default_translate_url")]
+    pub translate_url: String,
+    /// OpenAI-compatible base URL, for example `http://127.0.0.1:11434/v1`.
+    #[serde(default = "default_assistant_endpoint")]
+    pub assistant_endpoint: String,
+    #[serde(default = "default_assistant_model")]
+    pub assistant_model: String,
+    /// Kept on this computer. The sync folder does not receive it.
+    #[serde(default)]
+    pub assistant_key: String,
     /// Built-in ad blocker. An older file omits this, so blocking starts on with no paused sites.
     #[serde(default)]
     pub adblock: AdblockSettings,
@@ -121,6 +135,22 @@ const TAB_LAYOUTS: &[&str] = &["horizontal", "vertical"];
 
 fn default_true() -> bool {
     true
+}
+
+fn default_translate_language() -> String {
+    "en".into()
+}
+
+fn default_translate_url() -> String {
+    crate::tools::DEFAULT_TRANSLATE_URL.into()
+}
+
+fn default_assistant_endpoint() -> String {
+    "http://127.0.0.1:11434/v1".into()
+}
+
+fn default_assistant_model() -> String {
+    "llama3.2".into()
 }
 
 fn default_vertical_tabs_width() -> u32 {
@@ -355,6 +385,11 @@ impl Default for BrowserSettings {
             hidden_toolbar_extensions: Vec::new(),
             toolbar_order: Vec::new(),
             site_accent: true,
+            translate_language: default_translate_language(),
+            translate_url: default_translate_url(),
+            assistant_endpoint: default_assistant_endpoint(),
+            assistant_model: default_assistant_model(),
+            assistant_key: String::new(),
             adblock: AdblockSettings::default(),
             tab_layout: "horizontal".into(),
             vertical_tabs_collapsed: false,
@@ -400,6 +435,16 @@ impl BrowserSettings {
         self.print_editor = self.print_editor.normalize();
         self.hidden_toolbar_extensions = toolbar_hidden(&self.hidden_toolbar_extensions);
         self.toolbar_order = toolbar_hidden(&self.toolbar_order);
+        self.translate_language = clean_language(&self.translate_language);
+        if self.translate_url.trim().is_empty() {
+            self.translate_url = default_translate_url();
+        }
+        if self.assistant_endpoint.trim().is_empty() {
+            self.assistant_endpoint = default_assistant_endpoint();
+        }
+        if self.assistant_model.trim().is_empty() {
+            self.assistant_model = default_assistant_model();
+        }
         self.adblock = self.adblock.normalize();
         if !TAB_LAYOUTS.contains(&self.tab_layout.as_str()) {
             self.tab_layout = defaults.tab_layout.clone();
@@ -692,6 +737,15 @@ fn clean_hosts(hosts: &[String]) -> Vec<String> {
 }
 
 /// Saved ids that are still available, in that order, then any available id the list does not mention.
+pub fn clean_language(language: &str) -> String {
+    let cleaned: String = language
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
+        .take(12)
+        .collect();
+    if cleaned.is_empty() { "en".into() } else { cleaned }
+}
+
 pub fn toolbar_order(saved: &[String], available: &[String]) -> Vec<String> {
     let mut ordered = Vec::new();
     for id in saved {

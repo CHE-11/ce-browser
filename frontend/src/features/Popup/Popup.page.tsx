@@ -20,6 +20,7 @@ import { PageCapturePopover } from "@features/BuiltInExtensions/page-capture/Pag
 import { PrintPdfPopover } from "@features/BuiltInExtensions/print-pdf/PrintPdfPopover";
 import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
 import { DownloadsPanel } from "@features/Downloads/DownloadsPanel";
+import { AssistantPopover, PasswordPopover, PricePopover, ReadingPopover, TranslatePopover, WaybackPopover } from "@features/Tools/ToolPopovers";
 import { MediaGrid } from "@features/Media/MediaGrid";
 import { MediaHub } from "@features/Media/MediaHub";
 
@@ -99,6 +100,18 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <PageControlsPopover params={params} />;
     case "network":
       return <NetworkPopover tabId={Number(params.get("id"))} />;
+    case "translate":
+      return <TranslatePopover params={params} />;
+    case "password":
+      return <PasswordPopover />;
+    case "price":
+      return <PricePopover params={params} />;
+    case "wayback":
+      return <WaybackPopover params={params} />;
+    case "reading":
+      return <ReadingPopover params={params} />;
+    case "assistant":
+      return <AssistantPopover params={params} />;
     case "extension-pin":
       return <ExtensionPinMenu extensionId={params.get("id") ?? ""} />;
     case "tab-group":
