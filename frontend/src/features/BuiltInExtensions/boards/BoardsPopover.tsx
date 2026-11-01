@@ -8,7 +8,7 @@ import { boardLabel } from "@features/Boards/board-tree";
 import { useThumbnail } from "@features/Boards/thumbnails";
 import { useBoards } from "@features/Boards/use-boards";
 import { ActionTile, PopoverHeader } from "../PopoverParts";
-import { readPopoverTab } from "../shared";
+import { capturable, readPopoverTab } from "../shared";
 import { BoardPicker } from "./BoardPicker";
 
 type BoardsAction = Extract<PageToolRequest, { tool: "boards" }>["action"];
@@ -20,6 +20,7 @@ function openBoardsPage(boardId?: string) {
 
 export function BoardsPopover({ params }: { params: URLSearchParams }) {
   const tab = readPopoverTab(params);
+  const canCapture = capturable(tab.url);
   const status = params.get("status");
   const { boards, loaded } = useBoards();
   const [boardId, setBoardId] = useState(params.get("board") ?? "");
@@ -58,19 +59,59 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
       ) : (
         <div id="boards-form" className="flex flex-col gap-2 px-3 pb-3">
           <BoardPicker id="boards-picker" boards={boards} value={boardId} onChange={setBoardId} />
-          <ActionTile id="boards-visible" primary icon={<Monitor aria-hidden />} label="Visible area" hint="What is on screen now" onClick={() => send("page")} />
-          <ActionTile id="boards-full" icon={<ScrollText aria-hidden />} label="Entire page" hint="The whole page, top to bottom" onClick={() => send("full-page")} />
-          <ActionTile id="boards-region" icon={<Crop aria-hidden />} label="Region" hint="Drag a rectangle on the page" onClick={() => send("region")} />
+          {canCapture ? null : (
+            <p id="boards-not-web" className="rounded-lg bg-zinc-800/60 px-3 py-2 text-xs text-zinc-400">
+              Saving works on web pages. Open a site to save from it, or open your boards below.
+            </p>
+          )}
+          <ActionTile
+            id="boards-visible"
+            primary={canCapture}
+            disabled={!canCapture}
+            icon={<Monitor aria-hidden />}
+            label="Visible area"
+            hint="What is on screen now"
+            onClick={() => send("page")}
+          />
+          <ActionTile
+            id="boards-full"
+            disabled={!canCapture}
+            icon={<ScrollText aria-hidden />}
+            label="Entire page"
+            hint="The whole page, top to bottom"
+            onClick={() => send("full-page")}
+          />
+          <ActionTile id="boards-region" disabled={!canCapture} icon={<Crop aria-hidden />} label="Region" hint="Drag a rectangle on the page" onClick={() => send("region")} />
           <ActionTile
             id="boards-element"
+            disabled={!canCapture}
             icon={<MousePointerClick aria-hidden />}
             label="Page section"
             hint="Point at a part of the page and click it"
             onClick={() => send("element")}
           />
-          <ActionTile id="boards-link" icon={<Link2 aria-hidden />} label="Link card" hint="Title, description and preview image" onClick={() => send("link")} />
-          <ActionTile id="boards-images" icon={<Images aria-hidden />} label="Images on this page" hint="Pick one or more images" onClick={() => send("images")} />
-          <Button id="boards-open" variant="ghost" className="justify-start" onClick={() => openBoardsPage(boardId || undefined)}>
+          <ActionTile
+            id="boards-link"
+            disabled={!canCapture}
+            icon={<Link2 aria-hidden />}
+            label="Link card"
+            hint="Title, description and preview image"
+            onClick={() => send("link")}
+          />
+          <ActionTile
+            id="boards-images"
+            disabled={!canCapture}
+            icon={<Images aria-hidden />}
+            label="Images on this page"
+            hint="Pick one or more images"
+            onClick={() => send("images")}
+          />
+          <Button
+            id="boards-open"
+            variant={canCapture ? "ghost" : "primary"}
+            className={canCapture ? "justify-start" : undefined}
+            onClick={() => openBoardsPage(boardId || undefined)}
+          >
             <ExternalLink id="boards-open-icon" className="size-4" aria-hidden />
             Open boards
           </Button>

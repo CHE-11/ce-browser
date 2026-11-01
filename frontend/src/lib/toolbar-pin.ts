@@ -1,24 +1,10 @@
 import type { DragEvent, MouseEvent } from "react";
 import type { BrowserSettings } from "../../../types/browser";
+import { BUILTIN_TOOLS } from "../features/BuiltInExtensions/builtin";
 import { openPopup, saveSettings } from "./browser-client";
 
 /** Built-in tools, in the order they had before a custom order was saved. */
-export const DEFAULT_TOOLBAR = [
-  "print-pdf",
-  "page-capture",
-  "media-hub",
-  "clear-cache",
-  "what-runs",
-  "ad-blocker",
-  "page-controls",
-  "translate",
-  "password",
-  "price",
-  "shopping",
-  "wayback",
-  "reading",
-  "assistant",
-];
+export const DEFAULT_TOOLBAR = BUILTIN_TOOLS.map((tool) => tool.id);
 
 /** Saved ids that are still pinned, then any pinned id the saved list does not mention. */
 export function toolbarOrder(saved: string[] | undefined, available: string[]) {

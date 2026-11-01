@@ -4,7 +4,7 @@ import { IconButton } from "@/components/IconButton";
 import { openPopupBelow, pinElement, pinLink, pinPage, pinRegion } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import type { PageToolRequest, Pin, TabInfo } from "@type/browser";
-import { capturable, tabParams } from "../shared";
+import { tabParams } from "../shared";
 import { errorText, usePageToolRequests, useToolStatus } from "../use-page-tool";
 
 const POPOVER_WIDTH = 340;
@@ -89,7 +89,7 @@ export function BoardsButton({ activeTab }: { activeTab: TabInfo | undefined }) 
       id="address-boards"
       ref={buttonRef}
       label={label}
-      disabled={status === "busy" || !capturable(activeTab?.url)}
+      disabled={status === "busy" || !activeTab}
       className={cn(status === "done" && "text-sky-300", status === "failed" && "text-amber-300")}
       onClick={open}
     >

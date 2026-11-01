@@ -59,6 +59,7 @@ export function ToolbarEntry({ id, idPrefix, extension, activeTab, settings, lab
   return (
     <span
       id={domId}
+      title={caption || undefined}
       className={cn(
         stacked ? "flex w-full flex-col items-center py-0.5" : "inline-flex",
         labeled && "gap-0 px-0.5 py-0",
