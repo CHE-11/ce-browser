@@ -267,7 +267,12 @@ pub fn open(app: &AppHandle, window_label: &str, url: Url) -> Result<(), String>
     webview2::attach_peek_hooks(app, &frame, window_label, false);
     if let Ok(hwnd) = window.hwnd() {
         let scale = window.scale_factor().unwrap_or(1.0);
-        webview2::round_popup(&frame, hwnd.0 as isize, (10.0 * scale).round() as i32, Vec::new());
+        webview2::round_popup(
+            &frame,
+            hwnd.0 as isize,
+            (10.0 * scale).round() as i32,
+            Vec::new(),
+        );
     }
 
     let load_app = app.clone();
@@ -361,7 +366,12 @@ pub fn relayout(app: &AppHandle, window: &str) {
         if let Some(main) = app.get_window(window) {
             if let Ok(hwnd) = main.hwnd() {
                 let scale = main.scale_factor().unwrap_or(1.0);
-                webview2::round_popup(&frame, hwnd.0 as isize, (10.0 * scale).round() as i32, Vec::new());
+                webview2::round_popup(
+                    &frame,
+                    hwnd.0 as isize,
+                    (10.0 * scale).round() as i32,
+                    Vec::new(),
+                );
             }
         }
     }

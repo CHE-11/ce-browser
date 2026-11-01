@@ -116,7 +116,11 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             if tabs::popup_kind(app, &window).as_deref() == Some("tab-switcher") {
                 tabs::emit_to_popup(app, &window, "tab-switcher-step", step);
             } else {
-                let command = if step > 0 { "tab-switcher" } else { "tab-switcher-back" };
+                let command = if step > 0 {
+                    "tab-switcher"
+                } else {
+                    "tab-switcher-back"
+                };
                 tabs::send_command(app, &window, command);
             }
             Ok(())
@@ -237,7 +241,11 @@ fn category_of(action: &str) -> &'static str {
         "new-tab" | "new-window" | "close-tab" | "close-f4" | "reopen-tab" | "next-tab"
         | "previous-tab" | "next-page" | "previous-page" | "last-tab" | "tab-search"
         | "sleep-tab" | "sleep-other-tabs" => "Tabs",
-        "focus-address" | "alt-focus" | "focus-f6" | "command-palette" | "bookmark"
+        "focus-address"
+        | "alt-focus"
+        | "focus-f6"
+        | "command-palette"
+        | "bookmark"
         | "toggle-bookmarks-bar" => "Address bar and bookmarks",
         "reload" | "reload-key" | "back" | "forward" | "find" | "zoom-in" | "zoom-in-shift"
         | "zoom-out" | "zoom-reset" | "devtools" => "Page",
@@ -531,8 +539,16 @@ fn bind(action: &str, label: &str, keys: &str) -> ShortcutBinding {
 pub fn defaults() -> Vec<ShortcutBinding> {
     let mut rows = vec![
         bind("command-palette", "Command palette", "ctrl+k"),
-        bind("tab-search", "Search tabs and recently closed", "ctrl+shift+a"),
-        bind("shortcut-sheet", "Keyboard shortcut cheat sheet", "ctrl+slash"),
+        bind(
+            "tab-search",
+            "Search tabs and recently closed",
+            "ctrl+shift+a",
+        ),
+        bind(
+            "shortcut-sheet",
+            "Keyboard shortcut cheat sheet",
+            "ctrl+slash",
+        ),
         bind("sleep-tab", "Sleep selected background tabs", ""),
         bind("sleep-other-tabs", "Sleep other tabs", ""),
         bind("new-tab", "New tab", "ctrl+t"),
@@ -589,8 +605,14 @@ mod tests {
 
     #[test]
     fn slash_and_brackets_have_names() {
-        assert_eq!(chord_token(0xBF, true, false, false).as_deref(), Some("ctrl+slash"));
-        assert_eq!(chord_token(0xDB, false, false, false).as_deref(), Some("bracketleft"));
+        assert_eq!(
+            chord_token(0xBF, true, false, false).as_deref(),
+            Some("ctrl+slash")
+        );
+        assert_eq!(
+            chord_token(0xDB, false, false, false).as_deref(),
+            Some("bracketleft")
+        );
     }
 
     #[test]
@@ -604,9 +626,10 @@ mod tests {
         let saved = normalize_saved(&rows);
         let json = serde_json::to_string(&ShortcutFile { bindings: saved }).expect("json");
         assert!(!json.contains("category"));
-        let old: ShortcutFile =
-            serde_json::from_str(r#"{"bindings":[{"action":"find","label":"Find","keys":["ctrl+g"]}]}"#)
-                .expect("older file");
+        let old: ShortcutFile = serde_json::from_str(
+            r#"{"bindings":[{"action":"find","label":"Find","keys":["ctrl+g"]}]}"#,
+        )
+        .expect("older file");
         assert_eq!(old.bindings[0].keys, vec!["ctrl+g".to_string()]);
     }
 

@@ -10,8 +10,7 @@ use crate::{settings, tabs, webview2};
 
 const SEARCH_URL: &str = "https://html.duckduckgo.com/html/";
 const RESULTS_PER_QUERY: usize = 8;
-const USER_AGENT: &str =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -80,7 +79,10 @@ pub fn find_deals(app: &AppHandle, id: u32) -> Result<ShoppingDeals, String> {
         match search(&query, region) {
             Ok(results) => {
                 for result in results {
-                    if !sources.iter().any(|kept: &SearchResult| kept.url == result.url) {
+                    if !sources
+                        .iter()
+                        .any(|kept: &SearchResult| kept.url == result.url)
+                    {
                         sources.push(result);
                     }
                 }
@@ -89,7 +91,9 @@ pub fn find_deals(app: &AppHandle, id: u32) -> Result<ShoppingDeals, String> {
         }
     }
     if sources.is_empty() {
-        return Err(failure.unwrap_or_else(|| "The web search found nothing for this product.".into()));
+        return Err(
+            failure.unwrap_or_else(|| "The web search found nothing for this product.".into())
+        );
     }
 
     let reply = tools::chat(
@@ -99,7 +103,8 @@ pub fn find_deals(app: &AppHandle, id: u32) -> Result<ShoppingDeals, String> {
         &deals_prompt(&store, &name, product.as_ref(), &sources),
         Duration::from_secs(90),
     )?;
-    let parsed = parse_reply(&reply).ok_or("The assistant's reply wasn't valid JSON. Try again or pick another model.")?;
+    let parsed = parse_reply(&reply)
+        .ok_or("The assistant's reply wasn't valid JSON. Try again or pick another model.")?;
     let current_price = product.as_ref().map(|item| item.price);
     Ok(ShoppingDeals {
         coupons: grounded_coupons(&parsed, &sources),
@@ -192,7 +197,9 @@ fn parse_results(html: &str, limit: usize) -> Vec<SearchResult> {
         let Some(tag_end) = html[at..].find('>').map(|index| at + index) else {
             break;
         };
-        let Some(url) = attribute(&html[tag_start..tag_end], "href").and_then(|href| target_url(&href)) else {
+        let Some(url) =
+            attribute(&html[tag_start..tag_end], "href").and_then(|href| target_url(&href))
+        else {
             continue;
         };
         let title_end = html[tag_end..]
@@ -217,7 +224,11 @@ fn parse_results(html: &str, limit: usize) -> Vec<SearchResult> {
             .unwrap_or_default();
 
         if !title.is_empty() && !out.iter().any(|kept: &SearchResult| kept.url == url) {
-            out.push(SearchResult { title, url, snippet });
+            out.push(SearchResult {
+                title,
+                url,
+                snippet,
+            });
         }
     }
     out
@@ -297,7 +308,11 @@ fn decode_entities(text: &str) -> String {
                 .strip_prefix("#x")
                 .or_else(|| entity.strip_prefix("#X"))
                 .and_then(|hex| u32::from_str_radix(hex, 16).ok())
-                .or_else(|| entity.strip_prefix('#').and_then(|number| number.parse().ok()))
+                .or_else(|| {
+                    entity
+                        .strip_prefix('#')
+                        .and_then(|number| number.parse().ok())
+                })
                 .and_then(char::from_u32),
         };
         match decoded {
@@ -315,9 +330,18 @@ fn decode_entities(text: &str) -> String {
     out
 }
 
-fn deals_prompt(store: &str, name: &str, product: Option<&ProductPrice>, sources: &[SearchResult]) -> String {
+fn deals_prompt(
+    store: &str,
+    name: &str,
+    product: Option<&ProductPrice>,
+    sources: &[SearchResult],
+) -> String {
     let price = product
-        .map(|item| format!("{} {}", item.currency, item.price).trim().to_string())
+        .map(|item| {
+            format!("{} {}", item.currency, item.price)
+                .trim()
+                .to_string()
+        })
         .unwrap_or_else(|| "unknown".into());
     let mut results = String::new();
     for (index, result) in sources.iter().enumerate() {
@@ -376,12 +400,15 @@ fn grounded_coupons(reply: &serde_json::Value, sources: &[SearchResult]) -> Vec<
         if code.len() < 3
             || code.len() > 30
             || code.chars().any(char::is_whitespace)
-            || !code.chars().any(|character| character.is_ascii_digit() || character.is_ascii_uppercase())
+            || !code
+                .chars()
+                .any(|character| character.is_ascii_digit() || character.is_ascii_uppercase())
             || out.iter().any(|kept| kept.code.eq_ignore_ascii_case(&code))
         {
             continue;
         }
-        let shows = |result: &&SearchResult| result.title.contains(&code) || result.snippet.contains(&code);
+        let shows =
+            |result: &&SearchResult| result.title.contains(&code) || result.snippet.contains(&code);
         let claimed = field(item, "source");
         let source = sources
             .iter()
@@ -413,13 +440,19 @@ fn grounded_offers(
     };
     for item in items {
         let claimed = field(item, "url");
-        let Some(source) = sources.iter().find(|result| same_url(&result.url, &claimed)) else {
+        let Some(source) = sources
+            .iter()
+            .find(|result| same_url(&result.url, &claimed))
+        else {
             continue;
         };
         if same_url(&source.url, page_url) || out.iter().any(|kept| kept.url == source.url) {
             continue;
         }
-        let price = item.get("price").and_then(offer_price).filter(|value| *value > 0.0);
+        let price = item
+            .get("price")
+            .and_then(offer_price)
+            .filter(|value| *value > 0.0);
         if let (Some(price), Some(current)) = (price, current_price) {
             if price >= current {
                 continue;
@@ -461,7 +494,10 @@ fn offer_price(value: &serde_json::Value) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SearchResult, clean_name, grounded_coupons, grounded_offers, parse_reply, parse_results, target_url};
+    use super::{
+        SearchResult, clean_name, grounded_coupons, grounded_offers, parse_reply, parse_results,
+        target_url,
+    };
 
     const PAGE: &str = r#"
 <div class="result results_links results_links_deep result--ad">
@@ -492,14 +528,18 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].url, "https://coupons.test/mugshop");
         assert_eq!(results[0].title, "Mug Shop Coupon Codes & Deals");
-        assert_eq!(results[0].snippet, "Use code SAVE20 for 20% off at mugshop.test.");
+        assert_eq!(
+            results[0].snippet,
+            "Use code SAVE20 for 20% off at mugshop.test."
+        );
         assert_eq!(results[1].url, "https://other.test/mug");
     }
 
     #[test]
     fn a_wrapped_link_resolves_to_the_target() {
         assert_eq!(
-            target_url("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa%3Fb%3D1&rut=x").as_deref(),
+            target_url("//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa%3Fb%3D1&rut=x")
+                .as_deref(),
             Some("https://example.com/a?b=1")
         );
         assert_eq!(target_url("https://duckduckgo.com/y.js?ad_domain=x"), None);
@@ -523,10 +563,23 @@ mod tests {
         assert_eq!(coupons[0].code, "SAVE20");
         assert_eq!(coupons[0].source, "https://coupons.test/mugshop");
 
-        let offers = grounded_offers(&reply, &sources(), "https://mugshop.test/blue-mug", Some(14.0));
+        let offers = grounded_offers(
+            &reply,
+            &sources(),
+            "https://mugshop.test/blue-mug",
+            Some(14.0),
+        );
         assert_eq!(offers.len(), 1);
         assert_eq!(offers[0].price, Some(9.99));
-        assert!(grounded_offers(&reply, &sources(), "https://mugshop.test/blue-mug", Some(8.0)).is_empty());
+        assert!(
+            grounded_offers(
+                &reply,
+                &sources(),
+                "https://mugshop.test/blue-mug",
+                Some(8.0)
+            )
+            .is_empty()
+        );
     }
 
     #[test]

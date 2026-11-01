@@ -49,7 +49,9 @@ pub fn capture(app: &AppHandle, id: u32) -> Option<String> {
     )
     .ok()?;
     let data = response.get("data")?.as_str()?;
-    let bytes = base64::engine::general_purpose::STANDARD.decode(data).ok()?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .ok()?;
     let url = shrink(&bytes)?;
     cache().lock().expect("thumbnails").insert(id, url.clone());
     Some(url)

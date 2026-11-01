@@ -178,7 +178,10 @@ async fn end_page(app: AppHandle, id: u32) -> Result<(), String> {
         if pids.is_empty() {
             return Err("Couldn't find this page's process.".into());
         }
-        let ended = pids.into_iter().filter(|pid| status::terminate(*pid)).count();
+        let ended = pids
+            .into_iter()
+            .filter(|pid| status::terminate(*pid))
+            .count();
         if ended == 0 {
             return Err("Windows would not end this page's process.".into());
         }
@@ -493,7 +496,16 @@ async fn find_in_tabs(
     whole_word: bool,
 ) -> Result<Vec<find::FindTabResult>, String> {
     let label = window.label().to_string();
-    blocking(move || Ok(find::find_in_tabs(&app, &label, &query, case_sensitive, whole_word))).await
+    blocking(move || {
+        Ok(find::find_in_tabs(
+            &app,
+            &label,
+            &query,
+            case_sensitive,
+            whole_word,
+        ))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -517,8 +529,9 @@ async fn resize_popup(
     window: Window,
     width: Option<f64>,
     height: f64,
+    generation: Option<u64>,
 ) -> Result<(), String> {
-    tabs::resize_popup(&app, window.label(), width, height)
+    tabs::resize_popup(&app, window.label(), generation, width, height)
 }
 
 #[tauri::command]
@@ -526,13 +539,19 @@ async fn set_popup_shape(
     app: AppHandle,
     window: Window,
     shape: Vec<tabs::PopupRect>,
+    generation: Option<u64>,
 ) -> Result<(), String> {
-    tabs::set_popup_shape(&app, window.label(), shape)
+    tabs::set_popup_shape(&app, window.label(), generation, shape)
 }
 
 #[tauri::command]
-async fn popup_painted(app: AppHandle, window: Window) {
-    tabs::popup_painted(&app, window.label());
+async fn popup_painted(app: AppHandle, window: Window, generation: u64) {
+    tabs::popup_painted(&app, window.label(), generation);
+}
+
+#[tauri::command]
+async fn popup_host_ready(app: AppHandle, window: Window) {
+    tabs::popup_host_ready(&app, window.label());
 }
 
 #[tauri::command]
@@ -1197,7 +1216,11 @@ fn list_boards(app: AppHandle) -> boards::BoardsSnapshot {
 }
 
 #[tauri::command]
-fn create_board_folder(app: AppHandle, name: String, parent_id: Option<String>) -> Result<boards::BoardFolder, String> {
+fn create_board_folder(
+    app: AppHandle,
+    name: String,
+    parent_id: Option<String>,
+) -> Result<boards::BoardFolder, String> {
     boards::create_folder(&app, &name, parent_id.as_deref())
 }
 
@@ -1217,7 +1240,11 @@ async fn delete_board_folder(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn create_board(app: AppHandle, name: String, folder_id: Option<String>) -> Result<boards::Board, String> {
+fn create_board(
+    app: AppHandle,
+    name: String,
+    folder_id: Option<String>,
+) -> Result<boards::Board, String> {
     boards::create_board(&app, &name, folder_id.as_deref())
 }
 
@@ -1257,7 +1284,12 @@ async fn delete_pins(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn pin_page(app: AppHandle, id: u32, board_id: String, full_page: bool) -> Result<boards::Pin, String> {
+async fn pin_page(
+    app: AppHandle,
+    id: u32,
+    board_id: String,
+    full_page: bool,
+) -> Result<boards::Pin, String> {
     blocking(move || boards::pin_page(&app, id, &board_id, full_page)).await
 }
 
@@ -1277,12 +1309,20 @@ async fn pin_link(app: AppHandle, id: u32, board_id: String) -> Result<boards::P
 }
 
 #[tauri::command]
-async fn pin_images(app: AppHandle, id: u32, board_id: String, urls: Vec<String>) -> Result<Vec<boards::Pin>, String> {
+async fn pin_images(
+    app: AppHandle,
+    id: u32,
+    board_id: String,
+    urls: Vec<String>,
+) -> Result<Vec<boards::Pin>, String> {
     blocking(move || boards::pin_images(&app, id, &board_id, &urls)).await
 }
 
 #[tauri::command]
-async fn board_thumbnails(app: AppHandle, ids: Vec<String>) -> Result<std::collections::HashMap<String, String>, String> {
+async fn board_thumbnails(
+    app: AppHandle,
+    ids: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
     blocking(move || Ok(boards::thumbnails(&app, &ids))).await
 }
 
@@ -1807,6 +1847,7 @@ pub fn run() {
             resize_popup,
             set_popup_shape,
             popup_painted,
+            popup_host_ready,
             capture_page_png,
             copy_page_png,
             capture_region,

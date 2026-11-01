@@ -9,7 +9,7 @@ pnpm install
 pnpm tauri dev
 ```
 
-`pnpm build:exe` produces `src-tauri/target/release/ce-browser.exe`. WebView2 ships with Windows 10 and 11. Extension support needs a recent WebView2 runtime (1.0.2739 or later).
+`pnpm build:exe` produces the installer `src-tauri/target/release/bundle/nsis/ce-browser_<version>_x64-setup.exe`. WebView2 ships with Windows 10 and 11. Extension support needs a recent WebView2 runtime (1.0.2739 or later).
 
 ## Tabs
 

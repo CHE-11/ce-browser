@@ -710,18 +710,23 @@ export function closePopup() {
   return invoke<void>("close_popup");
 }
 
-export function resizePopup(height: number, width?: number) {
-  return invoke<void>("resize_popup", { height, width });
+export function resizePopup(height: number, width?: number, generation?: number) {
+  return invoke<void>("resize_popup", { height, width, generation });
 }
 
 /** Draws only these parts of the popup. The rest shows, and passes clicks to, the page below. */
-export function setPopupShape(shape: PopupRect[]) {
-  return invoke<void>("set_popup_shape", { shape });
+export function setPopupShape(shape: PopupRect[], generation?: number) {
+  return invoke<void>("set_popup_shape", { shape, generation });
 }
 
 /** Tells the backend this popup has drawn its first complete frame and can be shown. */
-export function popupPainted() {
-  return invoke<void>("popup_painted");
+export function popupPainted(generation: number) {
+  return invoke<void>("popup_painted", { generation });
+}
+
+/** The parked popup host has applied the saved theme and can show a menu. */
+export function popupHostReady() {
+  return invoke<void>("popup_host_ready");
 }
 
 export function onPopupChanged(handler: (change: PopupChange) => void): Promise<UnlistenFn> {

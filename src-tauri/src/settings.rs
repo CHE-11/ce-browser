@@ -563,17 +563,25 @@ impl BrowserSettings {
                 && self.bookmarks_bar_padding == defaults.bookmarks_bar_padding
                 && self.bookmark_folder_text_size == defaults.bookmark_folder_text_size
                 && self.bookmark_folder_padding == defaults.bookmark_folder_padding;
-            if let (Some((bar_text, bar_padding, folder_text, folder_padding)), true) = (sizes, untouched) {
+            if let (Some((bar_text, bar_padding, folder_text, folder_padding)), true) =
+                (sizes, untouched)
+            {
                 self.bookmarks_bar_text_size = bar_text;
                 self.bookmarks_bar_padding = bar_padding;
                 self.bookmark_folder_text_size = folder_text;
                 self.bookmark_folder_padding = folder_padding;
             }
         }
-        self.bookmarks_bar_text_size =
-            rem_in(self.bookmarks_bar_text_size, BOOKMARK_TEXT_REM, defaults.bookmarks_bar_text_size);
-        self.bookmarks_bar_padding =
-            rem_in(self.bookmarks_bar_padding, BOOKMARK_PADDING_REM, defaults.bookmarks_bar_padding);
+        self.bookmarks_bar_text_size = rem_in(
+            self.bookmarks_bar_text_size,
+            BOOKMARK_TEXT_REM,
+            defaults.bookmarks_bar_text_size,
+        );
+        self.bookmarks_bar_padding = rem_in(
+            self.bookmarks_bar_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.bookmarks_bar_padding,
+        );
         self.bookmark_folder_text_size = rem_in(
             self.bookmark_folder_text_size,
             BOOKMARK_TEXT_REM,
@@ -701,7 +709,8 @@ impl BrowserSettings {
 pub struct SettingsState(Mutex<BrowserSettings>);
 
 pub fn init(app: &AppHandle) {
-    let mut loaded: BrowserSettings = crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
+    let mut loaded: BrowserSettings =
+        crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
     loaded = loaded.normalize();
     loaded.pinned_tabs = canonicalize_pins(app, &loaded);
     crate::adblock::configure(&loaded.adblock);
@@ -812,7 +821,8 @@ fn page_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
 }
 
 pub fn reload(app: &AppHandle) {
-    let mut loaded: BrowserSettings = crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
+    let mut loaded: BrowserSettings =
+        crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
     loaded = loaded.normalize();
     loaded.pinned_tabs = canonicalize_pins(app, &loaded);
     if let Some(root) = paths::storage_root() {
@@ -1272,7 +1282,8 @@ mod tests {
     #[test]
     fn a_file_from_before_the_new_tab_and_window_options_keeps_its_values() {
         let loaded: super::BrowserSettings =
-            serde_json::from_str(r#"{"searchEngine":"bing","theme":"nord"}"#).expect("settings parse");
+            serde_json::from_str(r#"{"searchEngine":"bing","theme":"nord"}"#)
+                .expect("settings parse");
         let loaded = loaded.normalize();
         assert_eq!(loaded.search_engine, "bing");
         assert_eq!(loaded.theme, "nord");
@@ -1297,7 +1308,8 @@ mod tests {
     #[test]
     fn unknown_tab_order_and_backdrop_values_fall_back() {
         let loaded: super::BrowserSettings =
-            serde_json::from_str(r#"{"tabCycleOrder":"random","windowBackdrop":"glass"}"#).expect("settings parse");
+            serde_json::from_str(r#"{"tabCycleOrder":"random","windowBackdrop":"glass"}"#)
+                .expect("settings parse");
         let loaded = loaded.normalize();
         assert_eq!(loaded.tab_cycle_order, "strip");
         assert_eq!(loaded.window_backdrop, "none");

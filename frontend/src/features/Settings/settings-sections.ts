@@ -7,6 +7,7 @@ export const SETTINGS_SECTIONS = [
   { id: "settings-privacy", title: "Privacy" },
   { id: "settings-adblock", title: "Ad blocker" },
   { id: "settings-appearance", title: "Appearance" },
+  { id: "settings-bookmarks", title: "Bookmarks" },
   { id: "settings-tools", title: "Tools" },
   { id: "settings-system", title: "System" },
   { id: "settings-sync", title: "Sync" },

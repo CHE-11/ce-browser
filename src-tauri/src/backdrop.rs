@@ -41,7 +41,11 @@ pub fn windows_build() -> u32 {
             platform: 0,
             service_pack: [0; 128],
         };
-        if unsafe { RtlGetVersion(&mut info) } == 0 { info.build } else { 0 }
+        if unsafe { RtlGetVersion(&mut info) } == 0 {
+            info.build
+        } else {
+            0
+        }
     });
     *BUILD
 }
@@ -64,7 +68,10 @@ pub fn wanted(app: &AppHandle) -> Option<&'static str> {
 }
 
 pub fn note_transparent(label: &str) {
-    TRANSPARENT.lock().expect("backdrop").insert(label.to_string());
+    TRANSPARENT
+        .lock()
+        .expect("backdrop")
+        .insert(label.to_string());
 }
 
 pub fn forget(label: &str) {
@@ -83,7 +90,12 @@ pub fn apply_all(app: &AppHandle) {
         Some("acrylic") => Some(Effect::Acrylic),
         _ => None,
     };
-    let labels: Vec<String> = TRANSPARENT.lock().expect("backdrop").iter().cloned().collect();
+    let labels: Vec<String> = TRANSPARENT
+        .lock()
+        .expect("backdrop")
+        .iter()
+        .cloned()
+        .collect();
     for label in labels {
         let Some(window) = app.get_window(&label) else {
             continue;
@@ -109,7 +121,10 @@ pub struct BackdropSupport {
 
 pub fn support(app: &AppHandle) -> BackdropSupport {
     let wanted = wanted(app).is_some();
-    let ready = TRANSPARENT.lock().expect("backdrop").contains(crate::tabs::WINDOW);
+    let ready = TRANSPARENT
+        .lock()
+        .expect("backdrop")
+        .contains(crate::tabs::WINDOW);
     BackdropSupport {
         mica: supported("mica"),
         acrylic: supported("acrylic"),

@@ -36,7 +36,11 @@ fn fragment_encode(text: &str) -> String {
 }
 
 /// A link that scrolls to and highlights `selection` on `page`, without tracking parameters.
-pub fn link_to_text(settings: &settings::BrowserSettings, page: &str, selection: &str) -> Option<String> {
+pub fn link_to_text(
+    settings: &settings::BrowserSettings,
+    page: &str,
+    selection: &str,
+) -> Option<String> {
     let clean = privacy::rewrite(settings, page).unwrap_or_else(|| page.to_string());
     let mut url = Url::parse(&clean).ok()?;
     if url.scheme() != "http" && url.scheme() != "https" {
@@ -81,7 +85,16 @@ pub fn copy_link_to_text(app: &AppHandle, id: u32, page: &str, selection: &str) 
 }
 
 /// Opens a popup for tab `id` where the menu was, `x` and `y` being physical pixels inside the page.
-pub fn open_popup_at(app: &AppHandle, id: u32, x: i32, y: i32, kind: &str, params: String, width: f64, height: f64) {
+pub fn open_popup_at(
+    app: &AppHandle,
+    id: u32,
+    x: i32,
+    y: i32,
+    kind: &str,
+    params: String,
+    width: f64,
+    height: f64,
+) {
     let window = window_of(app, id);
     let Some(handle) = app.get_window(&window) else {
         return;
@@ -108,7 +121,9 @@ pub fn open_popup_at(app: &AppHandle, id: u32, x: i32, y: i32, kind: &str, param
 /// Image bytes from an `http(s)` or `data:` address.
 pub(crate) fn image_bytes(source: &str) -> Result<Vec<u8>, String> {
     if let Some(rest) = source.strip_prefix("data:") {
-        let (meta, data) = rest.split_once(',').ok_or("That image address is not readable.")?;
+        let (meta, data) = rest
+            .split_once(',')
+            .ok_or("That image address is not readable.")?;
         if !meta.ends_with(";base64") {
             return Err("That image address is not readable.".into());
         }
@@ -137,7 +152,8 @@ pub(crate) fn image_bytes(source: &str) -> Result<Vec<u8>, String> {
 pub fn copy_image_text(app: &AppHandle, id: u32, source: &str) {
     let window = window_of(app, id);
     let result = image_bytes(source).and_then(|bytes| {
-        let image = image::load_from_memory(&bytes).map_err(|error| format!("That image format isn't supported. {error}"))?;
+        let image = image::load_from_memory(&bytes)
+            .map_err(|error| format!("That image format isn't supported. {error}"))?;
         let mut png = Vec::new();
         image
             .write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
@@ -147,7 +163,10 @@ pub fn copy_image_text(app: &AppHandle, id: u32, source: &str) {
     let message = match result {
         Ok(text) if text.trim().is_empty() => "No text was found in the image.".to_string(),
         Ok(text) => match ocr::copy_text(&text) {
-            Ok(()) => format!("Copied {} characters from the image", text.trim().chars().count()),
+            Ok(()) => format!(
+                "Copied {} characters from the image",
+                text.trim().chars().count()
+            ),
             Err(error) => error,
         },
         Err(error) => error,
@@ -162,7 +181,9 @@ pub fn search_image(app: &AppHandle, id: u32, source: &str) {
         return;
     }
     let encoded: String = url::form_urlencoded::byte_serialize(source.as_bytes()).collect();
-    if let Ok(url) = Url::parse(&format!("https://lens.google.com/uploadbyurl?url={encoded}")) {
+    if let Ok(url) = Url::parse(&format!(
+        "https://lens.google.com/uploadbyurl?url={encoded}"
+    )) {
         let _ = tabs::open_beside(app, id, url, false);
     }
 }
@@ -180,8 +201,16 @@ mod tests {
     #[test]
     fn a_short_selection_links_to_the_whole_text() {
         let settings = settings::BrowserSettings::default();
-        let link = link_to_text(&settings, "https://example.com/a?utm_source=x#top", "Hello, world - again").expect("link");
-        assert_eq!(link, "https://example.com/a#:~:text=Hello%2C%20world%20%2D%20again");
+        let link = link_to_text(
+            &settings,
+            "https://example.com/a?utm_source=x#top",
+            "Hello, world - again",
+        )
+        .expect("link");
+        assert_eq!(
+            link,
+            "https://example.com/a#:~:text=Hello%2C%20world%20%2D%20again"
+        );
     }
 
     #[test]
@@ -196,6 +225,9 @@ mod tests {
     #[test]
     fn menu_labels_are_cut_at_a_word_boundary_with_an_ellipsis() {
         assert_eq!(label_text("  short   text ", 20), "short text");
-        assert_eq!(label_text("a selection that is much too long", 12), "a selection\u{2026}");
+        assert_eq!(
+            label_text("a selection that is much too long", 12),
+            "a selection\u{2026}"
+        );
     }
 }

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { closePopup, resizePopup } from "../lib/browser-client";
 import { cn } from "../lib/cn";
-import { usePopupPainted } from "../lib/popup-ready";
+import { PopupGenerationContext, usePopupPainted } from "../lib/popup-ready";
 
 /** Background, corners and border every popup surface shares. */
 export const popupSurfaceClass = "overflow-hidden rounded-xl bg-zinc-900 text-zinc-100 ring-1 ring-inset ring-zinc-700";
@@ -20,6 +20,7 @@ type PopupFrameProps = {
 export function PopupFrame({ id, children, className, fit = true, maxHeight = 640, ready = true }: PopupFrameProps) {
   const ref = useRef<HTMLDivElement>(null);
   const lastResize = useRef<Promise<unknown>>(Promise.resolve());
+  const generation = useContext(PopupGenerationContext);
   const settle = useCallback(() => lastResize.current, []);
 
   usePopupPainted(ready, settle);
@@ -34,14 +35,14 @@ export function PopupFrame({ id, children, className, fit = true, maxHeight = 64
       const height = Math.min(maxHeight, Math.ceil(element.getBoundingClientRect().height) + 2);
       if (Math.abs(height - last) >= 1) {
         last = height;
-        lastResize.current = resizePopup(height).catch(() => undefined);
+        lastResize.current = resizePopup(height, undefined, generation > 0 ? generation : undefined).catch(() => undefined);
       }
     };
     report();
     const observer = new ResizeObserver(report);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [fit, maxHeight]);
+  }, [fit, maxHeight, generation]);
 
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {

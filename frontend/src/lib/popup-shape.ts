@@ -1,5 +1,6 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useContext, useRef } from "react";
 import { setPopupShape } from "./browser-client";
+import { PopupGenerationContext } from "./popup-ready";
 
 /** Marks an element whose box is drawn. Everything else in the popup shows the page below. */
 export const POPUP_SHAPE_ATTR = "data-popup-shape";
@@ -9,6 +10,7 @@ export const POPUP_SHAPE_ATTR = "data-popup-shape";
  * them moves, resizes, mounts or unmounts. `settle` resolves when the last shape is applied.
  */
 export function usePopupShape() {
+  const generation = useContext(PopupGenerationContext);
   const last = useRef("");
   const queued = useRef(false);
   const applied = useRef<Promise<unknown>>(Promise.resolve());
@@ -31,9 +33,9 @@ export function usePopupShape() {
         return;
       }
       last.current = key;
-      applied.current = setPopupShape(shape).catch(() => undefined);
+      applied.current = setPopupShape(shape, generation > 0 ? generation : undefined).catch(() => undefined);
     });
-  }, []);
+  }, [generation]);
 
   const settle = useCallback(() => applied.current, []);
 

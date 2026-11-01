@@ -345,7 +345,10 @@ pub fn move_to(
 }
 
 /// Removes a bookmark and returns it with its folder and position, so it can be put back.
-pub fn delete_returning(app: &AppHandle, id: &str) -> Result<(BookmarkNode, String, usize), String> {
+pub fn delete_returning(
+    app: &AppHandle,
+    id: &str,
+) -> Result<(BookmarkNode, String, usize), String> {
     if id == BAR || id == OTHER {
         return Err("The bookmarks bar and Other bookmarks cannot be deleted.".into());
     }
@@ -361,7 +364,12 @@ pub fn delete_returning(app: &AppHandle, id: &str) -> Result<(BookmarkNode, Stri
 }
 
 /// Puts a deleted bookmark back. A folder that is gone too sends it to Other bookmarks.
-pub fn restore(app: &AppHandle, node: BookmarkNode, parent: &str, index: usize) -> Result<(), String> {
+pub fn restore(
+    app: &AppHandle,
+    node: BookmarkNode,
+    parent: &str,
+    index: usize,
+) -> Result<(), String> {
     change(app, |tree| {
         if tree.find(&node.id).is_some() {
             return Ok(());

@@ -1369,7 +1369,8 @@ pub fn migrate_layout(root: &Path, loose_default: bool) -> Result<bool, String> 
 }
 
 fn has_loose_files(dir: &Path) -> bool {
-    PROFILE_FILES.iter().any(|name| dir.join(name).is_file()) || PROFILE_DIRS.iter().any(|name| dir.join(name).is_dir())
+    PROFILE_FILES.iter().any(|name| dir.join(name).is_file())
+        || PROFILE_DIRS.iter().any(|name| dir.join(name).is_dir())
 }
 
 /// Points Start menu and taskbar shortcuts at each profile's icon after its folder moved.

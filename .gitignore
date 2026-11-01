@@ -32,9 +32,13 @@ dist-ssr
 */target/*
 */gen/schemas
 
-# Allow the release executable to be synced.
+# Allow the NSIS installer to be synced.
 # Git will not re-include a file inside a directory ignored with a trailing slash,
-# so the release directory stays visible and only this binary is kept.
+# so each parent directory stays visible and only the versioned setup executable is kept.
 !src-tauri/target/release/
 src-tauri/target/release/*
-!src-tauri/target/release/ce-browser.exe
+!src-tauri/target/release/bundle/
+src-tauri/target/release/bundle/*
+!src-tauri/target/release/bundle/nsis/
+src-tauri/target/release/bundle/nsis/*
+!src-tauri/target/release/bundle/nsis/*_x64-setup.exe

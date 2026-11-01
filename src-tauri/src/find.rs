@@ -151,7 +151,12 @@ fn run(app: &AppHandle, id: u32, query: &str, options: &Options) -> Result<FindR
     let webview = tabs::page_view(app, id).ok_or("That tab has no page loaded.")?;
     let query = serde_json::to_string(query).map_err(|error| error.to_string())?;
     let options = serde_json::to_string(options).map_err(|error| error.to_string())?;
-    let value = webview2::evaluate(&webview, &format!("{FINDER_JS}({query}, {options})"), TIMEOUT, FAILURE)?;
+    let value = webview2::evaluate(
+        &webview,
+        &format!("{FINDER_JS}({query}, {options})"),
+        TIMEOUT,
+        FAILURE,
+    )?;
     Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
@@ -217,7 +222,9 @@ pub fn find_in_tabs(
                 ""
             };
             let count = if skipped.is_empty() {
-                run(app, tab.id, query, &options).ok().map(|result| result.count)
+                run(app, tab.id, query, &options)
+                    .ok()
+                    .map(|result| result.count)
             } else {
                 None
             };

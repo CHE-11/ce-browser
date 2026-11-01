@@ -27,34 +27,71 @@ import {
 import { faviconKey } from "./format";
 import { publishZoom } from "./zoom";
 
-/** Loads a value once and keeps it current from a change event. */
-function useLiveValue<T>(load: () => Promise<T>, subscribe: (handler: (value: T) => void) => Promise<UnlistenFn>) {
-  const [value, setValue] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
+type LiveSlot<T> = {
+  value: T | null;
+  error: string | null;
+  listeners: Set<(value: T | null, error: string | null) => void>;
+  started: boolean;
+};
+
+const liveSlots = new Map<string, LiveSlot<unknown>>();
+
+function liveSlot<T>(key: string): LiveSlot<T> {
+  let slot = liveSlots.get(key) as LiveSlot<T> | undefined;
+  if (!slot) {
+    slot = { value: null, error: null, listeners: new Set(), started: false };
+    liveSlots.set(key, slot as LiveSlot<unknown>);
+  }
+  return slot;
+}
+
+function publishLive<T>(slot: LiveSlot<T>, value: T | null, error: string | null) {
+  slot.value = value;
+  slot.error = error;
+  for (const listener of slot.listeners) {
+    listener(value, error);
+  }
+}
+
+/**
+ * Loads a value once per webview and keeps it current from a change event.
+ * A later subscriber sees the value on its first render.
+ */
+function useLiveValue<T>(key: string, load: () => Promise<T>, subscribe: (handler: (value: T) => void) => Promise<UnlistenFn>) {
+  const slot = liveSlot<T>(key);
+  const [value, setValue] = useState<T | null>(slot.value);
+  const [error, setError] = useState<string | null>(slot.error);
 
   useEffect(() => {
-    let disposed = false;
-    const unlisten = subscribe((next) => {
-      if (!disposed) {
-        setValue(next);
-      }
-    });
-    load()
-      .then((next) => {
-        if (!disposed) {
-          setValue(next);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (!disposed) {
-          setError(String(reason));
-        }
-      });
-    return () => {
-      disposed = true;
-      void unlisten.then((stop) => stop());
+    const listener = (next: T | null, nextError: string | null) => {
+      setValue(next);
+      setError(nextError);
     };
-  }, [load, subscribe]);
+    slot.listeners.add(listener);
+    listener(slot.value, slot.error);
+    if (!slot.started) {
+      slot.started = true;
+      let sawEvent = false;
+      void subscribe((next) => {
+        sawEvent = true;
+        publishLive(slot, next, null);
+      });
+      load()
+        .then((next) => {
+          if (!sawEvent) {
+            publishLive(slot, next, null);
+          }
+        })
+        .catch((reason: unknown) => {
+          if (!sawEvent && slot.value === null) {
+            publishLive(slot, null, String(reason));
+          }
+        });
+    }
+    return () => {
+      slot.listeners.delete(listener);
+    };
+  }, [key, load, subscribe, slot]);
 
   /** The first load finished, with a value or an error. */
   const loaded = value !== null || error !== null;
@@ -81,7 +118,7 @@ function currentWindowLabel() {
 }
 
 export function useTabs() {
-  const live = useLiveValue(listTabs, onTabsChanged);
+  const live = useLiveValue("tabs", listTabs, onTabsChanged);
   const snapshot = live.value ?? EMPTY_TABS;
   const label = currentWindowLabel();
   const mine = snapshot.windows?.find((item) => item.label === label);
@@ -139,7 +176,7 @@ export function useRecentlyClosed() {
 }
 
 export function useBookmarksState() {
-  const { value, loaded } = useLiveValue(listBookmarks, onBookmarksChanged);
+  const { value, loaded } = useLiveValue("bookmarks", listBookmarks, onBookmarksChanged);
   return { tree: value, loaded };
 }
 
@@ -197,7 +234,7 @@ export function useSiteFavicons(urls: (string | null | undefined)[]) {
 }
 
 export function useDownloadsState() {
-  const { value, loaded } = useLiveValue(listDownloads, onDownloadsChanged);
+  const { value, loaded } = useLiveValue("downloads", listDownloads, onDownloadsChanged);
   return { downloads: value ?? [], loaded };
 }
 
@@ -207,11 +244,11 @@ export function useDownloads() {
 
 /** Version, waiting update and check state. Refreshes while an update check runs. */
 export function useUpdateStatus() {
-  return useLiveValue(updateStatus, onUpdateStatus).value;
+  return useLiveValue("update-status", updateStatus, onUpdateStatus).value;
 }
 
 export function useHistoryState() {
-  const { value, loaded } = useLiveValue(listHistory, onHistoryChanged);
+  const { value, loaded } = useLiveValue("history", listHistory, onHistoryChanged);
   return { history: value ?? [], loaded };
 }
 
@@ -220,17 +257,17 @@ export function useHistory() {
 }
 
 export function useExtensions() {
-  const { value, error, loaded } = useLiveValue(listExtensions, onExtensionsChanged);
+  const { value, error, loaded } = useLiveValue("extensions", listExtensions, onExtensionsChanged);
   return { extensions: value ?? [], error, loaded };
 }
 
 export function useSettingsState() {
-  const { value, loaded } = useLiveValue(getSettings, onSettingsChanged);
+  const { value, loaded } = useLiveValue("settings", getSettings, onSettingsChanged);
   return { settings: value, loaded };
 }
 
 export function usePageRules(): PageRules | null {
-  return useLiveValue(getPageRules, onPageRulesChanged).value;
+  return useLiveValue("page-rules", getPageRules, onPageRulesChanged).value;
 }
 
 export function useSettings(): BrowserSettings | null {

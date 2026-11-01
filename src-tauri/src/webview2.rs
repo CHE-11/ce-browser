@@ -263,7 +263,11 @@ fn key_down(key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> bo
 /// Shift, Ctrl, and Alt as held right now. Read from a new-window request: that is how
 /// WebView2 delivers Shift+click on a link.
 pub fn pointer_modifiers() -> (bool, bool, bool) {
-    (async_key(VK_SHIFT), async_key(VK_CONTROL), async_key(VK_MENU))
+    (
+        async_key(VK_SHIFT),
+        async_key(VK_CONTROL),
+        async_key(VK_MENU),
+    )
 }
 
 fn async_key(key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> bool {
@@ -433,7 +437,14 @@ fn clip_round(hwnd: HWND, radius: i32, shape: &[RECT]) {
     let mut region: Option<HRGN> = None;
     for rect in rects {
         let part = unsafe {
-            CreateRoundRectRgn(rect.left, rect.top, rect.right + 1, rect.bottom + 1, diameter, diameter)
+            CreateRoundRectRgn(
+                rect.left,
+                rect.top,
+                rect.right + 1,
+                rect.bottom + 1,
+                diameter,
+                diameter,
+            )
         };
         if part.0.is_null() {
             continue;
@@ -468,8 +479,8 @@ pub fn attach_popup_hooks(app: &AppHandle, webview: &Webview, label: &str) {
     });
 }
 
-/// Closes the popup when it loses focus. Attached only once the popup is shown, so the
-/// hidden-while-loading webview is not dismissed before it appears.
+/// Closes the popup when it loses focus. Attached once, for the life of the host. A parked
+/// host and a drag-opened menu (which never takes focus) are left alone.
 pub fn attach_popup_blur(app: &AppHandle, webview: &Webview, label: &str) {
     let app = app.clone();
     let label = label.to_string();
@@ -479,7 +490,7 @@ pub fn attach_popup_blur(app: &AppHandle, webview: &Webview, label: &str) {
         let handler = FocusChangedEventHandler::create(Box::new(move |_, _| {
             let app = blur_app.clone();
             let label = label.clone();
-            tauri::async_runtime::spawn(async move { tabs::close_popup_label(&app, &label) });
+            tauri::async_runtime::spawn(async move { tabs::popup_lost_focus(&app, &label) });
             Ok(())
         }));
         let _ = unsafe { platform.controller().add_LostFocus(&handler, &mut token) };
@@ -1276,15 +1287,18 @@ fn add_page_items(
     unsafe {
         let target = args.ContextMenuTarget()?;
         let selection = if read_bool(|value| target.HasSelection(value)) {
-            read_pwstr(|value| target.SelectionText(value)).trim().to_string()
+            read_pwstr(|value| target.SelectionText(value))
+                .trim()
+                .to_string()
         } else {
             String::new()
         };
         let mut kind = COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND::default();
         let _ = target.Kind(&mut kind);
-        let image = (kind == COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_IMAGE && read_bool(|value| target.HasSourceUri(value)))
-            .then(|| read_pwstr(|value| target.SourceUri(value)))
-            .filter(|source| !source.is_empty());
+        let image = (kind == COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_IMAGE
+            && read_bool(|value| target.HasSourceUri(value)))
+        .then(|| read_pwstr(|value| target.SourceUri(value)))
+        .filter(|source| !source.is_empty());
         if selection.is_empty() && image.is_none() {
             return Ok(());
         }
@@ -1296,53 +1310,94 @@ fn add_page_items(
             let engine = crate::settings::get(app).search_engine_name();
             let short = crate::page_menu::label_text(&selection, 28);
             let (search_app, text) = (app.clone(), selection.clone());
-            entries.push(menu_command(environment, &format!("Search {engine} for \u{201c}{short}\u{201d}"), move || {
-                crate::page_menu::search_selection(&search_app, id, &text)
-            })?);
+            entries.push(menu_command(
+                environment,
+                &format!("Search {engine} for \u{201c}{short}\u{201d}"),
+                move || crate::page_menu::search_selection(&search_app, id, &text),
+            )?);
             let (translate_app, text) = (app.clone(), selection.clone());
             let (x, y) = (location.x, location.y);
-            entries.push(menu_command(environment, "Translate selection", move || {
-                let params = url::form_urlencoded::Serializer::new(String::new())
-                    .append_pair("tab", &id.to_string())
-                    .append_pair("text", &text)
-                    .finish();
-                crate::page_menu::open_popup_at(&translate_app, id, x, y, "selection-translate", params, 360.0, 240.0);
-            })?);
+            entries.push(menu_command(
+                environment,
+                "Translate selection",
+                move || {
+                    let params = url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("tab", &id.to_string())
+                        .append_pair("text", &text)
+                        .finish();
+                    crate::page_menu::open_popup_at(
+                        &translate_app,
+                        id,
+                        x,
+                        y,
+                        "selection-translate",
+                        params,
+                        360.0,
+                        240.0,
+                    );
+                },
+            )?);
             let (assistant_app, text, page_url) = (app.clone(), selection.clone(), page.clone());
-            entries.push(menu_command(environment, "Ask the assistant about this", move || {
-                let question = format!("Explain this passage from the page:\n\n\u{201c}{}\u{201d}", text.chars().take(2000).collect::<String>());
-                let params = url::form_urlencoded::Serializer::new(String::new())
-                    .append_pair("tab", &id.to_string())
-                    .append_pair("url", &page_url)
-                    .append_pair("title", "")
-                    .append_pair("question", &question)
-                    .finish();
-                crate::page_menu::open_popup_at(&assistant_app, id, x, y, "assistant", params, 360.0, 460.0);
-            })?);
+            entries.push(menu_command(
+                environment,
+                "Ask the assistant about this",
+                move || {
+                    let question = format!(
+                        "Explain this passage from the page:\n\n\u{201c}{}\u{201d}",
+                        text.chars().take(2000).collect::<String>()
+                    );
+                    let params = url::form_urlencoded::Serializer::new(String::new())
+                        .append_pair("tab", &id.to_string())
+                        .append_pair("url", &page_url)
+                        .append_pair("title", "")
+                        .append_pair("question", &question)
+                        .finish();
+                    crate::page_menu::open_popup_at(
+                        &assistant_app,
+                        id,
+                        x,
+                        y,
+                        "assistant",
+                        params,
+                        360.0,
+                        460.0,
+                    );
+                },
+            )?);
             let (link_app, text, page_url) = (app.clone(), selection.clone(), page.clone());
             if page_url.starts_with("http") {
-                entries.push(menu_command(environment, "Copy link to highlight", move || {
-                    crate::page_menu::copy_link_to_text(&link_app, id, &page_url, &text)
-                })?);
+                entries.push(menu_command(
+                    environment,
+                    "Copy link to highlight",
+                    move || crate::page_menu::copy_link_to_text(&link_app, id, &page_url, &text),
+                )?);
             }
         }
         if let Some(source) = image {
             let (ocr_app, src) = (app.clone(), source.clone());
-            entries.push(menu_command(environment, "Copy text from image", move || {
-                crate::page_menu::copy_image_text(&ocr_app, id, &src)
-            })?);
+            entries.push(menu_command(
+                environment,
+                "Copy text from image",
+                move || crate::page_menu::copy_image_text(&ocr_app, id, &src),
+            )?);
             let (lens_app, src) = (app.clone(), source.clone());
-            entries.push(menu_command(environment, "Search image with Google Lens", move || {
-                crate::page_menu::search_image(&lens_app, id, &src)
-            })?);
+            entries.push(menu_command(
+                environment,
+                "Search image with Google Lens",
+                move || crate::page_menu::search_image(&lens_app, id, &src),
+            )?);
             let (save_app, src) = (app.clone(), source.clone());
-            entries.push(menu_command(environment, "Save image to Downloads", move || {
-                crate::page_menu::save_image(&save_app, id, &src)
-            })?);
+            entries.push(menu_command(
+                environment,
+                "Save image to Downloads",
+                move || crate::page_menu::save_image(&save_app, id, &src),
+            )?);
             let (board_app, src) = (app.clone(), source);
-            entries.push(menu_command(environment, "Save image to board", move || {
-                crate::boards::save_menu_image(&board_app, id, &src)
-            })?);
+            entries.push(menu_command(
+                environment,
+                "Save image to board",
+                move || crate::boards::save_menu_image(&board_app, id, &src),
+            )?);
         }
         let items = args.MenuItems()?;
         let mut count = 0u32;
@@ -1915,17 +1970,21 @@ pub fn security_state(webview: &Webview) -> Option<serde_json::Value> {
             let Ok(core) = core(&platform) else {
                 return;
             };
-            let Ok(receiver) = (unsafe { core.GetDevToolsProtocolEventReceiver(&HSTRING::from(EVENT)) })
+            let Ok(receiver) =
+                (unsafe { core.GetDevToolsProtocolEventReceiver(&HSTRING::from(EVENT)) })
             else {
                 return;
             };
             let sender = tx.clone();
-            let handler = DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, args| {
-                if let Some(args) = args {
-                    let _ = sender.send(read_pwstr(|value| unsafe { args.ParameterObjectAsJson(value) }));
-                }
-                Ok(())
-            }));
+            let handler =
+                DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, args| {
+                    if let Some(args) = args {
+                        let _ = sender.send(read_pwstr(|value| unsafe {
+                            args.ParameterObjectAsJson(value)
+                        }));
+                    }
+                    Ok(())
+                }));
             let mut token = 0i64;
             if unsafe { receiver.add_DevToolsProtocolEventReceived(&handler, &mut token) }.is_ok() {
                 let _ = token_tx.send(token);
@@ -1939,7 +1998,8 @@ pub fn security_state(webview: &Webview) -> Option<serde_json::Value> {
     let _ = call_cdp_json(webview, "Security.disable", "{}", timeout, "security");
     let _ = webview.with_webview(move |platform| {
         if let Ok(core) = core(&platform)
-            && let Ok(receiver) = unsafe { core.GetDevToolsProtocolEventReceiver(&HSTRING::from(EVENT)) }
+            && let Ok(receiver) =
+                unsafe { core.GetDevToolsProtocolEventReceiver(&HSTRING::from(EVENT)) }
         {
             let _ = unsafe { receiver.remove_DevToolsProtocolEventReceived(token) };
         }

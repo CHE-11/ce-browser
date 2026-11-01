@@ -188,7 +188,10 @@ fn enqueue(app: &AppHandle, hosts: Vec<String>) {
             state.pending.insert(host.clone());
             state.queue.push_back(host);
         }
-        let wanted = state.queue.len().min(MAX_WORKERS.saturating_sub(state.workers));
+        let wanted = state
+            .queue
+            .len()
+            .min(MAX_WORKERS.saturating_sub(state.workers));
         state.workers += wanted;
         wanted
     };
@@ -315,7 +318,12 @@ fn icon_links(html: &str) -> Vec<String> {
         let svg = attributes
             .get("type")
             .is_some_and(|kind| kind.contains("svg"))
-            || href.to_ascii_lowercase().split(['?', '#']).next().unwrap_or("").ends_with(".svg");
+            || href
+                .to_ascii_lowercase()
+                .split(['?', '#'])
+                .next()
+                .unwrap_or("")
+                .ends_with(".svg");
         if svg {
             continue;
         }
@@ -350,7 +358,10 @@ fn parse_attributes(tag: &str) -> HashMap<String, String> {
         {
             index += 1;
         }
-        let name: String = chars[name_start..index].iter().collect::<String>().to_ascii_lowercase();
+        let name: String = chars[name_start..index]
+            .iter()
+            .collect::<String>()
+            .to_ascii_lowercase();
         while index < chars.len() && chars[index].is_whitespace() {
             index += 1;
         }

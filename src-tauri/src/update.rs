@@ -236,7 +236,12 @@ pub fn release_notes(app: &AppHandle, version: &str) -> Result<ReleaseNotes, Str
         .into_string()
         .map_err(|error| error.to_string())?;
     let body: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
-    let text = |key: &str| body.get(key).and_then(|value| value.as_str()).unwrap_or_default().to_string();
+    let text = |key: &str| {
+        body.get(key)
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
     Ok(ReleaseNotes {
         name: text("name"),
         body: text("body"),
@@ -255,11 +260,20 @@ pub fn note_version(app: &AppHandle) {
     if seen == current {
         return;
     }
-    if settings::update(app, |settings| settings.last_seen_version = current.to_string()).is_err() {
+    if settings::update(app, |settings| {
+        settings.last_seen_version = current.to_string()
+    })
+    .is_err()
+    {
         return;
     }
     if !seen.is_empty() && !tauri::is_dev() {
-        let _ = tabs::create_tab(app, Some(format!("ce://whats-new?from={seen}")), false, None);
+        let _ = tabs::create_tab(
+            app,
+            Some(format!("ce://whats-new?from={seen}")),
+            false,
+            None,
+        );
     }
 }
 

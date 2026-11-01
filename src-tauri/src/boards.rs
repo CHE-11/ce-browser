@@ -95,7 +95,10 @@ fn new_id(prefix: &str) -> String {
 
 /// Pin ids name files, so only plain letters and digits are accepted from the UI.
 fn valid_id(id: &str) -> bool {
-    !id.is_empty() && id.chars().all(|character| character.is_ascii_alphanumeric())
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
 }
 
 fn clip_text(text: &str, limit: usize) -> String {
@@ -125,7 +128,11 @@ impl BoardsSnapshot {
             }
             seen.insert(folder.id.clone())
         });
-        let folder_ids: HashSet<String> = self.folders.iter().map(|folder| folder.id.clone()).collect();
+        let folder_ids: HashSet<String> = self
+            .folders
+            .iter()
+            .map(|folder| folder.id.clone())
+            .collect();
         for folder in &mut self.folders {
             if folder
                 .parent_id
@@ -294,7 +301,11 @@ impl BoardsSnapshot {
                 Err("That board no longer exists.".into())
             };
         }
-        if let Some(last) = self.last_board_id.clone().filter(|id| self.board_exists(id)) {
+        if let Some(last) = self
+            .last_board_id
+            .clone()
+            .filter(|id| self.board_exists(id))
+        {
             return Ok(last);
         }
         if let Some(first) = self.boards.first() {
@@ -304,7 +315,11 @@ impl BoardsSnapshot {
     }
 
     fn add_pin(&mut self, pin: Pin) {
-        if let Some(board) = self.boards.iter_mut().find(|board| board.id == pin.board_id) {
+        if let Some(board) = self
+            .boards
+            .iter_mut()
+            .find(|board| board.id == pin.board_id)
+        {
             board.updated_at = pin.created_at;
         }
         self.last_board_id = Some(pin.board_id.clone());
@@ -318,7 +333,11 @@ impl BoardsSnapshot {
             .map(|board| board.name.as_str())
     }
 
-    pub fn create_folder(&mut self, name: &str, parent: Option<&str>) -> Result<BoardFolder, String> {
+    pub fn create_folder(
+        &mut self,
+        name: &str,
+        parent: Option<&str>,
+    ) -> Result<BoardFolder, String> {
         self.check_folder(parent)?;
         let folder = BoardFolder {
             id: new_id("f"),
@@ -363,12 +382,21 @@ impl BoardsSnapshot {
         let boards: HashSet<String> = self
             .boards
             .iter()
-            .filter(|board| board.folder_id.as_ref().is_some_and(|folder| folders.contains(folder)))
+            .filter(|board| {
+                board
+                    .folder_id
+                    .as_ref()
+                    .is_some_and(|folder| folders.contains(folder))
+            })
             .map(|board| board.id.clone())
             .collect();
         self.folders.retain(|folder| !folders.contains(&folder.id));
         self.boards.retain(|board| !boards.contains(&board.id));
-        if self.last_board_id.as_ref().is_some_and(|board| boards.contains(board)) {
+        if self
+            .last_board_id
+            .as_ref()
+            .is_some_and(|board| boards.contains(board))
+        {
             self.last_board_id = None;
         }
         Ok(self.remove_pins_where(|pin| boards.contains(&pin.board_id)))
@@ -410,7 +438,11 @@ impl BoardsSnapshot {
 
     pub fn set_cover(&mut self, id: &str, pin: Option<&str>) -> Result<(), String> {
         if let Some(pin) = pin {
-            if !self.pins.iter().any(|item| item.id == pin && item.board_id == id) {
+            if !self
+                .pins
+                .iter()
+                .any(|item| item.id == pin && item.board_id == id)
+            {
                 return Err("That pin is not on this board.".into());
             }
         }
@@ -481,7 +513,11 @@ impl BoardsSnapshot {
             }
         });
         for board in &mut self.boards {
-            if board.cover_pin_id.as_ref().is_some_and(|pin| removed.contains(pin)) {
+            if board
+                .cover_pin_id
+                .as_ref()
+                .is_some_and(|pin| removed.contains(pin))
+            {
                 board.cover_pin_id = None;
             }
         }
@@ -549,7 +585,11 @@ fn remove_images(app: &AppHandle, ids: &[String]) {
     }
 }
 
-pub fn create_folder(app: &AppHandle, name: &str, parent: Option<&str>) -> Result<BoardFolder, String> {
+pub fn create_folder(
+    app: &AppHandle,
+    name: &str,
+    parent: Option<&str>,
+) -> Result<BoardFolder, String> {
     change(app, |boards| boards.create_folder(name, parent))
 }
 
@@ -610,10 +650,12 @@ pub fn thumbnail_jpeg(image: &RgbaImage) -> Result<Vec<u8>, String> {
     let width = width.max(1);
     let target_width = width.min(THUMB_WIDTH);
     let scale = f64::from(target_width) / f64::from(width);
-    let crop_height = ((f64::from(THUMB_MAX_HEIGHT) / scale).floor() as u32).clamp(1, height.max(1));
+    let crop_height =
+        ((f64::from(THUMB_MAX_HEIGHT) / scale).floor() as u32).clamp(1, height.max(1));
     let cropped = image::imageops::crop_imm(image, 0, 0, width, crop_height).to_image();
     let target_height = ((f64::from(crop_height) * scale).round() as u32).max(1);
-    let resized = image::imageops::resize(&cropped, target_width, target_height, FilterType::Triangle);
+    let resized =
+        image::imageops::resize(&cropped, target_width, target_height, FilterType::Triangle);
     let flat = RgbImage::from_fn(resized.width(), resized.height(), |x, y| {
         let Rgba([red, green, blue, alpha]) = *resized.get_pixel(x, y);
         let alpha = u32::from(alpha);
@@ -629,9 +671,11 @@ pub fn thumbnail_jpeg(image: &RgbaImage) -> Result<Vec<u8>, String> {
 
 fn write_image(app: &AppHandle, id: &str, image: &RgbaImage) -> Result<(), String> {
     let dir = image_dir(app);
-    fs::create_dir_all(&dir).map_err(|error| format!("Couldn't create {}. {error}", dir.display()))?;
+    fs::create_dir_all(&dir)
+        .map_err(|error| format!("Couldn't create {}. {error}", dir.display()))?;
     let png = capture::encode_png(image)?;
-    fs::write(image_path(app, id), png).map_err(|error| format!("Couldn't save the image. {error}"))?;
+    fs::write(image_path(app, id), png)
+        .map_err(|error| format!("Couldn't save the image. {error}"))?;
     fs::write(thumb_path(app, id), thumbnail_jpeg(image)?)
         .map_err(|error| format!("Couldn't save the thumbnail. {error}"))
 }
@@ -644,7 +688,12 @@ struct PinDraft {
     text: String,
 }
 
-fn save_pin(app: &AppHandle, board_id: &str, draft: PinDraft, image: Option<&RgbaImage>) -> Result<Pin, String> {
+fn save_pin(
+    app: &AppHandle,
+    board_id: &str,
+    draft: PinDraft,
+    image: Option<&RgbaImage>,
+) -> Result<Pin, String> {
     let id = new_id("p");
     if let Some(image) = image {
         if let Err(error) = write_image(app, &id, image) {
@@ -732,7 +781,12 @@ pub fn pin_region(app: &AppHandle, id: u32, board_id: &str) -> Result<Pin, Strin
 pub fn pin_element(app: &AppHandle, id: u32, board_id: &str) -> Result<Pin, String> {
     let (title, url) = tab_page(app, id);
     let webview = tabs::page_view(app, id).ok_or("This page is not loaded yet.")?;
-    let value = webview2::evaluate(&webview, ELEMENT_SCRIPT, Duration::from_secs(150), PICK_FAILURE)?;
+    let value = webview2::evaluate(
+        &webview,
+        ELEMENT_SCRIPT,
+        Duration::from_secs(150),
+        PICK_FAILURE,
+    )?;
     let number = |key: &str| value.get(key).and_then(|item| item.as_f64());
     let (Some(x), Some(y), Some(width), Some(height)) =
         (number("x"), number("y"), number("width"), number("height"))
@@ -761,7 +815,11 @@ pub fn pin_link(app: &AppHandle, id: u32, board_id: &str) -> Result<Pin, String>
     let value = webview2::evaluate(&webview, LINK_SCRIPT, Duration::from_secs(10), PICK_FAILURE)?;
     let preview = text_of(&value, "image");
     let image = (!preview.is_empty())
-        .then(|| page_menu::image_bytes(&preview).and_then(|bytes| decode_image(&bytes)).ok())
+        .then(|| {
+            page_menu::image_bytes(&preview)
+                .and_then(|bytes| decode_image(&bytes))
+                .ok()
+        })
         .flatten();
     let image = match image {
         Some(image) => image,
@@ -780,7 +838,12 @@ pub fn pin_link(app: &AppHandle, id: u32, board_id: &str) -> Result<Pin, String>
 }
 
 /// Downloads each image and pins it. Fails only when none could be saved.
-pub fn pin_images(app: &AppHandle, id: u32, board_id: &str, urls: &[String]) -> Result<Vec<Pin>, String> {
+pub fn pin_images(
+    app: &AppHandle,
+    id: u32,
+    board_id: &str,
+    urls: &[String],
+) -> Result<Vec<Pin>, String> {
     let (title, url) = tab_page(app, id);
     let mut seen = HashSet::new();
     let mut board = board_id.to_string();
@@ -859,7 +922,9 @@ pub fn thumbnails(app: &AppHandle, ids: &[String]) -> HashMap<String, String> {
         let path = thumb_path(app, id);
         let bytes = fs::read(&path).ok().or_else(|| {
             let png = fs::read(image_path(app, id)).ok()?;
-            let image = image::load_from_memory_with_format(&png, ImageFormat::Png).ok()?.to_rgba8();
+            let image = image::load_from_memory_with_format(&png, ImageFormat::Png)
+                .ok()?
+                .to_rgba8();
             let jpeg = thumbnail_jpeg(&image).ok()?;
             let _ = fs::write(&path, &jpeg);
             Some(jpeg)
@@ -1040,9 +1105,13 @@ mod tests {
     fn sample() -> BoardsSnapshot {
         let mut boards = BoardsSnapshot::default();
         let outer = boards.create_folder("Outer", None).expect("outer");
-        let inner = boards.create_folder("Inner", Some(&outer.id)).expect("inner");
+        let inner = boards
+            .create_folder("Inner", Some(&outer.id))
+            .expect("inner");
         let kept = boards.create_board("Kept", None).expect("kept");
-        let nested = boards.create_board("Nested", Some(&inner.id)).expect("nested");
+        let nested = boards
+            .create_board("Nested", Some(&inner.id))
+            .expect("nested");
         for (id, board) in [("p1", &kept.id), ("p2", &nested.id), ("p3", &nested.id)] {
             boards.add_pin(Pin {
                 id: id.into(),
@@ -1081,14 +1150,45 @@ mod tests {
     #[test]
     fn loading_repairs_missing_references() {
         let mut boards = BoardsSnapshot::default();
-        boards.folders.push(BoardFolder { id: "a".into(), name: "A".into(), parent_id: Some("b".into()), created_at: 0 });
-        boards.folders.push(BoardFolder { id: "b".into(), name: "B".into(), parent_id: Some("a".into()), created_at: 0 });
-        boards.folders.push(BoardFolder { id: "c".into(), name: "C".into(), parent_id: Some("gone".into()), created_at: 0 });
-        boards.boards.push(Board { id: "x".into(), name: "X".into(), folder_id: Some("gone".into()), ..Board::default() });
-        boards.pins.push(Pin { id: "p".into(), board_id: "gone".into(), kind: "hologram".into(), ..Pin::default() });
+        boards.folders.push(BoardFolder {
+            id: "a".into(),
+            name: "A".into(),
+            parent_id: Some("b".into()),
+            created_at: 0,
+        });
+        boards.folders.push(BoardFolder {
+            id: "b".into(),
+            name: "B".into(),
+            parent_id: Some("a".into()),
+            created_at: 0,
+        });
+        boards.folders.push(BoardFolder {
+            id: "c".into(),
+            name: "C".into(),
+            parent_id: Some("gone".into()),
+            created_at: 0,
+        });
+        boards.boards.push(Board {
+            id: "x".into(),
+            name: "X".into(),
+            folder_id: Some("gone".into()),
+            ..Board::default()
+        });
+        boards.pins.push(Pin {
+            id: "p".into(),
+            board_id: "gone".into(),
+            kind: "hologram".into(),
+            ..Pin::default()
+        });
         boards.last_board_id = Some("gone".into());
         let boards = boards.normalize();
-        let parent = |id: &str| boards.folders.iter().find(|folder| folder.id == id).and_then(|folder| folder.parent_id.clone());
+        let parent = |id: &str| {
+            boards
+                .folders
+                .iter()
+                .find(|folder| folder.id == id)
+                .and_then(|folder| folder.parent_id.clone())
+        };
         assert!(parent("a").is_none() || parent("b").is_none());
         assert_eq!(parent("c"), None);
         assert_eq!(boards.boards[0].folder_id, None);

@@ -50,7 +50,10 @@ fn text(value: &serde_json::Value, path: &str) -> String {
 }
 
 fn number(value: &serde_json::Value, path: &str) -> f64 {
-    value.pointer(path).and_then(|value| value.as_f64()).unwrap_or(0.0)
+    value
+        .pointer(path)
+        .and_then(|value| value.as_f64())
+        .unwrap_or(0.0)
 }
 
 /// Reads the DevTools security state into the fields the panel shows.
@@ -93,7 +96,8 @@ pub fn site_info(app: &AppHandle, id: u32) -> Result<SiteInfo, String> {
         });
     };
     let webview = tabs::page_view(app, id);
-    let (mut security, certificate) = match webview.as_ref().filter(|_| url.starts_with("https://")) {
+    let (mut security, certificate) = match webview.as_ref().filter(|_| url.starts_with("https://"))
+    {
         Some(webview) => webview2::security_state(webview)
             .map(|state| certificate_from(&state))
             .unwrap_or_else(|| ("unknown".into(), None)),

@@ -10,6 +10,7 @@ import { useSettings } from "@/lib/use-browser";
 import { SETTINGS_INDEX } from "./settings-index";
 import { AdBlockSection } from "./AdBlockSection";
 import { AppearanceSection } from "./AppearanceSection";
+import { BookmarksSection } from "./BookmarksSection";
 import { DownloadsSection } from "./DownloadsSection";
 import { PrivacySection } from "./PrivacySection";
 import { ProfilesSection } from "./ProfilesSection";
@@ -212,6 +213,7 @@ export function SettingsPage() {
           <PrivacySection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <AdBlockSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <AppearanceSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          <BookmarksSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <ToolsSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <SystemSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <SyncSection

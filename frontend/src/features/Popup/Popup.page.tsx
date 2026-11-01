@@ -1,9 +1,9 @@
-import { useEffect } from "react";
+import { useContext, useEffect, useRef } from "react";
 import { AppMenu } from "@components/AppMenu";
 import { StatusPopover } from "@/components/StatusPopover";
 import { Toast } from "@/components/Toast";
-import { PopupAppearanceContext, usePopupPainted } from "@lib/popup-ready";
-import { useAppearanceState } from "@lib/use-browser";
+import { PopupAppearanceContext, PopupGenerationContext, readPopupGeneration, usePopupHostReady, usePopupPainted } from "@lib/popup-ready";
+import { useAppearanceState, useBookmarksState, useExtensions, useTabs } from "@lib/use-browser";
 import { AddressBarEllipsisMenu } from "@/components/TabsAddressAndBookmarks/Addressbar/AddressBarEllipsisMenu";
 import { ExtensionPinMenu } from "@/components/TabsAddressAndBookmarks/Addressbar/ExtensionPinMenu";
 import { BookmarkAdd } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarkAdd";
@@ -49,6 +49,9 @@ type PopupPageProps = {
 
 export function PopupPage({ popup, params }: PopupPageProps) {
   const { loaded } = useAppearanceState();
+  useBookmarksState();
+  useTabs();
+  useExtensions();
 
   useEffect(() => {
     document.title = `ce-browser ${popup}`;
@@ -56,8 +59,27 @@ export function PopupPage({ popup, params }: PopupPageProps) {
 
   return (
     <PopupAppearanceContext.Provider value={loaded}>
-      <PopupContent popup={popup} params={params} />
+      {popup === "ready" ? (
+        <PopupStandby />
+      ) : (
+        <MountedPopup key={`${popup}?${params.toString()}`} popup={popup} params={params} />
+      )}
     </PopupAppearanceContext.Provider>
+  );
+}
+
+function PopupStandby() {
+  const appearanceReady = useContext(PopupAppearanceContext);
+  usePopupHostReady(appearanceReady);
+  return null;
+}
+
+function MountedPopup({ popup, params }: PopupPageProps) {
+  const generation = useRef(readPopupGeneration()).current;
+  return (
+    <PopupGenerationContext.Provider value={generation}>
+      <PopupContent popup={popup} params={params} />
+    </PopupGenerationContext.Provider>
   );
 }
 

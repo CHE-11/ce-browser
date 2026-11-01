@@ -148,7 +148,11 @@ pub fn resolve_input(app: &AppHandle, input: &str, search_url: &str) -> Url {
         return internal_url(app, page);
     }
     // `?` in front always searches, even for text that looks like an address.
-    if let Some(query) = text.strip_prefix('?').map(str::trim).filter(|query| !query.is_empty()) {
+    if let Some(query) = text
+        .strip_prefix('?')
+        .map(str::trim)
+        .filter(|query| !query.is_empty())
+    {
         return search(search_url, query);
     }
     let has_scheme = [
@@ -287,8 +291,7 @@ fn pin_parts(raw: &str) -> Option<PinParts> {
 }
 
 fn schemes_match(left: &str, right: &str) -> bool {
-    left == right
-        || (matches!(left, "http" | "https") && matches!(right, "http" | "https"))
+    left == right || (matches!(left, "http" | "https") && matches!(right, "http" | "https"))
 }
 
 fn default_port(parts: &PinParts) -> bool {
@@ -316,8 +319,7 @@ fn paths_align(left: &str, right: &str) -> bool {
     } else {
         (right, left)
     };
-    longer.starts_with(shorter)
-        && (shorter.is_empty() || longer[shorter.len()..].starts_with('/'))
+    longer.starts_with(shorter) && (shorter.is_empty() || longer[shorter.len()..].starts_with('/'))
 }
 
 /// A saved pin and an open tab are the same slot. A redirect, `www`, or a path under the pin still matches.
@@ -391,9 +393,7 @@ pub fn match_pins(pins: &[String], open: &[(&str, bool)]) -> Vec<PinMatch> {
             .iter()
             .enumerate()
             .filter(|(at, (url, _))| !claimed[*at] && same_pin(&pins[index], url))
-            .min_by_key(|(at, (url, pinned))| {
-                (!pinned, pin_specificity(url).abs_diff(wanted), *at)
-            })
+            .min_by_key(|(at, (url, pinned))| (!pinned, pin_specificity(url).abs_diff(wanted), *at))
             .map(|(at, _)| at);
         if let Some(at) = best {
             claimed[at] = true;
@@ -536,14 +536,17 @@ mod tests {
     fn a_navigated_pin_still_matches_the_saved_url() {
         assert!(same_pin("https://a.example", "https://a.example/inbox"));
         assert!(same_pin("https://a.example", "https://www.a.example/"));
-        assert!(same_pin("http://a.example/mail", "https://a.example/mail/u/0"));
-        assert!(same_pin("ce://bookmarks", "ce://bookmarks"));
-        assert!(!same_pin("https://a.example/mail", "https://a.example/mailbox"));
-        assert!(!same_pin("ce://bookmarks", "ce://history"));
-        assert!(same_pin_page(
-            "https://www.a.example/",
-            "https://a.example"
+        assert!(same_pin(
+            "http://a.example/mail",
+            "https://a.example/mail/u/0"
         ));
+        assert!(same_pin("ce://bookmarks", "ce://bookmarks"));
+        assert!(!same_pin(
+            "https://a.example/mail",
+            "https://a.example/mailbox"
+        ));
+        assert!(!same_pin("ce://bookmarks", "ce://history"));
+        assert!(same_pin_page("https://www.a.example/", "https://a.example"));
         assert!(!same_pin_page(
             "https://a.example",
             "https://a.example/inbox"
@@ -566,10 +569,7 @@ mod tests {
             vec![PinMatch::Open(1), PinMatch::Open(0)]
         );
         let loose = [("https://app.example/auth/login", false)];
-        assert_eq!(
-            match_pins(&pins[..1], &loose),
-            vec![PinMatch::Missing]
-        );
+        assert_eq!(match_pins(&pins[..1], &loose), vec![PinMatch::Missing]);
     }
 
     #[test]
