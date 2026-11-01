@@ -10,6 +10,7 @@ import { onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
 import { splitToolbar, toolbarPinned } from "@/lib/toolbar-pin";
 import { useTabs, useBookmarks, useDownloads, useHistory, useExtensions, useAppearanceFromSettings } from "@/lib/use-browser";
 import { useRef, useState, useEffect, useLayoutEffect } from "react";
+import type { PopupKind } from "@type/browser";
 
 
 export function BrowserPage() {
@@ -39,20 +40,41 @@ export function BrowserPage() {
   }, [activeTab]);
 
   useEffect(() => {
+    const centered = (kind: PopupKind, width: number, height: number, params = "") =>
+      void openPopup({
+        kind,
+        params,
+        focus: true,
+        x: Math.max(8, (window.innerWidth - width) / 2),
+        y: 52,
+        width,
+        height: Math.min(height, window.innerHeight - 60),
+      });
     const unlisten = onBrowserCommand((command) => {
-      if (command === "find") {
-        setFindToken((token) => (token ?? 0) + 1);
-      }
-      if (command === "palette") {
-        const width = 560;
-        void openPopup({
-          kind: "command-palette",
-          focus: true,
-          x: Math.max(8, (window.innerWidth - width) / 2),
-          y: 52,
-          width,
-          height: 420,
-        });
+      switch (command) {
+        case "find":
+          setFindToken((token) => (token ?? 0) + 1);
+          break;
+        case "palette":
+          centered("command-palette", 560, 420);
+          break;
+        case "tab-search":
+          centered("tab-search", 520, 480);
+          break;
+        case "tab-switcher":
+        case "tab-switcher-back": {
+          const width = Math.min(760, window.innerWidth - 32);
+          void openPopup({
+            kind: "tab-switcher",
+            params: `step=${command === "tab-switcher" ? 1 : -1}`,
+            focus: true,
+            x: Math.max(8, (window.innerWidth - width) / 2),
+            y: Math.max(52, window.innerHeight / 2 - 220),
+            width,
+            height: 440,
+          });
+          break;
+        }
       }
     });
     return () => {

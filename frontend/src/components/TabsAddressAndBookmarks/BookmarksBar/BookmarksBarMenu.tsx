@@ -1,6 +1,6 @@
 import { PopupMenu, PopupMenuItem, PopupMenuSeparator, PopupFrame } from "@/components/PopupFrame";
-import { openPopup, addBookmark, closePopup, deleteBookmark } from "@/lib/browser-client";
-import { FolderPlus, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
+import { openPopup, addBookmark, closePopup, deleteBookmark, openFolderAsGroup } from "@/lib/browser-client";
+import { FolderPlus, Group, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
 
 type DividerOrientation = "vertical" | "horizontal";
 
@@ -74,6 +74,17 @@ export function BookmarksBarMenuItems({ idPrefix, parentId, divider, x, y, targe
         label={vertical ? "Add vertical divider" : "Add horizontal divider"}
         onClick={addDivider}
       />
+      {target?.kind === "folder" ? (
+        <>
+          <PopupMenuSeparator id={`${idPrefix}-group-separator`} />
+          <PopupMenuItem
+            id={`${idPrefix}-open-group`}
+            icon={<Group />}
+            label="Open all as a tab group"
+            onClick={() => void openFolderAsGroup(target.id).finally(onDone)}
+          />
+        </>
+      ) : null}
       {canDelete && target ? (
         <>
           <PopupMenuSeparator id={`${idPrefix}-delete-separator`} />

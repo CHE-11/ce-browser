@@ -6,6 +6,7 @@ import { accentTint } from "@/lib/accent";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { useSettings } from "@/lib/use-browser";
+import { hoverTab, leaveTab } from "@/lib/tab-hover";
 import { groupColorClasses } from "@/lib/tab-rows";
 import { TabInfo } from "@type/browser";
 
@@ -83,14 +84,16 @@ export function TabItem({
       id={domId}
       role="tab"
       aria-selected={selected}
-      title={`${tab.title}\n${tab.url}${tab.sleeping ? "\nSleeping" : ""}`}
+      aria-label={`${tab.title || tab.url}${tab.sleeping ? ", asleep" : ""}${tab.audible ? ", playing sound" : ""}`}
       draggable
       tabIndex={0}
+      onMouseEnter={(event) => hoverTab(tab.id, event.currentTarget, vertical)}
+      onMouseLeave={() => leaveTab()}
       className={cn(
         "group relative flex shrink-0 cursor-default select-none items-center gap-2 text-xs transition-colors",
         focusRing,
         vertical ? "h-8 w-full rounded-lg px-2" : "h-7.5 rounded-t-lg px-2.5",
-        !vertical && (compact ? "w-10 justify-center px-0" : "w-56 min-w-14 shrink"),
+        !vertical && (compact ? "w-10 justify-center px-0" : "w-56 min-w-[88px] shrink"),
         vertical && compact && "w-9 justify-center px-0",
         active ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200",
         !vertical && active && "bg-zinc-900",
@@ -101,15 +104,17 @@ export function TabItem({
         split === "left" && (vertical ? "rounded-b-none" : "rounded-tr-none"),
         split === "right" && (vertical ? "rounded-t-none" : "rounded-tl-none"),
       )}
-      style={
-        accent
+      style={{
+        viewTransitionName: `tab-${tab.id}`,
+        ...(accent
           ? {
               backgroundColor: active ? accentTint(accent, 0.28) : undefined,
               boxShadow: vertical ? `inset 3px 0 0 ${accent}` : `inset 0 2px 0 ${accent}`,
             }
-          : undefined
-      }
+          : null),
+      }}
       onMouseDown={(event) => {
+        leaveTab(true);
         if (event.button !== 0) {
           return;
         }

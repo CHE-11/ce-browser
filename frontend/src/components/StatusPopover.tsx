@@ -28,7 +28,9 @@ export function StatusPopover() {
 
   const page = status?.pages.find((item) => item.id === activeTab?.id);
   const extra = status && page?.shown ? Math.max(0, now - status.receivedAt) : 0;
-  const asleep = snapshot.tabs.filter((tab) => tab.sleeping).length;
+  const sleepingTabs = snapshot.windowTabs.filter((tab) => tab.sleeping);
+  const asleep = sleepingTabs.length;
+  const sleepSaved = sleepingTabs.reduce((sum, tab) => sum + (tab.sleepSaved || 0), 0);
   const accent = settings?.siteAccent && activeTab?.accent ? activeTab.accent : undefined;
   const version = status?.version ?? "";
   const sessionMs = status ? Math.max(0, now - status.startedAt) : null;
@@ -104,6 +106,14 @@ export function StatusPopover() {
                 : "Renderer working set for this page."
           }
         />
+        {asleep > 0 ? (
+          <StatRow
+            id="status-popover-sleep-saved"
+            label={`Sleeping tabs (${asleep})`}
+            value={sleepSaved > 0 ? `about ${formatBytes(sleepSaved)} saved` : "—"}
+            hint="What those tabs used just before they went to sleep"
+          />
+        ) : null}
       </section>
       <section id="status-popover-time" className="mx-4 mb-3 rounded-lg bg-zinc-950/70 px-3 py-1">
         <h3 id="status-popover-time-title" className="pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-zinc-500">
@@ -123,7 +133,7 @@ export function StatusPopover() {
           ) : null}
           {asleep > 0 ? (
             <Flag id="status-popover-sleeping" title="Tabs suspended in the background">
-              {asleep} asleep
+              {asleep} asleep{sleepSaved > 0 ? `, ${formatBytes(sleepSaved)} saved` : ""}
             </Flag>
           ) : null}
           {downloading ? (

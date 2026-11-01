@@ -242,6 +242,32 @@ fn publish(app: &AppHandle, targets: &[tabs::StatusPageTarget], open: &[(u32, St
     );
 }
 
+/// Renderer processes that host tab `id`'s page. Waits on the main thread.
+pub fn renderer_pids(app: &AppHandle, id: u32) -> Vec<u32> {
+    let Some(url) = tabs::tab_page_url(app, id) else {
+        return Vec::new();
+    };
+    let Some(webview) = tabs::page_view(app, id) else {
+        return Vec::new();
+    };
+    let frames = webview2::renderer_frames(&webview);
+    pids_for(&frames, &page_candidates(app, &url))
+}
+
+/// Memory one tab uses now: its renderer working set, or its JavaScript heap when the
+/// renderer can't be matched. Waits on the main thread, so call it from a worker thread.
+pub fn tab_memory(app: &AppHandle, id: u32) -> Option<u64> {
+    let pids = renderer_pids(app, id);
+    if !pids.is_empty() {
+        let bytes = sum_working_set(&pids);
+        if bytes > 0 {
+            return Some(bytes);
+        }
+    }
+    let webview = tabs::page_view(app, id)?;
+    webview2::js_heap_used(&webview)
+}
+
 fn started_at_ms() -> u64 {
     STARTED
         .duration_since(UNIX_EPOCH)

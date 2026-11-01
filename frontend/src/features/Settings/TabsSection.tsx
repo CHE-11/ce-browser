@@ -6,12 +6,16 @@ import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
 import { cn } from "@/lib/cn";
 import { SETTINGS_SECTIONS } from "./settings-sections";
-import { inputClass, matchesQuery, Row, Section, useReportMatch, useSettingVisible, type SettingsSectionProps } from "./SettingsControls";
+import { inputClass, matchesQuery, Row, Section, Segmented, useReportMatch, useSettingVisible, type SettingsSectionProps } from "./SettingsControls";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-tabs")!;
 
 const LAYOUT_LABEL = "Tab layout";
 const LAYOUT_HINT = "Vertical tabs sit in a sidebar left of the page.";
+const CYCLE_LABEL = "Ctrl+Tab order";
+const CYCLE_HINT = "Recently used goes to the tab you used last, then the one before it.";
+const SWITCHER_LABEL = "Show the tab switcher";
+const SWITCHER_HINT = "With recently used order, Ctrl+Tab shows thumbnails until you let go of Ctrl.";
 const PEEK_LABEL = "Shift+click opens links in a peek";
 const PEEK_HINT = "A peek shows the page over the current tab. Esc closes it.";
 const MUTE_LABEL = "Mute tabs in the background";
@@ -40,6 +44,11 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
     LAYOUT_HINT,
     "horizontal",
     "vertical",
+    CYCLE_LABEL,
+    CYCLE_HINT,
+    SWITCHER_LABEL,
+    SWITCHER_HINT,
+    "ctrl+tab",
     PEEK_LABEL,
     PEEK_HINT,
     MUTE_LABEL,
@@ -76,23 +85,36 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
   return (
     <Section id={section.id} title={section.title}>
       <Row id="settings-tab-layout" label={LAYOUT_LABEL} hint={LAYOUT_HINT} search={["horizontal", "vertical"]}>
-        <div id="settings-tab-layout-options" className="flex rounded-md border border-zinc-700 p-0.5">
-          {(["horizontal", "vertical"] as const).map((layout) => (
-            <button
-              key={layout}
-              id={`settings-tab-layout-${layout}`}
-              type="button"
-              aria-pressed={settings.tabLayout === layout}
-              className={cn(
-                "rounded px-3 py-1 text-xs capitalize text-zinc-400 transition-colors hover:text-zinc-100",
-                settings.tabLayout === layout && "bg-zinc-700 text-zinc-100",
-              )}
-              onClick={() => onUpdate({ tabLayout: layout })}
-            >
-              {layout}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          id="settings-tab-layout-options"
+          label={LAYOUT_LABEL}
+          value={settings.tabLayout}
+          options={[
+            { value: "horizontal", label: "Horizontal" },
+            { value: "vertical", label: "Vertical" },
+          ]}
+          onChange={(tabLayout) => onUpdate({ tabLayout })}
+        />
+      </Row>
+      <Row id="settings-tab-cycle" label={CYCLE_LABEL} hint={CYCLE_HINT} search={["ctrl+tab", "recent", "strip order"]}>
+        <Segmented
+          id="settings-tab-cycle-options"
+          label={CYCLE_LABEL}
+          value={settings.tabCycleOrder}
+          options={[
+            { value: "strip", label: "Strip order" },
+            { value: "recent", label: "Recently used" },
+          ]}
+          onChange={(tabCycleOrder) => onUpdate({ tabCycleOrder })}
+        />
+      </Row>
+      <Row id="settings-tab-switcher" label={SWITCHER_LABEL} hint={SWITCHER_HINT} search={["thumbnails", "overlay"]}>
+        <Toggle
+          id="settings-tab-switcher-toggle"
+          checked={settings.tabSwitcher}
+          disabled={settings.tabCycleOrder !== "recent"}
+          onChange={(tabSwitcher) => onUpdate({ tabSwitcher })}
+        />
       </Row>
       <Row id="settings-peek" label={PEEK_LABEL} hint={PEEK_HINT}>
         <Toggle id="settings-peek-toggle" checked={settings.peekOnShiftClick} onChange={(value) => onUpdate({ peekOnShiftClick: value })} />

@@ -104,8 +104,23 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
         Action::NewTab => tabs::create_tab(app, None, false, None).map(|_| ()),
         Action::CloseTab => tabs::close_selected(app),
         Action::ReopenTab => tabs::reopen_closed(app).map(|_| ()),
-        Action::NextTab => tabs::cycle(app, 1),
-        Action::PreviousTab => tabs::cycle(app, -1),
+        Action::NextTab | Action::PreviousTab => {
+            let step = if action == Action::NextTab { 1 } else { -1 };
+            let settings = settings::get(app);
+            if settings.tab_cycle_order != "recent" {
+                return tabs::cycle(app, step);
+            }
+            if !settings.tab_switcher {
+                return tabs::cycle_recent(app, step);
+            }
+            if tabs::popup_kind(app, &window).as_deref() == Some("tab-switcher") {
+                tabs::emit_to_popup(app, &window, "tab-switcher-step", step);
+            } else {
+                let command = if step > 0 { "tab-switcher" } else { "tab-switcher-back" };
+                tabs::send_command(app, &window, command);
+            }
+            Ok(())
+        }
         Action::SelectTab(index) => tabs::select_index(app, Some(index)),
         Action::LastTab => tabs::select_index(app, None),
         Action::FocusAddress => {

@@ -41,6 +41,8 @@ export type TabInfo = {
   progress: number;
   /** Why the page can't be shown. The browser UI draws this in place of the page. */
   failure: TabFailure | null;
+  /** Bytes the page used just before it went to sleep. Zero while awake or when unknown. */
+  sleepSaved: number;
 };
 
 export type TabFailureKind = "crashed" | "offline" | "dns" | "certificate" | "timeout" | "refused" | "other";
@@ -284,7 +286,8 @@ export type BrowserCommand =
   | "palette"
   | "tab-search"
   | "shortcut-sheet"
-  | "tab-switcher";
+  | "tab-switcher"
+  | "tab-switcher-back";
 
 export type PopupKind =
   | "downloads"
@@ -532,6 +535,10 @@ export type BrowserSettings = {
   mouseGestures: boolean;
   /** Save page text on this computer so history search can match words from the page. */
   indexPageText: boolean;
+  /** Ctrl+Tab order: `strip` follows the tab strip, `recent` goes to the last used tab first. */
+  tabCycleOrder: "strip" | "recent";
+  /** In recent order, Ctrl+Tab shows a switcher with thumbnails until Ctrl is released. */
+  tabSwitcher: boolean;
 };
 
 /** One on-screen page in a status snapshot. */

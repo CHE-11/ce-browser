@@ -3,12 +3,12 @@ import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components
 import { Dialog } from "@/components/Dialog";
 import { FavIcon } from "@/components/FavIcon";
 import { IconButton } from "@/components/IconButton";
-import { deleteBookmark, moveBookmark, createTab, importBookmarksHtml, exportBookmarksHtml, updateBookmark, addBookmark, checkBookmarkHealth, onBookmarkHealth } from "@/lib/browser-client";
+import { deleteBookmark, deleteBookmarks, moveBookmark, createTab, importBookmarksHtml, exportBookmarksHtml, updateBookmark, addBookmark, checkBookmarkHealth, onBookmarkHealth, openFolderAsGroup } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { hostOf } from "@/lib/format";
 import { useRoute } from "@/lib/route";
 import { BookmarkDropPlace, useAppearanceFromSettings, useBookmarks, findFolder, bookmarkRootsOf, bookmarkContains, BOOKMARK_DRAG_TYPE, bookmarkDropPlace, findBookmarkParent, listFolders } from "@/lib/use-browser";
-import { ChevronRight, Search, LayoutGrid, List, Type, Upload, Download, Plus, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Pencil, Link2 } from "lucide-react";
+import { ChevronRight, Search, LayoutGrid, List, Type, Upload, Download, Plus, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, Link2 } from "lucide-react";
 import { useRef, useState, useEffect, useMemo, useCallback, type DragEvent, type MouseEvent } from "react";
 import { BookmarkHealthProgress, BookmarkHealthReport, BookmarkNode, BookmarkTree } from "../../../../types/browser";
 
@@ -186,9 +186,7 @@ export function BookmarksPage() {
   const removeIds = async (ids: string[]) => {
     const targets = bookmarkRootsOf(tree, orderedIds(ids));
     try {
-      for (const id of targets) {
-        await deleteBookmark(id);
-      }
+      await deleteBookmarks(targets);
       setPicked([]);
       setStatus(null);
     } catch (reason: unknown) {
@@ -528,16 +526,27 @@ export function BookmarksPage() {
               />
             </>
           ) : bulkMenu ? null : (
-            <ContextMenuItem
-              id="bookmarks-menu-open-folder"
-              icon={<Folder />}
-              label="Open folder"
-              onClick={() => {
-                setSelectedId(menu.node.id);
-                setQuery("");
-                closeMenu();
-              }}
-            />
+            <>
+              <ContextMenuItem
+                id="bookmarks-menu-open-folder"
+                icon={<Folder />}
+                label="Open folder"
+                onClick={() => {
+                  setSelectedId(menu.node.id);
+                  setQuery("");
+                  closeMenu();
+                }}
+              />
+              <ContextMenuItem
+                id="bookmarks-menu-open-group"
+                icon={<Group />}
+                label="Open all as a tab group"
+                onClick={() => {
+                  void openFolderAsGroup(menu.node.id);
+                  closeMenu();
+                }}
+              />
+            </>
           )}
           {bulkMenu || menu.node.separator ? null : (
             <>

@@ -79,6 +79,8 @@ pub struct TabInfo {
     pub progress: u8,
     /// Why the page can't be shown. The browser UI draws this in place of the page.
     pub failure: Option<TabFailure>,
+    /// Bytes the page used just before it went to sleep. Zero while awake or when unknown.
+    pub sleep_saved: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -1034,6 +1036,7 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                     last_active: 0,
                     progress: 0,
                     failure: None,
+                    sleep_saved: 0,
                 },
                 pending_url: Some(tab.url.clone()),
                 webview: None,
@@ -2047,6 +2050,7 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
                 if tab.hidden || tab.info.sleeping {
                     tab.hidden = false;
                     tab.info.sleeping = false;
+                    tab.info.sleep_saved = 0;
                     wake.push(label.clone());
                 }
             }
@@ -2784,6 +2788,82 @@ pub fn cycle(app: &AppHandle, step: isize) -> Result<(), String> {
     match next {
         Some(id) => activate(app, id),
         None => Ok(()),
+    }
+}
+
+/// Presses of Ctrl+Tab this close together walk one frozen most-recent-first list, so holding
+/// Ctrl and tapping Tab reaches older tabs instead of bouncing between the last two.
+const RECENT_CYCLE_WINDOW: Duration = Duration::from_millis(1500);
+
+struct RecentCycle {
+    window: String,
+    order: Vec<u32>,
+    index: usize,
+    at: Instant,
+}
+
+static RECENT_CYCLE: Mutex<Option<RecentCycle>> = Mutex::new(None);
+
+/// The window's current strip, most recently selected first.
+pub fn recent_order(app: &AppHandle, window: &str) -> Vec<u32> {
+    with_state(app, |state| {
+        let active = state.active_of(window);
+        let mut tabs: Vec<(u32, u64)> = state
+            .strip_indexes(window)
+            .into_iter()
+            .map(|index| (state.tabs[index].info.id, state.tabs[index].info.last_active))
+            .collect();
+        tabs.sort_by(|left, right| {
+            (Some(right.0) == active)
+                .cmp(&(Some(left.0) == active))
+                .then(right.1.cmp(&left.1))
+        });
+        tabs.into_iter().map(|(id, _)| id).collect()
+    })
+}
+
+/// Ctrl+Tab in recent-use order without the switcher.
+pub fn cycle_recent(app: &AppHandle, step: isize) -> Result<(), String> {
+    let window = focused_window(app);
+    let target = {
+        let mut cycle = RECENT_CYCLE.lock().expect("recent cycle");
+        let continuing = cycle
+            .as_ref()
+            .is_some_and(|cycle| cycle.window == window && cycle.at.elapsed() < RECENT_CYCLE_WINDOW);
+        if !continuing {
+            *cycle = Some(RecentCycle {
+                window: window.clone(),
+                order: recent_order(app, &window),
+                index: 0,
+                at: Instant::now(),
+            });
+        }
+        let cycle = cycle.as_mut().expect("recent cycle");
+        let count = cycle.order.len() as isize;
+        if count == 0 {
+            return Ok(());
+        }
+        cycle.index = (cycle.index as isize + step).rem_euclid(count) as usize;
+        cycle.at = Instant::now();
+        cycle.order[cycle.index]
+    };
+    if with_state(app, |state| state.index_of(target).is_none()) {
+        *RECENT_CYCLE.lock().expect("recent cycle") = None;
+        return cycle_recent(app, step);
+    }
+    activate(app, target)
+}
+
+/// Kind of the popup open in `window`, if any.
+pub fn popup_kind(app: &AppHandle, window: &str) -> Option<String> {
+    with_state(app, |state| state.chrome(window)?.popup.kind.clone())
+}
+
+/// Sends an event to the popup open in `window`.
+pub fn emit_to_popup<S: Serialize + Clone>(app: &AppHandle, window: &str, event: &str, payload: S) {
+    let label = with_state(app, |state| state.chrome(window)?.popup.label.clone());
+    if let Some(label) = label {
+        let _ = app.emit_to(label.as_str(), event, payload);
     }
 }
 
@@ -3750,20 +3830,30 @@ pub fn sleep_candidates(app: &AppHandle) -> Vec<u32> {
 }
 
 pub fn sleep_tab(app: &AppHandle, id: u32) -> Result<(), String> {
-    let label = with_state(app, |state| {
+    let eligible = with_state(app, |state| {
         if state.is_foreground(id) {
             return Err("The tab on screen can't sleep.".to_string());
         }
-        let tab = state.tab_mut(id).ok_or("That tab is no longer open.")?;
-        if tab.info.sleeping || tab.hidden {
-            return Ok(None);
-        }
-        let Some(label) = tab.webview.clone() else {
-            return Ok(None);
-        };
-        tab.hidden = true;
-        Ok(Some(label))
+        let tab = state.tabs.iter().find(|tab| tab.info.id == id).ok_or("That tab is no longer open.")?;
+        Ok(!tab.info.sleeping && !tab.hidden && tab.webview.is_some())
     })?;
+    if !eligible {
+        return Ok(());
+    }
+    let used = crate::status::tab_memory(app, id).unwrap_or(0);
+    let label = with_state(app, |state| {
+        if state.is_foreground(id) {
+            return None;
+        }
+        let tab = state.tab_mut(id)?;
+        if tab.info.sleeping || tab.hidden {
+            return None;
+        }
+        let label = tab.webview.clone()?;
+        tab.hidden = true;
+        tab.info.sleep_saved = used;
+        Some(label)
+    });
     if let Some(webview) = label.and_then(|label| app.get_webview(&label)) {
         webview2::suspend(app, &webview, id);
     }
@@ -3816,6 +3906,7 @@ pub fn finish_sleep(app: &AppHandle, id: u32, suspended: bool) {
         // Shown again while the request ran, or WebView2 refused: make the page visible again.
         tab.hidden = false;
         tab.info.sleeping = false;
+        tab.info.sleep_saved = 0;
         Some((label, true))
     });
     let Some((label, wake)) = result else {
@@ -4163,6 +4254,114 @@ pub fn close_group(app: &AppHandle, id: u32) -> Result<(), String> {
     let entry = close_many(app, &ids, "group", Some(group))?;
     crate::undo::offer_closed(app, &window, entry);
     Ok(())
+}
+
+/// A group's name and the title and address of each of its tabs, for bookmarking.
+pub fn group_links(app: &AppHandle, id: u32) -> Result<(String, Vec<(String, String)>), String> {
+    with_state(app, |state| {
+        let group = state
+            .groups
+            .iter()
+            .find(|group| group.id == id)
+            .ok_or("That group no longer exists.")?;
+        let links = state
+            .tabs
+            .iter()
+            .filter(|tab| tab.info.group_id == Some(id) && tab.info.url != paths::NEW_TAB)
+            .map(|tab| (tab.info.title.clone(), tab.info.url.clone()))
+            .collect::<Vec<_>>();
+        if links.is_empty() {
+            return Err("This group has no pages to save.".to_string());
+        }
+        Ok((group.name.clone(), links))
+    })
+}
+
+const MAX_GROUP_OPEN: usize = 50;
+
+/// Opens links as a new group named `name` at the end of the window's strip. The first tab is shown.
+pub fn open_as_group(
+    app: &AppHandle,
+    window: &str,
+    name: &str,
+    links: &[(String, String)],
+) -> Result<u32, String> {
+    let links: Vec<&(String, String)> = links
+        .iter()
+        .filter(|(_, url)| !url.trim().is_empty())
+        .take(MAX_GROUP_OPEN)
+        .collect();
+    if links.is_empty() {
+        return Err("That folder has no links to open.".into());
+    }
+    let mut ids = Vec::new();
+    for (position, (title, url)) in links.iter().enumerate() {
+        let id = open(
+            app,
+            OpenTab {
+                background: position > 0,
+                lazy: position > 0,
+                title: Some(title.clone()),
+                window: window.to_string(),
+                ..OpenTab::new(resolve(app, url))
+            },
+        )?;
+        ids.push(id);
+    }
+    let group = create_group(app, &ids)?;
+    update_group(app, group, Some(name.to_string()), None, None)?;
+    Ok(group)
+}
+
+/// Groups the window's loose tabs by site. Sites with one tab stay as they are.
+/// Returns how many groups were made or grew.
+pub fn group_by_site(app: &AppHandle, window: &str) -> Result<usize, String> {
+    let plan = with_state(app, |state| {
+        let mut by_site: Vec<(String, Vec<u32>)> = Vec::new();
+        for index in state.strip_indexes(window) {
+            let tab = &state.tabs[index].info;
+            if tab.pinned || tab.group_id.is_some() {
+                continue;
+            }
+            let site = paths::site_of(&tab.url);
+            if site.is_empty() {
+                continue;
+            }
+            match by_site.iter_mut().find(|(key, _)| *key == site) {
+                Some((_, ids)) => ids.push(tab.id),
+                None => by_site.push((site, vec![tab.id])),
+            }
+        }
+        let workspace = state.workspace_of(window);
+        by_site
+            .into_iter()
+            .filter_map(|(site, ids)| {
+                let existing = state.groups.iter().find(|group| {
+                    group.window == window
+                        && group.name.eq_ignore_ascii_case(&site)
+                        && state.tabs.iter().any(|tab| {
+                            tab.info.group_id == Some(group.id) && tab.info.workspace == workspace
+                        })
+                });
+                match existing {
+                    Some(group) => Some((site, ids, Some(group.id))),
+                    None if ids.len() >= 2 => Some((site, ids, None)),
+                    None => None,
+                }
+            })
+            .collect::<Vec<_>>()
+    });
+    let count = plan.len();
+    for (site, ids, existing) in plan {
+        match existing {
+            Some(group) => add_to_group(app, &ids, group)?,
+            None => {
+                let group = create_group(app, &ids)?;
+                update_group(app, group, Some(site), None, None)?;
+            }
+        }
+    }
+    Ok(count)
 }
 
 pub fn new_tab_in_group(app: &AppHandle, id: u32) -> Result<u32, String> {
@@ -4661,6 +4860,7 @@ mod tests {
                 last_active: 0,
                 progress: 0,
                 failure: None,
+                sleep_saved: 0,
             },
             pending_url: None,
             webview: None,

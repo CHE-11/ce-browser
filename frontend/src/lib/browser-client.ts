@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { emit, emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -181,6 +181,11 @@ export function restoreClosed(id?: number) {
 /** A JPEG data URL of what the tab last showed, or null when none was captured. */
 export function tabThumbnail(id: number) {
   return invoke<string | null>("tab_thumbnail", { id });
+}
+
+/** Bytes the tab's page uses now, or null when it can't be read. */
+export function tabMemory(id: number) {
+  return invoke<number | null>("tab_memory", { id });
 }
 
 export function undoAction(id: number) {
@@ -433,6 +438,29 @@ export function newTabInGroup(id: number) {
   return invoke<number>("new_tab_in_group", { id });
 }
 
+/** Saves the group's tabs as a new folder under Other bookmarks. */
+export function saveGroupToBookmarks(id: number) {
+  return invoke<BookmarkNode>("save_group_to_bookmarks", { id });
+}
+
+/** Opens every link in a bookmark folder as one tab group named after the folder. */
+export function openFolderAsGroup(id: string) {
+  return invoke<number>("open_folder_as_group", { id });
+}
+
+/** Groups loose tabs that share a site. Returns how many groups were made or grew. */
+export function groupBySite() {
+  return invoke<number>("group_by_site");
+}
+
+export function ctrlHeld() {
+  return invoke<boolean>("ctrl_held");
+}
+
+export function onTabSwitcherStep(handler: (step: number) => void): Promise<UnlistenFn> {
+  return getCurrentWebview().listen<number>("tab-switcher-step", (event) => handler(event.payload));
+}
+
 // Workspaces
 
 export function createWorkspace(name: string, color: TabGroupColor) {
@@ -507,6 +535,13 @@ export function onStatusText(handler: (status: StatusText) => void): Promise<Unl
 
 export function onBrowserCommand(handler: (command: BrowserCommand) => void): Promise<UnlistenFn> {
   return listen<BrowserCommand>("browser-command", (event) => handler(event.payload));
+}
+
+/** Sends a command to this window's browser UI from a popup or a `ce://` page. */
+export function sendUiCommand(command: BrowserCommand) {
+  const label = getCurrentWindow().label;
+  const ui = label === "main" ? "ui" : label.replace(/^main-/, "ui-");
+  return emitTo(ui, "browser-command", command);
 }
 
 // Popups
@@ -740,6 +775,11 @@ export function moveBookmark(id: string, parentId: string, index?: number) {
 
 export function deleteBookmark(id: string) {
   return invoke<void>("delete_bookmark", { id });
+}
+
+/** Deletes several bookmarks with one Undo toast. */
+export function deleteBookmarks(ids: string[]) {
+  return invoke<void>("delete_bookmarks", { ids });
 }
 
 export function findBookmark(url: string) {

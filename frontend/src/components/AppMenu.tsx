@@ -12,6 +12,7 @@ import {
   PanelTop,
   Plus,
   Puzzle,
+  Search,
   Settings,
   SquarePlus,
   ZoomIn,
@@ -27,8 +28,11 @@ import {
   openInBrowser,
   reopenClosedTab,
   saveSettings,
+  sendUiCommand,
   zoomTab,
 } from "../lib/browser-client";
+import { cn } from "../lib/cn";
+import { focusRing } from "../lib/focus-ring";
 import { useEffect, useState } from "react";
 import type { ExternalBrowser } from "../../../types/browser";
 import { useTabs } from "../lib/use-browser";
@@ -72,6 +76,13 @@ export function AppMenu() {
           shortcut="Ctrl+Shift+T"
           disabled={!snapshot.canReopen}
           onClick={run(() => reopenClosedTab())}
+        />
+        <PopupMenuItem
+          id="app-menu-tab-search"
+          icon={<Search />}
+          label="Search tabs"
+          shortcut="Ctrl+Shift+A"
+          onClick={() => void closePopup().then(() => sendUiCommand("tab-search"))}
         />
         <PopupMenuSeparator id="app-menu-separator-1" />
         <PopupMenuItem id="app-menu-bookmarks" icon={<Bookmark />} label="Bookmarks" onClick={openPage("ce://bookmarks")} />
@@ -121,8 +132,9 @@ export function AppMenu() {
             id="app-menu-zoom-reset"
             type="button"
             title="Reset zoom (Ctrl+0)"
+            aria-label={`Reset zoom, now ${Math.round((active?.zoom ?? 1) * 100)}%`}
             disabled={!active}
-            className="w-12 rounded text-center text-xs text-zinc-300 hover:bg-zinc-800"
+            className={cn("w-12 rounded text-center text-xs text-zinc-300 hover:bg-zinc-800", focusRing)}
             onClick={() => active && void zoomTab(active.id, "reset")}
           >
             {Math.round((active?.zoom ?? 1) * 100)}%

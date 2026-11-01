@@ -1,5 +1,47 @@
 import { createContext, useContext, useEffect, type ReactNode } from "react";
 import type { BrowserSettings } from "@type/browser";
+import { cn } from "@/lib/cn";
+import { focusRing } from "@/lib/focus-ring";
+
+/** A row of mutually exclusive buttons. */
+export function Segmented<T extends string>({
+  id,
+  label,
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  disabled?: boolean;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div id={id} role="radiogroup" aria-label={label} className={cn("flex rounded-md border border-zinc-700 p-0.5", disabled && "opacity-40")}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          id={`${id}-${option.value}`}
+          type="button"
+          role="radio"
+          aria-checked={value === option.value}
+          disabled={disabled}
+          className={cn(
+            "rounded px-3 py-1 text-xs text-zinc-400 transition-colors hover:text-zinc-100 disabled:hover:text-zinc-400",
+            focusRing,
+            value === option.value && "bg-zinc-700 text-zinc-100",
+          )}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export const inputClass =
   "h-8 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-sky-500";

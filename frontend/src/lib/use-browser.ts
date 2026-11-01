@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { BookmarkNode, BookmarkTree, BrowserSettings, PageRules, TabsSnapshot } from "../../../types/browser";
+import type { BookmarkNode, BookmarkTree, BrowserSettings, ClosedEntry, PageRules, TabsSnapshot } from "../../../types/browser";
 import { publishAppearance } from "./appearance";
 import {
   getPageRules,
@@ -10,6 +10,7 @@ import {
   listDownloads,
   listExtensions,
   listHistory,
+  listRecentlyClosed,
   listTabs,
   onBookmarksChanged,
   onDownloadsChanged,
@@ -107,6 +108,33 @@ export function useTabs() {
 }
 
 export type WindowTabsState = ReturnType<typeof useTabs>;
+
+/** Recently closed tabs and groups, newest first. Refreshes whenever the tabs change. */
+export function useRecentlyClosed() {
+  const [entries, setEntries] = useState<ClosedEntry[] | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    const load = () =>
+      void listRecentlyClosed()
+        .then((list) => {
+          if (!disposed) {
+            setEntries(list);
+          }
+        })
+        .catch(() => {
+          if (!disposed) {
+            setEntries([]);
+          }
+        });
+    load();
+    const unlisten = onTabsChanged(load);
+    return () => {
+      disposed = true;
+      void unlisten.then((stop) => stop());
+    };
+  }, []);
+  return entries;
+}
 
 export function useBookmarksState() {
   const { value, loaded } = useLiveValue(listBookmarks, onBookmarksChanged);

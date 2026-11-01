@@ -75,6 +75,7 @@ export function TabGroupChip({ group, tabs, orientation, compact }: TabGroupChip
         colors.chip,
         vertical ? (compact ? "h-6 w-9 justify-center" : "h-7 w-full px-2") : "mb-1 h-6 max-w-40 px-2",
       )}
+      style={{ viewTransitionName: `tab-group-${group.id}` }}
       onClick={() => {
         clearHover();
         if (flyoutOpen.current) {

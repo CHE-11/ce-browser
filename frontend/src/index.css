@@ -478,6 +478,22 @@ textarea {
   }
 }
 
+/* Tabs opening, closing, moving and groups collapsing. Only named tabs and chips move; the rest of the UI swaps at once. */
+::view-transition-group(*) {
+  animation-duration: 160ms;
+  animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+::view-transition-old(*),
+::view-transition-new(*) {
+  height: 100%;
+}
+
 /* Windows "Animation effects" off turns this on. Movement stops; color changes stay instant. */
 @media (prefers-reduced-motion: reduce) {
   *,

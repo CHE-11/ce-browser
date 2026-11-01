@@ -1,7 +1,19 @@
 import { useEffect, useState } from "react";
-import { Check, FolderMinus, Plus, X } from "lucide-react";
-import { closeGroup, closePopup, createContainer, listContainers, newTabInGroup, onContainersChanged, setGroupContainer, ungroup, updateGroup } from "../../../lib/browser-client";
+import { BookmarkPlus, Check, FolderMinus, Plus, X } from "lucide-react";
+import {
+  closeGroup,
+  closePopup,
+  createContainer,
+  listContainers,
+  newTabInGroup,
+  onContainersChanged,
+  saveGroupToBookmarks,
+  setGroupContainer,
+  ungroup,
+  updateGroup,
+} from "../../../lib/browser-client";
 import { cn } from "../../../lib/cn";
+import { focusRing, focusRow } from "../../../lib/focus-ring";
 import { GROUP_COLORS, groupColorClasses } from "../../../lib/tab-rows";
 import { useTabs } from "../../../lib/use-browser";
 import type { Container } from "@type/browser";
@@ -82,8 +94,10 @@ export function TabGroupMenu({ groupId }: TabGroupMenuProps) {
               role="radio"
               aria-checked={group.color === color}
               title={color}
+              aria-label={color}
               className={cn(
                 "inline-flex size-6 items-center justify-center rounded-full ring-offset-2 ring-offset-zinc-900",
+                focusRing,
                 groupColorClasses(color).swatch,
                 group.color === color && "ring-2 ring-zinc-200",
               )}
@@ -102,8 +116,10 @@ export function TabGroupMenu({ groupId }: TabGroupMenuProps) {
           <button
             id="tab-group-menu-container-default"
             type="button"
+            aria-pressed={!group.container}
             className={cn(
               "h-8 rounded-md px-2 text-left text-sm hover:bg-zinc-800",
+              focusRow,
               !group.container && "bg-zinc-800",
             )}
             onClick={() => void setGroupContainer(group.id, "")}
@@ -115,8 +131,10 @@ export function TabGroupMenu({ groupId }: TabGroupMenuProps) {
               id={`tab-group-menu-container-${container.id}`}
               key={container.id}
               type="button"
+              aria-pressed={group.container === container.id}
               className={cn(
                 "flex h-8 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-zinc-800",
+                focusRow,
                 group.container === container.id && "bg-zinc-800",
               )}
               onClick={() => void setGroupContainer(group.id, container.id)}
@@ -156,6 +174,13 @@ export function TabGroupMenu({ groupId }: TabGroupMenuProps) {
       </div>
       <PopupMenu id="tab-group-menu-items" label="Tab group">
         <PopupMenuItem id="tab-group-menu-new-tab" icon={<Plus />} label="New tab in group" onClick={run(() => newTabInGroup(group.id))} />
+        <PopupMenuItem
+          id="tab-group-menu-save"
+          icon={<BookmarkPlus />}
+          label="Save group to bookmarks"
+          title="A new folder in Other bookmarks with every tab in this group"
+          onClick={run(() => saveGroupToBookmarks(group.id))}
+        />
         <PopupMenuItem id="tab-group-menu-ungroup" icon={<FolderMinus />} label="Ungroup" onClick={run(() => ungroup(group.id))} />
         <PopupMenuSeparator id="tab-group-menu-separator" />
         <PopupMenuItem

@@ -202,6 +202,12 @@ async fn tab_thumbnail(app: AppHandle, id: u32) -> Result<Option<String>, String
     blocking(move || Ok(thumbnails::thumbnail(&app, id))).await
 }
 
+/// Bytes one tab's page uses now. Null when it has no page view or the renderer can't be read.
+#[tauri::command]
+async fn tab_memory(app: AppHandle, id: u32) -> Result<Option<u64>, String> {
+    blocking(move || Ok(status::tab_memory(&app, id))).await
+}
+
 #[tauri::command]
 async fn undo_action(app: AppHandle, id: u32) -> Result<(), String> {
     undo::undo(&app, id)
@@ -317,6 +323,30 @@ async fn close_group(app: AppHandle, id: u32) -> Result<(), String> {
 #[tauri::command]
 async fn new_tab_in_group(app: AppHandle, id: u32) -> Result<u32, String> {
     tabs::new_tab_in_group(&app, id)
+}
+
+#[tauri::command]
+async fn save_group_to_bookmarks(app: AppHandle, id: u32) -> Result<BookmarkNode, String> {
+    let (name, links) = tabs::group_links(&app, id)?;
+    bookmarks::add_folder_of_links(&app, &name, &links)
+}
+
+#[tauri::command]
+async fn open_folder_as_group(app: AppHandle, window: Window, id: String) -> Result<u32, String> {
+    let (title, links) = bookmarks::folder_links(&app, &id)?;
+    tabs::open_as_group(&app, window.label(), &title, &links)
+}
+
+#[tauri::command]
+async fn group_by_site(app: AppHandle, window: Window) -> Result<usize, String> {
+    tabs::group_by_site(&app, window.label())
+}
+
+/// Ctrl is down right now. The tab switcher closes when it is released.
+#[tauri::command]
+fn ctrl_held() -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL};
+    unsafe { GetAsyncKeyState(i32::from(VK_CONTROL.0)) < 0 }
 }
 
 // Workspaces
@@ -643,25 +673,44 @@ fn move_bookmark(
 
 #[tauri::command]
 async fn delete_bookmark(app: AppHandle, window: Window, id: String) -> Result<(), String> {
-    let (node, parent, index) = bookmarks::delete_returning(&app, &id)?;
-    let what = if node.separator {
-        "Deleted divider".to_string()
-    } else if node.url.is_none() {
-        format!("Deleted folder \u{201c}{}\u{201d}", node.title)
-    } else {
-        format!("Deleted bookmark \u{201c}{}\u{201d}", node.title)
+    delete_bookmarks(app, window, vec![id]).await
+}
+
+/// Deletes bookmarks and offers one Undo for all of them.
+#[tauri::command]
+async fn delete_bookmarks(app: AppHandle, window: Window, ids: Vec<String>) -> Result<(), String> {
+    let mut removed = Vec::new();
+    let mut failure = None;
+    for id in &ids {
+        match bookmarks::delete_returning(&app, id) {
+            Ok(entry) => removed.push(entry),
+            Err(error) => {
+                failure = Some(error);
+                break;
+            }
+        }
+    }
+    let message = match removed.as_slice() {
+        [] => None,
+        [(node, _, _)] if node.separator => Some("Deleted divider".to_string()),
+        [(node, _, _)] if node.url.is_none() => {
+            Some(format!("Deleted folder \u{201c}{}\u{201d}", node.title))
+        }
+        [(node, _, _)] => Some(format!("Deleted bookmark \u{201c}{}\u{201d}", node.title)),
+        many => Some(format!("Deleted {} bookmarks", many.len())),
     };
-    undo::offer(
-        &app,
-        window.label(),
-        &what,
-        undo::UndoAction::Bookmark {
-            node,
-            parent,
-            index,
-        },
-    );
-    Ok(())
+    if let Some(message) = message {
+        undo::offer(
+            &app,
+            window.label(),
+            &message,
+            undo::UndoAction::Bookmarks(removed),
+        );
+    }
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 #[tauri::command]
@@ -1450,6 +1499,7 @@ pub fn run() {
             list_recently_closed,
             restore_closed,
             tab_thumbnail,
+            tab_memory,
             undo_action,
             dismiss_toast,
             note_typed,
@@ -1471,6 +1521,10 @@ pub fn run() {
             ungroup,
             close_group,
             new_tab_in_group,
+            save_group_to_bookmarks,
+            open_folder_as_group,
+            group_by_site,
+            ctrl_held,
             create_workspace,
             rename_workspace,
             delete_workspace,
@@ -1517,6 +1571,7 @@ pub fn run() {
             update_bookmark,
             move_bookmark,
             delete_bookmark,
+            delete_bookmarks,
             find_bookmark,
             site_favicons,
             import_bookmarks_html,

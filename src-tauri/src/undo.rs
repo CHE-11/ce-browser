@@ -13,11 +13,8 @@ const KEEP: Duration = Duration::from_secs(120);
 pub enum UndoAction {
     /// A recently closed entry. Undo opens it again.
     Closed(u32),
-    Bookmark {
-        node: bookmarks::BookmarkNode,
-        parent: String,
-        index: usize,
-    },
+    /// Deleted bookmarks with their folder and position, in the order they were deleted.
+    Bookmarks(Vec<(bookmarks::BookmarkNode, String, usize)>),
     History {
         items: Vec<history::HistoryItem>,
         cleared: bool,
@@ -88,11 +85,12 @@ pub fn undo(app: &AppHandle, id: u32) -> Result<(), String> {
     tabs::close_toast(app, &offer.window);
     match offer.action {
         UndoAction::Closed(entry) => tabs::restore_closed(app, Some(entry)).map(|_| ()),
-        UndoAction::Bookmark {
-            node,
-            parent,
-            index,
-        } => bookmarks::restore(app, node, &parent, index),
+        UndoAction::Bookmarks(removed) => {
+            for (node, parent, index) in removed.into_iter().rev() {
+                bookmarks::restore(app, node, &parent, index)?;
+            }
+            Ok(())
+        }
         UndoAction::History { items, .. } => {
             history::restore(app, items);
             Ok(())

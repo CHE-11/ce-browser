@@ -177,9 +177,20 @@ pub struct BrowserSettings {
     /// Save page text on this computer so history search can match words from the page.
     #[serde(default = "default_true")]
     pub index_page_text: bool,
+    /// Ctrl+Tab order: `strip` follows the tab strip, `recent` goes to the last used tab first.
+    #[serde(default = "default_tab_cycle_order")]
+    pub tab_cycle_order: String,
+    /// In recent order, Ctrl+Tab shows a switcher with thumbnails until Ctrl is released.
+    #[serde(default = "default_true")]
+    pub tab_switcher: bool,
 }
 
 const TAB_LAYOUTS: &[&str] = &["horizontal", "vertical"];
+const TAB_CYCLE_ORDERS: &[&str] = &["strip", "recent"];
+
+fn default_tab_cycle_order() -> String {
+    "strip".into()
+}
 
 fn default_true() -> bool {
     true
@@ -473,6 +484,8 @@ impl Default for BrowserSettings {
             https_exceptions: Vec::new(),
             mouse_gestures: true,
             index_page_text: true,
+            tab_cycle_order: default_tab_cycle_order(),
+            tab_switcher: true,
         }
     }
 }
@@ -566,6 +579,9 @@ impl BrowserSettings {
         self.adblock = self.adblock.normalize();
         if !TAB_LAYOUTS.contains(&self.tab_layout.as_str()) {
             self.tab_layout = defaults.tab_layout.clone();
+        }
+        if !TAB_CYCLE_ORDERS.contains(&self.tab_cycle_order.as_str()) {
+            self.tab_cycle_order = defaults.tab_cycle_order.clone();
         }
         self.vertical_tabs_width = self.vertical_tabs_width.clamp(160, 400);
         self.tab_sleep = self.tab_sleep.normalize();

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type DragEvent, type MouseEvent } from "react";
-import { ArrowLeft, ExternalLink, Folder } from "lucide-react";
+import { ArrowLeft, ExternalLink, Folder, Group } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "@/components/PopupFrame";
-import { windowPoint, createTab, navigate, closePopup } from "@/lib/browser-client";
+import { windowPoint, createTab, navigate, closePopup, openFolderAsGroup } from "@/lib/browser-client";
 import { BOOKMARK_DROP_END, isBookmarkDrag, useBookmarkDrag } from "@/lib/bookmark-drag";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { cn } from "@/lib/cn";
@@ -261,6 +261,13 @@ export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFol
             }
             void closePopup();
           }}
+        />
+        <PopupMenuItem
+          id="bookmark-folder-menu-open-group"
+          icon={<Group />}
+          label="Open all as a tab group"
+          disabled={links.length === 0}
+          onClick={() => void openFolderAsGroup(currentId).finally(() => closePopup())}
         />
       </PopupMenu>
       {context ? (

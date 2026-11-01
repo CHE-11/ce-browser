@@ -27,6 +27,9 @@ import { TranslatePopover } from "@features/BuiltInExtensions/translate/Translat
 import { WaybackPopover } from "@features/BuiltInExtensions/wayback/Wayback";
 import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
 import { CommandPalette } from "@features/CommandPalette/CommandPalette";
+import { TabSearch } from "@features/TabSearch/TabSearch";
+import { TabSwitcher } from "@features/TabSwitcher/TabSwitcher";
+import { TabHoverCard } from "@features/TabHover/TabHoverCard";
 import { NetworkPopover } from "@features/Network/NetworkPopover";
 import { DownloadsPanel } from "@features/Downloads/DownloadsPanel";
 import { MediaGrid } from "@features/Media/MediaGrid";
@@ -144,6 +147,12 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <WorkspaceMenu />;
     case "toast":
       return <Toast params={params} />;
+    case "tab-search":
+      return <TabSearch params={params} />;
+    case "tab-switcher":
+      return <TabSwitcher params={params} />;
+    case "tab-hover":
+      return <TabHoverCard tabId={Number(params.get("id"))} />;
     default:
       return <UnknownPopup />;
   }

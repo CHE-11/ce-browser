@@ -3,7 +3,9 @@ import { PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import type { BrowserSettings } from "../../../../../types/browser";
 import { createEphemeralTab, createTab, saveSettings } from "../../../lib/browser-client";
 import { cn } from "../../../lib/cn";
+import { focusRing } from "../../../lib/focus-ring";
 import { useTabDrag } from "../../../lib/tab-drag";
+import { useTabMotion } from "../../../lib/tab-motion";
 import { buildTabRows } from "../../../lib/tab-rows";
 import type { WindowTabsState } from "../../../lib/use-browser";
 import { TabRowsView } from "./TabRowsView";
@@ -24,9 +26,10 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
   const drag = useTabDrag(snapshot.tabs, "y");
+  const shown = useTabMotion(snapshot, drag.dragging !== null);
   const rows = useMemo(
-    () => buildTabRows(snapshot.tabs, snapshot.groups, snapshot.activeId, snapshot.split),
-    [snapshot.tabs, snapshot.groups, snapshot.activeId, snapshot.split],
+    () => buildTabRows(shown.tabs, shown.groups, shown.activeId, shown.split),
+    [shown.tabs, shown.groups, shown.activeId, shown.split],
   );
   const pinnedRows = rows.filter((row) => row.kind === "tab" && row.tab.pinned);
   const otherRows = rows.filter((row) => row.kind !== "tab" || !row.tab.pinned);
@@ -82,7 +85,7 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
           id="vertical-tabs-new"
           type="button"
           aria-label="New tab"
-          className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          className={cn("inline-flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100", focusRing)}
           title="New tab (Ctrl+T). Right-click for an ephemeral tab."
           onClick={() => void createTab()}
           onContextMenu={(event) => {
@@ -98,7 +101,7 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
           id="vertical-tabs-pinned"
           className={cn("flex shrink-0 flex-wrap gap-1 border-b border-zinc-800 px-1.5 pb-2", collapsed && "flex-col items-center")}
         >
-          <TabRowsView snapshot={snapshot} rows={pinnedRows} orientation="vertical" compact drag={drag} />
+          <TabRowsView snapshot={shown} rows={pinnedRows} orientation="vertical" compact drag={drag} />
         </div>
       ) : null}
       <div
@@ -113,7 +116,7 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
           }
         }}
       >
-        <TabRowsView snapshot={snapshot} rows={otherRows} orientation="vertical" compact={collapsed} drag={drag} />
+        <TabRowsView snapshot={shown} rows={otherRows} orientation="vertical" compact={collapsed} drag={drag} />
       </div>
       <div id="vertical-tabs-bottom" className={cn("flex shrink-0 items-center px-1.5 py-1.5", collapsed && "justify-center")}>
         <button
@@ -121,7 +124,7 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
           type="button"
           title={collapsed ? "Expand tabs" : "Collapse tabs"}
           aria-label={collapsed ? "Expand tabs" : "Collapse tabs"}
-          className="inline-flex size-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          className={cn("inline-flex size-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100", focusRing)}
           onClick={toggleCollapsed}
         >
           {collapsed ? (
