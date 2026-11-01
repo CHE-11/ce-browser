@@ -1,4 +1,6 @@
 mod adblock;
+mod answer;
+mod keywords;
 mod bookmarks;
 mod capture;
 mod downloads;
@@ -644,6 +646,63 @@ fn clear_network_log(app: AppHandle, id: u32) {
 }
 
 #[tauri::command]
+fn list_keywords(app: AppHandle) -> Vec<keywords::Keyword> {
+    keywords::list(&app)
+}
+
+#[tauri::command]
+fn save_keywords(app: AppHandle, keywords: Vec<keywords::Keyword>) -> Result<Vec<keywords::Keyword>, String> {
+    keywords::save(&app, keywords)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OmniboxExtra {
+    title: String,
+    url: String,
+    answer: bool,
+}
+
+#[tauri::command]
+fn omnibox_extra(app: AppHandle, text: String) -> Option<OmniboxExtra> {
+    if let Some(hit) = keywords::expand(&keywords::list(&app), &text) {
+        return Some(OmniboxExtra {
+            title: hit.title,
+            url: hit.url,
+            answer: false,
+        });
+    }
+    answer::answer(&text).map(|answer| OmniboxExtra {
+        title: answer.title,
+        url: answer.url,
+        answer: answer.answer,
+    })
+}
+
+#[tauri::command]
+fn list_shortcuts(app: AppHandle) -> Vec<shortcuts::ShortcutBinding> {
+    shortcuts::list(&app)
+}
+
+#[tauri::command]
+fn save_shortcuts(
+    app: AppHandle,
+    bindings: Vec<shortcuts::ShortcutBinding>,
+) -> Result<Vec<shortcuts::ShortcutBinding>, String> {
+    shortcuts::save(&app, bindings)
+}
+
+#[tauri::command]
+fn reset_shortcut(app: AppHandle, action: String) -> Result<Vec<shortcuts::ShortcutBinding>, String> {
+    shortcuts::reset_action(&app, &action)
+}
+
+#[tauri::command]
+fn reset_shortcuts(app: AppHandle) -> Result<Vec<shortcuts::ShortcutBinding>, String> {
+    shortcuts::reset_all(&app)
+}
+
+#[tauri::command]
 fn get_page_rules(app: AppHandle) -> page_rules::PageRules {
     page_rules::get(&app)
 }
@@ -851,6 +910,8 @@ pub fn run() {
             settings::init(&handle);
             page_rules::init(&handle);
             privacy::init(&handle);
+            keywords::init(&handle);
+            shortcuts::init(&handle);
             if let Err(error) = user_styles::ensure(&handle) {
                 eprintln!("user styles: {error}");
             }
@@ -1022,6 +1083,13 @@ pub fn run() {
             create_ephemeral_tab,
             network_log,
             clear_network_log,
+            list_keywords,
+            save_keywords,
+            omnibox_extra,
+            list_shortcuts,
+            save_shortcuts,
+            reset_shortcut,
+            reset_shortcuts,
             get_page_rules,
             update_site_control,
             save_user_script,

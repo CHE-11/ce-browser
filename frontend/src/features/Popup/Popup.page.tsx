@@ -14,6 +14,7 @@ import { TabMenu } from "@/components/TabsAddressAndBookmarks/Tabs/TabMenu";
 import { WorkspaceMenu } from "@/components/WorkspaceMenu";
 import { AdBlockerPopover } from "@features/BuiltInExtensions/ad-blocker/AdBlockerPopover";
 import { PageControlsPopover } from "@features/BuiltInExtensions/page-controls/PageControlsPopover";
+import { CommandPalette } from "@features/CommandPalette/CommandPalette";
 import { NetworkPopover } from "@features/Network/NetworkPopover";
 import { PageCapturePopover } from "@features/BuiltInExtensions/page-capture/PageCapturePopover";
 import { PrintPdfPopover } from "@features/BuiltInExtensions/print-pdf/PrintPdfPopover";
@@ -78,6 +79,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <AppMenu />;
     case "omnibox":
       return <AddressBarEllipsisMenu />;
+    case "command-palette":
+      return <CommandPalette />;
     case "print-pdf":
       return <PrintPdfPopover params={params} />;
     case "page-capture":

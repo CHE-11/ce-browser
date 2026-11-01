@@ -35,6 +35,7 @@ import {
   goBack,
   goForward,
   navigate,
+  omniboxExtra,
   onBrowserCommand,
   onDownloadStarted,
   onOmniboxPick,
@@ -180,6 +181,13 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       if (!target.url) {
         return;
       }
+      if (target.kind === "answer") {
+        setText(target.url);
+        setEditing(true);
+        hideOmnibox();
+        window.setTimeout(() => inputRef.current?.select(), 0);
+        return;
+      }
       finishEditing();
       if (target.kind === "tab" && target.tabId !== undefined) {
         void activateTab(target.tabId);
@@ -257,6 +265,20 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     } else {
       showOmnibox({ suggestions, selected: 0 });
     }
+    const asked = value;
+    void omniboxExtra(asked).then((extra) => {
+      if (!extra || inputRef.current?.value !== asked) {
+        return;
+      }
+      const row = {
+        kind: extra.answer ? ("answer" as const) : ("url" as const),
+        title: extra.title,
+        url: extra.url,
+      };
+      const current = omniboxRef.current.suggestions.filter((item) => item.kind !== "answer" && item.title !== extra.title);
+      const withoutSearch = extra.answer ? current : current.filter((item) => item.kind !== "search");
+      showOmnibox({ suggestions: [row, ...withoutSearch].slice(0, 8), selected: 0 });
+    });
   };
 
   const moveSelection = (delta: number) => {

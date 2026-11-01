@@ -5,7 +5,7 @@ import { AddressBar } from "@/components/TabsAddressAndBookmarks/Addressbar/Addr
 import { BookmarksBar } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarksBar";
 import { TabStrip } from "@/components/TabsAddressAndBookmarks/Tabs/TabStrip";
 import { VerticalTabs } from "@/components/TabsAddressAndBookmarks/Tabs/VerticalTabs";
-import { onBrowserCommand, setUiInsets } from "@/lib/browser-client";
+import { onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
 import { useTabs, useBookmarks, useDownloads, useHistory, useExtensions, useAppearanceFromSettings } from "@/lib/use-browser";
 import { useRef, useState, useEffect, useLayoutEffect } from "react";
 
@@ -35,6 +35,17 @@ export function BrowserPage() {
     const unlisten = onBrowserCommand((command) => {
       if (command === "find") {
         setFindToken((token) => (token ?? 0) + 1);
+      }
+      if (command === "palette") {
+        const width = 560;
+        void openPopup({
+          kind: "command-palette",
+          focus: true,
+          x: Math.max(8, (window.innerWidth - width) / 2),
+          y: 52,
+          width,
+          height: 420,
+        });
       }
     });
     return () => {

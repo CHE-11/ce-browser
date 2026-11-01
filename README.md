@@ -32,6 +32,7 @@ On startup the browser restores the last session, pinned tabs first. Restored ta
 | Ctrl+F | Find in page |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Zoom in / out / reset |
 | F12 | Developer tools |
+| Ctrl+K | Command palette |
 | Ctrl+Alt+1 to Ctrl+Alt+9 | Switch to workspace 1 to 9 |
 | Shift+click a link | Open it in a peek |
 | Esc (in a peek) | Close the peek |
@@ -85,6 +86,18 @@ The sliders button in the toolbar changes how the current site behaves. A rule f
 - **Reader mode** opens the article in the same tab, using the same cleanup as Print to PDF. Back, or Show original, returns to the site.
 - **Auto-refresh** reloads that tab on an interval. **Notify when the page changes** puts a dot on the tab when the text differs.
 - **Site scripts** opens `ce://scripts`, where CSS and JavaScript can be saved for one site or for every site. `styles.css` still styles the browser itself.
+
+## Productivity
+
+Ctrl+K opens the command palette: search open tabs, bookmarks, history and browser actions.
+
+The address bar accepts keywords. `gh react` or `!yt cats` searches GitHub or YouTube. The built-in keywords are `gh`, `yt`, `w` and `r`. Add your own under Settings > Search. A keyword's address uses `%s` for the query.
+
+The address bar also answers `2*(3+4)`, `10 km to mi` and `32 f to c`. `10 usd to eur` uses the day's exchange rates when the computer is online. Enter on an answer leaves it in the address bar.
+
+`ce://shortcuts` lists every shortcut. Record captures the next key, and a second key within one second makes a chord. Reset one row, or reset all.
+
+Right-drag on a page: left goes back, right goes forward, up reloads, down closes the tab. A right-click without a drag still opens the menu. Settings > Search can turn gestures off.
 
 ## Privacy
 

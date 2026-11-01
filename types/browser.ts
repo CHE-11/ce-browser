@@ -145,7 +145,7 @@ export type PeekInfo = {
   favicon: string | null;
 };
 
-export type BrowserCommand = "focus-address" | "find" | "bookmark" | "downloads";
+export type BrowserCommand = "focus-address" | "find" | "bookmark" | "downloads" | "palette";
 
 export type PopupKind =
   | "downloads"
@@ -156,6 +156,7 @@ export type PopupKind =
   | "tab-menu"
   | "app-menu"
   | "omnibox"
+  | "command-palette"
   | "extension"
   | "print-pdf"
   | "page-capture"
@@ -294,6 +295,22 @@ export type BrowserSettings = {
   httpsOnly: boolean;
   /** Hosts that may stay on `http`. */
   httpsExceptions: string[];
+  /** Right-drag on a page goes back, forward, reloads or closes the tab. */
+  mouseGestures: boolean;
+};
+
+export type Keyword = {
+  keyword: string;
+  title: string;
+  /** `%s` is replaced with the query. */
+  url: string;
+};
+
+export type ShortcutBinding = {
+  action: string;
+  label: string;
+  /** One token, or two for a chord. Empty unbinds the action. */
+  keys: string[];
 };
 
 export type TabSleepSettings = {
@@ -493,7 +510,7 @@ export type ProfileIconChoice = {
 };
 
 export type OmniboxSuggestion = {
-  kind: "search" | "url" | "bookmark" | "tab" | "history";
+  kind: "search" | "url" | "bookmark" | "tab" | "history" | "answer";
   title: string;
   url: string;
   /** Set for `tab` suggestions: switching selects the open tab. */

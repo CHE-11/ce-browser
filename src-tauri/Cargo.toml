@@ -21,6 +21,7 @@ serde_json = "1"
 tauri = { version = "2", features = ["image-ico", "image-png", "devtools", "unstable"] }
 tauri-plugin-dialog = "2"
 url = "2"
+ureq = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # webview2-com and windows must match the versions wry is built against, or the

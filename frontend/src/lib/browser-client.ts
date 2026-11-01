@@ -14,6 +14,8 @@ import type {
   DownloadItem,
   ExtractedPage,
   HistoryItem,
+  Keyword,
+  ShortcutBinding,
   PageCaptureResult,
   PageRules,
   PageTechnologies,
@@ -653,6 +655,42 @@ export function onExtensionsChanged(handler: (extensions: ExtensionInfo[]) => vo
 }
 
 // Settings
+
+export function listKeywords() {
+  return invoke<Keyword[]>("list_keywords");
+}
+
+export function saveKeywords(keywords: Keyword[]) {
+  return invoke<Keyword[]>("save_keywords", { keywords });
+}
+
+export function onKeywordsChanged(handler: (keywords: Keyword[]) => void): Promise<UnlistenFn> {
+  return listen<Keyword[]>("keywords-changed", (event) => handler(event.payload));
+}
+
+export function omniboxExtra(text: string) {
+  return invoke<{ title: string; url: string; answer: boolean } | null>("omnibox_extra", { text });
+}
+
+export function listShortcuts() {
+  return invoke<ShortcutBinding[]>("list_shortcuts");
+}
+
+export function saveShortcuts(bindings: ShortcutBinding[]) {
+  return invoke<ShortcutBinding[]>("save_shortcuts", { bindings });
+}
+
+export function resetShortcut(action: string) {
+  return invoke<ShortcutBinding[]>("reset_shortcut", { action });
+}
+
+export function resetShortcuts() {
+  return invoke<ShortcutBinding[]>("reset_shortcuts");
+}
+
+export function onShortcutsChanged(handler: (bindings: ShortcutBinding[]) => void): Promise<UnlistenFn> {
+  return listen<ShortcutBinding[]>("shortcuts-changed", (event) => handler(event.payload));
+}
 
 export function getPageRules() {
   return invoke<PageRules>("get_page_rules");

@@ -314,6 +314,26 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                             });
                         }
                     }
+                    Some("ce-gesture") => {
+                        if !crate::settings::get(&message_app).mouse_gestures {
+                            return Ok(());
+                        }
+                        let direction = message.get("direction").and_then(|value| value.as_str()).unwrap_or("");
+                        let app = message_app.clone();
+                        let direction = direction.to_string();
+                        tauri::async_runtime::spawn(async move {
+                            let action = match direction.as_str() {
+                                "left" => Some(crate::shortcuts::Action::Back),
+                                "right" => Some(crate::shortcuts::Action::Forward),
+                                "up" => Some(crate::shortcuts::Action::Reload),
+                                "down" => Some(crate::shortcuts::Action::CloseTab),
+                                _ => None,
+                            };
+                            if let Some(action) = action {
+                                let _ = crate::shortcuts::run(&app, action);
+                            }
+                        });
+                    }
                     Some("ce-speed") => {
                         if let Some(speed) = message.get("speed").and_then(|value| value.as_f64()) {
                             let app = message_app.clone();

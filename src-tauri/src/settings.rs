@@ -100,6 +100,9 @@ pub struct BrowserSettings {
     /// Hosts that may stay on `http`, lowercase and without a leading `www.`.
     #[serde(default)]
     pub https_exceptions: Vec<String>,
+    /// Right-drag on a page goes back, forward, reloads or closes the tab.
+    #[serde(default = "default_true")]
+    pub mouse_gestures: bool,
 }
 
 const TAB_LAYOUTS: &[&str] = &["horizontal", "vertical"];
@@ -347,6 +350,7 @@ impl Default for BrowserSettings {
             fingerprint_shield: false,
             https_only: false,
             https_exceptions: Vec::new(),
+            mouse_gestures: true,
         }
     }
 }

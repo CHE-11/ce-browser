@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AppWindow, Globe, History, Search, Star } from "lucide-react";
+import { AppWindow, Calculator, Globe, History, Search, Star } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
 import { onOmniboxState, sendOmniboxReady, sendOmniboxPick } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
@@ -14,6 +14,7 @@ const KIND_LABEL: Record<OmniboxSuggestion["kind"], string> = {
   bookmark: "Bookmark",
   tab: "Switch to tab",
   history: "History",
+  answer: "Answer",
 };
 
 /** Shown under the address bar. The input keeps focus in the UI view; this view only mirrors its state. */
@@ -44,7 +45,7 @@ export function AddressBarEllipsisMenu() {
     >
       {state.suggestions.map((suggestion, index) => {
         const domId = `address-bar-ellipsis-menu-${index}`;
-        const Icon = suggestion.kind === "search" ? Search : suggestion.kind === "tab" ? AppWindow : suggestion.kind === "bookmark" ? Star : Globe;
+        const Icon = suggestion.kind === "answer" ? Calculator : suggestion.kind === "search" ? Search : suggestion.kind === "tab" ? AppWindow : suggestion.kind === "bookmark" ? Star : Globe;
         return (
           <div
             key={`${suggestion.kind}-${suggestion.url}-${index}`}
@@ -61,7 +62,7 @@ export function AddressBarEllipsisMenu() {
               void sendOmniboxPick(suggestion);
             }}
           >
-            {suggestion.kind === "search" || suggestion.kind === "url" ? (
+            {suggestion.kind === "search" || suggestion.kind === "url" || suggestion.kind === "answer" ? (
               <Icon id={`${domId}-icon`} className="size-4 shrink-0 text-zinc-400" aria-hidden />
             ) : (
               <FavIcon id={`${domId}-icon`} url={suggestion.url} />

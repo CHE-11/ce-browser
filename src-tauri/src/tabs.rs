@@ -1070,6 +1070,35 @@ fn page_zoom_for(app: &AppHandle, url: &str) -> f64 {
 const PEEK_CLICK_SCRIPT: &str = r#"(function () {
   if (!window.chrome || !window.chrome.webview) return;
   if (!/^https?:$/.test(location.protocol)) return;
+  document.addEventListener("mousedown", function (event) {
+    if (event.button !== 2) return;
+    window.__ceGestureStart = { x: event.clientX, y: event.clientY, moved: false };
+  }, true);
+  document.addEventListener("mousemove", function (event) {
+    var start = window.__ceGestureStart;
+    if (!start || (event.buttons & 2) === 0) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 80) start.moved = true;
+  }, true);
+  document.addEventListener("contextmenu", function (event) {
+    if (window.__ceGestureDrag || (window.__ceGestureStart && window.__ceGestureStart.moved)) {
+      window.__ceGestureDrag = false;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, true);
+  document.addEventListener("mouseup", function (event) {
+    var start = window.__ceGestureStart;
+    window.__ceGestureStart = null;
+    if (!start || event.button !== 2 || !start.moved) return;
+    window.__ceGestureDrag = true;
+    var dx = event.clientX - start.x;
+    var dy = event.clientY - start.y;
+    if (Math.hypot(dx, dy) < 80) return;
+    var direction = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down");
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage({ type: "ce-gesture", direction: direction });
+    }
+  }, true);
   document.addEventListener("click", function (event) {
     if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.button !== 0 || event.defaultPrevented) return;

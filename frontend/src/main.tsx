@@ -17,6 +17,7 @@ import { PopupPage } from "./features/Popup/Popup.page";
 import { PrintEditorPage } from "./features/PrintEditor/PrintEditor.page";
 import { ReaderPage } from "./features/Reader/Reader.page";
 import { ScriptsPage } from "./features/Scripts/Scripts.page";
+import { ShortcutsPage } from "./features/Shortcuts/Shortcuts.page";
 import { SettingsPage } from "./features/Settings/Settings.page";
 import "./index.css";
 
@@ -58,6 +59,8 @@ function App() {
       return <PermissionsPage />;
     case "scripts":
       return <ScriptsPage params={route.params} />;
+    case "shortcuts":
+      return <ShortcutsPage />;
     default:
       return <NewTabPage />;
   }

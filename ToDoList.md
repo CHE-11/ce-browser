@@ -32,11 +32,11 @@
 - [x] HTTPS-only mode with a per-site exception list.
 
 ## Productivity
-- [ ] Command palette (Ctrl+K): fuzzy search across tabs, bookmarks, history, settings and built-in actions.
-- [ ] Omnibox bangs and custom keywords (for example `!gh query` or `yt query`), configurable in settings.
-- [ ] Omnibox calculator, unit conversion and currency conversion inline.
-- [ ] Keyboard shortcut editor at `ce://shortcuts`, including key chords.
-- [ ] Mouse gestures, for example right-drag left to go back.
+- [x] Command palette (Ctrl+K): fuzzy search across tabs, bookmarks, history, settings and built-in actions.
+- [x] Omnibox bangs and custom keywords (for example `!gh query` or `yt query`), configurable in settings.
+- [x] Omnibox calculator, unit conversion and currency conversion inline.
+- [x] Keyboard shortcut editor at `ce://shortcuts`, including key chords.
+- [x] Mouse gestures, for example right-drag left to go back.
 
 ## Media and capture
 - [ ] Full-page and region screenshot with an annotate-and-blur editor (extends Page Capture).
