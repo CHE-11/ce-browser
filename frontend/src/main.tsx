@@ -22,6 +22,7 @@ import { RewritesPage } from "./features/Rewrites/Rewrites.page";
 import { ShortcutsPage } from "./features/Shortcuts/Shortcuts.page";
 import { StoragePage } from "./features/Storage/Storage.page";
 import { SettingsPage } from "./features/Settings/Settings.page";
+import { WhatsNewPage } from "./features/WhatsNew/WhatsNew.page";
 import "./index.css";
 
 const appearance = readAppearance();
@@ -72,6 +73,8 @@ function App() {
       return <StoragePage params={route.params} />;
     case "capture-editor":
       return <CaptureEditorPage />;
+    case "whats-new":
+      return <WhatsNewPage params={route.params} />;
     default:
       return <BookmarksPage />;
   }

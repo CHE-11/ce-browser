@@ -505,11 +505,11 @@ impl Default for BrowserSettings {
             tab_cycle_order: default_tab_cycle_order(),
             tab_switcher: true,
             tab_hover_preview: true,
-        }
-    }
             window_backdrop: default_backdrop(),
             auto_update: true,
             last_seen_version: String::new(),
+        }
+    }
 }
 
 impl BrowserSettings {
@@ -605,12 +605,12 @@ impl BrowserSettings {
         if !TAB_CYCLE_ORDERS.contains(&self.tab_cycle_order.as_str()) {
             self.tab_cycle_order = defaults.tab_cycle_order.clone();
         }
-        self.vertical_tabs_width = self.vertical_tabs_width.clamp(160, 400);
-        self.tab_sleep = self.tab_sleep.normalize();
         if !BACKDROPS.contains(&self.window_backdrop.as_str()) {
             self.window_backdrop = defaults.window_backdrop.clone();
         }
         self.last_seen_version = self.last_seen_version.trim().chars().take(40).collect();
+        self.vertical_tabs_width = self.vertical_tabs_width.clamp(160, 400);
+        self.tab_sleep = self.tab_sleep.normalize();
         self.https_exceptions = clean_hosts(&self.https_exceptions);
         self.download_name_template = self
             .download_name_template
@@ -1224,7 +1224,6 @@ mod tests {
         let stored = folder_from_stored(dir.to_string_lossy().as_ref());
         assert_eq!(stored, dir.to_string_lossy());
     }
-}
 
     #[test]
     fn a_file_from_before_the_new_tab_and_window_options_keeps_its_values() {
@@ -1250,3 +1249,4 @@ mod tests {
         let current = super::BrowserSettings::default().normalize();
         assert_eq!(current.clone().normalize(), current);
     }
+}

@@ -20,7 +20,9 @@ import {
   onPageRulesChanged,
   onSettingsChanged,
   onTabsChanged,
+  onUpdateStatus,
   siteFavicons,
+  updateStatus,
 } from "./browser-client";
 import { faviconKey } from "./format";
 import { publishZoom } from "./zoom";
@@ -201,6 +203,11 @@ export function useDownloadsState() {
 
 export function useDownloads() {
   return useDownloadsState().downloads;
+}
+
+/** Version, waiting update and check state. Refreshes while an update check runs. */
+export function useUpdateStatus() {
+  return useLiveValue(updateStatus, onUpdateStatus).value;
 }
 
 export function useHistoryState() {

@@ -12,6 +12,7 @@ import {
   PanelTop,
   Plus,
   Puzzle,
+  RefreshCw,
   Search,
   Settings,
   SquarePlus,
@@ -25,6 +26,7 @@ import {
   getSettings,
   openDevtools,
   installedBrowsers,
+  installUpdate,
   openInBrowser,
   reopenClosedTab,
   saveSettings,
@@ -35,12 +37,13 @@ import { cn } from "../lib/cn";
 import { focusRing } from "../lib/focus-ring";
 import { useEffect, useState } from "react";
 import type { ExternalBrowser } from "../../../types/browser";
-import { useTabs } from "../lib/use-browser";
+import { useTabs, useUpdateStatus } from "../lib/use-browser";
 import { IconButton } from "./IconButton";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "./PopupFrame";
 
 export function AppMenu() {
   const snapshot = useTabs();
+  const update = useUpdateStatus();
   const active = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const [browsers, setBrowsers] = useState<ExternalBrowser[]>([]);
   useEffect(() => {
@@ -67,6 +70,18 @@ export function AppMenu() {
   return (
     <PopupFrame id="app-menu" ready={snapshot.loaded}>
       <PopupMenu id="app-menu-items" label="Browser menu">
+        {update?.available ? (
+          <>
+            <PopupMenuItem
+              id="app-menu-update"
+              icon={<RefreshCw className="text-sky-300" />}
+              label={update.installing ? "Downloading the update…" : `Restart to update to ${update.available}`}
+              disabled={update.installing}
+              onClick={() => void installUpdate()}
+            />
+            <PopupMenuSeparator id="app-menu-separator-update" />
+          </>
+        ) : null}
         <PopupMenuItem id="app-menu-new-tab" icon={<SquarePlus />} label="New tab" shortcut="Ctrl+T" onClick={openPage("ce://newtab")} />
         <PopupMenuItem id="app-menu-ephemeral" icon={<Glasses />} label="New ephemeral tab" onClick={run(() => createEphemeralTab())} />
         <PopupMenuItem

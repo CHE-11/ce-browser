@@ -932,16 +932,17 @@ fn update_link_icon(link_path: &Path, icon: Option<&Path>) -> Result<(), String>
     Ok(())
 }
 
-/// Points Start menu and taskbar shortcuts made by a dev build (or an exe that no longer exists)
-/// at this exe. Taskbar files are never deleted: the pin opens through whichever file Windows
-/// chose, and nothing here can tell which one that is.
-pub fn repair_shortcuts() {
+/// Points Start menu and taskbar shortcuts made by a dev build, an exe that no longer exists,
+/// or the exe that ran before `moved_from` was replaced by this one, at this exe. Taskbar files
+/// are never deleted: the pin opens through whichever file Windows chose, and nothing here can
+/// tell which one that is.
+pub fn repair_shortcuts(moved_from: Option<PathBuf>) {
     let Ok(exe) = paths::launch_exe() else {
         return;
     };
     let dirs = [programs_dir().ok(), taskbar_dir()];
     for path in dirs.iter().flatten().flat_map(|dir| link_files(dir)) {
-        if let Err(error) = retarget_link(&path, &exe) {
+        if let Err(error) = retarget_link(&path, &exe, moved_from.as_deref()) {
             eprintln!("shortcut repair: {error}");
         }
     }
@@ -962,13 +963,20 @@ fn link_files(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// A ce-browser exe other than `exe` that is gone or sits in a `debug` build folder.
-fn stale_exe(target: &Path, exe: &Path) -> bool {
+/// A ce-browser exe other than `exe` that is gone, sits in a `debug` build folder, or is the
+/// exe this one replaced.
+fn stale_exe(target: &Path, exe: &Path, moved_from: Option<&Path>) -> bool {
+    if target == exe {
+        return false;
+    }
+    if moved_from.is_some_and(|previous| previous == target) {
+        return true;
+    }
     let same_name = target
         .file_name()
         .zip(exe.file_name())
         .is_some_and(|(left, right)| left.eq_ignore_ascii_case(right));
-    if !same_name || target == exe {
+    if !same_name {
         return false;
     }
     let debug_build = target
@@ -978,7 +986,7 @@ fn stale_exe(target: &Path, exe: &Path) -> bool {
     debug_build || !target.is_file()
 }
 
-fn retarget_link(path: &Path, exe: &Path) -> Result<(), String> {
+fn retarget_link(path: &Path, exe: &Path, moved_from: Option<&Path>) -> Result<(), String> {
     com_init();
     unsafe {
         let link: IShellLinkW =
@@ -990,7 +998,7 @@ fn retarget_link(path: &Path, exe: &Path) -> Result<(), String> {
         link.GetPath(&mut buffer, std::ptr::null_mut(), 0)
             .map_err(win_err)?;
         let target = PathBuf::from(wide_string(&buffer));
-        if !stale_exe(&target, exe) {
+        if !stale_exe(&target, exe, moved_from) {
             return Ok(());
         }
         link.SetPath(&HSTRING::from(exe.as_os_str()))
@@ -1620,10 +1628,18 @@ mod tests {
         let debug = std::path::Path::new(r"C:\repo\target\debug").join(name);
         let missing = std::path::Path::new(r"C:\gone\nowhere").join(name);
         let other_app = std::path::Path::new(r"C:\repo\target\debug\ce-git.exe");
-        assert!(stale_exe(&debug, &release));
-        assert!(stale_exe(&missing, &release));
-        assert!(!stale_exe(&release, &release));
-        assert!(!stale_exe(other_app, &release));
+        assert!(stale_exe(&debug, &release, None));
+        assert!(stale_exe(&missing, &release, None));
+        assert!(!stale_exe(&release, &release, None));
+        assert!(!stale_exe(other_app, &release, None));
+    }
+
+    #[test]
+    fn shortcuts_to_the_exe_this_one_replaced_are_stale() {
+        let installed = std::env::current_exe().unwrap();
+        let copied = std::path::Path::new(r"C:\Users\someone\Downloads\ce-browser_0_1_1.exe");
+        assert!(stale_exe(copied, &installed, Some(copied)));
+        assert!(!stale_exe(copied, &installed, None));
     }
 
     fn registry(root: &std::path::Path) -> ProfilesFile {

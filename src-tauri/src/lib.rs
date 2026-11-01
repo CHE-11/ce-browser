@@ -44,6 +44,7 @@ mod tabs;
 mod thumbnails;
 mod tools;
 mod undo;
+mod update;
 mod user_styles;
 mod webview2;
 mod what_runs;
@@ -244,8 +245,8 @@ async fn undo_action(app: AppHandle, id: u32) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn dismiss_toast(app: AppHandle, id: u32) {
-    undo::dismiss(&app, id);
+async fn dismiss_toast(app: AppHandle, window: Window, id: u32) {
+    undo::dismiss(&app, window.label(), id);
 }
 
 #[tauri::command]
@@ -1306,11 +1307,6 @@ fn save_settings(app: AppHandle, settings: BrowserSettings) -> Result<BrowserSet
     settings::save(&app, settings)
 }
 
-#[tauri::command]
-fn default_download_dir(app: AppHandle) -> String {
-    BrowserSettings::default()
-        .download_dir(&app)
-        .to_string_lossy()
 /// Settings as a new profile gets them, so the settings page can mark changed values.
 #[tauri::command]
 fn default_settings() -> BrowserSettings {
@@ -1322,6 +1318,32 @@ fn backdrop_support(app: AppHandle) -> backdrop::BackdropSupport {
     backdrop::support(&app)
 }
 
+#[tauri::command]
+fn update_status(app: AppHandle) -> update::UpdateStatus {
+    update::status(&app)
+}
+
+#[tauri::command]
+async fn check_for_update(app: AppHandle) -> Result<update::UpdateStatus, String> {
+    update::check(&app).await
+}
+
+/// Downloads and runs the installer. The browser closes and the new version opens.
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    update::install(&app).await
+}
+
+#[tauri::command]
+async fn release_notes(app: AppHandle, version: String) -> Result<update::ReleaseNotes, String> {
+    blocking(move || update::release_notes(&app, &version)).await
+}
+
+#[tauri::command]
+fn default_download_dir(app: AppHandle) -> String {
+    BrowserSettings::default()
+        .download_dir(&app)
+        .to_string_lossy()
         .into_owned()
 }
 
@@ -1487,12 +1509,14 @@ pub fn run() {
     profiles::read_args();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle().clone();
             sync::attach(&handle);
             profiles::init(&handle);
             if !tauri::is_dev() {
-                std::thread::spawn(profiles::repair_shortcuts);
+                let moved_from = update::record_exe(&handle);
+                std::thread::spawn(move || profiles::repair_shortcuts(moved_from));
             }
             if let Err(error) = profiles::set_process_identity() {
                 eprintln!("profile identity: {error}");
@@ -1515,14 +1539,17 @@ pub fn run() {
             session::init(&handle);
             status::init(&handle);
             tab_sleep::init(&handle);
+            update::init(&handle);
             build_window(&handle)?;
             system::start(&handle);
+            update::start(&handle);
 
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = session::restore(&handle) {
                     eprintln!("session restore: {error}");
                 }
                 system::apply_launch(&handle);
+                update::note_version(&handle);
                 let extensions_app = handle.clone();
                 let _ = tauri::async_runtime::spawn_blocking(move || {
                     if let Err(error) = extensions::sync_on_startup(&extensions_app) {
@@ -1759,14 +1786,18 @@ pub fn run() {
             show_reader_original,
             get_settings,
             save_settings,
+            default_settings,
+            backdrop_support,
+            update_status,
+            check_for_update,
+            install_update,
+            release_notes,
             default_download_dir,
             get_user_styles,
             save_user_styles,
             reload_user_styles,
             show_user_styles,
             show_sync_folder,
-            default_settings,
-            backdrop_support,
             default_user_styles,
             create_sync_folder,
             select_sync_folder,

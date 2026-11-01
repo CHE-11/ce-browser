@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bookmark, Code, Database, Download, Folder, Globe, History, ImageDown, Puzzle, Settings, Sparkles } from "lucide-react";
+import { Bookmark, Code, Database, Download, Folder, Globe, History, ImageDown, PartyPopper, Puzzle, Settings, Sparkles } from "lucide-react";
 import { cn } from "../lib/cn";
 import { faviconFor } from "../lib/format";
 
@@ -14,6 +14,7 @@ const INTERNAL_ICONS: Record<string, typeof Globe> = {
   "ce://capture-editor": ImageDown,
   "ce://rewrites": Code,
   "ce://storage": Database,
+  "ce://whats-new": PartyPopper,
 };
 
 type FavIconProps = {
@@ -31,7 +32,7 @@ export function FavIcon({ id, url, src, className }: FavIconProps) {
     setFailed(false);
   }, [candidate]);
 
-  const Internal = INTERNAL_ICONS[url];
+  const Internal = INTERNAL_ICONS[url.split(/[?#]/, 1)[0]];
   if (Internal) {
     return <Internal id={id} className={cn("size-4 shrink-0 text-sky-400", className)} aria-hidden />;
   }

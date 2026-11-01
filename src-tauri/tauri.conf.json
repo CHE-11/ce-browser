@@ -15,9 +15,24 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY2RjIzMEUyREJGRDRFQTQKUldTa1R2M2I0akR5OWg2NGFwWG9YL0I1VHlQS0ZsMzBsWU5lUGNrMEtxek1aL3dybThraFIzcTkK",
+      "endpoints": ["https://github.com/CHE-11/ce-browser/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
-    "active": false,
-    "targets": "all",
+    "active": true,
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

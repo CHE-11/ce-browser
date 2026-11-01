@@ -107,11 +107,15 @@ pub fn undo(app: &AppHandle, id: u32) -> Result<(), String> {
     }
 }
 
-/// The toast closed without Undo. The action is now final.
-pub fn dismiss(app: &AppHandle, id: u32) {
-    if let Some(offer) = take(id) {
-        tabs::close_toast(app, &offer.window);
-        finish(app, offer.action);
+/// The toast closed without Undo. The action is now final. A toast with no offer behind it,
+/// such as an update notice, just closes.
+pub fn dismiss(app: &AppHandle, window: &str, id: u32) {
+    match take(id) {
+        Some(offer) => {
+            tabs::close_toast(app, &offer.window);
+            finish(app, offer.action);
+        }
+        None => tabs::close_toast(app, window),
     }
 }
 

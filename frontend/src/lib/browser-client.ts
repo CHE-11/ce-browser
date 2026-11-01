@@ -21,6 +21,8 @@ import type {
   BrowserSettings,
   ClosedEntry,
   ProfileIconChoice,
+  ReleaseNotes,
+  UpdateStatus,
   DownloadItem,
   ExtractedPage,
   FindResult,
@@ -1068,11 +1070,6 @@ export function defaultDownloadDir() {
   return invoke<string>("default_download_dir");
 }
 
-export async function chooseFolder(title: string, defaultPath?: string) {
-  const path = await open({ directory: true, multiple: false, title, defaultPath });
-  return typeof path === "string" ? path : null;
-}
-
 /** Settings as a new profile gets them. */
 export function defaultSettings() {
   return invoke<BrowserSettings>("default_settings");
@@ -1080,6 +1077,32 @@ export function defaultSettings() {
 
 export function backdropSupport() {
   return invoke<BackdropSupport>("backdrop_support");
+}
+
+export function updateStatus() {
+  return invoke<UpdateStatus>("update_status");
+}
+
+export function checkForUpdate() {
+  return invoke<UpdateStatus>("check_for_update");
+}
+
+/** Downloads and runs the installer. The browser closes and the new version opens. */
+export function installUpdate() {
+  return invoke<void>("install_update");
+}
+
+export function releaseNotes(version: string) {
+  return invoke<ReleaseNotes>("release_notes", { version });
+}
+
+export function onUpdateStatus(handler: (status: UpdateStatus) => void): Promise<UnlistenFn> {
+  return listen<UpdateStatus>("update-status", (event) => handler(event.payload));
+}
+
+export async function chooseFolder(title: string, defaultPath?: string) {
+  const path = await open({ directory: true, multiple: false, title, defaultPath });
+  return typeof path === "string" ? path : null;
 }
 
 export function onSettingsChanged(handler: (settings: BrowserSettings) => void): Promise<UnlistenFn> {

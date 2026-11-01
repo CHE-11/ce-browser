@@ -903,7 +903,28 @@ export type OmniboxSuggestion = {
   historyId?: number;
 };
 
-/** Text matches on one page. `index` is the highlighted match, or -1. */
+export type UpdateStatus = {
+  current: string;
+  /** A newer version that is ready to install. */
+  available: string | null;
+  /** Release notes for `available`. */
+  notes: string;
+  checking: boolean;
+  installing: boolean;
+  error: string | null;
+  /** Milliseconds since 1970 of the last finished check. Zero before the first one. */
+  checkedAt: number;
+};
+
+export type ReleaseNotes = {
+  version: string;
+  name: string;
+  /** Markdown from the release page. */
+  body: string;
+  publishedAt: string;
+  url: string;
+};
+
 export type BackdropSupport = {
   mica: boolean;
   acrylic: boolean;
@@ -911,6 +932,7 @@ export type BackdropSupport = {
   restartNeeded: boolean;
 };
 
+/** Text matches on one page. `index` is the highlighted match, or -1. */
 export type FindResult = {
   count: number;
   index: number;
