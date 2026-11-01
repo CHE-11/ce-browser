@@ -1717,16 +1717,16 @@ pub fn run() {
                         return;
                     }
                     session::shutdown(&app);
-                    let closing = label.clone();
+                    // Browser windows are plain windows with child webviews, so a webview-window
+                    // lookup never finds them and the window stays open until the next click.
+                    let window = window.clone();
                     tauri::async_runtime::spawn(async move {
                         let flush_app = app.clone();
                         let _ =
                             tauri::async_runtime::spawn_blocking(move || sync::flush(&flush_app))
                                 .await;
                         sync::allow_close();
-                        if let Some(main) = app.get_webview_window(&closing) {
-                            let _ = main.close();
-                        }
+                        let _ = window.close();
                     });
                 }
                 _ => {}
