@@ -1,4 +1,4 @@
-import type { MouseEvent } from "react";
+import type { DragEvent, MouseEvent } from "react";
 import type { BrowserSettings } from "../../../types/browser";
 import { openPopup, saveSettings } from "./browser-client";
 
@@ -35,9 +35,71 @@ export function toolbarOrder(saved: string[] | undefined, available: string[]) {
   return ordered;
 }
 
-/** An extension stays on the address bar until its id is stored in settings. */
+/** A tool stays on its toolbar until its id is stored in settings. */
 export function toolbarPinned(settings: BrowserSettings | null, id: string) {
   return !settings?.hiddenToolbarExtensions?.includes(id);
+}
+
+export type ToolbarSplit = {
+  /** Pinned built-in tools, plus extensions when that setting is on. */
+  vertical: string[];
+  /** Pinned extensions that stay next to the address bar. */
+  address: string[];
+  /** Every pinned id, in saved order. Dragging uses this list. */
+  all: string[];
+};
+
+/** Built-in tools go on the right strip unless `verticalToolbar` is off. Extensions follow `verticalToolbarExtensions`. */
+export function splitToolbar(settings: BrowserSettings | null, extensionIds: string[]): ToolbarSplit {
+  const pinnedExtensions = extensionIds.filter((id) => toolbarPinned(settings, id));
+  const all = toolbarOrder(settings?.toolbarOrder, [
+    ...DEFAULT_TOOLBAR.filter((id) => toolbarPinned(settings, id)),
+    ...pinnedExtensions,
+  ]);
+  if (settings?.verticalToolbar === false) {
+    return { vertical: [], address: all, all };
+  }
+  if (settings?.verticalToolbarExtensions) {
+    return { vertical: all, address: [], all };
+  }
+  const extensions = new Set(pinnedExtensions);
+  return {
+    vertical: all.filter((id) => !extensions.has(id)),
+    address: all.filter((id) => extensions.has(id)),
+    all,
+  };
+}
+
+/** Moves `from` to sit just before `to` in the shared toolbar order. */
+export function reorderToolbar(order: string[], from: string, to: string) {
+  if (!from || from === to) {
+    return null;
+  }
+  const next = order.filter((id) => id !== from);
+  const index = next.indexOf(to);
+  if (index < 0) {
+    return null;
+  }
+  next.splice(index, 0, from);
+  return next;
+}
+
+export function toolbarDragHandlers(id: string, onMove: (from: string, to: string) => void) {
+  return {
+    draggable: true,
+    onDragStart: (event: DragEvent) => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", id);
+    },
+    onDragOver: (event: DragEvent) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+    },
+    onDrop: (event: DragEvent) => {
+      event.preventDefault();
+      onMove(event.dataTransfer.getData("text/plain"), id);
+    },
+  };
 }
 
 export function saveToolbarPin(settings: BrowserSettings, id: string, pinned: boolean) {
@@ -48,7 +110,7 @@ export function saveToolbarPin(settings: BrowserSettings, id: string, pinned: bo
   return saveSettings({ ...settings, hiddenToolbarExtensions: hidden });
 }
 
-/** Right-click menu for an icon that is currently on the address bar. */
+/** Right-click menu for an icon that is currently on a toolbar. */
 export function openToolbarPinMenu(event: MouseEvent, id: string) {
   event.preventDefault();
   void openPopup({

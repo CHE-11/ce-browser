@@ -207,18 +207,35 @@ const SETTLE_SCRIPT: &str = r#"(async () => {
 })()"#;
 
 pub fn extract_page(app: &AppHandle, id: u32) -> Result<ExtractedPage, String> {
-    let webview = tabs::page_view(app, id).ok_or("That tab is closed or its page is not loaded.")?;
-    let value = webview2::evaluate(&webview, EXTRACT_SCRIPT, Duration::from_secs(30), READ_FAILURE)?;
+    let webview =
+        tabs::page_view(app, id).ok_or("That tab is closed or its page is not loaded.")?;
+    let value = webview2::evaluate(
+        &webview,
+        EXTRACT_SCRIPT,
+        Duration::from_secs(30),
+        READ_FAILURE,
+    )?;
     serde_json::from_value(value).map_err(|error| format!("{READ_FAILURE} {error}"))
 }
 
-pub fn print_tab_to_pdf(app: &AppHandle, id: u32, options: PdfOptions, path: &Path) -> Result<(), String> {
-    let webview = tabs::page_view(app, id).ok_or("That tab is closed or its page is not loaded.")?;
+pub fn print_tab_to_pdf(
+    app: &AppHandle,
+    id: u32,
+    options: PdfOptions,
+    path: &Path,
+) -> Result<(), String> {
+    let webview =
+        tabs::page_view(app, id).ok_or("That tab is closed or its page is not loaded.")?;
     prepare_target(path)?;
     webview2::print_to_pdf(&webview, path, options.layout())
 }
 
-pub fn print_html_to_pdf(app: &AppHandle, html: &str, options: PdfOptions, path: &Path) -> Result<(), String> {
+pub fn print_html_to_pdf(
+    app: &AppHandle,
+    html: &str,
+    options: PdfOptions,
+    path: &Path,
+) -> Result<(), String> {
     prepare_target(path)?;
     let (webview, file) = open_host(app, html)?;
     let result = webview2::print_to_pdf(&webview, path, options.layout());
@@ -294,7 +311,11 @@ fn open_host(app: &AppHandle, html: &str) -> Result<(Webview, PathBuf), String> 
             }
         });
     let webview = window
-        .add_child(builder, LogicalPosition::new(-20000.0, -20000.0), LogicalSize::new(1024.0, 1400.0))
+        .add_child(
+            builder,
+            LogicalPosition::new(-20000.0, -20000.0),
+            LogicalSize::new(1024.0, 1400.0),
+        )
         .map_err(|error| {
             let _ = std::fs::remove_file(&file);
             format!("{PRINT_FAILURE} {error}")
@@ -304,6 +325,11 @@ fn open_host(app: &AppHandle, html: &str) -> Result<(Webview, PathBuf), String> 
         let _ = std::fs::remove_file(&file);
         return Err(format!("{PRINT_FAILURE} The page took too long to load."));
     }
-    let _ = webview2::evaluate(&webview, SETTLE_SCRIPT, Duration::from_secs(15), PRINT_FAILURE);
+    let _ = webview2::evaluate(
+        &webview,
+        SETTLE_SCRIPT,
+        Duration::from_secs(15),
+        PRINT_FAILURE,
+    );
     Ok((webview, file))
 }

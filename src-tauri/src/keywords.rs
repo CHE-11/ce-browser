@@ -41,12 +41,21 @@ pub fn init(app: &AppHandle) {
 }
 
 pub fn list(app: &AppHandle) -> Vec<Keyword> {
-    app.state::<KeywordState>().0.lock().expect("keywords").clone()
+    app.state::<KeywordState>()
+        .0
+        .lock()
+        .expect("keywords")
+        .clone()
 }
 
 pub fn save(app: &AppHandle, keywords: Vec<Keyword>) -> Result<Vec<Keyword>, String> {
     let keywords = normalize(keywords);
-    files::write_json(&paths::data_file(app, FILE), &KeywordFile { keywords: keywords.clone() })?;
+    files::write_json(
+        &paths::data_file(app, FILE),
+        &KeywordFile {
+            keywords: keywords.clone(),
+        },
+    )?;
     *app.state::<KeywordState>().0.lock().expect("keywords") = keywords.clone();
     let _ = app.emit("keywords-changed", &keywords);
     Ok(keywords)
@@ -55,8 +64,16 @@ pub fn save(app: &AppHandle, keywords: Vec<Keyword>) -> Result<Vec<Keyword>, Str
 pub fn defaults() -> Vec<Keyword> {
     vec![
         keyword("gh", "GitHub", "https://github.com/search?q=%s"),
-        keyword("yt", "YouTube", "https://www.youtube.com/results?search_query=%s"),
-        keyword("w", "Wikipedia", "https://en.wikipedia.org/wiki/Special:Search?search=%s"),
+        keyword(
+            "yt",
+            "YouTube",
+            "https://www.youtube.com/results?search_query=%s",
+        ),
+        keyword(
+            "w",
+            "Wikipedia",
+            "https://en.wikipedia.org/wiki/Special:Search?search=%s",
+        ),
         keyword("r", "Reddit", "https://www.reddit.com/search/?q=%s"),
     ]
 }
@@ -73,7 +90,11 @@ pub fn expand(keywords: &[Keyword], query: &str) -> Option<KeywordHit> {
     let keyword = keywords.iter().find(|item| item.keyword == word)?;
     let rest = rest.trim();
     let url = if rest.is_empty() {
-        keyword.url.replace("%s", "").trim_end_matches(['?', '&', '=']).to_string()
+        keyword
+            .url
+            .replace("%s", "")
+            .trim_end_matches(['?', '&', '='])
+            .to_string()
     } else {
         keyword.url.replace("%s", &urlencoding(&rest))
     };
@@ -103,7 +124,12 @@ fn normalize(keywords: Vec<Keyword>) -> Vec<Keyword> {
             .to_ascii_lowercase();
         keyword.title = keyword.title.trim().chars().take(60).collect();
         keyword.url = keyword.url.trim().to_string();
-        if !valid_keyword(&keyword.keyword) || !keyword.url.contains("%s") || kept.iter().any(|item: &Keyword| item.keyword == keyword.keyword) {
+        if !valid_keyword(&keyword.keyword)
+            || !keyword.url.contains("%s")
+            || kept
+                .iter()
+                .any(|item: &Keyword| item.keyword == keyword.keyword)
+        {
             continue;
         }
         if keyword.title.is_empty() {
@@ -125,7 +151,9 @@ fn urlencoding(text: &str) -> String {
     let mut out = String::new();
     for byte in text.bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
             b' ' => out.push('+'),
             _ => out.push_str(&format!("%{byte:02X}")),
         }
@@ -142,7 +170,11 @@ mod tests {
         let keywords = defaults();
         let hit = expand(&keywords, "!gh react hooks").unwrap();
         assert_eq!(hit.title, "Search GitHub for react hooks");
-        assert!(hit.url.contains("react+hooks") || hit.url.contains("react%20hooks") || hit.url.contains("react+hooks"));
+        assert!(
+            hit.url.contains("react+hooks")
+                || hit.url.contains("react%20hooks")
+                || hit.url.contains("react+hooks")
+        );
         assert!(hit.url.starts_with("https://github.com/search"));
         let bare = expand(&keywords, "yt cats").unwrap();
         assert!(bare.url.contains("cats"));

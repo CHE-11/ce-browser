@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
+  Activity,
   ArrowLeft,
   ArrowRight,
   Columns2,
@@ -8,9 +9,11 @@ import {
   History,
   House,
   Lock,
+  PanelRight,
   Puzzle,
   RotateCw,
   Search,
+  Settings,
   Star,
   TriangleAlert,
   X,
@@ -36,6 +39,7 @@ import {
   goForward,
   navigate,
   omniboxExtra,
+  searchHistory,
   onBrowserCommand,
   onDownloadStarted,
   onOmniboxPick,
@@ -52,12 +56,11 @@ import {
 } from "../../../lib/browser-client";
 import { accentTint } from "../../../lib/accent";
 import { cn } from "../../../lib/cn";
-import { DEFAULT_TOOLBAR, openToolbarPinMenu, toolbarOrder, toolbarPinned } from "../../../lib/toolbar-pin";
+import { reorderToolbar, splitToolbar, toolbarPinned } from "../../../lib/toolbar-pin";
 import { buildSuggestions, omniboxHeight } from "../../../lib/omnibox";
 import { flattenBookmarks } from "../../../lib/use-browser";
-import { ToolbarIcon } from "../../../features/BuiltInExtensions";
-import { ExtensionIcon } from "../../ExtensionIcon";
 import { IconButton } from "../../IconButton";
+import { ToolbarEntry } from "../../VerticalToolbar";
 import { WindowControls } from "../../WindowControls";
 
 type AddressBarProps = {
@@ -268,6 +271,23 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       showOmnibox({ suggestions, selected: 0 });
     }
     const asked = value;
+    if (asked.trim()) {
+      void searchHistory(asked).then((hits) => {
+        if (inputRef.current?.value !== asked || hits.length === 0) {
+          return;
+        }
+        const current = omniboxRef.current.suggestions;
+        const seen = new Set(current.map((item) => item.url));
+        const extra = hits
+          .filter((hit) => !seen.has(hit.url))
+          .slice(0, 4)
+          .map((hit) => ({ kind: "history" as const, title: hit.title || hit.url, url: hit.url }));
+        if (extra.length === 0) {
+          return;
+        }
+        showOmnibox({ suggestions: [...current, ...extra].slice(0, 8), selected: omniboxRef.current.selected });
+      });
+    }
     void omniboxExtra(asked).then((extra) => {
       if (!extra || inputRef.current?.value !== asked) {
         return;
@@ -335,21 +355,21 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const toolbarExtensions = extensions.filter(
     (extension) => extension.enabled && toolbarPinned(settings, extension.id),
   );
-  const toolbarIds = toolbarOrder(settings?.toolbarOrder, [
-    ...DEFAULT_TOOLBAR.filter((id) => toolbarPinned(settings, id)),
-    ...toolbarExtensions.map((extension) => extension.id),
-  ]);
+  const { address: toolbarIds, all: toolbarOrderIds } = splitToolbar(
+    settings,
+    toolbarExtensions.map((extension) => extension.id),
+  );
+  const extensionIds = new Set(toolbarExtensions.map((extension) => extension.id));
+  const addressBuiltins = toolbarIds.filter((id) => !extensionIds.has(id));
+  const addressExtensions = toolbarIds.filter((id) => extensionIds.has(id));
   const moveToolbar = (from: string, to: string) => {
-    if (!settings || from === to) {
+    if (!settings) {
       return;
     }
-    const next = toolbarIds.filter((id) => id !== from);
-    const index = next.indexOf(to);
-    if (index < 0) {
-      return;
+    const next = reorderToolbar(toolbarOrderIds, from, to);
+    if (next) {
+      void saveSettings({ ...settings, toolbarOrder: next });
     }
-    next.splice(index, 0, from);
-    void saveSettings({ ...settings, toolbarOrder: next });
   };
   const secure = activeTab?.url.startsWith("https://");
   const insecure = activeTab?.url.startsWith("http://");
@@ -471,56 +491,42 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       </div>
 
       <div id="address-tools" className="flex items-center">
-        {toolbarIds.map((id) => {
-          const extension = toolbarExtensions.find((item) => item.id === id);
-          return (
-            <span
-              key={id}
-              id={`address-tool-${id}`}
-              className="inline-flex"
-              draggable
-              onDragStart={(event: DragEvent) => {
-                event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("text/plain", id);
-              }}
-              onDragOver={(event: DragEvent) => {
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-              }}
-              onDrop={(event: DragEvent) => {
-                event.preventDefault();
-                moveToolbar(event.dataTransfer.getData("text/plain"), id);
-              }}
-              onContextMenu={(event) => openToolbarPinMenu(event, id)}
-            >
-              {extension ? (
-                <IconButton
-                  id={`address-extension-${extension.id}`}
-                  label={extension.name}
-                  disabled={!extension.popup}
-                  onClick={(event) =>
-                    void openPopupBelow(event.currentTarget, {
-                      kind: "extension",
-                      params: `id=${extension.id}`,
-                      width: 380,
-                      height: 600,
-                    })
-                  }
-                >
-                  <ExtensionIcon
-                    id={`address-extension-${extension.id}-icon`}
-                    extensionId={extension.id}
-                    name={extension.name}
-                    src={extension.icon}
-                    className="size-4"
-                  />
-                </IconButton>
-              ) : (
-                <ToolbarIcon id={id} activeTab={activeTab} settings={settings} />
-              )}
-            </span>
-          );
-        })}
+        {settings?.verticalToolbar === false ? (
+          <IconButton
+            id="address-tools-side"
+            label="Show tools on the side"
+            onClick={() => void saveSettings({ ...settings, verticalToolbar: true })}
+          >
+            <PanelRight id="address-tools-side-icon" aria-hidden />
+          </IconButton>
+        ) : null}
+        {addressBuiltins.map((id) => (
+          <ToolbarEntry
+            key={id}
+            id={id}
+            idPrefix="address"
+            extension={undefined}
+            activeTab={activeTab}
+            settings={settings}
+            labeled={false}
+            onMove={moveToolbar}
+          />
+        ))}
+        {addressBuiltins.length > 0 ? (
+          <div id="address-tools-end" className="mx-0.5 h-4 w-px shrink-0 bg-zinc-600" />
+        ) : null}
+        {addressExtensions.map((id) => (
+          <ToolbarEntry
+            key={id}
+            id={id}
+            idPrefix="address"
+            extension={toolbarExtensions.find((item) => item.id === id)}
+            activeTab={activeTab}
+            settings={settings}
+            labeled={false}
+            onMove={moveToolbar}
+          />
+        ))}
         <IconButton
           id="address-extensions-page"
           label="Extensions"
@@ -570,6 +576,16 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         onClick={toggleSplit}
       >
         <Columns2 id="address-split-icon" aria-hidden />
+      </IconButton>
+      <IconButton
+        id="address-status"
+        label="Browser status"
+        onClick={(event) => void openPopupBelow(event.currentTarget, { kind: "status", width: 300, height: 420 })}
+      >
+        <Activity id="address-status-icon" aria-hidden />
+      </IconButton>
+      <IconButton id="address-settings" label="Settings" onClick={() => void createTab("ce://settings")}>
+        <Settings id="address-settings-icon" aria-hidden />
       </IconButton>
 
       <IconButton

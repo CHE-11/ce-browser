@@ -31,15 +31,22 @@ pub fn recognize_png(bytes: &[u8]) -> Result<String, String> {
         "Windows has no OCR language pack. Add one in Settings, then Time & language, then Language.".to_string()
     })?;
     let stream = InMemoryRandomAccessStream::new().map_err(|error| format!("{FAILURE} {error}"))?;
-    let writer = DataWriter::CreateDataWriter(&stream).map_err(|error| format!("{FAILURE} {error}"))?;
-    writer.WriteBytes(bytes).map_err(|error| format!("{FAILURE} {error}"))?;
+    let writer =
+        DataWriter::CreateDataWriter(&stream).map_err(|error| format!("{FAILURE} {error}"))?;
+    writer
+        .WriteBytes(bytes)
+        .map_err(|error| format!("{FAILURE} {error}"))?;
     writer
         .StoreAsync()
         .map_err(|error| format!("{FAILURE} {error}"))?
         .get()
         .map_err(|error| format!("{FAILURE} {error}"))?;
-    writer.DetachStream().map_err(|error| format!("{FAILURE} {error}"))?;
-    stream.Seek(0).map_err(|error| format!("{FAILURE} {error}"))?;
+    writer
+        .DetachStream()
+        .map_err(|error| format!("{FAILURE} {error}"))?;
+    stream
+        .Seek(0)
+        .map_err(|error| format!("{FAILURE} {error}"))?;
     let decoder = BitmapDecoder::CreateAsync(&stream)
         .map_err(|error| format!("{FAILURE} {error}"))?
         .get()
@@ -54,7 +61,9 @@ pub fn recognize_png(bytes: &[u8]) -> Result<String, String> {
         .map_err(|error| format!("{FAILURE} {error}"))?
         .get()
         .map_err(|error| format!("{FAILURE} {error}"))?;
-    let text = result.Text().map_err(|error| format!("{FAILURE} {error}"))?;
+    let text = result
+        .Text()
+        .map_err(|error| format!("{FAILURE} {error}"))?;
     let text = text.to_string();
     if text.trim().is_empty() {
         return Err("No text was found in that image.".into());
@@ -64,7 +73,9 @@ pub fn recognize_png(bytes: &[u8]) -> Result<String, String> {
 
 pub(crate) fn copy_text(text: &str) -> Result<(), String> {
     use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
-    use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+    };
     use windows::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
     use windows::Win32::System::Ole::CF_UNICODETEXT;
     let mut wide: Vec<u16> = text.encode_utf16().collect();
@@ -74,7 +85,8 @@ pub(crate) fn copy_text(text: &str) -> Result<(), String> {
         OpenClipboard(None).map_err(|error| format!("{FAILURE} {error}"))?;
         let result = (|| {
             EmptyClipboard().map_err(|error| format!("{FAILURE} {error}"))?;
-            let memory = GlobalAlloc(GMEM_MOVEABLE, bytes.len()).map_err(|error| format!("{FAILURE} {error}"))?;
+            let memory = GlobalAlloc(GMEM_MOVEABLE, bytes.len())
+                .map_err(|error| format!("{FAILURE} {error}"))?;
             let target = GlobalLock(memory);
             if target.is_null() {
                 let _ = GlobalFree(Some(memory));
@@ -82,7 +94,9 @@ pub(crate) fn copy_text(text: &str) -> Result<(), String> {
             }
             std::ptr::copy_nonoverlapping(bytes.as_ptr(), target.cast::<u8>(), bytes.len());
             let _ = GlobalUnlock(memory);
-            if let Err(error) = SetClipboardData(u32::from(CF_UNICODETEXT.0), Some(HANDLE(memory.0))) {
+            if let Err(error) =
+                SetClipboardData(u32::from(CF_UNICODETEXT.0), Some(HANDLE(memory.0)))
+            {
                 let _ = GlobalFree(Some(HGLOBAL(memory.0)));
                 return Err(format!("{FAILURE} {error}"));
             }

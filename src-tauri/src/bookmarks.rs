@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{files, paths};
+use crate::paths;
 
 const FILE: &str = "bookmarks.json";
 pub const BAR: &str = "bar";
@@ -187,12 +187,13 @@ fn new_id() -> String {
 }
 
 pub fn init(app: &AppHandle) {
-    let tree: BookmarkTree = files::read_json(&paths::data_file(app, FILE));
+    crate::sync_conflicts::note(app, &paths::data_file(app, FILE));
+    let tree: BookmarkTree = crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
     app.manage(Bookmarks(Mutex::new(tree.normalize())));
 }
 
 pub fn reload(app: &AppHandle) {
-    let tree: BookmarkTree = files::read_json(&paths::data_file(app, FILE));
+    let tree: BookmarkTree = crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
     let tree = tree.normalize();
     *app.state::<Bookmarks>().0.lock().expect("bookmarks lock") = tree.clone();
     let _ = app.emit("bookmarks-changed", &tree);
@@ -216,7 +217,7 @@ fn change<T>(
         let result = edit(&mut tree)?;
         (result, tree.clone())
     };
-    files::write_json(&paths::data_file(app, FILE), &snapshot)?;
+    crate::sync_conflicts::store(app, &paths::data_file(app, FILE), &snapshot)?;
     let _ = app.emit("bookmarks-changed", &snapshot);
     crate::sync::touch();
     Ok(result)
@@ -224,7 +225,7 @@ fn change<T>(
 
 pub fn replace(app: &AppHandle, tree: BookmarkTree) -> Result<(), String> {
     let tree = tree.normalize();
-    files::write_json(&paths::data_file(app, FILE), &tree)?;
+    crate::sync_conflicts::store(app, &paths::data_file(app, FILE), &tree)?;
     *app.state::<Bookmarks>().0.lock().expect("bookmarks lock") = tree.clone();
     let _ = app.emit("bookmarks-changed", &tree);
     Ok(())

@@ -1,12 +1,16 @@
-import { Archive, BookOpen, KeyRound, Languages, Sparkles, Tags } from "lucide-react";
 import type { BrowserSettings, TabInfo } from "../../../../types/browser";
-import { ToolButton } from "@features/Tools/ToolButton";
 import { AdBlockerButton } from "./ad-blocker/AdBlockerButton";
+import { AssistantButton } from "./assistant/Assistant";
 import { PageControlsButton } from "./page-controls/PageControlsButton";
 import { ClearCacheButton } from "./clear-cache/ClearCacheButton";
 import { PageCaptureButton } from "./page-capture/PageCaptureButton";
+import { PasswordButton } from "./password/Password";
+import { PriceButton } from "./price/Price";
 import { MediaHubButton } from "../Media/MediaHubButton";
 import { PrintPdfButton } from "./print-pdf/PrintPdfButton";
+import { ReadingButton } from "./reading/Reading";
+import { TranslateButton } from "./translate/Translate";
+import { WaybackButton } from "./wayback/Wayback";
 import { WhatRunsButton } from "./what-runs/WhatRunsButton";
 
 /** One pinned built-in tool. Unknown ids render nothing. */
@@ -27,17 +31,17 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
     case "page-controls":
       return <PageControlsButton activeTab={activeTab} />;
     case "translate":
-      return <ToolButton id="translate" label="Translate page" kind="translate" icon={<Languages id="address-translate-icon" aria-hidden />} activeTab={activeTab} restore />;
+      return <TranslateButton activeTab={activeTab} />;
     case "password":
-      return <ToolButton id="password" label="Password" kind="password" icon={<KeyRound id="address-password-icon" aria-hidden />} activeTab={activeTab} needsPage={false} />;
+      return <PasswordButton activeTab={activeTab} />;
     case "price":
-      return <ToolButton id="price" label="Prices" kind="price" icon={<Tags id="address-price-icon" aria-hidden />} activeTab={activeTab} height={420} />;
+      return <PriceButton activeTab={activeTab} />;
     case "wayback":
-      return <ToolButton id="wayback" label="Wayback Machine" kind="wayback" icon={<Archive id="address-wayback-icon" aria-hidden />} activeTab={activeTab} height={220} />;
+      return <WaybackButton activeTab={activeTab} />;
     case "reading":
-      return <ToolButton id="reading" label="Reading" kind="reading" icon={<BookOpen id="address-reading-icon" aria-hidden />} activeTab={activeTab} height={220} />;
+      return <ReadingButton activeTab={activeTab} />;
     case "assistant":
-      return <ToolButton id="assistant" label="Assistant" kind="assistant" icon={<Sparkles id="address-assistant-icon" aria-hidden />} activeTab={activeTab} height={460} />;
+      return <AssistantButton activeTab={activeTab} />;
     default:
       return null;
   }

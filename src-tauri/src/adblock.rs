@@ -73,7 +73,11 @@ pub fn site_key(host: &str) -> String {
 pub fn configure(settings: &AdblockSettings) {
     let mut config = config().write().expect("adblock config lock");
     config.enabled = settings.enabled;
-    config.allowed = settings.allowed_sites.iter().map(|site| site_key(site)).collect();
+    config.allowed = settings
+        .allowed_sites
+        .iter()
+        .map(|site| site_key(site))
+        .collect();
 }
 
 fn http_host(url: &str) -> Option<String> {
@@ -81,7 +85,9 @@ fn http_host(url: &str) -> Option<String> {
     if !matches!(parsed.scheme(), "http" | "https" | "ws" | "wss") {
         return None;
     }
-    parsed.host_str().map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+    parsed
+        .host_str()
+        .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
 }
 
 /// The host and each parent domain, longest first: `a.b.c.com`, `b.c.com`, `c.com`.
@@ -89,7 +95,10 @@ fn host_and_parents(host: &str) -> impl Iterator<Item = &str> {
     let mut rest = Some(host);
     std::iter::from_fn(move || {
         let current = rest?;
-        rest = current.split_once('.').map(|(_, parent)| parent).filter(|parent| parent.contains('.'));
+        rest = current
+            .split_once('.')
+            .map(|(_, parent)| parent)
+            .filter(|parent| parent.contains('.'));
         Some(current)
     })
 }
@@ -105,7 +114,11 @@ fn base_domain(host: &str) -> &str {
     let labels: Vec<&str> = host.rsplitn(4, '.').collect();
     let keep = match labels.as_slice() {
         [tld, second, _, ..]
-            if tld.len() == 2 && matches!(*second, "co" | "com" | "net" | "org" | "gov" | "ac" | "edu" | "ne" | "or") =>
+            if tld.len() == 2
+                && matches!(
+                    *second,
+                    "co" | "com" | "net" | "org" | "gov" | "ac" | "edu" | "ne" | "or"
+                ) =>
         {
             3
         }
@@ -152,7 +165,13 @@ pub fn page_started(app: &AppHandle, id: u32, url: &str) {
         }
         tab.blocked = 0;
     }
-    let _ = app.emit("adblock-stats", AdblockStats { tab_id: id, blocked: 0 });
+    let _ = app.emit(
+        "adblock-stats",
+        AdblockStats {
+            tab_id: id,
+            blocked: 0,
+        },
+    );
 }
 
 pub fn forget(id: u32) {
@@ -165,7 +184,10 @@ pub fn stats(id: u32) -> AdblockStats {
         .expect("adblock tabs lock")
         .get(&id)
         .map_or(0, |tab| tab.blocked);
-    AdblockStats { tab_id: id, blocked }
+    AdblockStats {
+        tab_id: id,
+        blocked,
+    }
 }
 
 /// Decides whether a request from tab `id` is dropped, and counts it when it is.
@@ -220,7 +242,13 @@ fn record_block(app: &AppHandle, id: u32) {
             tab.pending = false;
             tab.blocked
         };
-        let _ = app.emit("adblock-stats", AdblockStats { tab_id: id, blocked });
+        let _ = app.emit(
+            "adblock-stats",
+            AdblockStats {
+                tab_id: id,
+                blocked,
+            },
+        );
     });
 }
 
@@ -283,7 +311,10 @@ mod tests {
     #[test]
     fn the_blocklist_has_no_paths_or_blanks() {
         for host in blocklist() {
-            assert!(!host.contains('/') && !host.contains(' ') && host.contains('.'), "{host}");
+            assert!(
+                !host.contains('/') && !host.contains(' ') && host.contains('.'),
+                "{host}"
+            );
         }
     }
 }

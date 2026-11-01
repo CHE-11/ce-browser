@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{files, paths};
+use crate::paths;
 
 const FILE: &str = "history.json";
 const MAX_ITEMS: usize = 2000;
@@ -74,7 +74,10 @@ fn useful_title(url: &str, title: &str) -> Option<String> {
 
 fn apply_visit(items: &mut Vec<HistoryItem>, next_id: &mut u32, url: &str, title: &str, now: u64) {
     let key = paths::pin_key(url);
-    if let Some(index) = items.iter().position(|item| paths::pin_key(&item.url) == key) {
+    if let Some(index) = items
+        .iter()
+        .position(|item| paths::pin_key(&item.url) == key)
+    {
         let mut item = items.remove(index);
         let repeat = now.saturating_sub(item.last_visited) < REPEAT_WINDOW_MS;
         item.url = url.to_string();
@@ -110,7 +113,10 @@ fn apply_title(items: &mut Vec<HistoryItem>, url: &str, title: &str) -> bool {
         return false;
     };
     let key = paths::pin_key(url);
-    let Some(item) = items.iter_mut().find(|item| paths::pin_key(&item.url) == key) else {
+    let Some(item) = items
+        .iter_mut()
+        .find(|item| paths::pin_key(&item.url) == key)
+    else {
         return false;
     };
     if item.title == title {
@@ -121,7 +127,8 @@ fn apply_title(items: &mut Vec<HistoryItem>, url: &str, title: &str) -> bool {
 }
 
 pub fn init(app: &AppHandle) {
-    let file: HistoryFile = files::read_json(&paths::data_file(app, FILE));
+    crate::sync_conflicts::note(app, &paths::data_file(app, FILE));
+    let file: HistoryFile = crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
     let mut items = file.items;
     items.retain(|item| tracked(&item.url));
     for item in &mut items {
@@ -134,7 +141,12 @@ pub fn init(app: &AppHandle) {
     }
     items.sort_by(|left, right| right.last_visited.cmp(&left.last_visited));
     items.truncate(MAX_ITEMS);
-    let next_id = items.iter().map(|item| item.id).max().unwrap_or(0).saturating_add(1);
+    let next_id = items
+        .iter()
+        .map(|item| item.id)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
     app.manage(History(Mutex::new(HistoryState { items, next_id })));
 }
 
@@ -145,7 +157,7 @@ fn with_state<T>(app: &AppHandle, change: impl FnOnce(&mut HistoryState) -> T) -
 }
 
 pub fn reload(app: &AppHandle) {
-    let file: HistoryFile = files::read_json(&paths::data_file(app, FILE));
+    let file: HistoryFile = crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
     let mut items = file.items;
     items.retain(|item| tracked(&item.url));
     for item in &mut items {
@@ -158,7 +170,12 @@ pub fn reload(app: &AppHandle) {
     }
     items.sort_by(|left, right| right.last_visited.cmp(&left.last_visited));
     items.truncate(MAX_ITEMS);
-    let next_id = items.iter().map(|item| item.id).max().unwrap_or(0).saturating_add(1);
+    let next_id = items
+        .iter()
+        .map(|item| item.id)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
     with_state(app, |state| {
         state.items = items.clone();
         state.next_id = next_id;
@@ -172,7 +189,13 @@ pub fn list(app: &AppHandle) -> Vec<HistoryItem> {
 
 fn changed(app: &AppHandle) {
     let items = list(app);
-    let _ = files::write_json(&paths::data_file(app, FILE), &HistoryFile { items: items.clone() });
+    let _ = crate::sync_conflicts::store(
+        app,
+        &paths::data_file(app, FILE),
+        &HistoryFile {
+            items: items.clone(),
+        },
+    );
     let _ = app.emit("history-changed", &items);
     crate::sync::touch();
 }
@@ -190,7 +213,12 @@ pub fn replace(app: &AppHandle, mut items: Vec<HistoryItem>) -> Result<(), Strin
     }
     items.sort_by(|left, right| right.last_visited.cmp(&left.last_visited));
     items.truncate(MAX_ITEMS);
-    let next_id = items.iter().map(|item| item.id).max().unwrap_or(0).saturating_add(1);
+    let next_id = items
+        .iter()
+        .map(|item| item.id)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
     with_state(app, |state| {
         state.items = items;
         state.next_id = next_id;
@@ -205,7 +233,13 @@ pub fn visit(app: &AppHandle, url: &str, title: &str) {
         return;
     }
     with_state(app, |state| {
-        apply_visit(&mut state.items, &mut state.next_id, url.trim(), title, now_ms());
+        apply_visit(
+            &mut state.items,
+            &mut state.next_id,
+            url.trim(),
+            title,
+            now_ms(),
+        );
     });
     changed(app);
 }
@@ -215,7 +249,9 @@ pub fn set_title(app: &AppHandle, url: &str, title: &str) {
     if !tracked(url) {
         return;
     }
-    let updated = with_state(app, |state| apply_title(&mut state.items, url.trim(), title));
+    let updated = with_state(app, |state| {
+        apply_title(&mut state.items, url.trim(), title)
+    });
     if updated {
         changed(app);
     }
@@ -223,12 +259,18 @@ pub fn set_title(app: &AppHandle, url: &str, title: &str) {
 
 pub fn remove(app: &AppHandle, id: u32) {
     let removed = with_state(app, |state| {
+        let url = state
+            .items
+            .iter()
+            .find(|item| item.id == id)
+            .map(|item| item.url.clone());
         let before = state.items.len();
         state.items.retain(|item| item.id != id);
-        state.items.len() != before
+        url.filter(|_| state.items.len() != before)
     });
-    if removed {
+    if let Some(url) = removed {
         changed(app);
+        crate::history_index::forget(app, &url);
     }
 }
 
@@ -240,6 +282,7 @@ pub fn clear(app: &AppHandle) {
     });
     if had {
         changed(app);
+        crate::history_index::clear(app);
     }
 }
 
@@ -263,7 +306,13 @@ mod tests {
         let mut items = Vec::new();
         let mut next = 1;
         apply_visit(&mut items, &mut next, "https://example.com/a", "", 1_000);
-        apply_visit(&mut items, &mut next, "https://example.com/a", "Example", 1_200);
+        apply_visit(
+            &mut items,
+            &mut next,
+            "https://example.com/a",
+            "Example",
+            1_200,
+        );
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].visit_count, 1);
         assert_eq!(items[0].title, "Example");
@@ -274,9 +323,21 @@ mod tests {
     fn a_later_visit_counts_and_a_trailing_slash_matches() {
         let mut items = Vec::new();
         let mut next = 1;
-        apply_visit(&mut items, &mut next, "https://example.com/a", "First", 1_000);
+        apply_visit(
+            &mut items,
+            &mut next,
+            "https://example.com/a",
+            "First",
+            1_000,
+        );
         apply_visit(&mut items, &mut next, "https://other.test/", "Other", 5_000);
-        apply_visit(&mut items, &mut next, "https://example.com/a/", "Again", 8_000);
+        apply_visit(
+            &mut items,
+            &mut next,
+            "https://example.com/a/",
+            "Again",
+            8_000,
+        );
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].url, "https://example.com/a/");
         assert_eq!(items[0].title, "Again");

@@ -286,7 +286,9 @@ pub fn delete_script(app: &AppHandle, id: &str) -> Result<PageRules, String> {
 pub fn control_for(app: &AppHandle, url: &str) -> SiteControl {
     let host = settings::sleep_site_key(url);
     let rules = get(app);
-    best_control(&host, &rules.sites).cloned().unwrap_or_default()
+    best_control(&host, &rules.sites)
+        .cloned()
+        .unwrap_or_default()
 }
 
 pub fn blocks_images(app: &AppHandle, url: &str) -> bool {
@@ -320,7 +322,9 @@ pub fn injection(app: &AppHandle, url: &str) -> String {
     }
     let host = settings::sleep_site_key(url);
     let rules = get(app);
-    let site = best_control(&host, &rules.sites).cloned().unwrap_or_default();
+    let site = best_control(&host, &rules.sites)
+        .cloned()
+        .unwrap_or_default();
     let scripts: Vec<serde_json::Value> = rules
         .scripts
         .iter()
@@ -446,7 +450,10 @@ fn normalize_script(mut script: UserScript) -> Result<UserScript, String> {
         script.name = "Script".into();
     }
     if script.css.len() > MAX_CODE || script.js.len() > MAX_CODE {
-        return Err(format!("A script can hold up to {} KB of CSS and of JS.", MAX_CODE / 1024));
+        return Err(format!(
+            "A script can hold up to {} KB of CSS and of JS.",
+            MAX_CODE / 1024
+        ));
     }
     script.id = script_id(&script.id, &script.name);
     let mut hosts = Vec::new();
@@ -464,7 +471,13 @@ fn script_id(raw: &str, name: &str) -> String {
     let source = if raw.trim().is_empty() { name } else { raw };
     let mut id: String = source
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '-' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     while id.contains("--") {
         id = id.replace("--", "-");
@@ -487,7 +500,11 @@ fn snap_speed(value: f64) -> f64 {
         return 1.0;
     }
     let snapped = (value.clamp(0.25, 4.0) * 20.0).round() / 20.0;
-    if (snapped - 1.0).abs() < 0.02 { 1.0 } else { snapped }
+    if (snapped - 1.0).abs() < 0.02 {
+        1.0
+    } else {
+        snapped
+    }
 }
 
 fn clean_selectors(selectors: Vec<String>) -> Vec<String> {
@@ -496,7 +513,9 @@ fn clean_selectors(selectors: Vec<String>) -> Vec<String> {
         let selector = selector.trim();
         if selector.is_empty()
             || selector.len() > MAX_SELECTOR
-            || selector.chars().any(|ch| ch.is_control() || matches!(ch, '{' | '}' | '<' | '>'))
+            || selector
+                .chars()
+                .any(|ch| ch.is_control() || matches!(ch, '{' | '}' | '<' | '>'))
             || kept.iter().any(|item: &String| item == selector)
         {
             continue;
@@ -513,7 +532,10 @@ fn site_matches(host: &str, rule: &str) -> bool {
     !host.is_empty() && !rule.is_empty() && (host == rule || host.ends_with(&format!(".{rule}")))
 }
 
-fn best_control<'a>(host: &str, sites: &'a HashMap<String, SiteControl>) -> Option<&'a SiteControl> {
+fn best_control<'a>(
+    host: &str,
+    sites: &'a HashMap<String, SiteControl>,
+) -> Option<&'a SiteControl> {
     sites
         .iter()
         .filter(|(rule, _)| site_matches(host, rule))

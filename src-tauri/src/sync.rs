@@ -21,7 +21,12 @@ const BOOKMARKS_FILE: &str = "bookmarks.json";
 const EXTENSIONS_FILE: &str = "extensions.json";
 const SETTINGS_FILE: &str = "settings.json";
 const HISTORY_FILE: &str = "history.json";
-const PARTS: [Part; 4] = [Part::Bookmarks, Part::Extensions, Part::Settings, Part::History];
+const PARTS: [Part; 4] = [
+    Part::Bookmarks,
+    Part::Extensions,
+    Part::Settings,
+    Part::History,
+];
 
 static DIRTY: AtomicBool = AtomicBool::new(false);
 static APPLYING: AtomicBool = AtomicBool::new(false);
@@ -191,25 +196,32 @@ pub fn start(app: &AppHandle) {
     if STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
+    crate::sync_conflicts::prepare(app);
     let app = app.clone();
     let _ = thread::Builder::new().name("sync".into()).spawn(move || {
         loop {
             thread::sleep(Duration::from_secs(1));
-            let _lock = operation_lock();
-            match reconcile(&app) {
-                Ok(()) => set_error(&app, None),
-                Err(error) => set_error(&app, Some(error)),
+            {
+                let _lock = operation_lock();
+                match reconcile(&app) {
+                    Ok(()) => set_error(&app, None),
+                    Err(error) => set_error(&app, Some(error)),
+                }
             }
+            crate::sync_conflicts::apply_pending(&app);
         }
     });
 }
 
 pub fn flush(app: &AppHandle) {
-    let _lock = operation_lock();
-    DIRTY.store(true, Ordering::Relaxed);
-    if let Err(error) = reconcile(app) {
-        eprintln!("sync: {error}");
+    {
+        let _lock = operation_lock();
+        DIRTY.store(true, Ordering::Relaxed);
+        if let Err(error) = reconcile(app) {
+            eprintln!("sync: {error}");
+        }
     }
+    crate::sync_conflicts::apply_pending(app);
 }
 
 pub fn show_folder(app: &AppHandle) -> Result<(), String> {
@@ -314,6 +326,7 @@ pub fn clear(app: &AppHandle) -> Result<SyncStatus, String> {
         crate::profiles::transfer_sync_to_appdata(&folder, &paths::root_data_dir(app))?;
     }
     paths::set_storage_root(None);
+    crate::sync_conflicts::rebase(app);
     crate::profiles::refresh_icons(app);
     clear_machine(app)?;
     let mut settings = settings::get(app);
@@ -344,6 +357,7 @@ fn reconcile(app: &AppHandle) -> Result<(), String> {
 
 fn reconcile_inner(app: &AppHandle, start_gen: u64) -> Result<(), String> {
     if paths::storage_root().is_some() {
+        crate::sync_conflicts::scan(app);
         finish(start_gen);
         return Ok(());
     }
@@ -356,7 +370,8 @@ fn reconcile_inner(app: &AppHandle, start_gen: u64) -> Result<(), String> {
     }
     import_legacy(app, &folder)?;
     require_files(&folder)?;
-    let stamp = folder_stamp(&folder).ok_or_else(|| format!("Could not read {}", folder.display()))?;
+    let stamp =
+        folder_stamp(&folder).ok_or_else(|| format!("Could not read {}", folder.display()))?;
     let tick = TICK.fetch_add(1, Ordering::Relaxed);
     let force = tick % 15 == 0;
     let dirty = DIRTY.load(Ordering::Relaxed);
@@ -398,7 +413,12 @@ fn sync_part(app: &AppHandle, folder: &Path, part: Part, dirty: bool) -> Result<
         }
         return Ok(());
     }
-    write_part(app, part, &path, next_revision(remote_revision.max(local_revision)))
+    write_part(
+        app,
+        part,
+        &path,
+        next_revision(remote_revision.max(local_revision)),
+    )
 }
 
 fn write_part(app: &AppHandle, part: Part, path: &Path, revision: u64) -> Result<(), String> {
@@ -515,7 +535,8 @@ fn same_as_local(app: &AppHandle, part: Part, path: &Path) -> Result<bool, Strin
         Part::Settings => {
             let document: SettingsDocument = serde_json::from_value(value)
                 .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-            serde_json::to_string(&exported(document.settings)).map_err(|error| error.to_string())?
+            serde_json::to_string(&exported(document.settings))
+                .map_err(|error| error.to_string())?
         }
         Part::History => {
             let document: HistoryDocument = serde_json::from_value(value)
@@ -534,13 +555,20 @@ fn same_as_local(app: &AppHandle, part: Part, path: &Path) -> Result<bool, Strin
                     hash: extension.hash.clone(),
                 })
                 .collect::<Vec<_>>();
-            return Ok(signature(&sigs(&extensions::extension_states(app)?))? == signature(&remote)?);
+            return Ok(
+                signature(&sigs(&extensions::extension_states(app)?))? == signature(&remote)?
+            );
         }
     };
     let local = match part {
-        Part::Bookmarks => serde_json::to_string(&bookmarks::tree(app)).map_err(|error| error.to_string())?,
-        Part::Settings => serde_json::to_string(&exported(settings::get(app))).map_err(|error| error.to_string())?,
-        Part::History => serde_json::to_string(&history::list(app)).map_err(|error| error.to_string())?,
+        Part::Bookmarks => {
+            serde_json::to_string(&bookmarks::tree(app)).map_err(|error| error.to_string())?
+        }
+        Part::Settings => serde_json::to_string(&exported(settings::get(app)))
+            .map_err(|error| error.to_string())?,
+        Part::History => {
+            serde_json::to_string(&history::list(app)).map_err(|error| error.to_string())?
+        }
         Part::Extensions => unreachable!("extensions return above"),
     };
     Ok(remote == local)
@@ -606,7 +634,11 @@ fn find_legacy(folder: &Path) -> Option<PathBuf> {
     let entries = fs::read_dir(folder).ok()?;
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|extension| extension == "json") && is_legacy_file(&path) {
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+            && is_legacy_file(&path)
+        {
             return Some(path);
         }
     }
@@ -638,7 +670,8 @@ fn read_legacy(path: &Path) -> Result<LegacyDocument, String> {
     if !is_legacy_document(&value) {
         return Err(format!("{} is not a ce-browser sync file.", path.display()));
     }
-    serde_json::from_value(value).map_err(|error| format!("Could not read {}: {error}", path.display()))
+    serde_json::from_value(value)
+        .map_err(|error| format!("Could not read {}: {error}", path.display()))
 }
 
 fn decode_extensions(extensions: &[SyncExtension]) -> Result<Vec<IncomingExtension>, String> {
@@ -647,7 +680,12 @@ fn decode_extensions(extensions: &[SyncExtension]) -> Result<Vec<IncomingExtensi
         .map(|extension| {
             let zip = base64::engine::general_purpose::STANDARD
                 .decode(extension.archive.trim())
-                .map_err(|_| format!("The {} extension in the sync folder is damaged.", extension.folder))?;
+                .map_err(|_| {
+                    format!(
+                        "The {} extension in the sync folder is damaged.",
+                        extension.folder
+                    )
+                })?;
             Ok(IncomingExtension {
                 folder: extension.folder.clone(),
                 enabled: extension.enabled,
@@ -718,10 +756,14 @@ fn target_folder(app: &AppHandle, raw: &str, must_exist: bool) -> Result<PathBuf
         return Err(format!("Folder does not exist: {}", path.display()));
     }
     if !must_exist {
-        fs::create_dir_all(&path).map_err(|error| format!("Could not create {}: {error}", path.display()))?;
+        fs::create_dir_all(&path)
+            .map_err(|error| format!("Could not create {}: {error}", path.display()))?;
     }
     if path.starts_with(paths::root_data_dir(app)) || path.starts_with(paths::root_local_dir(app)) {
-        return Err("That folder is inside the browser data folder. Choose a folder on the shared drive.".into());
+        return Err(
+            "That folder is inside the browser data folder. Choose a folder on the shared drive."
+                .into(),
+        );
     }
     Ok(path)
 }
@@ -740,7 +782,8 @@ fn require_files(folder: &Path) -> Result<(), String> {
 }
 
 fn read_value(path: &Path) -> Result<Value, String> {
-    let text = fs::read_to_string(path).map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    let text = fs::read_to_string(path)
+        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
     let value: Value = serde_json::from_str(&text)
         .map_err(|_| format!("{} is not a ce-browser sync file.", path.display()))?;
     require_format(&value)?;
@@ -772,7 +815,8 @@ fn require_format(value: &Value) -> Result<(), String> {
 }
 
 fn remember(folder: &Path) -> Result<(), String> {
-    let stamp = folder_stamp(folder).ok_or_else(|| format!("Could not read {}", folder.display()))?;
+    let stamp =
+        folder_stamp(folder).ok_or_else(|| format!("Could not read {}", folder.display()))?;
     *stamp_slot()
         .lock()
         .unwrap_or_else(|error| error.into_inner()) = Some(stamp);
@@ -802,7 +846,12 @@ fn folder_stamp(folder: &Path) -> Option<FolderStamp> {
 
 fn file_stamp(path: &Path) -> Option<Stamp> {
     let meta = fs::metadata(path).ok()?;
-    let modified_ms = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_millis();
+    let modified_ms = meta
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_millis();
     Some(Stamp {
         modified_ms,
         len: meta.len(),
@@ -833,7 +882,9 @@ fn is_save_error(message: &str) -> bool {
 
 fn publish(app: &AppHandle) {
     let next = status(app);
-    let mut last = LAST_STATUS.lock().unwrap_or_else(|poison| poison.into_inner());
+    let mut last = LAST_STATUS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
     if last.as_ref() == Some(&next) {
         return;
     }
@@ -842,7 +893,9 @@ fn publish(app: &AppHandle) {
 }
 
 fn operation_lock() -> std::sync::MutexGuard<'static, ()> {
-    OPERATION.lock().unwrap_or_else(|poison| poison.into_inner())
+    OPERATION
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
 }
 
 fn error_slot() -> &'static Mutex<Option<SyncProblem>> {
@@ -913,13 +966,16 @@ fn write_machine(app: &AppHandle, folder: &Path) -> Result<(), String> {
 fn clear_machine(app: &AppHandle) -> Result<(), String> {
     files::write_json(
         &paths::machine_sync_file(app),
-        &MachineFolder { folder: String::new() },
+        &MachineFolder {
+            folder: String::new(),
+        },
     )
 }
 
 fn point_at(app: &AppHandle, folder: &Path) -> Result<(), String> {
     write_machine(app, folder)?;
     paths::set_storage_root(Some(folder.to_path_buf()));
+    crate::sync_conflicts::rebase(app);
     Ok(())
 }
 
@@ -962,12 +1018,18 @@ fn materialize_legacy(folder: &Path) -> Result<(), String> {
     let bookmarks = wrapped_bookmarks(&folder.join(BOOKMARKS_FILE));
     let history = wrapped_history(&folder.join(HISTORY_FILE));
     let extensions = wrapped_extensions(&folder.join(EXTENSIONS_FILE));
-    let legacy = if settings.is_none() && bookmarks.is_none() && history.is_none() && extensions.is_none() {
-        find_legacy(folder).and_then(|path| read_legacy(&path).ok())
-    } else {
-        None
-    };
-    if settings.is_none() && bookmarks.is_none() && history.is_none() && extensions.is_none() && legacy.is_none() {
+    let legacy =
+        if settings.is_none() && bookmarks.is_none() && history.is_none() && extensions.is_none() {
+            find_legacy(folder).and_then(|path| read_legacy(&path).ok())
+        } else {
+            None
+        };
+    if settings.is_none()
+        && bookmarks.is_none()
+        && history.is_none()
+        && extensions.is_none()
+        && legacy.is_none()
+    {
         return Ok(());
     }
     fs::create_dir_all(&dest).map_err(|error| error.to_string())?;
@@ -994,17 +1056,23 @@ fn materialize_legacy(folder: &Path) -> Result<(), String> {
 
 fn wrapped_settings(path: &Path) -> Option<BrowserSettings> {
     let value = read_value(path).ok()?;
-    serde_json::from_value::<SettingsDocument>(value).ok().map(|document| document.settings)
+    serde_json::from_value::<SettingsDocument>(value)
+        .ok()
+        .map(|document| document.settings)
 }
 
 fn wrapped_bookmarks(path: &Path) -> Option<BookmarkTree> {
     let value = read_value(path).ok()?;
-    serde_json::from_value::<BookmarksDocument>(value).ok().map(|document| document.bookmarks)
+    serde_json::from_value::<BookmarksDocument>(value)
+        .ok()
+        .map(|document| document.bookmarks)
 }
 
 fn wrapped_history(path: &Path) -> Option<Vec<HistoryItem>> {
     let value = read_value(path).ok()?;
-    serde_json::from_value::<HistoryDocument>(value).ok().map(|document| document.items)
+    serde_json::from_value::<HistoryDocument>(value)
+        .ok()
+        .map(|document| document.items)
 }
 
 fn wrapped_extensions(path: &Path) -> Option<Vec<SyncExtension>> {
@@ -1062,14 +1130,22 @@ mod tests {
         });
         assert!(is_legacy_document(&legacy));
         assert!(!is_legacy_document(&bookmarks));
-        assert!(!is_legacy_document(&serde_json::json!({"format": 1, "items": []})));
+        assert!(!is_legacy_document(
+            &serde_json::json!({"format": 1, "items": []})
+        ));
     }
 
     #[test]
     fn a_write_failure_is_a_save_error_and_a_read_failure_is_not() {
-        assert!(is_save_error(r"Could not write D:\share\settings.json: Access is denied. (os error 5)"));
-        assert!(is_save_error(r"Could not create D:\share: Access is denied. (os error 5)"));
-        assert!(!is_save_error(r"Could not read D:\share\bookmarks.json: The system cannot find the file specified. (os error 2)"));
+        assert!(is_save_error(
+            r"Could not write D:\share\settings.json: Access is denied. (os error 5)"
+        ));
+        assert!(is_save_error(
+            r"Could not create D:\share: Access is denied. (os error 5)"
+        ));
+        assert!(!is_save_error(
+            r"Could not read D:\share\bookmarks.json: The system cannot find the file specified. (os error 2)"
+        ));
         assert!(!is_save_error(r"The sync folder is missing: D:\share"));
     }
 }

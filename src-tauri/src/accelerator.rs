@@ -160,7 +160,8 @@ pub fn probe(url: &str, cookie: &str, user_agent: &str) -> Result<u64, String> {
         return Err("This server does not accept range downloads.".into());
     }
     let header = response.header("Content-Range").unwrap_or("");
-    let total = total_from_content_range(header).ok_or_else(|| "The server did not say how big the file is.".to_string())?;
+    let total = total_from_content_range(header)
+        .ok_or_else(|| "The server did not say how big the file is.".to_string())?;
     if total < MIN_BYTES {
         return Err("The file is under 8 MB.".into());
     }
@@ -168,7 +169,13 @@ pub fn probe(url: &str, cookie: &str, user_agent: &str) -> Result<u64, String> {
     Ok(total)
 }
 
-pub fn read_range(url: &str, cookie: &str, user_agent: &str, start: u64, end: u64) -> Result<Vec<u8>, String> {
+pub fn read_range(
+    url: &str,
+    cookie: &str,
+    user_agent: &str,
+    start: u64,
+    end: u64,
+) -> Result<Vec<u8>, String> {
     let response = request(
         url,
         cookie,
@@ -242,7 +249,10 @@ mod tests {
             cursor = range.end + 1;
         }
         assert_eq!(cursor, 10_000_000);
-        assert_eq!(total_from_content_range("bytes 0-0/10485760"), Some(10_485_760));
+        assert_eq!(
+            total_from_content_range("bytes 0-0/10485760"),
+            Some(10_485_760)
+        );
     }
 
     #[test]

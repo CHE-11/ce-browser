@@ -28,7 +28,11 @@ pub fn translated_now(id: u32) -> bool {
 }
 
 pub fn fill_translate_url(template: &str, text: &str, language: &str) -> String {
-    let template = if template.trim().is_empty() { DEFAULT_TRANSLATE_URL } else { template };
+    let template = if template.trim().is_empty() {
+        DEFAULT_TRANSLATE_URL
+    } else {
+        template
+    };
     let text: String = url::form_urlencoded::byte_serialize(text.as_bytes()).collect();
     let language: String = url::form_urlencoded::byte_serialize(language.as_bytes()).collect();
     template.replace("%s", &text).replace("%t", &language)
@@ -46,7 +50,12 @@ pub fn translate_page(app: &AppHandle, id: u32, language: &str) -> Result<(), St
     let language = clean_language(language);
     let template = settings::get(app).translate_url;
     let webview = tabs::page_view(app, id).ok_or("This page is not loaded yet.")?;
-    let value = webview2::evaluate(&webview, COLLECT_SCRIPT, Duration::from_secs(8), TEXT_FAILURE)?;
+    let value = webview2::evaluate(
+        &webview,
+        COLLECT_SCRIPT,
+        Duration::from_secs(8),
+        TEXT_FAILURE,
+    )?;
     let blocks: Vec<String> = serde_json::from_value(value).unwrap_or_default();
     if blocks.is_empty() {
         return Err("This page has no article text to translate.".into());
@@ -96,11 +105,16 @@ fn translate_text(template: &str, text: &str, language: &str) -> Result<String, 
 fn read_translation(body: &str) -> Result<String, String> {
     let trimmed = body.trim();
     if trimmed.starts_with('[') {
-        let value: serde_json::Value = serde_json::from_str(trimmed).map_err(|error| error.to_string())?;
+        let value: serde_json::Value =
+            serde_json::from_str(trimmed).map_err(|error| error.to_string())?;
         let mut out = String::new();
         if let Some(sentences) = value.get(0).and_then(|item| item.as_array()) {
             for sentence in sentences {
-                if let Some(text) = sentence.get(0).and_then(|item| item.get(0)).and_then(|item| item.as_str()) {
+                if let Some(text) = sentence
+                    .get(0)
+                    .and_then(|item| item.get(0))
+                    .and_then(|item| item.as_str())
+                {
                     out.push_str(text);
                 }
             }
@@ -110,7 +124,8 @@ fn read_translation(body: &str) -> Result<String, String> {
         }
     }
     if trimmed.starts_with('{') {
-        let value: serde_json::Value = serde_json::from_str(trimmed).map_err(|error| error.to_string())?;
+        let value: serde_json::Value =
+            serde_json::from_str(trimmed).map_err(|error| error.to_string())?;
         if let Some(text) = value
             .get("translatedText")
             .or_else(|| value.get("text"))
@@ -148,7 +163,14 @@ const COLLECT_SCRIPT: &str = r#"(function () {
   return out;
 })()"#;
 
-pub fn password(length: usize, upper: bool, lower: bool, digits: bool, symbols: bool, random: &[u8]) -> Result<String, String> {
+pub fn password(
+    length: usize,
+    upper: bool,
+    lower: bool,
+    digits: bool,
+    symbols: bool,
+    random: &[u8],
+) -> Result<String, String> {
     let length = length.clamp(8, 64);
     let mut alphabet = String::new();
     let mut required = Vec::new();
@@ -186,7 +208,13 @@ pub fn password(length: usize, upper: bool, lower: bool, digits: bool, symbols: 
     Ok(out.into_iter().collect())
 }
 
-pub fn random_password(length: usize, upper: bool, lower: bool, digits: bool, symbols: bool) -> Result<String, String> {
+pub fn random_password(
+    length: usize,
+    upper: bool,
+    lower: bool,
+    digits: bool,
+    symbols: bool,
+) -> Result<String, String> {
     let mut bytes = [0u8; 64];
     fill_random(&mut bytes)?;
     password(length, upper, lower, digits, symbols, &bytes)
@@ -227,14 +255,23 @@ pub struct ReadingStats {
 }
 
 pub fn reading_stats(text: &str) -> ReadingStats {
-    let words: Vec<&str> = text.split_whitespace().filter(|word| !word.is_empty()).collect();
+    let words: Vec<&str> = text
+        .split_whitespace()
+        .filter(|word| !word.is_empty())
+        .collect();
     let word_count = words.len() as u32;
-    let sentences = text.chars().filter(|character| matches!(character, '.' | '!' | '?')).count().max(1) as f64;
+    let sentences = text
+        .chars()
+        .filter(|character| matches!(character, '.' | '!' | '?'))
+        .count()
+        .max(1) as f64;
     let syllables: u32 = words.iter().map(|word| syllables(word)).sum();
     let ease = if word_count == 0 {
         0.0
     } else {
-        206.835 - 1.015 * (f64::from(word_count) / sentences) - 84.6 * (f64::from(syllables) / f64::from(word_count))
+        206.835
+            - 1.015 * (f64::from(word_count) / sentences)
+            - 84.6 * (f64::from(syllables) / f64::from(word_count))
     };
     ReadingStats {
         words: word_count,
@@ -271,9 +308,16 @@ fn plain_text(html: &str) -> String {
     while let Some(start) = rest.find('<') {
         out.push_str(rest[..start].trim());
         out.push(' ');
-        let Some(end) = rest[start..].find('>') else { break };
+        let Some(end) = rest[start..].find('>') else {
+            break;
+        };
         let tag = &rest[start + 1..start + end];
-        let name = tag.split_whitespace().next().unwrap_or("").trim_start_matches('/').to_ascii_lowercase();
+        let name = tag
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_start_matches('/')
+            .to_ascii_lowercase();
         rest = &rest[start + end + 1..];
         if matches!(name.as_str(), "script" | "style") && !tag.starts_with('/') {
             if let Some(close) = rest.to_ascii_lowercase().find(&format!("</{name}>")) {
@@ -359,16 +403,30 @@ fn find_product(value: &serde_json::Value) -> Option<ProductPrice> {
         }
     }
     let object = value.as_object()?;
-    let kind = object.get("@type").and_then(|item| item.as_str()).unwrap_or("");
+    let kind = object
+        .get("@type")
+        .and_then(|item| item.as_str())
+        .unwrap_or("");
     if kind == "Product" || object.contains_key("offers") {
         if let Some(offers) = object.get("offers") {
-            let offer = offers.as_array().and_then(|items| items.first()).unwrap_or(offers);
+            let offer = offers
+                .as_array()
+                .and_then(|items| items.first())
+                .unwrap_or(offers);
             if let Some(price) = offer.get("price").and_then(json_price) {
                 return Some(ProductPrice {
                     url: String::new(),
-                    title: object.get("name").and_then(|item| item.as_str()).unwrap_or("").to_string(),
+                    title: object
+                        .get("name")
+                        .and_then(|item| item.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     price,
-                    currency: offer.get("priceCurrency").and_then(|item| item.as_str()).unwrap_or("").to_string(),
+                    currency: offer
+                        .get("priceCurrency")
+                        .and_then(|item| item.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     availability: offer
                         .get("availability")
                         .and_then(|item| item.as_str())
@@ -396,12 +454,16 @@ fn find_product(value: &serde_json::Value) -> Option<ProductPrice> {
 }
 
 fn json_price(value: &serde_json::Value) -> Option<f64> {
-    value.as_f64().or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+    value
+        .as_f64()
+        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
 }
 
 fn meta_content(html: &str, property: &str) -> Option<String> {
     let needle = format!("property=\"{property}\"");
-    let index = html.find(&needle).or_else(|| html.find(&format!("property='{property}'")))?;
+    let index = html
+        .find(&needle)
+        .or_else(|| html.find(&format!("property='{property}'")))?;
     let rest = &html[index..];
     let content = rest.find("content=")? + "content=".len();
     let quote = rest[content..].chars().next()?;
@@ -430,8 +492,17 @@ const PRICE_SCRIPT: &str = r#"(function () {
 pub fn read_page_price(app: &AppHandle, id: u32) -> Result<ProductPrice, String> {
     let webview = tabs::page_view(app, id).ok_or("This page is not loaded yet.")?;
     let url = tabs::tab_page_url(app, id).unwrap_or_default();
-    let value = webview2::evaluate(&webview, PRICE_SCRIPT, Duration::from_secs(8), "Couldn't read a price on this page.")?;
-    let title = value.get("title").and_then(|item| item.as_str()).unwrap_or("").to_string();
+    let value = webview2::evaluate(
+        &webview,
+        PRICE_SCRIPT,
+        Duration::from_secs(8),
+        "Couldn't read a price on this page.",
+    )?;
+    let title = value
+        .get("title")
+        .and_then(|item| item.as_str())
+        .unwrap_or("")
+        .to_string();
     let mut html = String::new();
     if let Some(blocks) = value.get("blocks").and_then(|item| item.as_array()) {
         for block in blocks {
@@ -450,7 +521,8 @@ pub fn read_page_price(app: &AppHandle, id: u32) -> Result<ProductPrice, String>
             ));
         }
     }
-    let mut price = parse_price(&html).ok_or_else(|| "No product price was found on this page.".to_string())?;
+    let mut price =
+        parse_price(&html).ok_or_else(|| "No product price was found on this page.".to_string())?;
     price.url = url;
     if price.title.is_empty() {
         price.title = title;
@@ -470,7 +542,8 @@ pub fn track_price(app: &AppHandle, id: u32) -> Result<ProductPrice, String> {
         existing.previous_price = Some(existing.price);
         existing.previous_availability = existing.availability.clone();
         existing.dropped = price.price < existing.price;
-        existing.stock_changed = !price.availability.is_empty() && price.availability != existing.availability;
+        existing.stock_changed =
+            !price.availability.is_empty() && price.availability != existing.availability;
         existing.price = price.price;
         existing.currency = price.currency.clone();
         existing.availability = price.availability.clone();
@@ -479,19 +552,34 @@ pub fn track_price(app: &AppHandle, id: u32) -> Result<ProductPrice, String> {
         items.insert(0, price.clone());
     }
     save_prices(app, &items)?;
-    Ok(items.into_iter().find(|item| item.url == price.url).unwrap_or(price))
+    Ok(items
+        .into_iter()
+        .find(|item| item.url == price.url)
+        .unwrap_or(price))
 }
 
 pub fn check_prices(app: &AppHandle) -> Result<Vec<ProductPrice>, String> {
     let mut items = list_prices(app);
-    let open = tabs::snapshot(app).tabs.into_iter().filter(|tab| tab.loaded).map(|tab| tab.id).collect::<Vec<_>>();
+    let open = tabs::snapshot(app)
+        .tabs
+        .into_iter()
+        .filter(|tab| tab.loaded)
+        .map(|tab| tab.id)
+        .collect::<Vec<_>>();
     for item in &mut items {
-        let Some(id) = open.iter().copied().find(|id| tabs::tab_page_url(app, *id).as_deref() == Some(item.url.as_str())) else {
+        let Some(id) = open
+            .iter()
+            .copied()
+            .find(|id| tabs::tab_page_url(app, *id).as_deref() == Some(item.url.as_str()))
+        else {
             continue;
         };
-        let Ok(fresh) = read_page_price(app, id) else { continue };
+        let Ok(fresh) = read_page_price(app, id) else {
+            continue;
+        };
         item.dropped = fresh.price < item.price;
-        item.stock_changed = !fresh.availability.is_empty() && fresh.availability != item.availability;
+        item.stock_changed =
+            !fresh.availability.is_empty() && fresh.availability != item.availability;
         item.previous_price = Some(item.price);
         item.previous_availability = item.availability.clone();
         item.price = fresh.price;
@@ -503,7 +591,12 @@ pub fn check_prices(app: &AppHandle) -> Result<Vec<ProductPrice>, String> {
 }
 
 fn save_prices(app: &AppHandle, items: &[ProductPrice]) -> Result<(), String> {
-    files::write_json(&paths::data_file(app, PRICES), &PriceFile { items: items.to_vec() })
+    files::write_json(
+        &paths::data_file(app, PRICES),
+        &PriceFile {
+            items: items.to_vec(),
+        },
+    )
 }
 
 pub fn chat_url(endpoint: &str) -> String {
@@ -533,7 +626,10 @@ pub fn ask_page(app: &AppHandle, id: u32, question: &str) -> Result<String, Stri
     let user = if question.is_empty() {
         format!("Summarize this page.\n\nTitle: {}\n\n{article}", page.title)
     } else {
-        format!("Answer using only this page.\n\nQuestion: {question}\n\nTitle: {}\n\n{article}", page.title)
+        format!(
+            "Answer using only this page.\n\nQuestion: {question}\n\nTitle: {}\n\n{article}",
+            page.title
+        )
     };
     let url = chat_url(endpoint);
     let body = serde_json::json!({
@@ -543,15 +639,21 @@ pub fn ask_page(app: &AppHandle, id: u32, question: &str) -> Result<String, Stri
             { "role": "user", "content": user }
         ]
     });
-    let mut request = ureq::post(&url).timeout(Duration::from_secs(60)).set("Content-Type", "application/json");
+    let mut request = ureq::post(&url)
+        .timeout(Duration::from_secs(60))
+        .set("Content-Type", "application/json");
     if !current.assistant_key.trim().is_empty() {
-        request = request.set("Authorization", &format!("Bearer {}", current.assistant_key.trim()));
+        request = request.set(
+            "Authorization",
+            &format!("Bearer {}", current.assistant_key.trim()),
+        );
     }
     let response = request
         .send_string(&serde_json::to_string(&body).map_err(|error| error.to_string())?)
         .map_err(|error| format!("Couldn't reach the assistant. {error}"))?;
     let text = response.into_string().map_err(|error| error.to_string())?;
-    let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|error| error.to_string())?;
     value
         .pointer("/choices/0/message/content")
         .and_then(|item| item.as_str())
@@ -563,11 +665,15 @@ pub fn ask_page(app: &AppHandle, id: u32, question: &str) -> Result<String, Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{fill_translate_url, parse_price, password, reading_stats, wayback_url, chat_url};
+    use super::{chat_url, fill_translate_url, parse_price, password, reading_stats, wayback_url};
 
     #[test]
     fn the_translate_template_fills_the_text_and_language() {
-        let url = fill_translate_url("https://example.test/translate?q=%s&lang=%t", "hello world", "es");
+        let url = fill_translate_url(
+            "https://example.test/translate?q=%s&lang=%t",
+            "hello world",
+            "es",
+        );
         assert!(url.contains("q=hello+world") || url.contains("q=hello%20world"));
         assert!(url.contains("lang=es"));
         assert!(!url.contains("%s"));
@@ -578,10 +684,22 @@ mod tests {
         let random = [3u8, 9, 1, 8, 4, 2, 7, 5, 6, 0, 11, 12, 13, 14, 15, 16];
         let password = password(12, true, true, true, true, &random).expect("password");
         assert_eq!(password.chars().count(), 12);
-        assert!(password.chars().any(|character| character.is_ascii_uppercase()));
-        assert!(password.chars().any(|character| character.is_ascii_lowercase()));
+        assert!(
+            password
+                .chars()
+                .any(|character| character.is_ascii_uppercase())
+        );
+        assert!(
+            password
+                .chars()
+                .any(|character| character.is_ascii_lowercase())
+        );
         assert!(password.chars().any(|character| character.is_ascii_digit()));
-        assert!(password.chars().any(|character| "!@#$%^&*-_=+".contains(character)));
+        assert!(
+            password
+                .chars()
+                .any(|character| "!@#$%^&*-_=+".contains(character))
+        );
     }
 
     #[test]

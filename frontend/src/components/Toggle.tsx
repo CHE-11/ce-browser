@@ -5,9 +5,11 @@ type ToggleProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "id" | "onClick
   id: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  size?: "sm" | "md";
 };
 
-export function Toggle({ id, checked, onChange, className, disabled, ...props }: ToggleProps) {
+export function Toggle({ id, checked, onChange, className, disabled, size = "md", ...props }: ToggleProps) {
+  const small = size === "sm";
   return (
     <button
       id={id}
@@ -16,7 +18,8 @@ export function Toggle({ id, checked, onChange, className, disabled, ...props }:
       aria-checked={checked}
       disabled={disabled}
       className={cn(
-        "inline-flex h-5 w-9 shrink-0 items-center rounded-full p-0.5 transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+        "inline-flex shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+        small ? "h-3 w-5 p-px" : "h-5 w-9 p-0.5",
         checked ? "bg-sky-600" : "bg-zinc-700",
         className,
       )}
@@ -27,8 +30,9 @@ export function Toggle({ id, checked, onChange, className, disabled, ...props }:
         id={`${id}-thumb`}
         aria-hidden
         className={cn(
-          "pointer-events-none size-4 rounded-full bg-white transition-transform",
-          checked ? "translate-x-4" : "translate-x-0",
+          "pointer-events-none rounded-full bg-white transition-transform",
+          small ? "size-2" : "size-4",
+          checked ? (small ? "translate-x-2.5" : "translate-x-4") : "translate-x-0",
         )}
       />
     </button>

@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
-import type { SyncStatus } from "@type/browser";
+import type { SyncConflict, SyncStatus } from "@type/browser";
 import { Button } from "@/components/Button";
-import { clearSyncFolder, createSyncFolder, onSyncStatus, pickSyncFolder, selectSyncFolder, showSyncFolder, syncStatus } from "@/lib/browser-client";
+import {
+  clearSyncFolder,
+  createSyncFolder,
+  listSyncConflicts,
+  onSyncConflicts,
+  onSyncStatus,
+  pickSyncFolder,
+  resolveSyncConflict,
+  selectSyncFolder,
+  showSyncFolder,
+  syncStatus,
+} from "@/lib/browser-client";
 import { SETTINGS_SECTIONS } from "./settings-sections";
 import { errorText, matchesQuery, Row, Section, useReportMatch, useSettingVisible, type SettingsSectionProps } from "./SettingsControls";
 
@@ -22,6 +33,8 @@ export function SyncSection({
   const [syncState, setSyncState] = useState<SyncStatus | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncWorking, setSyncWorking] = useState(false);
+  const [conflicts, setConflicts] = useState<SyncConflict[]>([]);
+  const [resolving, setResolving] = useState<string | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -32,14 +45,27 @@ export function SyncSection({
         }
       })
       .catch(() => undefined);
+    void listSyncConflicts()
+      .then((items) => {
+        if (!disposed) {
+          setConflicts(items);
+        }
+      })
+      .catch(() => undefined);
     const unlisten = onSyncStatus((status) => {
       if (!disposed) {
         setSyncState(status);
       }
     });
+    const unlistenConflicts = onSyncConflicts((items) => {
+      if (!disposed) {
+        setConflicts(items);
+      }
+    });
     return () => {
       disposed = true;
       void unlisten.then((stop) => stop());
+      void unlistenConflicts.then((stop) => stop());
     };
   }, []);
 
@@ -56,6 +82,8 @@ export function SyncSection({
     settings.syncFolder ? FILES_HINT : "",
     settings.syncFolder ? "Clear" : "",
     shownError,
+    "Conflicts",
+    ...conflicts.flatMap((conflict) => [conflict.label, conflict.summary, "Keep this computer", "Keep the other copy", conflict.canMerge ? "Merge" : ""]),
   );
   useReportMatch(section.id, visible, onMatch);
 
@@ -114,7 +142,91 @@ export function SyncSection({
         <SyncPath folder={settings.syncFolder} busy={syncWorking} onError={onError} onClear={() => runSync(() => clearSyncFolder())} />
       ) : null}
       {shownError ? <SyncError message={shownError} /> : null}
+      {settings.syncFolder ? (
+        <SyncConflicts
+          conflicts={conflicts}
+          resolving={resolving}
+          onResolve={(id, choice) => {
+            setResolving(id);
+            onError(null);
+            void resolveSyncConflict(id, choice)
+              .then(() => listSyncConflicts().then(setConflicts))
+              .catch((reason: unknown) => onError(String(reason)))
+              .finally(() => setResolving(null));
+          }}
+        />
+      ) : null}
     </Section>
+  );
+}
+
+function SyncConflicts({
+  conflicts,
+  resolving,
+  onResolve,
+}: {
+  conflicts: SyncConflict[];
+  resolving: string | null;
+  onResolve: (id: string, choice: "mine" | "theirs" | "merge") => void;
+}) {
+  const visible = useSettingVisible(
+    "Conflicts",
+    conflicts.length === 0 ? "No conflicts." : "",
+    ...conflicts.flatMap((conflict) => [conflict.label, conflict.summary]),
+  );
+  if (!visible) {
+    return null;
+  }
+  return (
+    <div id="settings-sync-conflicts" className="flex flex-col gap-3 px-5 py-3">
+      <div id="settings-sync-conflicts-label" className="text-sm text-zinc-200">
+        Conflicts
+      </div>
+      {conflicts.length === 0 ? (
+        <p id="settings-sync-conflicts-empty" className="text-xs text-zinc-500">
+          No conflicts. When two computers change the same bookmarks, history, or settings, both copies show up here.
+        </p>
+      ) : (
+        conflicts.map((conflict) => (
+          <div id={`settings-sync-conflict-${conflict.id.replace(/[^a-z0-9]+/gi, "-")}`} key={conflict.id} className="rounded-md border border-zinc-800 px-3 py-3">
+            <div id={`settings-sync-conflict-${conflict.id.replace(/[^a-z0-9]+/gi, "-")}-label`} className="text-sm text-zinc-100">
+              {conflict.label}
+            </div>
+            <p id={`settings-sync-conflict-${conflict.id.replace(/[^a-z0-9]+/gi, "-")}-summary`} className="mt-1 text-xs text-zinc-400">
+              {conflict.summary}
+            </p>
+            <div id={`settings-sync-conflict-${conflict.id.replace(/[^a-z0-9]+/gi, "-")}-actions`} className="mt-3 flex flex-wrap gap-2">
+              <Button
+                id={`settings-sync-conflict-${conflict.id.replace(/[^a-z0-9]+/gi, "-")}-mine`}
+                size="sm"
+                disabled={resolving !== null}
+                onClick={() => onResolve(conflict.id, "mine")}
+              >
+                Keep this computer
+              </Button>
+              <Button
+                id={`settings-sync-conflict-${conflict.id.replace(/[^a-z0-9]+/gi, "-")}-theirs`}
+                size="sm"
+                disabled={resolving !== null}
+                onClick={() => onResolve(conflict.id, "theirs")}
+              >
+                Keep the other copy
+              </Button>
+              {conflict.canMerge ? (
+                <Button
+                  id={`settings-sync-conflict-${conflict.id.replace(/[^a-z0-9]+/gi, "-")}-merge`}
+                  size="sm"
+                  disabled={resolving !== null}
+                  onClick={() => onResolve(conflict.id, "merge")}
+                >
+                  Merge
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
   );
 }
 

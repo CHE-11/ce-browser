@@ -3,14 +3,14 @@ import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components
 import { Dialog } from "@/components/Dialog";
 import { FavIcon } from "@/components/FavIcon";
 import { IconButton } from "@/components/IconButton";
-import { deleteBookmark, moveBookmark, createTab, importBookmarksHtml, exportBookmarksHtml, updateBookmark, addBookmark } from "@/lib/browser-client";
+import { deleteBookmark, moveBookmark, createTab, importBookmarksHtml, exportBookmarksHtml, updateBookmark, addBookmark, checkBookmarkHealth, onBookmarkHealth } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { hostOf } from "@/lib/format";
 import { useRoute } from "@/lib/route";
 import { BookmarkDropPlace, useAppearanceFromSettings, useBookmarks, findFolder, bookmarkRootsOf, bookmarkContains, BOOKMARK_DRAG_TYPE, bookmarkDropPlace, findBookmarkParent, listFolders } from "@/lib/use-browser";
-import { ChevronRight, Search, LayoutGrid, List, Type, Upload, Download, Plus, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Pencil } from "lucide-react";
+import { ChevronRight, Search, LayoutGrid, List, Type, Upload, Download, Plus, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Pencil, Link2 } from "lucide-react";
 import { useRef, useState, useEffect, useMemo, useCallback, type DragEvent, type MouseEvent } from "react";
-import { BookmarkNode, BookmarkTree } from "../../../../types/browser";
+import { BookmarkHealthProgress, BookmarkHealthReport, BookmarkNode, BookmarkTree } from "../../../../types/browser";
 
 type EditorState =
   | { mode: "add-link"; parentId: string }
@@ -86,6 +86,9 @@ export function BookmarksPage() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [health, setHealth] = useState<BookmarkHealthReport | null>(null);
+  const [healthProgress, setHealthProgress] = useState<BookmarkHealthProgress | null>(null);
+  const [healthRunning, setHealthRunning] = useState(false);
   const [drop, setDrop] = useState<DropState | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const [moving, setMoving] = useState<string[] | null>(null);
@@ -99,6 +102,27 @@ export function BookmarksPage() {
   useEffect(() => {
     document.title = "Bookmarks";
   }, []);
+
+  useEffect(() => {
+    const unlisten = onBookmarkHealth((progress) => setHealthProgress(progress));
+    return () => {
+      void unlisten.then((stop) => stop());
+    };
+  }, []);
+
+  const checkLinks = () => {
+    setHealthRunning(true);
+    setHealth(null);
+    setHealthProgress({ done: 0, total: 0 });
+    void checkBookmarkHealth()
+      .then((report) => {
+        setHealth(report);
+        const problems = report.failed.length + report.duplicates.length;
+        setStatus(problems === 0 ? `Checked ${report.checked} links.` : null);
+      })
+      .catch((reason: unknown) => setStatus(String(reason)))
+      .finally(() => setHealthRunning(false));
+  };
 
   useEffect(() => {
     if (!requestedFolder || !tree || appliedFolder.current === requestedFolder) {
@@ -343,6 +367,9 @@ export function BookmarksPage() {
             </button>
           ))}
         </div>
+        <IconButton id="bookmarks-page-health" label="Check links" disabled={healthRunning} onClick={checkLinks}>
+          <Link2 id="bookmarks-page-health-icon" aria-hidden />
+        </IconButton>
         <IconButton
           id="bookmarks-page-import"
           label="Import"
@@ -393,6 +420,19 @@ export function BookmarksPage() {
         <div id="bookmarks-page-status" className="shrink-0 border-b border-zinc-800 px-3 py-1.5 text-xs text-zinc-400">
           {status}
         </div>
+      ) : null}
+      {healthRunning || health ? (
+        <BookmarkHealthPanel
+          running={healthRunning}
+          progress={healthProgress}
+          report={health}
+          onOpen={(url) => void createTab(url)}
+          onDelete={(id) => {
+            void deleteBookmark(id).then(() => {
+              setHealth((current) => (current ? withoutBookmark(current, id) : current));
+            });
+          }}
+        />
       ) : null}
       <div
         id="bookmarks-page-items"
@@ -780,5 +820,97 @@ function BookmarkDialog({ editor, onClose, onSave }: BookmarkDialogProps) {
         </div>
       </form>
     </Dialog>
+  );
+}
+
+function withoutBookmark(report: BookmarkHealthReport, id: string): BookmarkHealthReport {
+  return {
+    ...report,
+    duplicates: report.duplicates
+      .map((group) => ({ ...group, bookmarks: group.bookmarks.filter((bookmark) => bookmark.id !== id) }))
+      .filter((group) => group.bookmarks.length > 1),
+    failed: report.failed.filter((link) => link.id !== id),
+  };
+}
+
+function BookmarkHealthPanel({
+  running,
+  progress,
+  report,
+  onOpen,
+  onDelete,
+}: {
+  running: boolean;
+  progress: BookmarkHealthProgress | null;
+  report: BookmarkHealthReport | null;
+  onOpen: (url: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const progressText = running && progress && progress.total > 0 ? `Checking ${Math.min(progress.done, progress.total)} of ${progress.total}` : running ? "Checking links" : "";
+  return (
+    <section id="bookmarks-page-health-panel" className="shrink-0 border-b border-zinc-800 px-3 py-3">
+      <div id="bookmarks-page-health-heading" className="text-xs font-medium text-zinc-300">
+        {progressText || "Link check"}
+      </div>
+      {report && report.duplicates.length === 0 && report.failed.length === 0 ? (
+        <p id="bookmarks-page-health-clear" className="mt-2 text-xs text-zinc-500">
+          No dead links or duplicates in {report.checked} checked links.
+        </p>
+      ) : null}
+      {report && report.duplicates.length > 0 ? (
+        <div id="bookmarks-page-health-duplicates" className="mt-3 flex flex-col gap-2">
+          <h3 id="bookmarks-page-health-duplicates-title" className="text-xs uppercase tracking-wide text-zinc-500">
+            Duplicates
+          </h3>
+          {report.duplicates.map((group) => (
+            <div id={`bookmarks-health-dup-${group.bookmarks[0]?.id ?? "group"}`} key={group.url} className="rounded-md border border-zinc-800 px-2 py-2">
+              <div id={`bookmarks-health-dup-${group.bookmarks[0]?.id ?? "group"}-url`} className="truncate text-xs text-zinc-400">
+                {group.url}
+              </div>
+              {group.bookmarks.map((bookmark) => (
+                <div id={`bookmarks-health-dup-row-${bookmark.id}`} key={bookmark.id} className="mt-1 flex items-center gap-2">
+                  <button
+                    id={`bookmarks-health-dup-open-${bookmark.id}`}
+                    type="button"
+                    className="min-w-0 flex-1 truncate text-left text-sm text-zinc-100 hover:underline"
+                    onClick={() => onOpen(bookmark.url)}
+                  >
+                    {bookmark.title || bookmark.url}
+                  </button>
+                  <Button id={`bookmarks-health-dup-delete-${bookmark.id}`} size="xs" variant="ghost" onClick={() => onDelete(bookmark.id)}>
+                    Delete
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {report && report.failed.length > 0 ? (
+        <div id="bookmarks-page-health-failed" className="mt-3 flex flex-col gap-2">
+          <h3 id="bookmarks-page-health-failed-title" className="text-xs uppercase tracking-wide text-zinc-500">
+            Could not open
+          </h3>
+          {report.failed.map((link) => (
+            <div id={`bookmarks-health-fail-${link.id}`} key={link.id} className="flex items-center gap-2">
+              <button
+                id={`bookmarks-health-fail-open-${link.id}`}
+                type="button"
+                className="min-w-0 flex-1 truncate text-left text-sm text-zinc-100 hover:underline"
+                onClick={() => onOpen(link.url)}
+              >
+                {link.title || link.url}
+              </button>
+              <span id={`bookmarks-health-fail-status-${link.id}`} className="shrink-0 text-xs text-zinc-500">
+                {link.status === "blocked" ? "Blocked" : link.status === "dead" ? "Dead" : "Unreachable"} {link.detail}
+              </span>
+              <Button id={`bookmarks-health-fail-delete-${link.id}`} size="xs" variant="ghost" onClick={() => onDelete(link.id)}>
+                Delete
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }

@@ -84,7 +84,12 @@ pub fn save_png(
     })
 }
 
-pub fn copy_png(app: &AppHandle, id: u32, full_page: bool, load_lazy: bool) -> Result<PageCaptureResult, String> {
+pub fn copy_png(
+    app: &AppHandle,
+    id: u32,
+    full_page: bool,
+    load_lazy: bool,
+) -> Result<PageCaptureResult, String> {
     let capture = capture(app, id, full_page, load_lazy)?;
     let png = encode_png(&capture.image)?;
     clipboard::write_image(&capture.image, &png)?;
@@ -110,20 +115,32 @@ fn capture(app: &AppHandle, id: u32, full_page: bool, load_lazy: bool) -> Result
         // Lazy loading is a nicety. A page that blocks the script is still captured.
         let _ = webview2::evaluate(&webview, LOAD_LAZY_SCRIPT, Duration::from_secs(30), FAILURE);
     }
-    let ratio = webview2::evaluate(&webview, "window.devicePixelRatio", Duration::from_secs(5), FAILURE)?
-        .as_f64()
-        .filter(|ratio| *ratio > 0.0)
-        .unwrap_or(1.0);
+    let ratio = webview2::evaluate(
+        &webview,
+        "window.devicePixelRatio",
+        Duration::from_secs(5),
+        FAILURE,
+    )?
+    .as_f64()
+    .filter(|ratio| *ratio > 0.0)
+    .unwrap_or(1.0);
     let metrics = cdp(&webview, "Page.getLayoutMetrics", "{}")?;
     let number = |pointer: &str| metrics.pointer(pointer).and_then(|value| value.as_f64());
-    let view_width = number("/cssLayoutViewport/clientWidth").unwrap_or(1280.0).max(1.0);
-    let view_height = number("/cssLayoutViewport/clientHeight").unwrap_or(800.0).max(1.0);
+    let view_width = number("/cssLayoutViewport/clientWidth")
+        .unwrap_or(1280.0)
+        .max(1.0);
+    let view_height = number("/cssLayoutViewport/clientHeight")
+        .unwrap_or(800.0)
+        .max(1.0);
 
     if !full_page {
         let x = number("/cssVisualViewport/pageX").unwrap_or(0.0);
         let y = number("/cssVisualViewport/pageY").unwrap_or(0.0);
         let image = shot(&webview, x, y, view_width, view_height, 1.0, false)?;
-        return Ok(Capture { image, truncated: false });
+        return Ok(Capture {
+            image,
+            truncated: false,
+        });
     }
 
     let content_width = number("/cssContentSize/width").unwrap_or(view_width);
@@ -133,7 +150,11 @@ fn capture(app: &AppHandle, id: u32, full_page: bool, load_lazy: bool) -> Result
     let height = content_height.min(MAX_CSS_HEIGHT).max(1.0).ceil();
 
     let pixels = width * height * ratio * ratio;
-    let scale = if pixels > MAX_PIXELS { (MAX_PIXELS / pixels).sqrt() } else { 1.0 };
+    let scale = if pixels > MAX_PIXELS {
+        (MAX_PIXELS / pixels).sqrt()
+    } else {
+        1.0
+    };
     let device = ratio * scale;
     let slice_css = (SLICE_PIXELS / device).floor().max(256.0);
 
@@ -190,7 +211,14 @@ fn shot(
 }
 
 /// Keeps a dragged rectangle inside the page. Width and height stay at least 1 pixel.
-pub fn clip_inside(page_width: f64, page_height: f64, x: f64, y: f64, width: f64, height: f64) -> (f64, f64, f64, f64) {
+pub fn clip_inside(
+    page_width: f64,
+    page_height: f64,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> (f64, f64, f64, f64) {
     let page_width = page_width.max(1.0);
     let page_height = page_height.max(1.0);
     let x = x.max(0.0).min(page_width - 1.0);
@@ -250,8 +278,14 @@ pub fn capture_region(app: &AppHandle, id: u32) -> Result<PageCaptureResult, Str
         return Err("The capture was cancelled.".into());
     };
     let metrics = cdp(&webview, "Page.getLayoutMetrics", "{}")?;
-    let page_width = metrics.pointer("/cssContentSize/width").and_then(|item| item.as_f64()).unwrap_or(width);
-    let page_height = metrics.pointer("/cssContentSize/height").and_then(|item| item.as_f64()).unwrap_or(height);
+    let page_width = metrics
+        .pointer("/cssContentSize/width")
+        .and_then(|item| item.as_f64())
+        .unwrap_or(width);
+    let page_height = metrics
+        .pointer("/cssContentSize/height")
+        .and_then(|item| item.as_f64())
+        .unwrap_or(height);
     let (x, y, width, height) = clip_inside(page_width, page_height, x, y, width, height);
     *LAST_REGION.lock().expect("region") = Some((x, y, width, height));
     let image = shot(&webview, x, y, width, height, 1.0, true)?;
@@ -357,7 +391,12 @@ const RECORD_FPS: u32 = 8;
 const RECORD_SECONDS: u32 = 15;
 const GIF_LONG_SIDE: u32 = 1280;
 
-pub fn start_recording(app: &AppHandle, id: u32, kind: &str, path: std::path::PathBuf) -> Result<(), String> {
+pub fn start_recording(
+    app: &AppHandle,
+    id: u32,
+    kind: &str,
+    path: std::path::PathBuf,
+) -> Result<(), String> {
     if RECORDING.lock().expect("recording").is_some() {
         return Err("A recording is already running.".into());
     }
@@ -402,7 +441,13 @@ pub fn stop_recording() {
     }
 }
 
-fn record_frames(app: &AppHandle, id: u32, kind: &str, window: &str, stop: &AtomicBool) -> Result<Vec<RgbaImage>, String> {
+fn record_frames(
+    app: &AppHandle,
+    id: u32,
+    kind: &str,
+    window: &str,
+    stop: &AtomicBool,
+) -> Result<Vec<RgbaImage>, String> {
     let total = RECORD_FPS * RECORD_SECONDS;
     let mut frames = Vec::new();
     for index in 0..total {
@@ -439,7 +484,12 @@ fn record_frames(app: &AppHandle, id: u32, kind: &str, window: &str, stop: &Atom
             if frame.width() == width && frame.height() == height {
                 frame
             } else {
-                image::imageops::resize(&frame, width, height, image::imageops::FilterType::Triangle)
+                image::imageops::resize(
+                    &frame,
+                    width,
+                    height,
+                    image::imageops::FilterType::Triangle,
+                )
             }
         })
         .collect())
@@ -457,8 +507,12 @@ fn visible_frame(app: &AppHandle, id: u32) -> Result<RgbaImage, String> {
     let webview = tabs::page_view(app, id).ok_or("This page is not loaded yet.")?;
     let metrics = cdp(&webview, "Page.getLayoutMetrics", "{}")?;
     let number = |pointer: &str| metrics.pointer(pointer).and_then(|value| value.as_f64());
-    let width = number("/cssLayoutViewport/clientWidth").unwrap_or(1280.0).max(1.0);
-    let height = number("/cssLayoutViewport/clientHeight").unwrap_or(800.0).max(1.0);
+    let width = number("/cssLayoutViewport/clientWidth")
+        .unwrap_or(1280.0)
+        .max(1.0);
+    let height = number("/cssLayoutViewport/clientHeight")
+        .unwrap_or(800.0)
+        .max(1.0);
     let x = number("/cssVisualViewport/pageX").unwrap_or(0.0);
     let y = number("/cssVisualViewport/pageY").unwrap_or(0.0);
     shot(&webview, x, y, width, height, 1.0, false)
@@ -480,7 +534,8 @@ pub fn write_gif(frames: &[RgbaImage], path: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| format!("{FAILURE} {error}"))?;
     }
-    let file = std::fs::File::create(path).map_err(|error| format!("Couldn't save the GIF. {error}"))?;
+    let file =
+        std::fs::File::create(path).map_err(|error| format!("Couldn't save the GIF. {error}"))?;
     let mut encoder = image::codecs::gif::GifEncoder::new(file);
     encoder
         .set_repeat(image::codecs::gif::Repeat::Infinite)
@@ -501,7 +556,9 @@ pub fn write_gif(frames: &[RgbaImage], path: &Path) -> Result<(), String> {
 }
 
 fn capture_browser_window(app: &AppHandle, label: &str) -> Result<RgbaImage, String> {
-    let window = app.get_webview_window(label).ok_or("The browser window is missing.")?;
+    let window = app
+        .get_webview_window(label)
+        .ok_or("The browser window is missing.")?;
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
     window_image(hwnd.0 as isize)
 }
@@ -509,10 +566,10 @@ fn capture_browser_window(app: &AppHandle, label: &str) -> Result<RgbaImage, Str
 fn window_image(hwnd: isize) -> Result<RgbaImage, String> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Gdi::{
-        BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
-        GetDC, GetDIBits, ReleaseDC, SelectObject, DIB_RGB_COLORS,
+        BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleBitmap, CreateCompatibleDC, DIB_RGB_COLORS,
+        DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject,
     };
-    use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
+    use windows::Win32::Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow};
     use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, PW_RENDERFULLCONTENT};
     unsafe {
         let hwnd = HWND(hwnd as *mut std::ffi::c_void);
@@ -613,7 +670,8 @@ mod clipboard {
 
     unsafe fn set(format: u32, bytes: &[u8]) -> Result<(), String> {
         unsafe {
-            let memory = GlobalAlloc(GMEM_MOVEABLE, bytes.len()).map_err(|error| format!("{FAILURE} {error}"))?;
+            let memory = GlobalAlloc(GMEM_MOVEABLE, bytes.len())
+                .map_err(|error| format!("{FAILURE} {error}"))?;
             let target = GlobalLock(memory);
             if target.is_null() {
                 let _ = GlobalFree(Some(memory));
@@ -643,8 +701,9 @@ mod clipboard {
         };
         let header_size = size_of::<BITMAPINFOHEADER>();
         let mut bytes = Vec::with_capacity(header_size + (width * height * 4) as usize);
-        let header_bytes =
-            unsafe { std::slice::from_raw_parts(std::ptr::addr_of!(header).cast::<u8>(), header_size) };
+        let header_bytes = unsafe {
+            std::slice::from_raw_parts(std::ptr::addr_of!(header).cast::<u8>(), header_size)
+        };
         bytes.extend_from_slice(header_bytes);
         let stride = width as usize * 4;
         let raw = image.as_raw();

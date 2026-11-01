@@ -87,7 +87,11 @@ pub fn site_id(url: &str) -> Option<String> {
 pub fn hotkey_mods(token: &str) -> Option<(u32, u32)> {
     let mut mods = 0u32;
     let mut key = None;
-    for part in token.split('+').map(str::trim).filter(|part| !part.is_empty()) {
+    for part in token
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
         match part.to_ascii_lowercase().as_str() {
             "ctrl" | "control" => mods |= 0x0002,
             "alt" => mods |= 0x0001,
@@ -209,9 +213,23 @@ pub fn install_site(app: &AppHandle, id: u32) -> Result<(), String> {
         .tabs
         .iter()
         .find(|tab| tab.id == id)
-        .map(|tab| if tab.title.is_empty() { site_id.clone() } else { tab.title.clone() })
+        .map(|tab| {
+            if tab.title.is_empty() {
+                site_id.clone()
+            } else {
+                tab.title.clone()
+            }
+        })
         .unwrap_or_else(|| site_id.clone());
-    let icon = save_site_icon(app, &site_id, snapshot.tabs.iter().find(|tab| tab.id == id).and_then(|tab| tab.favicon.as_deref()));
+    let icon = save_site_icon(
+        app,
+        &site_id,
+        snapshot
+            .tabs
+            .iter()
+            .find(|tab| tab.id == id)
+            .and_then(|tab| tab.favicon.as_deref()),
+    );
     let model = format!("com.ce.browser.site.{site_id}");
     let arguments = format!("--app {site_id}");
     let _ = profiles::install_link(
@@ -247,7 +265,11 @@ fn save_site_icon(app: &AppHandle, id: &str, favicon: Option<&str>) -> Option<Pa
         }
         let response = ureq::get(url).timeout(Duration::from_secs(8)).call().ok()?;
         let mut bytes = Vec::new();
-        response.into_reader().take(1_000_000).read_to_end(&mut bytes).ok()?;
+        response
+            .into_reader()
+            .take(1_000_000)
+            .read_to_end(&mut bytes)
+            .ok()?;
         image::load_from_memory(&bytes).ok()
     });
     let image = fetched
@@ -267,7 +289,11 @@ pub fn mark_site_window(app: &AppHandle, window: &tauri::Window, id: &str) {
         .map(|exe| format!("\"{}\" --app {id}", exe.display()))
         .unwrap_or_default();
     let icon = paths::data_dir(app).join("apps").join(format!("{id}.ico"));
-    let icon = if icon.is_file() { icon.display().to_string() } else { String::new() };
+    let icon = if icon.is_file() {
+        icon.display().to_string()
+    } else {
+        String::new()
+    };
     let _ = profiles::mark_model(window, &model, &relaunch, &icon);
     if icon_file_ok(&icon) {
         if let Ok(image) = tauri::image::Image::from_path(&icon) {
@@ -297,7 +323,11 @@ pub fn summon(app: &AppHandle) {
 fn start_hotkey(app: AppHandle) {
     std::thread::spawn(move || {
         let token = settings::get(&app).summon_hotkey;
-        let Some((mods, key)) = hotkey_mods(if token.trim().is_empty() { DEFAULT_HOTKEY } else { token.as_str() }) else {
+        let Some((mods, key)) = hotkey_mods(if token.trim().is_empty() {
+            DEFAULT_HOTKEY
+        } else {
+            token.as_str()
+        }) else {
             return;
         };
         unsafe { hotkey_loop(&app, mods, key) };
@@ -305,8 +335,10 @@ fn start_hotkey(app: AppHandle) {
 }
 
 unsafe fn hotkey_loop(app: &AppHandle, mods: u32, key: u32) {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, HOT_KEY_MODIFIERS};
-    use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW, GetMessageW, TranslateMessage, MSG};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{HOT_KEY_MODIFIERS, RegisterHotKey};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, GetMessageW, MSG, TranslateMessage,
+    };
     unsafe {
         if RegisterHotKey(None, 1, HOT_KEY_MODIFIERS(mods), key).is_err() {
             return;
@@ -325,7 +357,8 @@ unsafe fn hotkey_loop(app: &AppHandle, mods: u32, key: u32) {
 fn install_tray(app: &AppHandle) -> Result<(), String> {
     use tauri::image::Image;
     use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
-    let icon = Image::from_bytes(crate::profile_icons::default_png()).map_err(|error| error.to_string())?;
+    let icon = Image::from_bytes(crate::profile_icons::default_png())
+        .map_err(|error| error.to_string())?;
     let menu = tray_menu(app)?;
     let tray = TrayIconBuilder::new()
         .icon(icon)
@@ -344,7 +377,11 @@ fn install_tray(app: &AppHandle) -> Result<(), String> {
             }
         })
         .on_tray_icon_event(|tray, event| {
-            if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                ..
+            } = event
+            {
                 summon(tray.app_handle());
             }
         })
@@ -363,10 +400,14 @@ fn tray_menu(app: &AppHandle) -> Result<tauri::menu::Menu<tauri::Wry>, String> {
             items.push(item);
         }
     }
-    let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>).map_err(|error| error.to_string())?;
-    let search = MenuItem::with_id(app, "search", "Quick search", true, None::<&str>).map_err(|error| error.to_string())?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>).map_err(|error| error.to_string())?;
-    let mut refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> = items.iter().map(|item| item as _).collect();
+    let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let search = MenuItem::with_id(app, "search", "Quick search", true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let mut refs: Vec<&dyn tauri::menu::IsMenuItem<tauri::Wry>> =
+        items.iter().map(|item| item as _).collect();
     refs.push(&show);
     refs.push(&search);
     refs.push(&quit);
@@ -395,16 +436,19 @@ pub fn toast(title: &str, body: &str, launch: &str) {
         Ok(document) => document,
         Err(_) => return,
     };
-    if document.LoadXml(&windows::core::HSTRING::from(&xml)).is_err() {
+    if document
+        .LoadXml(&windows::core::HSTRING::from(&xml))
+        .is_err()
+    {
         return;
     }
     let toast = match ToastNotification::CreateToastNotification(&document) {
         Ok(toast) => toast,
         Err(_) => return,
     };
-    if let Ok(notifier) = ToastNotificationManager::CreateToastNotifierWithId(&windows::core::HSTRING::from(
-        profiles::current_model_id(),
-    )) {
+    if let Ok(notifier) = ToastNotificationManager::CreateToastNotifierWithId(
+        &windows::core::HSTRING::from(profiles::current_model_id()),
+    ) {
         let _ = notifier.Show(&toast);
     }
 }
@@ -424,10 +468,22 @@ pub fn register_browser() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let command = format!("\"{}\" \"%1\"", exe.display());
     set_key(r"Software\Classes\ce-browser", "", "ce-browser")?;
-    set_key(r"Software\Classes\ce-browser\shell\open\command", "", &command)?;
+    set_key(
+        r"Software\Classes\ce-browser\shell\open\command",
+        "",
+        &command,
+    )?;
     set_key(r"Software\Classes\ce-browserHTML", "", "HTML document")?;
-    set_key(r"Software\Classes\ce-browserHTML\shell\open\command", "", &command)?;
-    set_key(r"Software\Clients\StartMenuInternet\ce-browser", "", "ce-browser")?;
+    set_key(
+        r"Software\Classes\ce-browserHTML\shell\open\command",
+        "",
+        &command,
+    )?;
+    set_key(
+        r"Software\Clients\StartMenuInternet\ce-browser",
+        "",
+        "ce-browser",
+    )?;
     set_key(
         r"Software\Clients\StartMenuInternet\ce-browser\Capabilities",
         "ApplicationName",
@@ -478,7 +534,14 @@ fn set_key(path: &str, name: &str, value: &str) -> Result<(), String> {
             result: *mut isize,
             disposition: *mut u32,
         ) -> i32;
-        fn RegSetValueExW(key: isize, name: *const u16, reserved: u32, kind: u32, data: *const u8, bytes: u32) -> i32;
+        fn RegSetValueExW(
+            key: isize,
+            name: *const u16,
+            reserved: u32,
+            kind: u32,
+            data: *const u8,
+            bytes: u32,
+        ) -> i32;
         fn RegCloseKey(key: isize) -> i32;
     }
     let sub = wide(path);
@@ -608,11 +671,14 @@ pub const NOTIFY_JS: &str = r#"(function () {
 
 #[cfg(test)]
 mod tests {
-    use super::{hotkey_mods, is_website, launch_from_args, power_is_battery, site_id, Launch};
+    use super::{Launch, hotkey_mods, is_website, launch_from_args, power_is_battery, site_id};
 
     #[test]
     fn a_site_id_comes_from_the_host() {
-        assert_eq!(site_id("https://www.example.com/a").as_deref(), Some("example-com"));
+        assert_eq!(
+            site_id("https://www.example.com/a").as_deref(),
+            Some("example-com")
+        );
         assert_eq!(site_id("ce://settings"), None);
     }
 

@@ -1,14 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { History, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/Button";
 import { FavIcon } from "@/components/FavIcon";
 import { IconButton } from "@/components/IconButton";
 import { PageShell } from "@/components/PageShell";
-import { createTab, removeHistory, clearHistory } from "@/lib/browser-client";
+import { createTab, removeHistory, clearHistory, searchHistory } from "@/lib/browser-client";
 import { hostOf } from "@/lib/format";
 import { absoluteTime, relativeTime } from "@/lib/time";
 import { useHistory } from "@/lib/use-browser";
-import { HistoryItem } from "../../../../types/browser";
+import { HistoryHit, HistoryItem } from "../../../../types/browser";
 
 
 function dayLabel(ms: number) {
@@ -25,7 +25,7 @@ function dayLabel(ms: number) {
   return date.toLocaleDateString(undefined, { dateStyle: "long" });
 }
 
-function HistoryRow({ item }: { item: HistoryItem }) {
+function HistoryRow({ item, snippet }: { item: HistoryItem; snippet?: string }) {
   const domId = `history-${item.id}`;
   const when = new Date(item.lastVisited).toISOString();
   return (
@@ -50,6 +50,11 @@ function HistoryRow({ item }: { item: HistoryItem }) {
         >
           {item.url}
         </button>
+        {snippet ? (
+          <p id={`${domId}-snippet`} className="mt-1 line-clamp-2 text-xs text-zinc-400">
+            {snippet}
+          </p>
+        ) : null}
       </div>
       <div id={`${domId}-meta`} className="hidden shrink-0 text-right text-xs text-zinc-500 sm:block">
         <div id={`${domId}-time`} title={absoluteTime(when)}>
@@ -71,21 +76,56 @@ function HistoryRow({ item }: { item: HistoryItem }) {
 export function HistoryPage() {
   const history = useHistory();
   const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<HistoryHit[] | null>(null);
+  const [hitsFor, setHitsFor] = useState("");
+
+  useEffect(() => {
+    const needle = query.trim();
+    if (!needle) {
+      setHits(null);
+      setHitsFor("");
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void searchHistory(needle)
+        .then((found) => {
+          if (!cancelled) {
+            setHits(found);
+            setHitsFor(needle);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setHits(null);
+            setHitsFor("");
+          }
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
 
   const groups = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const filtered = needle
-      ? history.filter(
-          (item) => item.title.toLowerCase().includes(needle) || item.url.toLowerCase().includes(needle),
-        )
-      : history;
-    const byDay = new Map<string, HistoryItem[]>();
+    const searched = needle && hitsFor === needle ? hits : null;
+    const filtered = searched
+      ? searched
+      : needle
+        ? history.filter(
+            (item) => item.title.toLowerCase().includes(needle) || item.url.toLowerCase().includes(needle),
+          )
+        : history;
+    const byDay = new Map<string, HistoryHit[]>();
     for (const item of filtered) {
       const label = dayLabel(item.lastVisited);
-      byDay.set(label, [...(byDay.get(label) ?? []), item]);
+      const snippet = "snippet" in item && typeof item.snippet === "string" ? item.snippet : "";
+      byDay.set(label, [...(byDay.get(label) ?? []), { ...item, snippet }]);
     }
     return [...byDay.entries()];
-  }, [history, query]);
+  }, [history, hits, hitsFor, query]);
 
   return (
     <PageShell
@@ -100,7 +140,7 @@ export function HistoryPage() {
               id="history-page-search-input"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search history"
+              placeholder="Search titles, addresses, and page text"
               className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-500"
             />
           </label>
@@ -123,7 +163,7 @@ export function HistoryPage() {
                 {label}
               </h2>
               {items.map((item) => (
-                <HistoryRow key={item.id} item={item} />
+                <HistoryRow key={item.id} item={item} snippet={item.snippet} />
               ))}
             </section>
           ))

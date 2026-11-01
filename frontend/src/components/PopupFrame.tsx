@@ -42,7 +42,7 @@ export function PopupFrame({ id, children, className, fit = true, maxHeight = 64
 
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !event.defaultPrevented) {
         void closePopup();
       }
     };

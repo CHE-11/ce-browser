@@ -129,7 +129,9 @@ pub fn save_now(app: &AppHandle) -> Result<(), String> {
             .collect(),
         workspaces: saved.workspaces,
         active_workspace: saved.active_workspace,
-        split: saved.split.map(|(left, right, ratio)| SessionSplitFile { left, right, ratio }),
+        split: saved
+            .split
+            .map(|(left, right, ratio)| SessionSplitFile { left, right, ratio }),
     };
     files::write_json(&paths::data_file(app, FILE), &file)
 }
@@ -137,6 +139,7 @@ pub fn save_now(app: &AppHandle) -> Result<(), String> {
 /// Stops the debounced writer so a late save cannot run after the window is gone.
 pub fn shutdown(app: &AppHandle) {
     let _ = save_now(app);
+    crate::status::flush(app);
     if let Some(saver) = app.try_state::<SessionSaver>() {
         saver.tx.lock().expect("session lock").take();
     }
@@ -161,7 +164,10 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
             if !known(&tab.workspace) {
                 tab.workspace = tabs::DEFAULT_WORKSPACE.to_string();
             }
-            if tab.group_id.is_some_and(|id| !file.groups.iter().any(|group| group.id == id)) {
+            if tab
+                .group_id
+                .is_some_and(|id| !file.groups.iter().any(|group| group.id == id))
+            {
                 tab.group_id = None;
             }
             tab
@@ -189,7 +195,11 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
     };
     let split = if restore_all {
         file.split.as_ref().and_then(|split| {
-            Some((position_of(split.left)?, position_of(split.right)?, split.ratio))
+            Some((
+                position_of(split.left)?,
+                position_of(split.right)?,
+                split.ratio,
+            ))
         })
     } else {
         None
@@ -305,9 +315,11 @@ mod tests {
         assert!(file.tabs[0].group_id.is_none());
         assert!(file.groups.is_empty());
         assert!(file.split.is_none());
-        assert!(crate::tabs::normalize_workspaces(file.workspaces)
-            .iter()
-            .any(|workspace| workspace.id == crate::tabs::DEFAULT_WORKSPACE));
+        assert!(
+            crate::tabs::normalize_workspaces(file.workspaces)
+                .iter()
+                .any(|workspace| workspace.id == crate::tabs::DEFAULT_WORKSPACE)
+        );
     }
 
     #[test]

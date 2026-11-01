@@ -4,8 +4,8 @@ use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
 use std::sync::mpsc;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ use windows::core::HSTRING;
 
 use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2;
 
-use crate::accelerator::{self, ByteRange, CONNECTIONS, CHUNK_BYTES, MIN_BYTES};
+use crate::accelerator::{self, ByteRange, CHUNK_BYTES, CONNECTIONS, MIN_BYTES};
 use crate::webview2::{self, MainThread, read_bool, read_pwstr};
 use crate::{files, paths, settings, tabs};
 
@@ -135,7 +135,8 @@ fn settle_unfinished(item: &mut DownloadItem) {
         return;
     }
     let total = item.total_bytes.unwrap_or(0);
-    let resumable = item.accelerated && total > item.received_bytes && Path::new(&item.path).is_file();
+    let resumable =
+        item.accelerated && total > item.received_bytes && Path::new(&item.path).is_file();
     item.state = INTERRUPTED.into();
     item.can_resume = resumable;
 }
@@ -204,7 +205,10 @@ pub fn on_download_starting(
     }
 }
 
-fn worth_probing(settings: &settings::BrowserSettings, operation: &ICoreWebView2DownloadOperation) -> bool {
+fn worth_probing(
+    settings: &settings::BrowserSettings,
+    operation: &ICoreWebView2DownloadOperation,
+) -> bool {
     if !settings.accelerate_downloads {
         return false;
     }
@@ -246,7 +250,9 @@ fn place(
                         start_accelerated(&main_app, &probe_url, path, total, cookie, agent);
                     }
                     Err(_) => {
-                        let _ = unsafe { args.SetResultFilePath(&HSTRING::from(path.to_string_lossy().as_ref())) };
+                        let _ = unsafe {
+                            args.SetResultFilePath(&HSTRING::from(path.to_string_lossy().as_ref()))
+                        };
                         let _ = track(&main_app, &operation, path);
                         let _ = unsafe { deferral.Complete() };
                     }
@@ -399,7 +405,10 @@ fn state_changed(app: &AppHandle, id: u32, operation: &ICoreWebView2DownloadOper
         OPERATIONS.with(|operations| operations.borrow_mut().remove(&id));
     }
     if next == COMPLETED {
-        let name = Path::new(&path).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or(path.clone());
+        let name = Path::new(&path)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or(path.clone());
         crate::system::toast_download(&name, &path);
     }
     changed(app, true);
@@ -565,7 +574,14 @@ fn accelerated(app: &AppHandle, id: u32) -> bool {
     item(app, id).is_ok_and(|item| item.accelerated)
 }
 
-fn start_accelerated(app: &AppHandle, url: &str, path: PathBuf, total: u64, cookie: String, agent: String) {
+fn start_accelerated(
+    app: &AppHandle,
+    url: &str,
+    path: PathBuf,
+    total: u64,
+    cookie: String,
+    agent: String,
+) {
     let ranges = accelerator::split_ranges(total, CONNECTIONS);
     let file_name = path
         .file_name()
@@ -620,7 +636,11 @@ fn launch(app: &AppHandle, id: u32) {
         return;
     }
     job.failed.store(false, Ordering::Relaxed);
-    let file = OpenOptions::new().create(true).write(true).read(true).open(&item.path);
+    let file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .read(true)
+        .open(&item.path);
     let Ok(file) = file else {
         job.running.store(false, Ordering::Relaxed);
         mark_interrupted(app, id, false);
@@ -677,9 +697,8 @@ fn pump(app: &AppHandle, id: u32, index: usize, file: &Mutex<std::fs::File>, job
         };
         let cookie = job.cookie.lock().expect("cookie").clone();
         let agent = job.agent.lock().expect("agent").clone();
-        let bytes = accelerator::read_range(&url, &cookie, &agent, start, end).or_else(|_| {
-            accelerator::read_range(&url, &cookie, &agent, start, end)
-        });
+        let bytes = accelerator::read_range(&url, &cookie, &agent, start, end)
+            .or_else(|_| accelerator::read_range(&url, &cookie, &agent, start, end));
         let Ok(bytes) = bytes else {
             job.failed.store(true, Ordering::Relaxed);
             return;
@@ -800,7 +819,10 @@ fn refresh_session(app: &AppHandle, url: &str) -> (String, String) {
         .and_then(|url| url.host_str().map(|host| host.to_string()));
     let snapshot = tabs::snapshot(app);
     let matched = snapshot.tabs.iter().find(|tab| {
-        tab.loaded && host.as_ref().is_some_and(|host| tab.url.contains(host.as_str()))
+        tab.loaded
+            && host
+                .as_ref()
+                .is_some_and(|host| tab.url.contains(host.as_str()))
     });
     let webview = matched
         .and_then(|tab| tabs::page_view(app, tab.id))

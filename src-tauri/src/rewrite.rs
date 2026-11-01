@@ -61,12 +61,22 @@ pub fn init(app: &AppHandle) {
 }
 
 pub fn list(app: &AppHandle) -> Vec<RewriteRule> {
-    app.state::<Rewrites>().inner().0.lock().expect("rewrites").clone()
+    app.state::<Rewrites>()
+        .inner()
+        .0
+        .lock()
+        .expect("rewrites")
+        .clone()
 }
 
 pub fn save(app: &AppHandle, rules: Vec<RewriteRule>) -> Result<Vec<RewriteRule>, String> {
     let rules = normalize(rules);
-    files::write_json(&paths::data_file(app, FILE), &RewriteFile { rules: rules.clone() })?;
+    files::write_json(
+        &paths::data_file(app, FILE),
+        &RewriteFile {
+            rules: rules.clone(),
+        },
+    )?;
     *app.state::<Rewrites>().inner().0.lock().expect("rewrites") = rules.clone();
     Ok(rules)
 }
@@ -87,7 +97,9 @@ pub fn find(url: &str, rules: &[RewriteRule]) -> Option<RewriteHit> {
             "block" => return Some(RewriteHit::Block),
             "redirect" => {
                 let target = rule.target.trim();
-                if (target.starts_with("http://") || target.starts_with("https://")) && target != url {
+                if (target.starts_with("http://") || target.starts_with("https://"))
+                    && target != url
+                {
                     return Some(RewriteHit::Redirect(target.to_string()));
                 }
             }
@@ -154,9 +166,18 @@ mod tests {
 
     #[test]
     fn a_block_rule_matches_the_substring() {
-        let hit = find("https://ads.example/banner.js", &[rule("block", "ads.example", "")]);
+        let hit = find(
+            "https://ads.example/banner.js",
+            &[rule("block", "ads.example", "")],
+        );
         assert_eq!(hit, Some(RewriteHit::Block));
-        assert_eq!(find("https://example.com/ok", &[rule("block", "ads.example", "")]), None);
+        assert_eq!(
+            find(
+                "https://example.com/ok",
+                &[rule("block", "ads.example", "")]
+            ),
+            None
+        );
     }
 
     #[test]
@@ -165,7 +186,13 @@ mod tests {
             "https://example.com/old.js",
             &[rule("redirect", "/old.js", "https://cdn.example/new.js")],
         );
-        assert_eq!(hit, Some(RewriteHit::Redirect("https://cdn.example/new.js".into())));
-        assert_eq!(find("ce://settings", &[rule("block", "settings", "")]), None);
+        assert_eq!(
+            hit,
+            Some(RewriteHit::Redirect("https://cdn.example/new.js".into()))
+        );
+        assert_eq!(
+            find("ce://settings", &[rule("block", "settings", "")]),
+            None
+        );
     }
 }

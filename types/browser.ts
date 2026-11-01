@@ -346,6 +346,10 @@ export type BrowserSettings = {
   /** Empty keeps the name the site suggested. */
   downloadNameTemplate: string;
   showBookmarksBar: boolean;
+  /** The status bar under every page. */
+  showStatusBar: boolean;
+  /** Memory, time and the other status readings. Off leaves the version and zoom. */
+  statusStats: boolean;
   theme: string;
   colorMode: "dark" | "light" | "system";
   uiZoom: number;
@@ -357,10 +361,16 @@ export type BrowserSettings = {
   printEditor: PrintEditorSettings;
   /** Last choices in the Page to PNG popover. */
   pageCapture: PageCaptureSettings;
-  /** Extension ids left off the address bar. Empty means every enabled extension stays pinned. */
+  /** Extension ids left off the toolbars. Empty means every enabled extension stays pinned. */
   hiddenToolbarExtensions: string[];
   /** Order of pinned toolbar icons. Empty keeps the built-in order, then extensions. */
   toolbarOrder: string[];
+  /** Built-in tools sit on the right strip. Off puts them on the address bar. */
+  verticalToolbar: boolean;
+  /** Pinned extensions share the vertical tool strip on the right. */
+  verticalToolbarExtensions: boolean;
+  /** Short names under icons on the vertical tool strip. */
+  verticalToolbarLabels: boolean;
   /** Tint the active tab and address bar from the site's color. */
   siteAccent: boolean;
   /** Target language code for the translate tool. */
@@ -399,6 +409,46 @@ export type BrowserSettings = {
   httpsExceptions: string[];
   /** Right-drag on a page goes back, forward, reloads or closes the tab. */
   mouseGestures: boolean;
+  /** Save page text on this computer so history search can match words from the page. */
+  indexPageText: boolean;
+};
+
+/** One on-screen page in a status snapshot. */
+export type StatusPage = {
+  id: number;
+  /** Renderer working set, in bytes. Null when it could not be matched. */
+  tabUsed: number | null;
+  /** Another open tab can share this renderer. */
+  tabShared: boolean;
+  /** JavaScript heap, in bytes, when the renderer process was not matched. */
+  tabHeap: number | null;
+  siteHost: string;
+  siteAllTimeMs: number;
+  tabSessionMs: number;
+  /** The page is on screen, so the clocks keep counting from this snapshot. */
+  shown: boolean;
+};
+
+/** Memory and time for the status bar. The flat fields are the focused window's active tab. */
+export type StatusSnapshot = {
+  version: string;
+  startedAt: number;
+  systemUsed: number;
+  systemTotal: number;
+  appUsed: number;
+  tabUsed: number | null;
+  tabShared: boolean;
+  tabHeap: number | null;
+  siteHost: string;
+  siteAllTimeMs: number;
+  tabSessionMs: number;
+  batterySaver: boolean;
+  pages: StatusPage[];
+};
+
+export type StatusText = {
+  tabId: number;
+  text: string;
 };
 
 export type Keyword = {
@@ -626,6 +676,56 @@ export type SyncStatus = {
   error: string | null;
   /** True when `error` is a failure to write one of the files in the sync folder. */
   saveError: boolean;
+};
+
+export type SyncConflict = {
+  id: string;
+  path: string;
+  label: string;
+  time: number;
+  summary: string;
+  canMerge: boolean;
+};
+
+export type ImportedProfile = {
+  id: string;
+  name: string;
+};
+
+export type HistoryHit = HistoryItem & {
+  /** Words from the page around the match. Empty when the title or address matched. */
+  snippet: string;
+};
+
+export type BookmarkHealthBookmark = {
+  id: string;
+  title: string;
+  url: string;
+};
+
+export type BookmarkDuplicateGroup = {
+  url: string;
+  bookmarks: BookmarkHealthBookmark[];
+};
+
+export type BookmarkHealthLink = {
+  id: string;
+  title: string;
+  url: string;
+  /** `dead`, `blocked`, or `unreachable`. */
+  status: string;
+  detail: string;
+};
+
+export type BookmarkHealthReport = {
+  duplicates: BookmarkDuplicateGroup[];
+  failed: BookmarkHealthLink[];
+  checked: number;
+};
+
+export type BookmarkHealthProgress = {
+  done: number;
+  total: number;
 };
 
 export type BrowserProfile = {

@@ -62,7 +62,8 @@ pub fn browse(path: &Path) -> Result<BrowseResult, String> {
     } else if size > PREVIEW_LIMIT {
         (String::new(), true)
     } else {
-        let bytes = fs::read(path).map_err(|error| format!("Couldn't read {}. {error}", path.display()))?;
+        let bytes =
+            fs::read(path).map_err(|error| format!("Couldn't read {}. {error}", path.display()))?;
         let text = String::from_utf8(bytes).map_err(|_| "This file is not text.".to_string())?;
         (text, false)
     };
@@ -79,7 +80,8 @@ pub fn browse(path: &Path) -> Result<BrowseResult, String> {
 
 fn list_dir(path: &Path) -> Result<Vec<FileEntry>, String> {
     let mut entries = Vec::new();
-    let read = fs::read_dir(path).map_err(|error| format!("Couldn't open {}. {error}", path.display()))?;
+    let read =
+        fs::read_dir(path).map_err(|error| format!("Couldn't open {}. {error}", path.display()))?;
     for entry in read.flatten() {
         let file_path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -102,10 +104,11 @@ fn list_dir(path: &Path) -> Result<Vec<FileEntry>, String> {
         });
     }
     entries.sort_by(|left, right| {
-        right
-            .directory
-            .cmp(&left.directory)
-            .then_with(|| left.name.to_ascii_lowercase().cmp(&right.name.to_ascii_lowercase()))
+        right.directory.cmp(&left.directory).then_with(|| {
+            left.name
+                .to_ascii_lowercase()
+                .cmp(&right.name.to_ascii_lowercase())
+        })
     });
     Ok(entries)
 }

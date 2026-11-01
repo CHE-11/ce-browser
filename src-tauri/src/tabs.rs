@@ -250,6 +250,10 @@ struct WindowChrome {
     ui_height: f64,
     /// Width of the vertical tab sidebar. Zero with horizontal tabs.
     ui_left: f64,
+    /// Width of the vertical tool strip. Zero when that strip is hidden.
+    ui_right: f64,
+    /// Height of the status bar. Zero when it is hidden.
+    ui_bottom: f64,
     fullscreen: bool,
     popup: Popup,
     /// Page views on screen and where each one sits.
@@ -270,6 +274,8 @@ impl WindowChrome {
             active: None,
             ui_height: DEFAULT_UI_HEIGHT,
             ui_left: 0.0,
+            ui_right: 0.0,
+            ui_bottom: 0.0,
             fullscreen: false,
             popup: Popup::default(),
             shown: Vec::new(),
@@ -469,7 +475,9 @@ impl TabsState {
                 }
             }
         }
-        if order.len() == self.tabs.len() && order.iter().enumerate().any(|(at, index)| at != *index) {
+        if order.len() == self.tabs.len()
+            && order.iter().enumerate().any(|(at, index)| at != *index)
+        {
             let mut slots: Vec<Option<Tab>> = self.tabs.drain(..).map(Some).collect();
             self.tabs = order
                 .into_iter()
@@ -568,7 +576,11 @@ impl TabsState {
         self.tabs
             .iter()
             .filter(|tab| window.is_none_or(|label| tab.info.window == label))
-            .filter(|tab| workspace.as_ref().is_none_or(|workspace| tab.info.workspace == *workspace))
+            .filter(|tab| {
+                workspace
+                    .as_ref()
+                    .is_none_or(|workspace| tab.info.workspace == *workspace)
+            })
             .map(|tab| tab.info.id)
             .filter(|id| {
                 let active = self
@@ -668,7 +680,11 @@ pub fn browser_labels(app: &AppHandle) -> Vec<String> {
 }
 
 pub fn any_ui(app: &AppHandle) -> Option<Webview> {
-    let labels: Vec<String> = lock(app).windows.iter().map(|window| window.ui.clone()).collect();
+    let labels: Vec<String> = lock(app)
+        .windows
+        .iter()
+        .map(|window| window.ui.clone())
+        .collect();
     labels.iter().find_map(|label| app.get_webview(label))
 }
 
@@ -1222,7 +1238,12 @@ fn blank_tab(
                     ),
                 }
             }
-            None => (host.unwrap_or_else(|| focused_window(&app)), None, String::new(), None),
+            None => (
+                host.unwrap_or_else(|| focused_window(&app)),
+                None,
+                String::new(),
+                None,
+            ),
         };
         let _ = open(
             &app,
@@ -1239,7 +1260,12 @@ fn blank_tab(
 }
 
 /// Opens `url` right after tab `opener`, in the same window, workspace and group.
-pub fn open_beside(app: &AppHandle, opener: u32, url: Url, background: bool) -> Result<u32, String> {
+pub fn open_beside(
+    app: &AppHandle,
+    opener: u32,
+    url: Url,
+    background: bool,
+) -> Result<u32, String> {
     let place = with_state(app, |state| {
         let (window, workspace, local) = state.local_index(opener)?;
         let group = state
@@ -1302,7 +1328,11 @@ pub fn recent_tabs(app: &AppHandle) -> Vec<(u32, String)> {
         .filter(|tab| tab.url.starts_with("http://") || tab.url.starts_with("https://"))
         .take(8)
         .map(|tab| {
-            let title = if tab.title.is_empty() { tab.url } else { tab.title };
+            let title = if tab.title.is_empty() {
+                tab.url
+            } else {
+                tab.title
+            };
             (tab.id, title)
         })
         .collect()
@@ -1513,7 +1543,11 @@ pub fn fit_device(page_w: u32, page_h: u32, want_w: u32, want_h: u32) -> (u32, u
     (x, y, width, height)
 }
 
-fn device_pixels(device: &str, page: PhysicalSize<u32>, scale: f64) -> Option<(u32, u32, u32, u32)> {
+fn device_pixels(
+    device: &str,
+    page: PhysicalSize<u32>,
+    scale: f64,
+) -> Option<(u32, u32, u32, u32)> {
     let (css_w, css_h) = match device {
         "phone" => (390u32, 844u32),
         "tablet" => (768, 1024),
@@ -1532,7 +1566,9 @@ pub fn set_device(app: &AppHandle, window: &str, device: &str) -> Result<(), Str
         _ => return Err("Unknown device.".into()),
     };
     let found = with_state(app, |state| {
-        state.chrome_mut(window).map(|chrome| chrome.device = device)
+        state
+            .chrome_mut(window)
+            .map(|chrome| chrome.device = device)
     });
     if found.is_none() {
         return Err("That window is not open.".into());
@@ -1651,6 +1687,7 @@ fn remember_visit(app: &AppHandle, id: u32) {
         return;
     };
     history::visit(app, &url, &title);
+    crate::history_index::queue(app, id, &url);
 }
 
 pub fn update_favicon(app: &AppHandle, id: u32, favicon: Option<String>) {
@@ -1673,7 +1710,9 @@ fn set_active(app: &AppHandle, id: u32, collapse: bool) -> Result<(), String> {
             let previous = state.active_of(&window);
             if let Some(chrome) = state.chrome_mut(&window) {
                 if let Some(previous) = previous {
-                    chrome.active_by_workspace.insert(chrome.workspace.clone(), previous);
+                    chrome
+                        .active_by_workspace
+                        .insert(chrome.workspace.clone(), previous);
                 }
                 chrome.workspace = workspace;
             }
@@ -1778,17 +1817,26 @@ pub fn select_range(app: &AppHandle, id: u32) -> Result<(), String> {
             return false;
         };
         let indexes = state.strip_indexes(&window);
-        let Some(target) = indexes.iter().position(|index| state.tabs[*index].info.id == id) else {
+        let Some(target) = indexes
+            .iter()
+            .position(|index| state.tabs[*index].info.id == id)
+        else {
             return false;
         };
         let anchor = state
             .anchor
             .filter(|anchor| state.tab_window(*anchor).as_deref() == Some(window.as_str()))
-            .and_then(|anchor| indexes.iter().position(|index| state.tabs[*index].info.id == anchor))
+            .and_then(|anchor| {
+                indexes
+                    .iter()
+                    .position(|index| state.tabs[*index].info.id == anchor)
+            })
             .or_else(|| {
-                state
-                    .active_of(&window)
-                    .and_then(|active| indexes.iter().position(|index| state.tabs[*index].info.id == active))
+                state.active_of(&window).and_then(|active| {
+                    indexes
+                        .iter()
+                        .position(|index| state.tabs[*index].info.id == active)
+                })
             })
             .unwrap_or(target);
         let start = anchor.min(target);
@@ -1830,7 +1878,9 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         let device = chrome.device.clone();
         let previous = chrome.shown.clone();
         let split = chrome.split.filter(|split| {
-            device.is_empty() && !fullscreen && active.is_some_and(|id| id == split.left || id == split.right)
+            device.is_empty()
+                && !fullscreen
+                && active.is_some_and(|id| id == split.left || id == split.right)
         });
         let ratio = split.map(|split| split.ratio).unwrap_or(0.5);
         let painted_view = |id: u32| {
@@ -1849,13 +1899,21 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         let shown = paired.unwrap_or_else(|| {
             let ready = active.and_then(painted_view);
             let fallback = || {
-                previous.first().map(|(label, _)| label.clone()).filter(|label| {
-                    state.tabs.iter().any(|tab| {
-                        tab.info.window == window && tab.painted && tab.webview.as_ref() == Some(label)
+                previous
+                    .first()
+                    .map(|(label, _)| label.clone())
+                    .filter(|label| {
+                        state.tabs.iter().any(|tab| {
+                            tab.info.window == window
+                                && tab.painted
+                                && tab.webview.as_ref() == Some(label)
+                        })
                     })
-                })
             };
-            ready.or_else(fallback).map(|label| vec![(label, Slot::Full)]).unwrap_or_default()
+            ready
+                .or_else(fallback)
+                .map(|label| vec![(label, Slot::Full)])
+                .unwrap_or_default()
         });
         let changed = previous != shown;
         let parked: Vec<String> = state
@@ -1907,16 +1965,17 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         let Some(webview) = app.get_webview(label) else {
             continue;
         };
-        let (x, y, width, height) = if let Some((dx, dy, width, height)) = fitted.filter(|_| matches!(slot, Slot::Full)) {
-            (dx as i32, dy as i32, width, height)
-        } else {
-            let (x, width) = match slot {
-                Slot::Full => (0, page_size.width as i32),
-                Slot::Left => (0, left_width),
-                Slot::Right => (right_x, right_width),
+        let (x, y, width, height) =
+            if let Some((dx, dy, width, height)) = fitted.filter(|_| matches!(slot, Slot::Full)) {
+                (dx as i32, dy as i32, width, height)
+            } else {
+                let (x, width) = match slot {
+                    Slot::Full => (0, page_size.width as i32),
+                    Slot::Left => (0, left_width),
+                    Slot::Right => (right_x, right_width),
+                };
+                (x, 0, width as u32, page_size.height)
             };
-            (x, 0, width as u32, page_size.height)
-        };
         let _ = webview.set_size(PhysicalSize::new(width, height));
         let _ = webview.set_position(PhysicalPosition::new(position.x + x, position.y + y));
     }
@@ -2038,7 +2097,11 @@ pub fn close_tab(app: &AppHandle, id: u32) -> Result<(), String> {
                 .or_else(|| {
                     indexes
                         .get(local)
-                        .or_else(|| local.checked_sub(1).and_then(|previous| indexes.get(previous)))
+                        .or_else(|| {
+                            local
+                                .checked_sub(1)
+                                .and_then(|previous| indexes.get(previous))
+                        })
                         .map(|tab_index| state.tabs[*tab_index].info.id)
                 });
             state.set_window_active(&window, next);
@@ -2048,7 +2111,15 @@ pub fn close_tab(app: &AppHandle, id: u32) -> Result<(), String> {
         let strip_empty = state.strip_indexes(&window).is_empty();
         let last_window = state.windows.len() <= 1;
         state.forget_tab(id, &window);
-        Some((tab.webview, was_active, next, empty, strip_empty, last_window, window))
+        Some((
+            tab.webview,
+            was_active,
+            next,
+            empty,
+            strip_empty,
+            last_window,
+            window,
+        ))
     });
     let Some((label, was_active, next, empty, strip_empty, last_window, window)) = result else {
         return Ok(());
@@ -2155,7 +2226,10 @@ pub fn reopen_closed(app: &AppHandle) -> Result<Option<u32>, String> {
         return Ok(None);
     };
     let url = resolve(app, &closed.url);
-    let window = if browser_labels(app).iter().any(|label| label == &closed.window) {
+    let window = if browser_labels(app)
+        .iter()
+        .any(|label| label == &closed.window)
+    {
         closed.window
     } else {
         focused_window(app)
@@ -2178,6 +2252,72 @@ pub fn page_view(app: &AppHandle, id: u32) -> Option<Webview> {
         state.tab_mut(id).and_then(|tab| tab.webview.clone())
     })?;
     app.get_webview(&label)
+}
+
+/// A page the status bar should describe. Shown pages are on screen, including both sides of a split.
+#[derive(Clone)]
+pub struct StatusPageTarget {
+    pub id: u32,
+    pub url: String,
+    pub shown: bool,
+}
+
+/// On-screen pages, plus each window's active tab when it is not on screen yet.
+pub fn status_targets(app: &AppHandle) -> Vec<StatusPageTarget> {
+    with_state(app, |state| {
+        let shown: Vec<String> = state
+            .windows
+            .iter()
+            .flat_map(|chrome| chrome.shown.iter().map(|(label, _)| label.clone()))
+            .collect();
+        let actives: Vec<u32> = state
+            .windows
+            .iter()
+            .filter_map(|chrome| chrome.active)
+            .collect();
+        let mut pages = Vec::new();
+        let mut seen = HashSet::new();
+        for label in shown {
+            let Some(tab) = state
+                .tabs
+                .iter()
+                .find(|tab| tab.webview.as_deref() == Some(label.as_str()))
+            else {
+                continue;
+            };
+            if seen.insert(tab.info.id) {
+                pages.push(StatusPageTarget {
+                    id: tab.info.id,
+                    url: tab.info.url.clone(),
+                    shown: true,
+                });
+            }
+        }
+        for id in actives {
+            if !seen.insert(id) {
+                continue;
+            }
+            let Some(tab) = state.tabs.iter().find(|tab| tab.info.id == id) else {
+                continue;
+            };
+            pages.push(StatusPageTarget {
+                id,
+                url: tab.info.url.clone(),
+                shown: false,
+            });
+        }
+        pages
+    })
+}
+
+pub fn open_page_urls(app: &AppHandle) -> Vec<(u32, String)> {
+    with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .map(|tab| (tab.info.id, tab.info.url.clone()))
+            .collect()
+    })
 }
 
 pub fn navigate(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
@@ -2267,7 +2407,9 @@ pub fn move_tab(app: &AppHandle, id: u32, to: usize) {
                 .checked_sub(1)
                 .and_then(|at| strip.get(at))
                 .and_then(|at| state.tabs[*at].info.group_id);
-            let after = strip.get(local).and_then(|at| state.tabs[*at].info.group_id);
+            let after = strip
+                .get(local)
+                .and_then(|at| state.tabs[*at].info.group_id);
             tab.info.group_id = match (before, after) {
                 (Some(before), Some(after)) if before == after => Some(before),
                 _ if tab.info.group_id.is_some()
@@ -2316,7 +2458,13 @@ pub fn duplicate_tab(app: &AppHandle, id: u32) -> Result<u32, String> {
     let (url, index, window, workspace, group) = with_state(app, |state| {
         let (window, workspace, local) = state.local_index(id)?;
         let tab = &state.tabs[state.index_of(id)?];
-        Some((tab.info.url.clone(), local, window, workspace, tab.info.group_id))
+        Some((
+            tab.info.url.clone(),
+            local,
+            window,
+            workspace,
+            tab.info.group_id,
+        ))
     })
     .ok_or("That tab is no longer open.")?;
     let url = resolve(app, &url);
@@ -2342,7 +2490,11 @@ pub fn cycle(app: &AppHandle, step: isize) -> Result<(), String> {
         }
         let current = state
             .active_of(&window)
-            .and_then(|id| indexes.iter().position(|index| state.tabs[*index].info.id == id))
+            .and_then(|id| {
+                indexes
+                    .iter()
+                    .position(|index| state.tabs[*index].info.id == id)
+            })
             .unwrap_or(0) as isize;
         let index = indexes[(current + step).rem_euclid(count) as usize];
         Some(state.tabs[index].info.id)
@@ -2491,21 +2643,31 @@ pub fn set_fullscreen(app: &AppHandle, id: u32, fullscreen: bool) {
     });
 }
 
-/// `top` is the header height and `left` the vertical tab sidebar width, in CSS pixels.
-pub fn set_ui_insets(app: &AppHandle, window: &str, top: f64, left: f64) {
+/// `top` is the header height, `left` the vertical tab sidebar, `right` the tool strip,
+/// and `bottom` the status bar, in CSS pixels. A zero bottom means the bar is hidden.
+pub fn set_ui_insets(app: &AppHandle, window: &str, top: f64, left: f64, right: f64, bottom: f64) {
     let changed = with_state(app, |state| {
         // A zero report is the header before it has laid out. Treating it as the real
         // height parks every page at the top of the window and covers the window buttons.
+        // A zero bottom is real: the status bar is hidden, or the window is fullscreen.
         if top < 1.0 {
             return None;
         }
         let left = left.max(0.0);
+        let right = right.max(0.0);
+        let bottom = bottom.max(0.0);
         let chrome = state.chrome_mut(window)?;
-        if (chrome.ui_height - top).abs() < 0.5 && (chrome.ui_left - left).abs() < 0.5 {
+        if (chrome.ui_height - top).abs() < 0.5
+            && (chrome.ui_left - left).abs() < 0.5
+            && (chrome.ui_right - right).abs() < 0.5
+            && (chrome.ui_bottom - bottom).abs() < 0.5
+        {
             return None;
         }
         chrome.ui_height = top;
         chrome.ui_left = left;
+        chrome.ui_right = right;
+        chrome.ui_bottom = bottom;
         Some(())
     });
     if changed.is_some() {
@@ -2513,14 +2675,22 @@ pub fn set_ui_insets(app: &AppHandle, window: &str, top: f64, left: f64) {
     }
 }
 
-/// Physical rectangle for page views: below the browser UI and right of the tab sidebar,
-/// or the whole window in fullscreen.
+/// Physical rectangle for page views: below the browser UI, right of the tab sidebar,
+/// left of the tool strip, and above the status bar, or the whole window in fullscreen.
 fn page_rect(app: &AppHandle, window_label: &str) -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
-    let (ui_height, ui_left, fullscreen) = with_state(app, |state| {
+    let (ui_height, ui_left, ui_right, ui_bottom, fullscreen) = with_state(app, |state| {
         state
             .chrome(window_label)
-            .map(|chrome| (chrome.ui_height, chrome.ui_left, chrome.fullscreen))
-            .unwrap_or((DEFAULT_UI_HEIGHT, 0.0, false))
+            .map(|chrome| {
+                (
+                    chrome.ui_height,
+                    chrome.ui_left,
+                    chrome.ui_right,
+                    chrome.ui_bottom,
+                    chrome.fullscreen,
+                )
+            })
+            .unwrap_or((DEFAULT_UI_HEIGHT, 0.0, 0.0, 0.0, false))
     });
     let Some(window) = app.get_window(window_label) else {
         return (PhysicalPosition::new(0, 0), PhysicalSize::new(800, 600));
@@ -2532,14 +2702,20 @@ fn page_rect(app: &AppHandle, window_label: &str) -> (PhysicalPosition<i32>, Phy
     let scale = window.scale_factor().unwrap_or(1.0);
     let top = ((ui_height * scale).round() as u32).min(size.height);
     let left = ((ui_left * scale).round() as u32).min(size.width.saturating_sub(1));
+    let right =
+        ((ui_right * scale).round() as u32).min(size.width.saturating_sub(left).saturating_sub(1));
+    let bottom = ((ui_bottom * scale).round() as u32).min(size.height.saturating_sub(top));
     (
         PhysicalPosition::new(left as i32, top as i32),
-        PhysicalSize::new(size.width - left, size.height - top),
+        PhysicalSize::new(size.width - left - right, size.height - top - bottom),
     )
 }
 
 /// The page area of a window in physical pixels, for views drawn over the pages.
-pub fn page_area(app: &AppHandle, window_label: &str) -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
+pub fn page_area(
+    app: &AppHandle,
+    window_label: &str,
+) -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
     page_rect(app, window_label)
 }
 
@@ -2592,7 +2768,11 @@ pub fn apply_page_background(app: &AppHandle) {
 }
 
 /// Returns false when the request closed an already open popup of the same kind instead.
-pub fn open_popup(app: &AppHandle, window_label: &str, request: PopupRequest) -> Result<bool, String> {
+pub fn open_popup(
+    app: &AppHandle,
+    window_label: &str,
+    request: PopupRequest,
+) -> Result<bool, String> {
     let key = format!("{}?{}", request.kind, request.params);
     let toggled = request.focus
         && with_state(app, |state| {
@@ -2609,7 +2789,10 @@ pub fn open_popup(app: &AppHandle, window_label: &str, request: PopupRequest) ->
     if toggled {
         close_window_popup(app, window_label);
         with_state(app, |state| {
-            if let Some(popup) = state.chrome_mut(window_label).map(|chrome| &mut chrome.popup) {
+            if let Some(popup) = state
+                .chrome_mut(window_label)
+                .map(|chrome| &mut chrome.popup)
+            {
                 popup.closed_at = None;
             }
         });
@@ -2743,7 +2926,12 @@ pub fn close_popup_label(app: &AppHandle, label: &str) {
     }
 }
 
-pub fn resize_popup(app: &AppHandle, window_label: &str, width: Option<f64>, height: f64) -> Result<(), String> {
+pub fn resize_popup(
+    app: &AppHandle,
+    window_label: &str,
+    width: Option<f64>,
+    height: f64,
+) -> Result<(), String> {
     let (label, anchor_y, revealed) = with_state(app, |state| {
         let popup = &state.chrome(window_label)?.popup;
         let label = popup.label.clone()?;
@@ -2912,12 +3100,14 @@ pub fn session_tabs(app: &AppHandle) -> SessionState {
                 watch_changes: tab.info.watch_changes,
             })
             .collect();
-        let active = state
-            .active_of(WINDOW)
-            .and_then(|id| state.index_of(id));
+        let active = state.active_of(WINDOW).and_then(|id| state.index_of(id));
         let split = state.chrome(WINDOW).and_then(|chrome| {
             let split = chrome.split?;
-            Some((state.index_of(split.left)?, state.index_of(split.right)?, split.ratio))
+            Some((
+                state.index_of(split.left)?,
+                state.index_of(split.right)?,
+                split.ratio,
+            ))
         });
         SessionState {
             tabs,
@@ -3007,13 +3197,14 @@ pub fn restore(app: &AppHandle, restored: RestoreState) -> Result<(), String> {
         state.normalize_groups();
         if let Some((left, right, ratio)) = restored.split {
             if let (Some(left), Some(right)) = (ids.get(left), ids.get(right)) {
-                let same_strip = state.index_of(*left).zip(state.index_of(*right)).is_some_and(
-                    |(a, b)| {
+                let same_strip = state
+                    .index_of(*left)
+                    .zip(state.index_of(*right))
+                    .is_some_and(|(a, b)| {
                         state.tabs[a].info.workspace == state.tabs[b].info.workspace
                             && !state.tabs[a].info.pinned
                             && !state.tabs[b].info.pinned
-                    },
-                );
+                    });
                 if same_strip && left != right {
                     if let Some(chrome) = state.chrome_mut(WINDOW) {
                         chrome.split = Some(Split {
@@ -3435,7 +3626,11 @@ pub fn create_group(app: &AppHandle, ids: &[u32]) -> Result<u32, String> {
         }
         let id = state.next_group;
         state.next_group += 1;
-        let used: Vec<String> = state.groups.iter().map(|group| group.color.clone()).collect();
+        let used: Vec<String> = state
+            .groups
+            .iter()
+            .map(|group| group.color.clone())
+            .collect();
         let color = GROUP_COLORS
             .iter()
             .skip(1)
@@ -3476,7 +3671,9 @@ pub fn add_to_group(app: &AppHandle, ids: &[u32], group: u32) -> Result<(), Stri
             .map(|tab| tab.info.workspace.clone());
         for id in ids {
             if let Some(tab) = state.tab_mut(*id) {
-                let same_strip = workspace.as_ref().is_none_or(|workspace| tab.info.workspace == *workspace);
+                let same_strip = workspace
+                    .as_ref()
+                    .is_none_or(|workspace| tab.info.workspace == *workspace);
                 if tab.info.window == window && same_strip && !tab.info.pinned {
                     tab.info.group_id = Some(group);
                 }
@@ -3608,7 +3805,11 @@ pub fn create_workspace(app: &AppHandle, name: &str, color: &str) -> Result<Stri
         let mut number = state.workspaces.len();
         let id = loop {
             let candidate = format!("workspace-{number}");
-            if !state.workspaces.iter().any(|workspace| workspace.id == candidate) {
+            if !state
+                .workspaces
+                .iter()
+                .any(|workspace| workspace.id == candidate)
+            {
                 break candidate;
             }
             number += 1;
@@ -3698,12 +3899,16 @@ pub fn switch_workspace(app: &AppHandle, window: &str, id: &str) -> Result<(), S
             return Err("That workspace no longer exists.".to_string());
         }
         let active = state.active_of(window);
-        let chrome = state.chrome_mut(window).ok_or("The browser window is missing.")?;
+        let chrome = state
+            .chrome_mut(window)
+            .ok_or("The browser window is missing.")?;
         if chrome.workspace == id {
             return Ok(None);
         }
         if let Some(active) = active {
-            chrome.active_by_workspace.insert(chrome.workspace.clone(), active);
+            chrome
+                .active_by_workspace
+                .insert(chrome.workspace.clone(), active);
         }
         chrome.workspace = id.to_string();
         let remembered = chrome.active_by_workspace.get(id).copied();
@@ -3726,7 +3931,10 @@ pub fn switch_workspace(app: &AppHandle, window: &str, id: &str) -> Result<(), S
 pub fn switch_workspace_index(app: &AppHandle, index: usize) -> Result<(), String> {
     let window = focused_window(app);
     let id = with_state(app, |state| {
-        state.workspaces.get(index).map(|workspace| workspace.id.clone())
+        state
+            .workspaces
+            .get(index)
+            .map(|workspace| workspace.id.clone())
     });
     match id {
         Some(id) => switch_workspace(app, &window, &id),
@@ -3903,7 +4111,11 @@ fn rebuild_page(app: &AppHandle, id: u32) -> Result<(), String> {
 const REFRESH_CHOICES: &[u32] = &[0, 15, 30, 60, 300, 900];
 
 pub fn set_refresh(app: &AppHandle, id: u32, secs: u32, watch: bool) -> Result<(), String> {
-    let secs = if REFRESH_CHOICES.contains(&secs) { secs } else { 0 };
+    let secs = if REFRESH_CHOICES.contains(&secs) {
+        secs
+    } else {
+        0
+    };
     let found = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
         tab.info.refresh_secs = secs;
@@ -3938,7 +4150,8 @@ pub fn refresh_due(app: &AppHandle) -> Vec<(u32, bool)> {
                     && !tab.hidden
                     && !tab.info.loading
                     && tab.info.url.starts_with("http")
-                    && tab.last_refresh.elapsed() >= Duration::from_secs(u64::from(tab.info.refresh_secs))
+                    && tab.last_refresh.elapsed()
+                        >= Duration::from_secs(u64::from(tab.info.refresh_secs))
             })
             .map(|tab| (tab.info.id, tab.info.watch_changes))
             .collect()
@@ -3959,7 +4172,10 @@ pub fn note_content(app: &AppHandle, id: u32, mark: &str) -> bool {
         let Some(tab) = state.tab_mut(id) else {
             return false;
         };
-        let changed = tab.content_mark.as_deref().is_some_and(|previous| previous != mark);
+        let changed = tab
+            .content_mark
+            .as_deref()
+            .is_some_and(|previous| previous != mark);
         tab.content_mark = Some(mark.to_string());
         if changed {
             tab.info.changed = true;
@@ -4010,7 +4226,11 @@ pub fn run_inspector(app: &AppHandle, id: u32) -> Result<(), String> {
 }
 
 pub fn tab_page_url(app: &AppHandle, id: u32) -> Option<String> {
-    with_state(app, |state| state.index_of(id).map(|index| state.tabs[index].info.url.clone()))
+    with_state(app, |state| {
+        state
+            .index_of(id)
+            .map(|index| state.tabs[index].info.url.clone())
+    })
 }
 
 #[cfg(test)]
@@ -4147,8 +4367,16 @@ mod tests {
     #[test]
     fn default_workspace_is_always_present() {
         let list = normalize_workspaces(vec![
-            Workspace { id: "a".into(), name: " ".into(), color: "neon".into() },
-            Workspace { id: "a".into(), name: "Dup".into(), color: "red".into() },
+            Workspace {
+                id: "a".into(),
+                name: " ".into(),
+                color: "neon".into(),
+            },
+            Workspace {
+                id: "a".into(),
+                name: "Dup".into(),
+                color: "red".into(),
+            },
         ]);
         assert_eq!(list[0].id, DEFAULT_WORKSPACE);
         assert_eq!(list.len(), 2);

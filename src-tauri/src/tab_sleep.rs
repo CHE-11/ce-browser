@@ -26,6 +26,7 @@ pub fn init(app: &AppHandle) {
                 }
             }
             crate::system::sync_frames(&app);
+            crate::status::tick(&app);
         }
     });
 }

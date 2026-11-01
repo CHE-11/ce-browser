@@ -106,7 +106,9 @@ pub fn list_playing(app: &AppHandle) -> Vec<MediaElement> {
     let tabs = tabs::snapshot(app)
         .tabs
         .into_iter()
-        .filter(|tab| tab.loaded && (tab.url.starts_with("http://") || tab.url.starts_with("https://")))
+        .filter(|tab| {
+            tab.loaded && (tab.url.starts_with("http://") || tab.url.starts_with("https://"))
+        })
         .map(|tab| tab.id)
         .collect::<Vec<_>>();
     let mut found = Vec::new();
@@ -114,7 +116,8 @@ pub fn list_playing(app: &AppHandle) -> Vec<MediaElement> {
         let Some(webview) = tabs::page_view(app, id) else {
             continue;
         };
-        let Ok(value) = webview2::evaluate(&webview, LIST_SCRIPT, Duration::from_secs(3), FAILURE) else {
+        let Ok(value) = webview2::evaluate(&webview, LIST_SCRIPT, Duration::from_secs(3), FAILURE)
+        else {
             continue;
         };
         let Ok(items) = serde_json::from_value::<Vec<RawElement>>(value) else {
@@ -139,7 +142,13 @@ pub fn list_playing(app: &AppHandle) -> Vec<MediaElement> {
     found
 }
 
-pub fn control(app: &AppHandle, tab: u32, index: u32, action: &str, time: Option<f64>) -> Result<(), String> {
+pub fn control(
+    app: &AppHandle,
+    tab: u32,
+    index: u32,
+    action: &str,
+    time: Option<f64>,
+) -> Result<(), String> {
     let webview = tabs::page_view(app, tab).ok_or("That tab is not loaded.")?;
     let time = time.unwrap_or(0.0);
     let script = format!(
@@ -192,10 +201,24 @@ pub fn download_media(app: &AppHandle, id: u32, urls: &[String]) -> Result<u32, 
 
 pub fn save_html(app: &AppHandle, id: u32, path: &std::path::Path) -> Result<(), String> {
     let webview = tabs::page_view(app, id).ok_or("This page is not loaded yet.")?;
-    let value = webview2::evaluate(&webview, PAGE_SCRIPT, Duration::from_secs(15), "Couldn't read this page.")?;
-    let title = value.get("title").and_then(|item| item.as_str()).unwrap_or("");
-    let html = value.get("html").and_then(|item| item.as_str()).unwrap_or("");
-    let css = value.get("css").and_then(|item| item.as_str()).unwrap_or("");
+    let value = webview2::evaluate(
+        &webview,
+        PAGE_SCRIPT,
+        Duration::from_secs(15),
+        "Couldn't read this page.",
+    )?;
+    let title = value
+        .get("title")
+        .and_then(|item| item.as_str())
+        .unwrap_or("");
+    let html = value
+        .get("html")
+        .and_then(|item| item.as_str())
+        .unwrap_or("");
+    let css = value
+        .get("css")
+        .and_then(|item| item.as_str())
+        .unwrap_or("");
     let document = inline_style(title, css, html);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -218,7 +241,10 @@ fn inline_style(title: &str, css: &str, html: &str) -> String {
         let at = index + "<head>".len();
         format!("{}{style}{}", &html[..at], &html[at..])
     } else {
-        format!("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>{}</title>{style}</head><body>{html}</body></html>", escape(title))
+        format!(
+            "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>{}</title>{style}</head><body>{html}</body></html>",
+            escape(title)
+        )
     };
     with_style
 }
@@ -242,7 +268,12 @@ pub fn html_to_markdown(title: &str, html: &str) -> String {
         };
         let tag = &rest[start + 1..start + end];
         rest = &rest[start + end + 1..];
-        let name = tag.split_whitespace().next().unwrap_or("").trim_start_matches('/').to_ascii_lowercase();
+        let name = tag
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim_start_matches('/')
+            .to_ascii_lowercase();
         let closing = tag.starts_with('/');
         if matches!(name.as_str(), "script" | "style") && !closing {
             if let Some(close) = rest.to_ascii_lowercase().find(&format!("</{name}>")) {
@@ -315,7 +346,9 @@ fn decode(text: &str) -> String {
 }
 
 fn escape(text: &str) -> String {
-    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 #[cfg(test)]

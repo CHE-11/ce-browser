@@ -1,32 +1,37 @@
+mod accelerator;
 mod accent;
 mod adblock;
 mod answer;
-mod accelerator;
-mod keywords;
-mod library;
+mod bookmark_health;
 mod bookmarks;
+mod browsers;
 mod capture;
 mod downloads;
-mod media;
-mod ocr;
-mod history;
 mod extensions;
 mod files;
+mod history;
+mod history_index;
+mod keywords;
+mod library;
+mod media;
+mod ocr;
 mod page_rules;
 mod paths;
-mod privacy;
 mod peek;
 mod print;
-mod browsers;
-mod rewrite;
+mod privacy;
+mod profile_archive;
 mod profile_icons;
 mod profiles;
+mod rewrite;
 mod session;
 mod settings;
 mod shortcuts;
-mod system;
+mod status;
 mod storage;
 mod sync;
+mod sync_conflicts;
+mod system;
 mod tab_sleep;
 mod tabs;
 mod tools;
@@ -41,10 +46,10 @@ use tauri::{AppHandle, Manager, Window, WindowEvent};
 use adblock::AdblockStats;
 use bookmarks::{BookmarkNode, BookmarkTree};
 use capture::PageCaptureResult;
-use print::{ExtractedPage, PdfOptions};
 use downloads::DownloadItem;
-use history::HistoryItem;
 use extensions::ExtensionInfo;
+use history::HistoryItem;
+use print::{ExtractedPage, PdfOptions};
 use profiles::{ProfileIconChoice, ProfileInfo};
 use settings::BrowserSettings;
 use sync::SyncStatus;
@@ -179,8 +184,15 @@ async fn reopen_closed_tab(app: AppHandle) -> Result<Option<u32>, String> {
 }
 
 #[tauri::command]
-async fn set_ui_insets(app: AppHandle, window: Window, top: f64, left: f64) {
-    tabs::set_ui_insets(&app, window.label(), top, left);
+async fn set_ui_insets(
+    app: AppHandle,
+    window: Window,
+    top: f64,
+    left: f64,
+    right: f64,
+    bottom: f64,
+) {
+    tabs::set_ui_insets(&app, window.label(), top, left, right, bottom);
 }
 
 #[tauri::command]
@@ -286,7 +298,12 @@ async fn create_workspace(app: AppHandle, name: String, color: String) -> Result
 }
 
 #[tauri::command]
-async fn rename_workspace(app: AppHandle, id: String, name: String, color: String) -> Result<(), String> {
+async fn rename_workspace(
+    app: AppHandle,
+    id: String,
+    name: String,
+    color: String,
+) -> Result<(), String> {
     tabs::rename_workspace(&app, &id, &name, &color)
 }
 
@@ -301,7 +318,11 @@ async fn switch_workspace(app: AppHandle, window: Window, id: String) -> Result<
 }
 
 #[tauri::command]
-async fn move_tabs_to_workspace(app: AppHandle, ids: Vec<u32>, workspace: String) -> Result<(), String> {
+async fn move_tabs_to_workspace(
+    app: AppHandle,
+    ids: Vec<u32>,
+    workspace: String,
+) -> Result<(), String> {
     tabs::move_tabs_to_workspace(&app, &ids, &workspace)
 }
 
@@ -439,7 +460,12 @@ async fn copy_edited_png(data: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn start_recording(app: AppHandle, id: u32, kind: String, path: String) -> Result<(), String> {
+async fn start_recording(
+    app: AppHandle,
+    id: u32,
+    kind: String,
+    path: String,
+) -> Result<(), String> {
     blocking(move || capture::start_recording(&app, id, &kind, PathBuf::from(path))).await
 }
 
@@ -615,9 +641,10 @@ fn list_downloads(app: AppHandle) -> Vec<DownloadItem> {
 
 #[tauri::command]
 fn browse_local(app: AppHandle, path: Option<String>) -> Result<library::BrowseResult, String> {
-    let path = path.filter(|path| !path.trim().is_empty()).map(PathBuf::from).unwrap_or_else(|| {
-        settings::get(&app).download_dir(&app)
-    });
+    let path = path
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| settings::get(&app).download_dir(&app));
     library::browse(&path)
 }
 
@@ -729,7 +756,11 @@ fn list_containers(app: AppHandle) -> Vec<privacy::Container> {
 }
 
 #[tauri::command]
-fn create_container(app: AppHandle, name: String, color: String) -> Result<privacy::Container, String> {
+fn create_container(
+    app: AppHandle,
+    name: String,
+    color: String,
+) -> Result<privacy::Container, String> {
     privacy::create_container(&app, &name, &color)
 }
 
@@ -739,7 +770,11 @@ fn delete_container(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn set_group_container(app: AppHandle, group_id: u32, container: String) -> Result<(), String> {
+async fn set_group_container(
+    app: AppHandle,
+    group_id: u32,
+    container: String,
+) -> Result<(), String> {
     tabs::set_group_container(&app, group_id, &container)
 }
 
@@ -764,7 +799,10 @@ fn list_keywords(app: AppHandle) -> Vec<keywords::Keyword> {
 }
 
 #[tauri::command]
-fn save_keywords(app: AppHandle, keywords: Vec<keywords::Keyword>) -> Result<Vec<keywords::Keyword>, String> {
+fn save_keywords(
+    app: AppHandle,
+    keywords: Vec<keywords::Keyword>,
+) -> Result<Vec<keywords::Keyword>, String> {
     keywords::save(&app, keywords)
 }
 
@@ -806,7 +844,10 @@ fn save_shortcuts(
 }
 
 #[tauri::command]
-fn reset_shortcut(app: AppHandle, action: String) -> Result<Vec<shortcuts::ShortcutBinding>, String> {
+fn reset_shortcut(
+    app: AppHandle,
+    action: String,
+) -> Result<Vec<shortcuts::ShortcutBinding>, String> {
     shortcuts::reset_action(&app, &action)
 }
 
@@ -830,7 +871,10 @@ fn update_site_control(
 }
 
 #[tauri::command]
-fn save_user_script(app: AppHandle, script: page_rules::UserScript) -> Result<page_rules::PageRules, String> {
+fn save_user_script(
+    app: AppHandle,
+    script: page_rules::UserScript,
+) -> Result<page_rules::PageRules, String> {
     page_rules::save_script(&app, script)
 }
 
@@ -865,7 +909,13 @@ async fn restore_translation(app: AppHandle, id: u32) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn generate_password(length: usize, upper: bool, lower: bool, digits: bool, symbols: bool) -> Result<String, String> {
+fn generate_password(
+    length: usize,
+    upper: bool,
+    lower: bool,
+    digits: bool,
+    symbols: bool,
+) -> Result<String, String> {
     tools::random_password(length, upper, lower, digits, symbols)
 }
 
@@ -920,7 +970,10 @@ fn list_rewrite_rules(app: AppHandle) -> Vec<rewrite::RewriteRule> {
 }
 
 #[tauri::command]
-fn save_rewrite_rules(app: AppHandle, rules: Vec<rewrite::RewriteRule>) -> Result<Vec<rewrite::RewriteRule>, String> {
+fn save_rewrite_rules(
+    app: AppHandle,
+    rules: Vec<rewrite::RewriteRule>,
+) -> Result<Vec<rewrite::RewriteRule>, String> {
     rewrite::save(&app, rules)
 }
 
@@ -945,7 +998,13 @@ async fn set_cookie(app: AppHandle, id: u32, name: String, value: String) -> Res
 }
 
 #[tauri::command]
-async fn delete_cookie(app: AppHandle, id: u32, name: String, domain: String, path: String) -> Result<(), String> {
+async fn delete_cookie(
+    app: AppHandle,
+    id: u32,
+    name: String,
+    domain: String,
+    path: String,
+) -> Result<(), String> {
     blocking(move || storage::delete_cookie(&app, id, &name, &domain, &path)).await
 }
 
@@ -955,7 +1014,12 @@ async fn list_local_storage(app: AppHandle, id: u32) -> Result<Vec<storage::Stor
 }
 
 #[tauri::command]
-async fn set_local_storage(app: AppHandle, id: u32, key: String, value: String) -> Result<(), String> {
+async fn set_local_storage(
+    app: AppHandle,
+    id: u32,
+    key: String,
+    value: String,
+) -> Result<(), String> {
     blocking(move || storage::set_local(&app, id, &key, &value)).await
 }
 
@@ -1068,6 +1132,51 @@ fn sync_status(app: AppHandle) -> SyncStatus {
 }
 
 #[tauri::command]
+fn list_sync_conflicts(app: AppHandle) -> Vec<sync_conflicts::SyncConflict> {
+    sync_conflicts::list(&app)
+}
+
+#[tauri::command]
+async fn resolve_sync_conflict(app: AppHandle, id: String, choice: String) -> Result<(), String> {
+    blocking(move || sync_conflicts::resolve(&app, &id, &choice)).await
+}
+
+#[tauri::command]
+async fn export_profile_archive(
+    app: AppHandle,
+    path: String,
+    password: String,
+) -> Result<(), String> {
+    blocking(move || profile_archive::export_archive(&app, std::path::Path::new(&path), &password))
+        .await
+}
+
+#[tauri::command]
+async fn import_profile_archive(
+    app: AppHandle,
+    path: String,
+    password: String,
+) -> Result<profile_archive::ImportedProfile, String> {
+    blocking(move || profile_archive::import_archive(&app, std::path::Path::new(&path), &password))
+        .await
+}
+
+#[tauri::command]
+async fn search_history(
+    app: AppHandle,
+    query: String,
+) -> Result<Vec<history_index::HistoryHit>, String> {
+    blocking(move || Ok(history_index::search(&app, &query))).await
+}
+
+#[tauri::command]
+async fn check_bookmark_health(
+    app: AppHandle,
+) -> Result<bookmark_health::BookmarkHealthReport, String> {
+    blocking(move || bookmark_health::check(&app)).await
+}
+
+#[tauri::command]
 fn list_profiles(app: AppHandle) -> Vec<ProfileInfo> {
     profiles::list(&app)
 }
@@ -1157,6 +1266,7 @@ pub fn run() {
             tabs::init(&handle);
             peek::init(&handle);
             session::init(&handle);
+            status::init(&handle);
             tab_sleep::init(&handle);
             build_window(&handle)?;
             system::start(&handle);
@@ -1320,8 +1430,10 @@ pub fn run() {
             remove_download,
             clear_downloads,
             list_history,
+            search_history,
             remove_history,
             clear_history,
+            check_bookmark_health,
             list_extensions,
             install_extension_folder,
             install_extension_zip,
@@ -1390,6 +1502,10 @@ pub fn run() {
             select_sync_folder,
             clear_sync_folder,
             sync_status,
+            list_sync_conflicts,
+            resolve_sync_conflict,
+            export_profile_archive,
+            import_profile_archive,
             list_profiles,
             create_profile,
             open_profile,

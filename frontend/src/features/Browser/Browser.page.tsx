@@ -5,7 +5,9 @@ import { AddressBar } from "@/components/TabsAddressAndBookmarks/Addressbar/Addr
 import { BookmarksBar } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarksBar";
 import { TabStrip } from "@/components/TabsAddressAndBookmarks/Tabs/TabStrip";
 import { VerticalTabs } from "@/components/TabsAddressAndBookmarks/Tabs/VerticalTabs";
+import { VerticalToolbar } from "@/components/VerticalToolbar";
 import { onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
+import { splitToolbar, toolbarPinned } from "@/lib/toolbar-pin";
 import { useTabs, useBookmarks, useDownloads, useHistory, useExtensions, useAppearanceFromSettings } from "@/lib/use-browser";
 import { useRef, useState, useEffect, useLayoutEffect } from "react";
 
@@ -19,10 +21,15 @@ export function BrowserPage() {
   const settings = useAppearanceFromSettings();
   const headerRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
+  const toolbarRef = useRef<HTMLElement>(null);
   const [findToken, setFindToken] = useState<number | null>(null);
 
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const vertical = settings?.tabLayout === "vertical";
+  const toolExtensionIds = extensions
+    .filter((extension) => extension.enabled && toolbarPinned(settings, extension.id))
+    .map((extension) => extension.id);
+  const showToolStrip = !snapshot.fullscreen && splitToolbar(settings, toolExtensionIds).vertical.length > 0;
   const split = snapshot.split;
   const splitShown =
     !!split && !snapshot.fullscreen && (snapshot.activeId === split.left || snapshot.activeId === split.right);
@@ -61,7 +68,8 @@ export function BrowserPage() {
     const report = () => {
       const top = Math.ceil(header.getBoundingClientRect().height);
       const left = sidebarRef.current ? Math.ceil(sidebarRef.current.getBoundingClientRect().width) : 0;
-      void setUiInsets(top, left);
+      const right = toolbarRef.current ? Math.ceil(toolbarRef.current.getBoundingClientRect().width) : 0;
+      void setUiInsets(top, left, right, 0);
     };
     report();
     const observer = new ResizeObserver(report);
@@ -69,8 +77,11 @@ export function BrowserPage() {
     if (sidebarRef.current) {
       observer.observe(sidebarRef.current);
     }
+    if (toolbarRef.current) {
+      observer.observe(toolbarRef.current);
+    }
     return () => observer.disconnect();
-  }, [vertical, snapshot.fullscreen]);
+  }, [vertical, snapshot.fullscreen, showToolStrip, settings?.verticalToolbarLabels]);
 
   const showBookmarksBar = settings?.showBookmarksBar ?? true;
 
@@ -105,6 +116,9 @@ export function BrowserPage() {
           ) : null}
           {splitShown && split ? <SplitDivider split={split} activeId={snapshot.activeId} /> : null}
         </div>
+        {showToolStrip ? (
+          <VerticalToolbar ref={toolbarRef} activeTab={activeTab} extensions={extensions} settings={settings} />
+        ) : null}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { AppMenu } from "@components/AppMenu";
+import { StatusPopover } from "@components/StatusBar";
 import { PopupAppearanceContext, usePopupPainted } from "@lib/popup-ready";
 import { useAppearanceState } from "@lib/use-browser";
 import { AddressBarEllipsisMenu } from "@/components/TabsAddressAndBookmarks/Addressbar/AddressBarEllipsisMenu";
@@ -13,14 +14,19 @@ import { TabGroupMenu } from "@/components/TabsAddressAndBookmarks/Tabs/TabGroup
 import { TabMenu } from "@/components/TabsAddressAndBookmarks/Tabs/TabMenu";
 import { WorkspaceMenu } from "@/components/WorkspaceMenu";
 import { AdBlockerPopover } from "@features/BuiltInExtensions/ad-blocker/AdBlockerPopover";
+import { AssistantPopover } from "@features/BuiltInExtensions/assistant/Assistant";
 import { PageControlsPopover } from "@features/BuiltInExtensions/page-controls/PageControlsPopover";
+import { PageCapturePopover } from "@features/BuiltInExtensions/page-capture/PageCapturePopover";
+import { PasswordPopover } from "@features/BuiltInExtensions/password/Password";
+import { PricePopover } from "@features/BuiltInExtensions/price/Price";
+import { PrintPdfPopover } from "@features/BuiltInExtensions/print-pdf/PrintPdfPopover";
+import { ReadingPopover } from "@features/BuiltInExtensions/reading/Reading";
+import { TranslatePopover } from "@features/BuiltInExtensions/translate/Translate";
+import { WaybackPopover } from "@features/BuiltInExtensions/wayback/Wayback";
+import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
 import { CommandPalette } from "@features/CommandPalette/CommandPalette";
 import { NetworkPopover } from "@features/Network/NetworkPopover";
-import { PageCapturePopover } from "@features/BuiltInExtensions/page-capture/PageCapturePopover";
-import { PrintPdfPopover } from "@features/BuiltInExtensions/print-pdf/PrintPdfPopover";
-import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
 import { DownloadsPanel } from "@features/Downloads/DownloadsPanel";
-import { AssistantPopover, PasswordPopover, PricePopover, ReadingPopover, TranslatePopover, WaybackPopover } from "@features/Tools/ToolPopovers";
 import { MediaGrid } from "@features/Media/MediaGrid";
 import { MediaHub } from "@features/Media/MediaHub";
 
@@ -80,6 +86,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <TabMenu tabId={Number(params.get("id"))} />;
     case "app-menu":
       return <AppMenu />;
+    case "status":
+      return <StatusPopover />;
     case "omnibox":
       return <AddressBarEllipsisMenu />;
     case "command-palette":

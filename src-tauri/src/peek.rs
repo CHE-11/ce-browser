@@ -51,7 +51,9 @@ fn with_peeks<T>(app: &AppHandle, work: impl FnOnce(&mut HashMap<String, Peek>) 
 
 pub fn url_of(app: &AppHandle, window: &str) -> Option<String> {
     app.try_state::<PeekState>()?;
-    with_peeks(app, |peeks| peeks.get(window).map(|peek| peek.info.url.clone()))
+    with_peeks(app, |peeks| {
+        peeks.get(window).map(|peek| peek.info.url.clone())
+    })
 }
 
 pub fn info(app: &AppHandle, window: &str) -> Option<PeekInfo> {
@@ -98,7 +100,10 @@ pub fn open_for_tab(app: &AppHandle, opener: u32, raw: &str) {
 fn rects(
     app: &AppHandle,
     window: &str,
-) -> ((PhysicalPosition<i32>, PhysicalSize<u32>), (PhysicalPosition<i32>, PhysicalSize<u32>)) {
+) -> (
+    (PhysicalPosition<i32>, PhysicalSize<u32>),
+    (PhysicalPosition<i32>, PhysicalSize<u32>),
+) {
     let (area, size) = tabs::page_area(app, window);
     let scale = app
         .get_window(window)
@@ -249,7 +254,9 @@ pub fn relayout(app: &AppHandle, window: &str) {
         return;
     }
     let Some((frame, page)) = with_peeks(app, |peeks| {
-        peeks.get(window).map(|peek| (peek.frame.clone(), peek.page.clone()))
+        peeks
+            .get(window)
+            .map(|peek| (peek.frame.clone(), peek.page.clone()))
     }) else {
         return;
     };

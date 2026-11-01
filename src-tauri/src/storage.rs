@@ -36,12 +36,29 @@ pub fn set_cookie(app: &AppHandle, id: u32, name: &str, value: &str) -> Result<(
     if name.trim().is_empty() {
         return Err("A cookie needs a name.".into());
     }
-    webview2::put_cookie(&webview, name.trim().to_string(), value.to_string(), host, "/".into())
+    webview2::put_cookie(
+        &webview,
+        name.trim().to_string(),
+        value.to_string(),
+        host,
+        "/".into(),
+    )
 }
 
-pub fn delete_cookie(app: &AppHandle, id: u32, name: &str, domain: &str, path: &str) -> Result<(), String> {
+pub fn delete_cookie(
+    app: &AppHandle,
+    id: u32,
+    name: &str,
+    domain: &str,
+    path: &str,
+) -> Result<(), String> {
     let (webview, _) = page(app, id)?;
-    webview2::delete_cookie(&webview, name.to_string(), domain.to_string(), path.to_string())
+    webview2::delete_cookie(
+        &webview,
+        name.to_string(),
+        domain.to_string(),
+        path.to_string(),
+    )
 }
 
 pub fn local_items(app: &AppHandle, id: u32) -> Result<Vec<StoragePair>, String> {

@@ -34,6 +34,13 @@ import type {
   UserScript,
   PdfOptions,
   SyncStatus,
+  SyncConflict,
+  ImportedProfile,
+  HistoryHit,
+  BookmarkHealthReport,
+  BookmarkHealthProgress,
+  StatusSnapshot,
+  StatusText,
   ExtensionInfo,
   OmniboxState,
   Container,
@@ -158,9 +165,9 @@ export function reopenClosedTab() {
   return invoke<number | null>("reopen_closed_tab");
 }
 
-/** `top` is the header height and `left` the vertical tab sidebar width, in CSS pixels. */
-export function setUiInsets(top: number, left: number) {
-  return invoke<void>("set_ui_insets", { top, left });
+/** Chrome insets in CSS pixels. `bottom` is the status bar. Zero means that edge is hidden. */
+export function setUiInsets(top: number, left: number, right = 0, bottom = 0) {
+  return invoke<void>("set_ui_insets", { top, left, right, bottom });
 }
 
 export function createEphemeralTab() {
@@ -459,6 +466,14 @@ export function onTabsChanged(handler: (snapshot: TabsSnapshot) => void): Promis
   return listen<TabsSnapshot>("tabs-changed", (event) => handler(event.payload));
 }
 
+export function onStatusChanged(handler: (status: StatusSnapshot) => void): Promise<UnlistenFn> {
+  return listen<StatusSnapshot>("status-changed", (event) => handler(event.payload));
+}
+
+export function onStatusText(handler: (status: StatusText) => void): Promise<UnlistenFn> {
+  return listen<StatusText>("status-text", (event) => handler(event.payload));
+}
+
 export function onBrowserCommand(handler: (command: BrowserCommand) => void): Promise<UnlistenFn> {
   return listen<BrowserCommand>("browser-command", (event) => handler(event.payload));
 }
@@ -486,13 +501,20 @@ export function onPopupChanged(handler: (change: PopupChange) => void): Promise<
   return listen<PopupChange>("popup-changed", (event) => handler(event.payload));
 }
 
-/** Opens a popup anchored under `element`, right-aligned when `align` is `end`. */
+/** Opens a popup anchored under `element`, right-aligned when `align` is `end`.
+ * A button on the vertical tool strip opens the popup to its left. */
 export function openPopupBelow(
   element: HTMLElement,
   request: Omit<PopupRequest, "x" | "y">,
   align: "start" | "end" = "end",
 ) {
   const rect = element.getBoundingClientRect();
+  if (element.closest("#vertical-toolbar")) {
+    const x = Math.max(8, rect.left - request.width - 4);
+    const maxY = Math.max(8, window.innerHeight - request.height - 8);
+    const y = Math.min(Math.max(8, rect.top), maxY);
+    return openPopup({ ...request, x, y });
+  }
   const x = align === "end" ? rect.right - request.width : rect.left;
   return openPopup({ ...request, x, y: rect.bottom + 4 });
 }
@@ -957,6 +979,38 @@ export function clearSyncFolder() {
 
 export function onSyncStatus(handler: (status: SyncStatus) => void): Promise<UnlistenFn> {
   return listen<SyncStatus>("sync-status", (event) => handler(event.payload));
+}
+
+export function listSyncConflicts() {
+  return invoke<SyncConflict[]>("list_sync_conflicts");
+}
+
+export function resolveSyncConflict(id: string, choice: "mine" | "theirs" | "merge") {
+  return invoke<void>("resolve_sync_conflict", { id, choice });
+}
+
+export function onSyncConflicts(handler: (conflicts: SyncConflict[]) => void): Promise<UnlistenFn> {
+  return listen<SyncConflict[]>("sync-conflicts", (event) => handler(event.payload));
+}
+
+export function exportProfileArchive(path: string, password: string) {
+  return invoke<void>("export_profile_archive", { path, password });
+}
+
+export function importProfileArchive(path: string, password: string) {
+  return invoke<ImportedProfile>("import_profile_archive", { path, password });
+}
+
+export function searchHistory(query: string) {
+  return invoke<HistoryHit[]>("search_history", { query });
+}
+
+export function checkBookmarkHealth() {
+  return invoke<BookmarkHealthReport>("check_bookmark_health");
+}
+
+export function onBookmarkHealth(handler: (progress: BookmarkHealthProgress) => void): Promise<UnlistenFn> {
+  return listen<BookmarkHealthProgress>("bookmark-health", (event) => handler(event.payload));
 }
 
 export async function pickSyncFolder(title: string) {

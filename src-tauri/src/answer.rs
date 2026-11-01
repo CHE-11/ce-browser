@@ -92,8 +92,16 @@ fn ensure_rates() {
 fn convert_currency(amount: f64, from: &str, to: &str) -> Option<f64> {
     let rates = RATES.lock().expect("rates");
     let rates = rates.as_ref()?;
-    let from = rates.per_eur.iter().find(|(code, _)| code == &from.to_uppercase())?.1;
-    let to = rates.per_eur.iter().find(|(code, _)| code == &to.to_uppercase())?.1;
+    let from = rates
+        .per_eur
+        .iter()
+        .find(|(code, _)| code == &from.to_uppercase())?
+        .1;
+    let to = rates
+        .per_eur
+        .iter()
+        .find(|(code, _)| code == &to.to_uppercase())?
+        .1;
     if from == 0.0 {
         return None;
     }
@@ -112,7 +120,9 @@ fn parse_currency(query: &str) -> Option<(f64, String, String)> {
     if parts.next().is_some() || from.len() != 3 || to.len() != 3 {
         return None;
     }
-    if !from.chars().all(|ch| ch.is_ascii_alphabetic()) || !to.chars().all(|ch| ch.is_ascii_alphabetic()) {
+    if !from.chars().all(|ch| ch.is_ascii_alphabetic())
+        || !to.chars().all(|ch| ch.is_ascii_alphabetic())
+    {
         return None;
     }
     Some((amount, from, to))
@@ -178,10 +188,15 @@ fn eval_math(query: &str) -> Option<f64> {
     if !query.chars().any(|ch| "+-*/^%()".contains(ch)) {
         return None;
     }
-    if query.chars().any(|ch| !(ch.is_ascii_digit() || ch == '.' || ch.is_whitespace() || "+-*/^%()".contains(ch))) {
+    if query.chars().any(|ch| {
+        !(ch.is_ascii_digit() || ch == '.' || ch.is_whitespace() || "+-*/^%()".contains(ch))
+    }) {
         return None;
     }
-    let mut parser = Parser { input: query.as_bytes(), pos: 0 };
+    let mut parser = Parser {
+        input: query.as_bytes(),
+        pos: 0,
+    };
     let value = parser.parse_expr()?;
     parser.skip();
     if parser.pos != parser.input.len() {

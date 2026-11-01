@@ -1,8 +1,8 @@
 import { useRef, type ReactNode } from "react";
 import { IconButton } from "@/components/IconButton";
 import { openPopupBelow, restoreTranslation, translationActive } from "@/lib/browser-client";
-import { capturable, tabParams } from "@features/BuiltInExtensions/shared";
 import type { PopupKind, TabInfo } from "@type/browser";
+import { capturable, tabParams } from "./shared";
 
 type ToolButtonProps = {
   id: string;

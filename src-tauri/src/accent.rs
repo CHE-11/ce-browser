@@ -38,7 +38,12 @@ pub fn parse_color(input: &str) -> Option<String> {
     if parts.len() < 3 {
         return None;
     }
-    let channel = |part: &str| part.parse::<u16>().ok().filter(|value| *value <= 255).map(|value| value as u8);
+    let channel = |part: &str| {
+        part.parse::<u16>()
+            .ok()
+            .filter(|value| *value <= 255)
+            .map(|value| value as u8)
+    };
     Some(format!(
         "#{:02x}{:02x}{:02x}",
         channel(parts[0])?,

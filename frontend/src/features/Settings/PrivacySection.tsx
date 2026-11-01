@@ -17,6 +17,8 @@ const HTTPS_LABEL = "HTTPS-only";
 const HTTPS_HINT = "http pages load over https. Localhost is left alone.";
 const EXCEPTIONS_LABEL = "Sites that may use http";
 const EXCEPTIONS_EMPTY = "No exceptions.";
+const INDEX_LABEL = "Index page text";
+const INDEX_HINT = "Saves page text on this computer so history search can match words from the page.";
 
 export function PrivacySection({ settings, query, onUpdate, onMatch }: SettingsSectionProps) {
   const [httpsDraft, setHttpsDraft] = useState("");
@@ -31,6 +33,8 @@ export function PrivacySection({ settings, query, onUpdate, onMatch }: SettingsS
     HTTPS_HINT,
     EXCEPTIONS_LABEL,
     EXCEPTIONS_EMPTY,
+    INDEX_LABEL,
+    INDEX_HINT,
     "Add",
     httpsDraft,
     ...settings.httpsExceptions,
@@ -55,6 +59,13 @@ export function PrivacySection({ settings, query, onUpdate, onMatch }: SettingsS
       </Row>
       <Row id="settings-https-only" label={HTTPS_LABEL} hint={HTTPS_HINT}>
         <Toggle id="settings-https-only-toggle" checked={settings.httpsOnly} onChange={(httpsOnly) => onUpdate({ httpsOnly })} />
+      </Row>
+      <Row id="settings-index-page-text" label={INDEX_LABEL} hint={INDEX_HINT}>
+        <Toggle
+          id="settings-index-page-text-toggle"
+          checked={settings.indexPageText}
+          onChange={(indexPageText) => onUpdate({ indexPageText })}
+        />
       </Row>
       <HttpsExceptions settings={settings} draft={httpsDraft} setDraft={setHttpsDraft} onUpdate={onUpdate} />
     </Section>

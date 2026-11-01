@@ -1,4 +1,4 @@
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use tauri::webview::PlatformWebview;
@@ -58,7 +58,11 @@ pub fn user_agent(core: &ICoreWebView2) -> String {
 }
 
 /// Asks the webview for the cookies it would send to `url`. The callback runs on the webview thread.
-pub fn request_cookies(core: &ICoreWebView2, url: &str, done: impl FnOnce(String) + Send + 'static) {
+pub fn request_cookies(
+    core: &ICoreWebView2,
+    url: &str,
+    done: impl FnOnce(String) + Send + 'static,
+) {
     let slot = Arc::new(Mutex::new(Some(done)));
     let fallback = slot.clone();
     let started = (|| -> windows::core::Result<()> {
@@ -117,7 +121,13 @@ pub fn list_cookies(webview: &Webview, url: &str) -> Vec<SiteCookie> {
     rx.recv_timeout(Duration::from_secs(3)).unwrap_or_default()
 }
 
-pub fn put_cookie(webview: &Webview, name: String, value: String, domain: String, path: String) -> std::result::Result<(), String> {
+pub fn put_cookie(
+    webview: &Webview,
+    name: String,
+    value: String,
+    domain: String,
+    path: String,
+) -> std::result::Result<(), String> {
     let (tx, rx) = mpsc::channel();
     let posted = webview.with_webview(move |platform| {
         let result = (|| -> windows::core::Result<()> {
@@ -140,13 +150,24 @@ pub fn put_cookie(webview: &Webview, name: String, value: String, domain: String
         .map_err(|_| "WebView2 did not answer.".to_string())?
 }
 
-pub fn delete_cookie(webview: &Webview, name: String, domain: String, path: String) -> std::result::Result<(), String> {
+pub fn delete_cookie(
+    webview: &Webview,
+    name: String,
+    domain: String,
+    path: String,
+) -> std::result::Result<(), String> {
     let (tx, rx) = mpsc::channel();
     let posted = webview.with_webview(move |platform| {
         let result = (|| -> windows::core::Result<()> {
             let core = core(&platform)?;
             let manager = unsafe { core.cast::<ICoreWebView2_2>()?.CookieManager()? };
-            unsafe { manager.DeleteCookiesWithDomainAndPath(&HSTRING::from(&name), &HSTRING::from(&domain), &HSTRING::from(&path)) }
+            unsafe {
+                manager.DeleteCookiesWithDomainAndPath(
+                    &HSTRING::from(&name),
+                    &HSTRING::from(&domain),
+                    &HSTRING::from(&path),
+                )
+            }
         })();
         let _ = tx.send(result.map_err(|error| error.to_string()));
     });
@@ -240,7 +261,13 @@ fn read_stream(stream: &IStream) -> Option<Vec<u8>> {
     let mut buffer = [0u8; 8192];
     loop {
         let mut read = 0u32;
-        let status = unsafe { stream.Read(buffer.as_mut_ptr().cast(), buffer.len() as u32, Some(&mut read)) };
+        let status = unsafe {
+            stream.Read(
+                buffer.as_mut_ptr().cast(),
+                buffer.len() as u32,
+                Some(&mut read),
+            )
+        };
         if status.is_err() || read == 0 {
             break;
         }
@@ -437,6 +464,25 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
             &mut token,
         )?;
 
+        if let Ok(settings) = core.Settings() {
+            let _ = settings.SetIsStatusBarEnabled(false);
+        }
+        if let Ok(core12) = core.cast::<ICoreWebView2_12>() {
+            let text_app = app.clone();
+            core12.add_StatusBarTextChanged(
+                &StatusBarTextChangedEventHandler::create(Box::new(move |sender, _| {
+                    let Some(core) = sender.and_then(|core| core.cast::<ICoreWebView2_12>().ok())
+                    else {
+                        return Ok(());
+                    };
+                    let text = read_pwstr(|value| core.StatusBarText(value));
+                    crate::status::emit_status_text(&text_app, id, text);
+                    Ok(())
+                })),
+                &mut token,
+            )?;
+        }
+
         let fullscreen_app = app.clone();
         core.add_ContainsFullScreenElementChanged(
             &ContainsFullScreenElementChangedEventHandler::create(Box::new(move |sender, _| {
@@ -469,7 +515,9 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                         .and_then(|core| core.cast::<ICoreWebView2_8>().ok())
                         .is_some_and(|core| read_bool(|value| core.IsDocumentPlayingAudio(value)));
                     let app = audio_app.clone();
-                    tauri::async_runtime::spawn(async move { tabs::update_audio(&app, id, audible) });
+                    tauri::async_runtime::spawn(
+                        async move { tabs::update_audio(&app, id, audible) },
+                    );
                     Ok(())
                 })),
                 &mut token,
@@ -507,17 +555,31 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                         }
                     }
                     Some("ce-notify") => {
-                        let title = message.get("title").and_then(|value| value.as_str()).unwrap_or("Notification");
-                        let body = message.get("body").and_then(|value| value.as_str()).unwrap_or("");
+                        let title = message
+                            .get("title")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("Notification");
+                        let body = message
+                            .get("body")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("");
                         let page = tabs::tab_page_url(&message_app, id).unwrap_or_default();
-                        if crate::privacy::decision(&message_app, &page, "notifications") == Some(true) {
+                        if crate::privacy::decision(&message_app, &page, "notifications")
+                            == Some(true)
+                        {
                             crate::system::toast(title, body, "");
                         }
                     }
                     Some("ce-theme") => {
-                        let color = message.get("color").and_then(|value| value.as_str()).unwrap_or("").to_string();
+                        let color = message
+                            .get("color")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         let app = message_app.clone();
-                        tauri::async_runtime::spawn(async move { tabs::set_theme_color(&app, id, &color) });
+                        tauri::async_runtime::spawn(async move {
+                            tabs::set_theme_color(&app, id, &color)
+                        });
                     }
                     Some("ce-error") => {
                         let app = message_app.clone();
@@ -529,7 +591,9 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                         }
                     }
                     Some("ce-zap") => {
-                        if let Some(selector) = message.get("selector").and_then(|value| value.as_str()) {
+                        if let Some(selector) =
+                            message.get("selector").and_then(|value| value.as_str())
+                        {
                             let app = message_app.clone();
                             let selector = selector.to_string();
                             tauri::async_runtime::spawn(async move {
@@ -543,7 +607,10 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                         if !crate::settings::get(&message_app).mouse_gestures {
                             return Ok(());
                         }
-                        let direction = message.get("direction").and_then(|value| value.as_str()).unwrap_or("");
+                        let direction = message
+                            .get("direction")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("");
                         let app = message_app.clone();
                         let direction = direction.to_string();
                         tauri::async_runtime::spawn(async move {
@@ -580,24 +647,28 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
             let favicon_app = app.clone();
             core15.add_FaviconChanged(
                 &FaviconChangedEventHandler::create(Box::new(move |sender, _| {
-                    let Some(core) = sender.and_then(|core| core.cast::<ICoreWebView2_15>().ok()) else {
+                    let Some(core) = sender.and_then(|core| core.cast::<ICoreWebView2_15>().ok())
+                    else {
                         return Ok(());
                     };
                     let favicon = read_pwstr(|value| core.FaviconUri(value));
                     let favicon = (!favicon.is_empty()).then_some(favicon);
                     tabs::update_favicon(&favicon_app, id, favicon);
                     let accent_app = favicon_app.clone();
-                    let handler = GetFaviconCompletedHandler::create(Box::new(move |result, stream| {
-                        if result.is_ok()
-                            && let Some(stream) = stream
-                            && let Some(bytes) = read_stream(&stream)
-                            && let Some(color) = crate::accent::average_png(&bytes)
-                        {
-                            let app = accent_app.clone();
-                            tauri::async_runtime::spawn(async move { tabs::set_favicon_accent(&app, id, color) });
-                        }
-                        Ok(())
-                    }));
+                    let handler =
+                        GetFaviconCompletedHandler::create(Box::new(move |result, stream| {
+                            if result.is_ok()
+                                && let Some(stream) = stream
+                                && let Some(bytes) = read_stream(&stream)
+                                && let Some(color) = crate::accent::average_png(&bytes)
+                            {
+                                let app = accent_app.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    tabs::set_favicon_accent(&app, id, color)
+                                });
+                            }
+                            Ok(())
+                        }));
                     let _ = core.GetFavicon(COREWEBVIEW2_FAVICON_IMAGE_FORMAT_PNG, &handler);
                     Ok(())
                 })),
@@ -685,7 +756,8 @@ fn attach_adblock(
                                 .unwrap_or_default();
                             if method.eq_ignore_ascii_case("GET")
                                 && let Some(bytes) = crate::rewrite::file_bytes(&path)
-                                && let Some(stream) = windows::Win32::UI::Shell::SHCreateMemStream(Some(&bytes))
+                                && let Some(stream) =
+                                    windows::Win32::UI::Shell::SHCreateMemStream(Some(&bytes))
                             {
                                 let response = environment.CreateWebResourceResponse(
                                     &stream,
@@ -802,14 +874,18 @@ fn attach_adblock(
                     };
                     let uri = read_pwstr(|value| request.Uri(value));
                     let method = read_pwstr(|value| request.Method(value));
-                    let status = args
-                        .Response()
-                        .ok()
-                        .and_then(|response| {
-                            let mut code = 0i32;
-                            response.StatusCode(&mut code).ok().map(|_| code)
-                        });
-                    crate::privacy::record_request(&response_app, id, &method, &uri, "request", status);
+                    let status = args.Response().ok().and_then(|response| {
+                        let mut code = 0i32;
+                        response.StatusCode(&mut code).ok().map(|_| code)
+                    });
+                    crate::privacy::record_request(
+                        &response_app,
+                        id,
+                        &method,
+                        &uri,
+                        "request",
+                        status,
+                    );
                     Ok(())
                 })),
                 &mut token,
@@ -872,7 +948,8 @@ fn apply_referrer(
             let _ = unsafe { headers.RemoveHeader(windows::core::w!("Referer")) };
         }
         crate::privacy::ReferrerAction::Set(value) => {
-            let _ = unsafe { headers.SetHeader(windows::core::w!("Referer"), &HSTRING::from(value)) };
+            let _ =
+                unsafe { headers.SetHeader(windows::core::w!("Referer"), &HSTRING::from(value)) };
         }
     }
 }
@@ -905,7 +982,9 @@ fn attach_downloads(app: &AppHandle, core: &ICoreWebView2) -> windows::core::Res
         core4.add_DownloadStarting(
             &DownloadStartingEventHandler::create(Box::new(move |_, args| {
                 if let Some(args) = args {
-                    if let Err(error) = downloads::on_download_starting(&download_app, &download_core, args) {
+                    if let Err(error) =
+                        downloads::on_download_starting(&download_app, &download_core, args)
+                    {
                         eprintln!("download: {error}");
                     }
                 }
@@ -1158,8 +1237,22 @@ pub fn clear_site_cache(webview: &Webview, origin: &str) -> std::result::Result<
     .to_string();
     const FAILURE: &str = "Couldn't clear the cache for this site.";
     let timeout = Duration::from_secs(10);
-    call_cdp_json(webview, "Storage.clearDataForOrigin", &params, timeout, FAILURE)?;
-    if call_cdp_json(webview, "Page.reload", r#"{"ignoreCache":true}"#, timeout, FAILURE).is_err() {
+    call_cdp_json(
+        webview,
+        "Storage.clearDataForOrigin",
+        &params,
+        timeout,
+        FAILURE,
+    )?;
+    if call_cdp_json(
+        webview,
+        "Page.reload",
+        r#"{"ignoreCache":true}"#,
+        timeout,
+        FAILURE,
+    )
+    .is_err()
+    {
         webview.reload().map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -1340,10 +1433,129 @@ pub fn show_print_dialog(webview: &Webview) -> std::result::Result<(), String> {
         .with_webview(move |platform| {
             let shown = core(&platform)
                 .and_then(|core| core.cast::<ICoreWebView2_16>())
-                .and_then(|core| unsafe { core.ShowPrintUI(COREWEBVIEW2_PRINT_DIALOG_KIND_SYSTEM) });
-            let _ = tx.send(shown.map_err(|error| format!("Couldn't open the print dialog. {error}")));
+                .and_then(|core| unsafe {
+                    core.ShowPrintUI(COREWEBVIEW2_PRINT_DIALOG_KIND_SYSTEM)
+                });
+            let _ =
+                tx.send(shown.map_err(|error| format!("Couldn't open the print dialog. {error}")));
         })
         .map_err(|error| error.to_string())?;
     rx.recv_timeout(Duration::from_secs(10))
         .map_err(|_| "Couldn't open the print dialog.".to_string())?
+}
+
+/// Renderer processes in this webview's environment, with the frame URL each one is hosting.
+/// Empty when the runtime does not offer process info.
+pub fn renderer_frames(webview: &Webview) -> Vec<(u32, Vec<String>)> {
+    let (tx, rx) = mpsc::channel();
+    let posted = webview.with_webview(move |platform| {
+        let Ok(environment) = platform.environment().cast::<ICoreWebView2Environment13>() else {
+            let _ = tx.send(Vec::new());
+            return;
+        };
+        let sender = tx.clone();
+        let handler =
+            GetProcessExtendedInfosCompletedHandler::create(Box::new(move |result, collection| {
+                let rows = if result.is_ok() {
+                    read_renderer_frames(collection.as_ref())
+                } else {
+                    Vec::new()
+                };
+                let _ = sender.send(rows);
+                Ok(())
+            }));
+        if unsafe { environment.GetProcessExtendedInfos(&handler) }.is_err() {
+            let _ = tx.send(Vec::new());
+        }
+    });
+    if posted.is_err() {
+        return Vec::new();
+    }
+    rx.recv_timeout(Duration::from_millis(800))
+        .unwrap_or_default()
+}
+
+fn read_renderer_frames(
+    collection: Option<&ICoreWebView2ProcessExtendedInfoCollection>,
+) -> Vec<(u32, Vec<String>)> {
+    let Some(collection) = collection else {
+        return Vec::new();
+    };
+    unsafe {
+        let mut count = 0u32;
+        if collection.Count(&mut count).is_err() {
+            return Vec::new();
+        }
+        let mut rows = Vec::new();
+        for index in 0..count {
+            let Ok(extended) = collection.GetValueAtIndex(index) else {
+                continue;
+            };
+            let Ok(info) = extended.ProcessInfo() else {
+                continue;
+            };
+            let mut kind = COREWEBVIEW2_PROCESS_KIND::default();
+            if info.Kind(&mut kind).is_err() || kind != COREWEBVIEW2_PROCESS_KIND_RENDERER {
+                continue;
+            }
+            let mut pid = 0i32;
+            if info.ProcessId(&mut pid).is_err() || pid <= 0 {
+                continue;
+            }
+            let sources = frame_sources(&extended);
+            if sources.is_empty() {
+                continue;
+            }
+            rows.push((pid as u32, sources));
+        }
+        rows
+    }
+}
+
+fn frame_sources(extended: &ICoreWebView2ProcessExtendedInfo) -> Vec<String> {
+    unsafe {
+        let Ok(frames) = extended.AssociatedFrameInfos() else {
+            return Vec::new();
+        };
+        let Ok(iterator) = frames.GetIterator() else {
+            return Vec::new();
+        };
+        let mut sources = Vec::new();
+        for _ in 0..64 {
+            if !read_bool(|value| iterator.HasCurrent(value)) {
+                break;
+            }
+            if let Ok(frame) = iterator.GetCurrent() {
+                let source = read_pwstr(|value| frame.Source(value));
+                if !source.is_empty() {
+                    sources.push(source);
+                }
+            }
+            if !read_bool(|value| iterator.MoveNext(value)) {
+                break;
+            }
+        }
+        sources
+    }
+}
+
+/// JavaScript heap of one page, used when its renderer process cannot be matched.
+pub fn js_heap_used(webview: &Webview) -> Option<u64> {
+    let timeout = Duration::from_millis(400);
+    let _ = call_cdp_json(webview, "Performance.enable", "{}", timeout, "metrics");
+    let value = call_cdp_json(webview, "Performance.getMetrics", "{}", timeout, "metrics").ok()?;
+    let metrics = value.get("metrics")?.as_array()?;
+    for metric in metrics {
+        if metric.get("name").and_then(|name| name.as_str()) != Some("JSHeapUsedSize") {
+            continue;
+        }
+        let amount = metric.get("value")?;
+        if let Some(bytes) = amount.as_u64() {
+            return Some(bytes);
+        }
+        if let Some(bytes) = amount.as_f64() {
+            return Some(bytes.max(0.0) as u64);
+        }
+    }
+    None
 }

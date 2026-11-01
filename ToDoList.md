@@ -81,7 +81,7 @@
 - [x] Battery saver: on battery power, throttle background tabs and cap frame rate.
 
 ## Data and sync
-- [ ] Encrypted export and import of a full profile as one file.
-- [ ] Sync conflict viewer for the sync folder when two machines edit at the same time.
-- [ ] Full-text history search: index page text locally so history can be searched by content.
-- [ ] Bookmark health check: find dead links and duplicates.
+- [x] Encrypted export and import of a full profile as one file.
+- [x] Sync conflict viewer for the sync folder when two machines edit at the same time.
+- [x] Full-text history search: index page text locally so history can be searched by content.
+- [x] Bookmark health check: find dead links and duplicates.

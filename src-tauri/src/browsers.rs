@@ -54,7 +54,10 @@ fn executable(kind: &str) -> Option<PathBuf> {
             if let Some(local) = local {
                 paths.push(local.join("Google\\Chrome\\Application\\chrome.exe"));
             }
-            for root in [program_files.clone(), program_files_x86.clone()].into_iter().flatten() {
+            for root in [program_files.clone(), program_files_x86.clone()]
+                .into_iter()
+                .flatten()
+            {
                 paths.push(root.join("Google\\Chrome\\Application\\chrome.exe"));
             }
             paths

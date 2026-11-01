@@ -121,7 +121,8 @@ pub fn show(app: &AppHandle) -> Result<(), String> {
 
 fn read(app: &AppHandle) -> Result<UserStyles, String> {
     let path = file_path(app);
-    let css = fs::read_to_string(&path).map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    let css = fs::read_to_string(&path)
+        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
     Ok(UserStyles {
         css,
         path: path.to_string_lossy().into_owned(),
@@ -138,10 +139,12 @@ fn file_path(app: &AppHandle) -> PathBuf {
 
 fn write_text(path: &Path, text: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
     }
     let temp = path.with_extension("css.tmp");
-    fs::write(&temp, text).map_err(|error| format!("Could not write {}: {error}", temp.display()))?;
+    fs::write(&temp, text)
+        .map_err(|error| format!("Could not write {}: {error}", temp.display()))?;
     fs::rename(&temp, path).map_err(|error| format!("Could not write {}: {error}", path.display()))
 }
 

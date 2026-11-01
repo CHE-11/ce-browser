@@ -108,7 +108,10 @@ pub fn note_request(app: &AppHandle, origin: &str, kind: &str) {
     }
     let guard = state(app);
     let mut grants = guard.grants.lock().expect("permissions");
-    if grants.iter().any(|grant| grant.origin == origin && grant.kind == kind) {
+    if grants
+        .iter()
+        .any(|grant| grant.origin == origin && grant.kind == kind)
+    {
         return;
     }
     grants.push(PermissionGrant {
@@ -136,7 +139,12 @@ pub fn decision(app: &AppHandle, origin: &str, kind: &str) -> Option<bool> {
         })
 }
 
-pub fn set_permission(app: &AppHandle, origin: &str, kind: &str, allow: bool) -> Result<(), String> {
+pub fn set_permission(
+    app: &AppHandle,
+    origin: &str,
+    kind: &str,
+    allow: bool,
+) -> Result<(), String> {
     let origin = origin_key(origin);
     let kind = kind_key(kind);
     if origin.is_empty() || kind.is_empty() {
@@ -208,7 +216,12 @@ pub fn known_container(app: &AppHandle, id: &str) -> bool {
         return true;
     }
     let guard = state(app);
-    guard.containers.lock().expect("containers").iter().any(|item| item.id == id)
+    guard
+        .containers
+        .lock()
+        .expect("containers")
+        .iter()
+        .any(|item| item.id == id)
 }
 
 /// A stable noise seed for this host, kept until the browser exits.
@@ -308,7 +321,10 @@ pub fn copy_script() -> String {
     event.clipboardData.setData("text/plain", cleaned);
   }, true);
 })();"#
-    .replace("{names}", &serde_json::to_string(TRACKING).unwrap_or_else(|_| "[]".into()))
+        .replace(
+            "{names}",
+            &serde_json::to_string(TRACKING).unwrap_or_else(|_| "[]".into()),
+        )
 }
 
 /// `Some` when the navigation should be cancelled and started again at the returned URL.
@@ -323,7 +339,11 @@ pub fn rewrite(settings: &settings::BrowserSettings, raw: &str) -> Option<String
         return None;
     }
     let mut changed = false;
-    if settings.https_only && url.scheme() == "http" && !local_host(&url) && !https_exception(settings, &url) {
+    if settings.https_only
+        && url.scheme() == "http"
+        && !local_host(&url)
+        && !https_exception(settings, &url)
+    {
         if url.set_scheme("https").is_ok() {
             changed = true;
         }
@@ -331,7 +351,10 @@ pub fn rewrite(settings: &settings::BrowserSettings, raw: &str) -> Option<String
     if settings.strip_tracking {
         let pairs: Vec<(String, String)> = url.query_pairs().into_owned().collect();
         if pairs.iter().any(|(name, _)| is_tracking(name)) {
-            let kept: Vec<(String, String)> = pairs.into_iter().filter(|(name, _)| !is_tracking(name)).collect();
+            let kept: Vec<(String, String)> = pairs
+                .into_iter()
+                .filter(|(name, _)| !is_tracking(name))
+                .collect();
             if kept.is_empty() {
                 url.set_query(None);
             } else {
@@ -350,14 +373,27 @@ pub fn is_tracking(name: &str) -> bool {
 
 pub fn https_exception(settings: &settings::BrowserSettings, url: &Url) -> bool {
     let host = settings::sleep_site_key(url.as_str());
-    settings.https_exceptions.iter().any(|site| host == *site || host.ends_with(&format!(".{site}")))
+    settings
+        .https_exceptions
+        .iter()
+        .any(|site| host == *site || host.ends_with(&format!(".{site}")))
 }
 
 fn local_host(url: &Url) -> bool {
-    matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]" | "::1"))
+    matches!(
+        url.host_str(),
+        Some("localhost" | "127.0.0.1" | "[::1]" | "::1")
+    )
 }
 
-pub fn record_request(app: &AppHandle, tab: u32, method: &str, url: &str, kind: &str, status: Option<i32>) {
+pub fn record_request(
+    app: &AppHandle,
+    tab: u32,
+    method: &str,
+    url: &str,
+    kind: &str,
+    status: Option<i32>,
+) {
     if url.starts_with("ce:") || url.starts_with("chrome-extension:") || url.starts_with("data:") {
         return;
     }
@@ -438,23 +474,41 @@ fn origin_key(raw: &str) -> String {
 
 fn kind_key(raw: &str) -> String {
     let raw = raw.trim().to_ascii_lowercase();
-    if KINDS.contains(&raw.as_str()) { raw } else { String::new() }
+    if KINDS.contains(&raw.as_str()) {
+        raw
+    } else {
+        String::new()
+    }
 }
 
 pub fn normalize_referrer(raw: &str) -> String {
-    if REFERRERS.contains(&raw) { raw.to_string() } else { "default".into() }
+    if REFERRERS.contains(&raw) {
+        raw.to_string()
+    } else {
+        "default".into()
+    }
 }
 
 fn container_id(name: &str) -> String {
     let mut id: String = name
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '-' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect();
     while id.contains("--") {
         id = id.replace("--", "-");
     }
     let id = id.trim_matches('-').chars().take(40).collect::<String>();
-    if id.is_empty() { "container".into() } else { id }
+    if id.is_empty() {
+        "container".into()
+    } else {
+        id
+    }
 }
 
 fn normalize_grants(grants: Vec<PermissionGrant>) -> Vec<PermissionGrant> {
@@ -467,10 +521,19 @@ fn normalize_grants(grants: Vec<PermissionGrant>) -> Vec<PermissionGrant> {
             "asked" => "asked",
             _ => "deny",
         };
-        if origin.is_empty() || kind.is_empty() || kept.iter().any(|item: &PermissionGrant| item.origin == origin && item.kind == kind) {
+        if origin.is_empty()
+            || kind.is_empty()
+            || kept
+                .iter()
+                .any(|item: &PermissionGrant| item.origin == origin && item.kind == kind)
+        {
             continue;
         }
-        kept.push(PermissionGrant { origin, kind, state: state.into() });
+        kept.push(PermissionGrant {
+            origin,
+            kind,
+            state: state.into(),
+        });
     }
     kept
 }
@@ -480,7 +543,10 @@ fn normalize_containers(containers: Vec<Container>) -> Vec<Container> {
     for mut container in containers {
         container.id = container_id(&container.id);
         container.name = container.name.trim().chars().take(40).collect();
-        if container.id.is_empty() || container.name.is_empty() || kept.iter().any(|item: &Container| item.id == container.id) {
+        if container.id.is_empty()
+            || container.name.is_empty()
+            || kept.iter().any(|item: &Container| item.id == container.id)
+        {
             continue;
         }
         container.color = crate::tabs::group_color_owned(&container.color);
@@ -493,18 +559,27 @@ fn normalize_containers(containers: Vec<Container>) -> Vec<Container> {
 }
 
 fn save_grants(app: &AppHandle, grants: &[PermissionGrant]) -> Result<(), String> {
-    files::write_json(&paths::data_file(app, PERMISSIONS), &PermissionFile { grants: grants.to_vec() })
+    files::write_json(
+        &paths::data_file(app, PERMISSIONS),
+        &PermissionFile {
+            grants: grants.to_vec(),
+        },
+    )
 }
 
 fn save_containers(app: &AppHandle, containers: &[Container]) -> Result<(), String> {
     files::write_json(
         &paths::data_file(app, CONTAINERS),
-        &ContainerFile { containers: containers.to_vec() },
+        &ContainerFile {
+            containers: containers.to_vec(),
+        },
     )
 }
 
 pub fn container_dir(app: &AppHandle, id: &str) -> std::path::PathBuf {
-    paths::root_local_dir(app).join("containers").join(container_id(id))
+    paths::root_local_dir(app)
+        .join("containers")
+        .join(container_id(id))
 }
 
 #[cfg(test)]
@@ -553,9 +628,21 @@ mod tests {
 
     #[test]
     fn referrer_none_removes_the_header() {
-        assert!(matches!(referrer_value("none", "https://a.test/x", "https://b.test/y"), ReferrerAction::Remove));
-        assert!(matches!(referrer_value("default", "https://a.test/x", "https://b.test/y"), ReferrerAction::Keep));
-        assert!(matches!(referrer_value("same-origin", "https://a.test/x", "https://a.test/y"), ReferrerAction::Keep));
-        assert!(matches!(referrer_value("same-origin", "https://a.test/x", "https://b.test/y"), ReferrerAction::Remove));
+        assert!(matches!(
+            referrer_value("none", "https://a.test/x", "https://b.test/y"),
+            ReferrerAction::Remove
+        ));
+        assert!(matches!(
+            referrer_value("default", "https://a.test/x", "https://b.test/y"),
+            ReferrerAction::Keep
+        ));
+        assert!(matches!(
+            referrer_value("same-origin", "https://a.test/x", "https://a.test/y"),
+            ReferrerAction::Keep
+        ));
+        assert!(matches!(
+            referrer_value("same-origin", "https://a.test/x", "https://b.test/y"),
+            ReferrerAction::Remove
+        ));
     }
 }

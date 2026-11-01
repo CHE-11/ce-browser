@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import { ImagePlus } from "lucide-react";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import type { BrowserProfile, ProfileIconChoice } from "@type/browser";
 import { Button } from "@/components/Button";
+import { Dialog } from "@/components/Dialog";
 import { cn } from "@/lib/cn";
 import {
   createProfile,
   deleteProfile,
+  exportProfileArchive,
+  importProfileArchive,
   installProfileShortcut,
   listProfileIcons,
   listProfiles,
@@ -22,6 +26,17 @@ const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-profiles"
 
 const NEW_PROFILE_HINT =
   "Each profile has its own bookmarks, history, extensions, and settings, kept in a folder named after the profile (Default for the first one) in the sync folder or in app data. Its icon is used for a separate Start menu item and taskbar button.";
+const ARCHIVE_LABEL = "Profile file";
+const ARCHIVE_HINT =
+  "Saves this profile's bookmarks, history, extensions, and settings in one encrypted file. Cookies stay on this computer.";
+
+type ArchivePrompt = {
+  mode: "export" | "import";
+  path: string;
+  password: string;
+  confirm: string;
+  error: string | null;
+};
 
 function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], iconOpen: boolean) {
   const terms = [
@@ -64,6 +79,9 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
   const [profileWorking, setProfileWorking] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [iconProfile, setIconProfile] = useState<string | null>(null);
+  const [archive, setArchive] = useState<ArchivePrompt | null>(null);
+  const [archiveNote, setArchiveNote] = useState<string | null>(null);
+  const [archiveWorking, setArchiveWorking] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -105,11 +123,77 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
     NEW_PROFILE_HINT,
     "Create",
     profileName,
+    ARCHIVE_LABEL,
+    ARCHIVE_HINT,
+    "Export",
+    "Import",
+    archiveNote ?? "",
     ...profiles.flatMap((profile) => profileTerms(profile, profileIcons, iconProfile === profile.id)),
     confirmText,
     pendingDelete ? "Cancel" : "",
   );
   useReportMatch(section.id, visible, onMatch);
+
+  const currentName = profiles.find((profile) => profile.current)?.name || "profile";
+
+  const chooseArchive = (mode: "export" | "import") => {
+    onError(null);
+    setArchiveNote(null);
+    const dialog =
+      mode === "export"
+        ? save({
+            title: "Export profile",
+            defaultPath: `${currentName}.ceprofile`,
+            filters: [{ name: "ce-browser profile", extensions: ["ceprofile"] }],
+          })
+        : open({
+            title: "Import profile",
+            multiple: false,
+            directory: false,
+            filters: [{ name: "ce-browser profile", extensions: ["ceprofile"] }],
+          });
+    void Promise.resolve(dialog)
+      .then((path) => {
+        if (typeof path === "string" && path) {
+          setArchive({ mode, path, password: "", confirm: "", error: null });
+        }
+      })
+      .catch((reason: unknown) => onError(String(reason)));
+  };
+
+  const submitArchive = () => {
+    if (!archive || archiveWorking) {
+      return;
+    }
+    if (!archive.password) {
+      setArchive({ ...archive, error: "Enter a password." });
+      return;
+    }
+    if (archive.mode === "export" && archive.password !== archive.confirm) {
+      setArchive({ ...archive, error: "Those passwords do not match." });
+      return;
+    }
+    setArchiveWorking(true);
+    const prompt = archive;
+    const work =
+      prompt.mode === "export"
+        ? exportProfileArchive(prompt.path, prompt.password).then(() => "Profile exported.")
+        : importProfileArchive(prompt.path, prompt.password).then((imported) => {
+            return listProfiles().then((next) => {
+              setProfiles(next);
+              return `Imported as ${imported.name}. Open it from the list.`;
+            });
+          });
+    void work
+      .then((note) => {
+        setArchive(null);
+        setArchiveNote(note);
+      })
+      .catch((reason: unknown) => {
+        setArchive((current) => (current ? { ...current, error: String(reason) } : current));
+      })
+      .finally(() => setArchiveWorking(false));
+  };
 
   const runProfiles = (work: () => Promise<BrowserProfile[] | void>) => {
     setProfileWorking(true);
@@ -161,6 +245,19 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
           Create
         </Button>
       </Row>
+      <Row id="settings-profiles-archive" label={ARCHIVE_LABEL} hint={ARCHIVE_HINT} search={["Export", "Import", archiveNote ?? ""]}>
+        <Button id="settings-profiles-export" size="sm" disabled={profileWorking || archiveWorking} onClick={() => chooseArchive("export")}>
+          Export
+        </Button>
+        <Button id="settings-profiles-import" size="sm" disabled={profileWorking || archiveWorking} onClick={() => chooseArchive("import")}>
+          Import
+        </Button>
+      </Row>
+      {archiveNote ? (
+        <div id="settings-profiles-archive-note" className="px-5 pb-3 text-xs text-zinc-400">
+          {archiveNote}
+        </div>
+      ) : null}
       {profiles.map((profile) => (
         <ProfileCard
           key={profile.id}
@@ -197,6 +294,66 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
           }}
         />
       ) : null}
+      <Dialog
+        id="settings-profile-archive"
+        title={archive?.mode === "import" ? "Import profile" : "Export profile"}
+        open={archive !== null}
+        onClose={() => {
+          if (!archiveWorking) {
+            setArchive(null);
+          }
+        }}
+        panelClassName="max-w-md"
+      >
+        <form
+          id="settings-profile-archive-form"
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitArchive();
+          }}
+        >
+          <p id="settings-profile-archive-path" className="break-all text-xs text-zinc-500">
+            {archive?.path}
+          </p>
+          <label id="settings-profile-archive-password-label" className="flex flex-col gap-1 text-sm text-zinc-300">
+            Password
+            <input
+              id="settings-profile-archive-password"
+              type="password"
+              autoFocus
+              value={archive?.password ?? ""}
+              className={inputClass}
+              onChange={(event) => setArchive((current) => (current ? { ...current, password: event.target.value, error: null } : current))}
+            />
+          </label>
+          {archive?.mode === "export" ? (
+            <label id="settings-profile-archive-confirm-label" className="flex flex-col gap-1 text-sm text-zinc-300">
+              Confirm password
+              <input
+                id="settings-profile-archive-confirm"
+                type="password"
+                value={archive.confirm}
+                className={inputClass}
+                onChange={(event) => setArchive((current) => (current ? { ...current, confirm: event.target.value, error: null } : current))}
+              />
+            </label>
+          ) : null}
+          {archive?.error ? (
+            <p id="settings-profile-archive-error" className="text-sm text-red-300">
+              {archive.error}
+            </p>
+          ) : null}
+          <div id="settings-profile-archive-actions" className="flex justify-end gap-2">
+            <Button id="settings-profile-archive-cancel" size="sm" variant="ghost" disabled={archiveWorking} onClick={() => setArchive(null)}>
+              Cancel
+            </Button>
+            <Button id="settings-profile-archive-save" size="sm" type="submit" disabled={archiveWorking}>
+              {archive?.mode === "import" ? "Import" : "Export"}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
     </Section>
   );
 }

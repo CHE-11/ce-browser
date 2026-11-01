@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::webview::Color;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{files, paths};
+use crate::paths;
 
 const FILE: &str = "settings.json";
 
@@ -43,6 +43,12 @@ pub struct BrowserSettings {
     #[serde(default)]
     pub download_name_template: String,
     pub show_bookmarks_bar: bool,
+    /// The status bar under every page. An older file omits this, so the bar stays on.
+    #[serde(default = "default_true")]
+    pub show_status_bar: bool,
+    /// Memory, time and the other status readings. Off leaves the version and zoom.
+    #[serde(default = "default_true")]
+    pub status_stats: bool,
     pub theme: String,
     pub color_mode: String,
     pub ui_zoom: u32,
@@ -70,12 +76,21 @@ pub struct BrowserSettings {
     /// Last choices in the Page to PNG popover.
     #[serde(default)]
     pub page_capture: PageCaptureSettings,
-    /// Extension ids left off the address bar. An older file omits this, so every extension stays pinned.
+    /// Extension ids left off the toolbars. An older file omits this, so every extension stays pinned.
     #[serde(default)]
     pub hidden_toolbar_extensions: Vec<String>,
     /// Order of pinned toolbar icons. Empty keeps the built-in order, then extensions.
     #[serde(default)]
     pub toolbar_order: Vec<String>,
+    /// Built-in tools sit on the right strip. Off puts them on the address bar.
+    #[serde(default = "default_true")]
+    pub vertical_toolbar: bool,
+    /// Pinned extensions share the vertical tool strip on the right.
+    #[serde(default)]
+    pub vertical_toolbar_extensions: bool,
+    /// Short names under icons on the vertical tool strip.
+    #[serde(default)]
+    pub vertical_toolbar_labels: bool,
     /// Tint the active tab and address bar from the site's theme color or favicon.
     #[serde(default = "default_true")]
     pub site_accent: bool,
@@ -135,6 +150,9 @@ pub struct BrowserSettings {
     /// Right-drag on a page goes back, forward, reloads or closes the tab.
     #[serde(default = "default_true")]
     pub mouse_gestures: bool,
+    /// Save page text on this computer so history search can match words from the page.
+    #[serde(default = "default_true")]
+    pub index_page_text: bool,
 }
 
 const TAB_LAYOUTS: &[&str] = &["horizontal", "vertical"];
@@ -380,6 +398,8 @@ impl Default for BrowserSettings {
             accelerate_downloads: true,
             download_name_template: String::new(),
             show_bookmarks_bar: true,
+            show_status_bar: true,
+            status_stats: true,
             theme: "zinc".into(),
             color_mode: "dark".into(),
             ui_zoom: 100,
@@ -394,6 +414,9 @@ impl Default for BrowserSettings {
             page_capture: PageCaptureSettings::default(),
             hidden_toolbar_extensions: Vec::new(),
             toolbar_order: Vec::new(),
+            vertical_toolbar: true,
+            vertical_toolbar_extensions: false,
+            vertical_toolbar_labels: false,
             site_accent: true,
             translate_language: default_translate_language(),
             translate_url: default_translate_url(),
@@ -414,6 +437,7 @@ impl Default for BrowserSettings {
             https_only: false,
             https_exceptions: Vec::new(),
             mouse_gestures: true,
+            index_page_text: true,
         }
     }
 }
@@ -517,11 +541,12 @@ impl BrowserSettings {
 pub struct SettingsState(Mutex<BrowserSettings>);
 
 pub fn init(app: &AppHandle) {
-    let mut loaded: BrowserSettings = files::read_json(&paths::data_file(app, FILE));
+    let mut loaded: BrowserSettings = crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
     loaded = loaded.normalize();
     loaded.pinned_tabs = canonicalize_pins(app, &loaded);
     crate::adblock::configure(&loaded.adblock);
     app.manage(SettingsState(Mutex::new(loaded)));
+    crate::sync_conflicts::note(app, &paths::data_file(app, FILE));
 }
 
 fn prefers_light(app: &AppHandle, color_mode: &str) -> bool {
@@ -627,7 +652,7 @@ fn page_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
 }
 
 pub fn reload(app: &AppHandle) {
-    let mut loaded: BrowserSettings = files::read_json(&paths::data_file(app, FILE));
+    let mut loaded: BrowserSettings = crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
     loaded = loaded.normalize();
     loaded.pinned_tabs = canonicalize_pins(app, &loaded);
     if let Some(root) = paths::storage_root() {
@@ -684,7 +709,7 @@ pub fn store(
             settings.sync_history_revision = guard.sync_history_revision;
         }
         let previous_page_zoom = guard.page_zoom;
-        files::write_json(&paths::data_file(app, FILE), &settings)?;
+        crate::sync_conflicts::store(app, &paths::data_file(app, FILE), &settings)?;
         crate::adblock::configure(&settings.adblock);
         *guard = settings.clone();
         (settings, previous_page_zoom)
@@ -740,7 +765,11 @@ fn clean_hosts(hosts: &[String]) -> Vec<String> {
     let mut kept = Vec::new();
     for raw in hosts {
         let host = sleep_site_key(raw);
-        if host.is_empty() || host.len() > 253 || host.chars().any(char::is_whitespace) || kept.contains(&host) {
+        if host.is_empty()
+            || host.len() > 253
+            || host.chars().any(char::is_whitespace)
+            || kept.contains(&host)
+        {
             continue;
         }
         kept.push(host);
@@ -762,7 +791,11 @@ fn clean_language(language: &str) -> String {
         .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
         .take(12)
         .collect();
-    if cleaned.is_empty() { "en".into() } else { cleaned }
+    if cleaned.is_empty() {
+        "en".into()
+    } else {
+        cleaned
+    }
 }
 
 pub fn toolbar_order(saved: &[String], available: &[String]) -> Vec<String> {
@@ -845,9 +878,10 @@ mod tests {
 
     #[test]
     fn older_settings_get_page_tool_defaults() {
-        let loaded: super::BrowserSettings =
-            serde_json::from_str(r#"{"searchEngine":"bing","printEditor":{"paper":"a9","textSize":400}}"#)
-                .expect("settings parse");
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"searchEngine":"bing","printEditor":{"paper":"a9","textSize":400}}"#,
+        )
+        .expect("settings parse");
         let loaded = loaded.normalize();
         assert_eq!(loaded.search_engine, "bing");
         assert_eq!(loaded.print_editor.paper, "letter");
@@ -866,9 +900,10 @@ mod tests {
         assert!(loaded.adblock.allowed_sites.is_empty());
         assert!(loaded.accelerate_downloads);
         assert!(loaded.download_name_template.is_empty());
+        assert!(loaded.show_status_bar);
+        assert!(loaded.status_stats);
     }
 
-    #[test]
     #[test]
     fn older_settings_get_privacy_defaults() {
         let loaded: super::BrowserSettings =
@@ -878,6 +913,7 @@ mod tests {
         assert!(!loaded.fingerprint_shield);
         assert!(!loaded.https_only);
         assert!(loaded.https_exceptions.is_empty());
+        assert!(loaded.index_page_text);
     }
 
     #[test]
@@ -895,6 +931,16 @@ mod tests {
     }
 
     #[test]
+    fn older_settings_keep_extensions_on_the_address_bar() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"searchEngine":"bing"}"#).expect("settings parse");
+        let loaded = loaded.normalize();
+        assert!(loaded.vertical_toolbar);
+        assert!(!loaded.vertical_toolbar_extensions);
+        assert!(!loaded.vertical_toolbar_labels);
+    }
+
+    #[test]
     fn tab_settings_out_of_range_fall_back() {
         let loaded: super::BrowserSettings = serde_json::from_str(
             r#"{"tabLayout":"diagonal","verticalTabsWidth":9000,"tabSleep":{"minutes":1,"neverSleepSites":["https://www.Mail.example.com/inbox","mail.example.com",""]}}"#,
@@ -904,8 +950,15 @@ mod tests {
         assert_eq!(loaded.tab_layout, "horizontal");
         assert_eq!(loaded.vertical_tabs_width, 400);
         assert_eq!(loaded.tab_sleep.minutes, 5);
-        assert_eq!(loaded.tab_sleep.never_sleep_sites, vec!["mail.example.com".to_string()]);
-        assert!(loaded.tab_sleep.never_sleeps("https://inbox.mail.example.com/x"));
+        assert_eq!(
+            loaded.tab_sleep.never_sleep_sites,
+            vec!["mail.example.com".to_string()]
+        );
+        assert!(
+            loaded
+                .tab_sleep
+                .never_sleeps("https://inbox.mail.example.com/x")
+        );
         assert!(!loaded.tab_sleep.never_sleeps("https://example.com/"));
     }
 
@@ -917,7 +970,10 @@ mod tests {
         .expect("settings parse");
         let loaded = loaded.normalize();
         assert!(!loaded.adblock.enabled);
-        assert_eq!(loaded.adblock.allowed_sites, vec!["example.com".to_string()]);
+        assert_eq!(
+            loaded.adblock.allowed_sites,
+            vec!["example.com".to_string()]
+        );
     }
 
     #[test]
@@ -932,7 +988,11 @@ mod tests {
     #[test]
     fn a_saved_toolbar_order_drops_an_unpinned_id() {
         let available = ["print-pdf".to_string(), "ad-blocker".to_string()];
-        let saved = ["missing".to_string(), "ad-blocker".to_string(), "print-pdf".to_string()];
+        let saved = [
+            "missing".to_string(),
+            "ad-blocker".to_string(),
+            "print-pdf".to_string(),
+        ];
         assert_eq!(
             super::toolbar_order(&saved, &available),
             vec!["ad-blocker".to_string(), "print-pdf".to_string()]
@@ -964,7 +1024,10 @@ mod tests {
 
     #[test]
     fn a_sync_file_path_becomes_its_folder() {
-        assert_eq!(folder_from_stored(r"D:\share\ce-browser-sync.json"), r"D:\share");
+        assert_eq!(
+            folder_from_stored(r"D:\share\ce-browser-sync.json"),
+            r"D:\share"
+        );
         assert_eq!(folder_from_stored(""), "");
     }
 

@@ -11,10 +11,12 @@ import {
   openReader,
   reopenClosedTab,
   saveSettings,
+  searchHistory,
   zoomTab,
 } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { flattenBookmarks, useBookmarks, useHistory, useSettings, useTabs } from "@/lib/use-browser";
+import type { HistoryHit } from "@type/browser";
 
 type Hit = {
   id: string;
@@ -30,6 +32,7 @@ export function CommandPalette() {
   const settings = useSettings();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
+  const [textHits, setTextHits] = useState<HistoryHit[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const active = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
 
@@ -104,11 +107,46 @@ export function CommandPalette() {
     if (!text) {
       return all.slice(0, 12);
     }
-    return new Fuse(all, { keys: ["title", "hint"], threshold: 0.4, ignoreLocation: true })
+    const matched = new Fuse(all, { keys: ["title", "hint"], threshold: 0.4, ignoreLocation: true })
       .search(text)
       .slice(0, 12)
       .map((result) => result.item);
-  }, [active, bookmarks, history, query, settings, snapshot.tabs]);
+    const extra = textHits
+      .filter((hit) => !matched.some((item) => item.id === `history-${hit.id}`))
+      .map((hit) => ({
+        id: `history-${hit.id}`,
+        title: hit.title || hit.url,
+        hint: hit.snippet || hit.url,
+        run: () => createTab(hit.url),
+      }));
+    return [...matched, ...extra].slice(0, 12);
+  }, [active, bookmarks, history, query, settings, snapshot.tabs, textHits]);
+
+  useEffect(() => {
+    const needle = query.trim();
+    if (needle.length < 2) {
+      setTextHits([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void searchHistory(needle)
+        .then((found) => {
+          if (!cancelled) {
+            setTextHits(found.filter((hit) => hit.snippet));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setTextHits([]);
+          }
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
 
   useEffect(() => {
     setSelected(0);

@@ -570,7 +570,8 @@ const DETECT_SCRIPT: &str = r##"(async () => {
 })()"##;
 
 pub fn detect_technologies(app: &AppHandle, id: u32) -> Result<PageTechnologies, String> {
-    let webview = tabs::page_view(app, id).ok_or("That tab is closed or its page is not loaded.")?;
+    let webview =
+        tabs::page_view(app, id).ok_or("That tab is closed or its page is not loaded.")?;
     let value = webview2::evaluate(&webview, DETECT_SCRIPT, Duration::from_secs(10), FAILURE)?;
     let page: PageTechnologies =
         serde_json::from_value(value).map_err(|error| format!("{FAILURE} {error}"))?;

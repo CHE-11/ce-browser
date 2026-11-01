@@ -8,7 +8,6 @@ use std::sync::{Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::{HWND, LPARAM, PROPERTYKEY};
-use windows::core::BOOL;
 use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
@@ -22,8 +21,9 @@ use windows::Win32::UI::Shell::{
     ShellLink,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
+    EnumWindows, IsIconic, SW_RESTORE, SetForegroundWindow, ShowWindow,
 };
+use windows::core::BOOL;
 use windows::core::{GUID, HSTRING, Interface, PWSTR};
 
 use crate::{files, paths};
@@ -40,7 +40,11 @@ static ACTIVE: OnceLock<String> = OnceLock::new();
 
 #[link(name = "kernel32")]
 unsafe extern "system" {
-    fn CreateMutexW(attrs: *mut core::ffi::c_void, initial_owner: i32, name: *const u16) -> *mut core::ffi::c_void;
+    fn CreateMutexW(
+        attrs: *mut core::ffi::c_void,
+        initial_owner: i32,
+        name: *const u16,
+    ) -> *mut core::ffi::c_void;
     fn OpenMutexW(access: u32, inherit: i32, name: *const u16) -> *mut core::ffi::c_void;
     fn CloseHandle(handle: *mut core::ffi::c_void) -> i32;
     fn GetLastError() -> u32;
@@ -128,6 +132,7 @@ pub fn active_id() -> String {
 }
 
 pub fn init(app: &AppHandle) {
+    crate::sync_conflicts::note(app, &registry_path(app));
     let mut file = load(app);
     if ensure_default(&mut file) {
         let _ = save(app, &file);
@@ -176,7 +181,12 @@ pub fn mark_window(window: &tauri::Window) -> Result<(), String> {
     )
 }
 
-pub fn mark_model(window: &tauri::Window, model: &str, relaunch: &str, icon: &str) -> Result<(), String> {
+pub fn mark_model(
+    window: &tauri::Window,
+    model: &str,
+    relaunch: &str,
+    icon: &str,
+) -> Result<(), String> {
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
     com_init();
     unsafe {
@@ -350,6 +360,13 @@ pub fn apply_window_icon(app: &AppHandle, window: &tauri::Window) {
 }
 
 pub fn create(app: &AppHandle, name: &str) -> Result<Vec<ProfileInfo>, String> {
+    let id = create_closed(app, name)?;
+    let _ = open(&id);
+    Ok(list(app))
+}
+
+/// Creates the profile folder and Start menu item without opening a window.
+pub fn create_closed(app: &AppHandle, name: &str) -> Result<String, String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("A profile needs a name.".into());
@@ -378,9 +395,13 @@ pub fn create(app: &AppHandle, name: &str) -> Result<Vec<ProfileInfo>, String> {
         folder,
         ..ProfileRecord::default()
     });
-    save(app, &file)?;
-    let _ = open(&id);
-    Ok(list(app))
+    if let Err(error) = save(app, &file) {
+        let _ = fs::remove_dir_all(&data_dir);
+        let _ = fs::remove_dir_all(paths::profile_webview_dir(app, &id));
+        let _ = fs::remove_file(&shortcut);
+        return Err(error);
+    }
+    Ok(id)
 }
 
 pub fn install_shortcut_for(app: &AppHandle, id: &str) -> Result<Vec<ProfileInfo>, String> {
@@ -496,10 +517,16 @@ fn profile_child_dir(path: &Path, id: &str, data_root: &Path) -> bool {
     let Some(parent) = path.parent() else {
         return false;
     };
-    if parent.file_name().is_some_and(|parent_name| parent_name == "profiles") && name == id {
+    if parent
+        .file_name()
+        .is_some_and(|parent_name| parent_name == "profiles")
+        && name == id
+    {
         return true;
     }
-    let root = data_root.canonicalize().unwrap_or_else(|_| data_root.to_path_buf());
+    let root = data_root
+        .canonicalize()
+        .unwrap_or_else(|_| data_root.to_path_buf());
     parent == root
 }
 
@@ -510,18 +537,27 @@ pub fn folder_name(app: &AppHandle, id: &str) -> String {
 
 /// Folder of the default profile inside `root`.
 pub fn default_dir(root: &Path) -> PathBuf {
-    root.join(folder_of(&read_profiles_file(&root.join("profiles.json")), DEFAULT_ID))
+    root.join(folder_of(
+        &read_profiles_file(&root.join("profiles.json")),
+        DEFAULT_ID,
+    ))
 }
 
 pub fn sync_has_profile_settings(folder: &Path) -> bool {
-    if folder.join("profiles").join(DEFAULT_ID).join("settings.json").is_file() {
+    if folder
+        .join("profiles")
+        .join(DEFAULT_ID)
+        .join("settings.json")
+        .is_file()
+    {
         return true;
     }
     let Ok(entries) = fs::read_dir(folder) else {
         return false;
     };
     entries.flatten().any(|entry| {
-        entry.file_type().is_ok_and(|kind| kind.is_dir()) && entry.path().join("settings.json").is_file()
+        entry.file_type().is_ok_and(|kind| kind.is_dir())
+            && entry.path().join("settings.json").is_file()
     })
 }
 
@@ -642,7 +678,7 @@ fn profile_is_open(id: &str) -> bool {
 static PROFILE_MUTEX: OnceLock<usize> = OnceLock::new();
 
 fn load(app: &AppHandle) -> ProfilesFile {
-    let mut file: ProfilesFile = files::read_json(&registry_path(app));
+    let mut file: ProfilesFile = crate::sync_conflicts::read_json(app, &registry_path(app));
     ensure_default(&mut file);
     migrate_default(&mut file);
     assign_folders(&mut file);
@@ -654,7 +690,11 @@ fn migrate_default(file: &mut ProfilesFile) {
     let other_owns_default = file.profiles.iter().any(|profile| {
         profile.id != DEFAULT_ID && profile.folder.eq_ignore_ascii_case(DEFAULT_FOLDER)
     });
-    let Some(record) = file.profiles.iter_mut().find(|profile| profile.id == DEFAULT_ID) else {
+    let Some(record) = file
+        .profiles
+        .iter_mut()
+        .find(|profile| profile.id == DEFAULT_ID)
+    else {
         return;
     };
     if record.name == LEGACY_DEFAULT_NAME || record.name.trim().is_empty() {
@@ -666,7 +706,7 @@ fn migrate_default(file: &mut ProfilesFile) {
 }
 
 fn save(app: &AppHandle, file: &ProfilesFile) -> Result<(), String> {
-    files::write_json(&registry_path(app), file)
+    crate::sync_conflicts::store(app, &registry_path(app), file)
 }
 
 fn registry_path(app: &AppHandle) -> PathBuf {
@@ -741,8 +781,10 @@ pub fn install_link(
         let link: IShellLinkW =
             CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(win_err)?;
         link.SetPath(&HSTRING::from(&exe_text)).map_err(win_err)?;
-        link.SetArguments(&HSTRING::from(arguments)).map_err(win_err)?;
-        link.SetDescription(&HSTRING::from(description)).map_err(win_err)?;
+        link.SetArguments(&HSTRING::from(arguments))
+            .map_err(win_err)?;
+        link.SetDescription(&HSTRING::from(description))
+            .map_err(win_err)?;
         let icon_path = icon
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| exe_text.clone());
@@ -1081,7 +1123,7 @@ fn wide(value: impl AsRef<std::ffi::OsStr>) -> Vec<u16> {
         .collect()
 }
 
-const PROFILE_FILES: &[&str] = &[
+pub(crate) const PROFILE_FILES: &[&str] = &[
     "settings.json",
     "history.json",
     "bookmarks.json",
@@ -1096,7 +1138,9 @@ const PROFILE_FILES: &[&str] = &[
     "shortcuts.json",
     "rewrite-rules.json",
     "prices.json",
+    "stats.json",
     "window-icon.png",
+    "history-text.json",
 ];
 
 /// Moves profile stores between app data and a sync folder. Both keep `profiles.json` and one
@@ -1129,7 +1173,11 @@ fn transfer_profiles(
     let mut moved = migrate_layout(from, from_appdata)?;
     moved |= migrate_layout(to, to_appdata)?;
     let source = read_profiles_file(&from.join("profiles.json"));
-    move_entry(&from.join("profiles.json"), &to.join("profiles.json"), overwrite)?;
+    move_entry(
+        &from.join("profiles.json"),
+        &to.join("profiles.json"),
+        overwrite,
+    )?;
     let file = read_profiles_file(&to.join("profiles.json"));
     for profile in &file.profiles {
         let from_dir = from.join(folder_of(&source, &profile.id));
@@ -1190,7 +1238,9 @@ pub fn migrate_layout(root: &Path, loose_default: bool) -> Result<bool, String> 
         }
     }
     if let Ok(entries) = fs::read_dir(root.join("profiles")) {
-        let leftover = entries.flatten().any(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()));
+        let leftover = entries
+            .flatten()
+            .any(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()));
         if !leftover {
             let _ = fs::remove_dir_all(root.join("profiles"));
         }
@@ -1251,7 +1301,11 @@ fn move_loose_profile(from_dir: &Path, to_dir: &Path, overwrite: bool) -> Result
     for name in PROFILE_FILES {
         move_entry(&from_dir.join(name), &to_dir.join(name), overwrite)?;
     }
-    move_entry(&from_dir.join("extensions"), &to_dir.join("extensions"), overwrite)?;
+    move_entry(
+        &from_dir.join("extensions"),
+        &to_dir.join("extensions"),
+        overwrite,
+    )?;
     let Ok(entries) = fs::read_dir(from_dir) else {
         return Ok(());
     };
@@ -1304,7 +1358,8 @@ fn move_entry(from: &Path, to: &Path, overwrite: bool) -> Result<(), String> {
         files::copy_dir(from, to)?;
         fs::remove_dir_all(from).map_err(|error| error.to_string())?;
     } else {
-        fs::copy(from, to).map_err(|error| format!("Could not copy {}: {error}", from.display()))?;
+        fs::copy(from, to)
+            .map_err(|error| format!("Could not copy {}: {error}", from.display()))?;
         fs::remove_file(from).map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -1408,7 +1463,11 @@ fn unique_directory_name(name: &str, id: &str, used: &[String]) -> String {
 fn sanitize_directory_name(name: &str) -> String {
     let mut folder = String::new();
     for character in name.chars() {
-        if matches!(character, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || character.is_control() {
+        if matches!(
+            character,
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+        ) || character.is_control()
+        {
             folder.push('-');
         } else {
             folder.push(character);
@@ -1417,7 +1476,11 @@ fn sanitize_directory_name(name: &str) -> String {
             break;
         }
     }
-    folder.trim().trim_end_matches(['.', ' ']).trim().to_string()
+    folder
+        .trim()
+        .trim_end_matches(['.', ' '])
+        .trim()
+        .to_string()
 }
 
 fn valid_folder_name(name: &str) -> bool {
@@ -1428,7 +1491,10 @@ fn valid_folder_name(name: &str) -> bool {
         && !name.ends_with('.')
         && !name.ends_with(' ')
         && !name.chars().any(|character| {
-            matches!(character, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || character.is_control()
+            matches!(
+                character,
+                '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+            ) || character.is_control()
         })
 }
 
@@ -1451,7 +1517,8 @@ mod tests {
 
     #[test]
     fn deleting_a_profile_removes_its_stores() {
-        let root = std::env::temp_dir().join(format!("ce-browser-profile-test-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("ce-browser-profile-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let id = "work";
         let roaming = root.join("roaming");
@@ -1459,7 +1526,12 @@ mod tests {
         let webview = root.join("local").join("profiles").join(id);
         fs::create_dir_all(data.join("extensions")).unwrap();
         fs::create_dir_all(&webview).unwrap();
-        for name in ["settings.json", "history.json", "bookmarks.json", "extensions.json"] {
+        for name in [
+            "settings.json",
+            "history.json",
+            "bookmarks.json",
+            "extensions.json",
+        ] {
             fs::write(data.join(name), "{}").unwrap();
         }
         fs::write(data.join("extensions").join("manifest.json"), "{}").unwrap();
@@ -1475,7 +1547,8 @@ mod tests {
 
     #[test]
     fn old_app_data_moves_into_one_folder_per_profile() {
-        let root = std::env::temp_dir().join(format!("ce-browser-appdata-layout-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("ce-browser-appdata-layout-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("profiles").join("work").join("extensions")).unwrap();
         fs::create_dir_all(root.join("extensions").join("ublock")).unwrap();
@@ -1485,19 +1558,43 @@ mod tests {
         )
         .unwrap();
         fs::write(root.join("sync-folder.json"), "{}").unwrap();
-        for name in ["settings.json", "downloads.json", "session.json", "styles.css"] {
+        for name in [
+            "settings.json",
+            "downloads.json",
+            "session.json",
+            "styles.css",
+        ] {
             fs::write(root.join(name), "{}").unwrap();
         }
-        fs::write(root.join("extensions").join("ublock").join("manifest.json"), "{}").unwrap();
-        fs::write(root.join("profiles").join("work").join("settings.json"), "{}").unwrap();
+        fs::write(
+            root.join("extensions").join("ublock").join("manifest.json"),
+            "{}",
+        )
+        .unwrap();
+        fs::write(
+            root.join("profiles").join("work").join("settings.json"),
+            "{}",
+        )
+        .unwrap();
 
         assert!(migrate_layout(&root, true).unwrap());
 
-        for name in ["settings.json", "downloads.json", "session.json", "styles.css"] {
+        for name in [
+            "settings.json",
+            "downloads.json",
+            "session.json",
+            "styles.css",
+        ] {
             assert!(root.join("Default").join(name).is_file(), "{name}");
             assert!(!root.join(name).exists(), "{name}");
         }
-        assert!(root.join("Default").join("extensions").join("ublock").join("manifest.json").is_file());
+        assert!(
+            root.join("Default")
+                .join("extensions")
+                .join("ublock")
+                .join("manifest.json")
+                .is_file()
+        );
         assert!(root.join("Work").join("settings.json").is_file());
         assert!(!root.join("profiles").exists());
         assert!(root.join("sync-folder.json").is_file());
@@ -1508,14 +1605,18 @@ mod tests {
 
         let written = fs::read_to_string(root.join("profiles.json")).unwrap();
         assert!(!migrate_layout(&root, true).unwrap());
-        assert_eq!(fs::read_to_string(root.join("profiles.json")).unwrap(), written);
+        assert_eq!(
+            fs::read_to_string(root.join("profiles.json")).unwrap(),
+            written
+        );
         assert!(root.join("Default").join("settings.json").is_file());
         let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
     fn an_old_sync_folder_renames_ce_browser_to_default() {
-        let root = std::env::temp_dir().join(format!("ce-browser-sync-layout-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("ce-browser-sync-layout-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("ce-browser")).unwrap();
         fs::create_dir_all(root.join("Work")).unwrap();
@@ -1540,7 +1641,8 @@ mod tests {
 
     #[test]
     fn a_profile_already_named_default_keeps_its_folder() {
-        let root = std::env::temp_dir().join(format!("ce-browser-default-clash-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("ce-browser-default-clash-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("ce-browser")).unwrap();
         fs::create_dir_all(root.join("Default")).unwrap();
@@ -1554,8 +1656,14 @@ mod tests {
 
         migrate_layout(&root, false).unwrap();
 
-        assert_eq!(fs::read_to_string(root.join("ce-browser").join("settings.json")).unwrap(), "{\"a\":1}");
-        assert_eq!(fs::read_to_string(root.join("Default").join("settings.json")).unwrap(), "{\"b\":2}");
+        assert_eq!(
+            fs::read_to_string(root.join("ce-browser").join("settings.json")).unwrap(),
+            "{\"a\":1}"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("Default").join("settings.json")).unwrap(),
+            "{\"b\":2}"
+        );
         let file = registry(&root);
         assert_eq!(file.profiles[0].folder, "ce-browser");
         let _ = fs::remove_dir_all(&root);
@@ -1563,15 +1671,14 @@ mod tests {
 
     #[test]
     fn a_profile_delete_cannot_remove_the_registry() {
-        let root = std::env::temp_dir().join(format!(
-            "ce-browser-profile-guard-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("ce-browser-profile-guard-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("profiles")).unwrap();
         fs::write(root.join("profiles.json"), "{}").unwrap();
 
-        let error = remove_profile_dir(&root.join("profiles").join(".."), "nope", &root).unwrap_err();
+        let error =
+            remove_profile_dir(&root.join("profiles").join(".."), "nope", &root).unwrap_err();
         assert!(error.contains("outside"));
         assert!(root.join("profiles.json").is_file());
         assert!(!profile_child_dir(&root, "default", &root));
@@ -1583,7 +1690,8 @@ mod tests {
 
     #[test]
     fn profiles_move_into_the_sync_folder_and_leave_app_data() {
-        let root = std::env::temp_dir().join(format!("ce-browser-sync-move-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("ce-browser-sync-move-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let appdata = root.join("appdata");
         let sync = root.join("sync");
@@ -1595,11 +1703,20 @@ mod tests {
         )
         .unwrap();
         fs::write(appdata.join("sync-folder.json"), "{}").unwrap();
-        for name in ["settings.json", "history.json", "bookmarks.json", "extensions.json"] {
+        for name in [
+            "settings.json",
+            "history.json",
+            "bookmarks.json",
+            "extensions.json",
+        ] {
             fs::write(appdata.join(name), "{}").unwrap();
         }
         fs::write(appdata.join("extensions").join("manifest.json"), "{}").unwrap();
-        fs::write(appdata.join("profiles").join("work").join("settings.json"), "{}").unwrap();
+        fs::write(
+            appdata.join("profiles").join("work").join("settings.json"),
+            "{}",
+        )
+        .unwrap();
 
         super::transfer_appdata_to_sync(&appdata, &sync).unwrap();
 
@@ -1607,7 +1724,12 @@ mod tests {
         assert!(sync.join("Default").join("settings.json").is_file());
         assert!(sync.join("Default").join("history.json").is_file());
         assert!(sync.join("Default").join("bookmarks.json").is_file());
-        assert!(sync.join("Default").join("extensions").join("manifest.json").is_file());
+        assert!(
+            sync.join("Default")
+                .join("extensions")
+                .join("manifest.json")
+                .is_file()
+        );
         assert!(sync.join("Work").join("settings.json").is_file());
         assert!(!sync.join("profiles").exists());
         assert!(!appdata.join("settings.json").exists());
@@ -1620,7 +1742,13 @@ mod tests {
         super::transfer_sync_to_appdata(&sync, &appdata).unwrap();
 
         assert!(appdata.join("Default").join("settings.json").is_file());
-        assert!(appdata.join("Default").join("extensions").join("manifest.json").is_file());
+        assert!(
+            appdata
+                .join("Default")
+                .join("extensions")
+                .join("manifest.json")
+                .is_file()
+        );
         assert!(appdata.join("Work").join("settings.json").is_file());
         assert!(appdata.join("profiles.json").is_file());
         assert!(!sync.join("Default").exists());

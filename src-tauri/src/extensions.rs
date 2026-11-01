@@ -65,7 +65,8 @@ struct Installed {
 }
 
 pub fn init(app: &AppHandle) {
-    let file: ExtensionsFile = files::read_json(&paths::data_file(app, FILE));
+    crate::sync_conflicts::note(app, &paths::data_file(app, FILE));
+    let file: ExtensionsFile = crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
     app.manage(Extensions(Mutex::new(file.extensions)));
 }
 
@@ -87,7 +88,8 @@ fn save_records(
         change(&mut records);
         records.clone()
     };
-    files::write_json(
+    crate::sync_conflicts::store(
+        app,
         &paths::data_file(app, FILE),
         &ExtensionsFile {
             extensions: snapshot,
@@ -299,10 +301,17 @@ fn emit(app: &AppHandle) {
     }
 }
 
+/// Loads `extensions.json` into memory without installing or rewriting it.
+pub fn adopt_saved(app: &AppHandle) {
+    let file: ExtensionsFile = crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
+    *app.state::<Extensions>().0.lock().expect("extensions lock") = file.extensions;
+    emit(app);
+}
+
 /// Extensions persist in the WebView2 profile. Folders dropped into `<data>/extensions` by hand,
 /// or a profile that was reset, get (re)added here.
 pub fn reload(app: &AppHandle) -> Result<(), String> {
-    let file: ExtensionsFile = files::read_json(&paths::data_file(app, FILE));
+    let file: ExtensionsFile = crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
     *app.state::<Extensions>().0.lock().expect("extensions lock") = file.extensions;
     let _ = fs::remove_file(extensions_root_marker(app));
     sync_on_startup(app)
@@ -618,7 +627,9 @@ pub fn stage_incoming(profile_dir: &Path, incoming: &[IncomingExtension]) -> Res
     }
     files::write_json(
         &profile_dir.join("extensions.json"),
-        &ExtensionsFile { extensions: records },
+        &ExtensionsFile {
+            extensions: records,
+        },
     )
 }
 

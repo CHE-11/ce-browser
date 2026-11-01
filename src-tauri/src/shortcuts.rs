@@ -206,9 +206,17 @@ pub fn list(app: &AppHandle) -> Vec<ShortcutBinding> {
     defaults()
 }
 
-pub fn save(app: &AppHandle, bindings: Vec<ShortcutBinding>) -> Result<Vec<ShortcutBinding>, String> {
+pub fn save(
+    app: &AppHandle,
+    bindings: Vec<ShortcutBinding>,
+) -> Result<Vec<ShortcutBinding>, String> {
     let bindings = normalize_saved(&bindings);
-    files::write_json(&paths::data_file(app, FILE), &ShortcutFile { bindings: bindings.clone() })?;
+    files::write_json(
+        &paths::data_file(app, FILE),
+        &ShortcutFile {
+            bindings: bindings.clone(),
+        },
+    )?;
     let shown = effective(&bindings);
     store_bindings(&bindings);
     if let Some(state) = app.try_state::<ShortcutState>() {
@@ -251,10 +259,17 @@ pub fn effective(saved: &[ShortcutBinding]) -> Vec<ShortcutBinding> {
 }
 
 fn normalize_saved(bindings: &[ShortcutBinding]) -> Vec<ShortcutBinding> {
-    let known: Vec<String> = defaults().into_iter().map(|binding| binding.action).collect();
+    let known: Vec<String> = defaults()
+        .into_iter()
+        .map(|binding| binding.action)
+        .collect();
     let mut rows = Vec::new();
     for binding in bindings {
-        if !known.iter().any(|action| action == &binding.action) || rows.iter().any(|item: &ShortcutBinding| item.action == binding.action) {
+        if !known.iter().any(|action| action == &binding.action)
+            || rows
+                .iter()
+                .any(|item: &ShortcutBinding| item.action == binding.action)
+        {
             continue;
         }
         let keys: Vec<String> = binding
@@ -282,12 +297,18 @@ fn binding_action(token: &str) -> Option<Action> {
     let bindings = live_bindings();
     let pending = take_pending();
     if let Some(first) = pending {
-        if let Some(binding) = bindings.iter().find(|binding| binding.keys.len() == 2 && binding.keys[0] == first && binding.keys[1] == token) {
+        if let Some(binding) = bindings.iter().find(|binding| {
+            binding.keys.len() == 2 && binding.keys[0] == first && binding.keys[1] == token
+        }) {
             return action_from(&binding.action);
         }
     }
-    let exact = bindings.iter().find(|binding| binding.keys.len() == 1 && binding.keys[0] == token);
-    let prefix = bindings.iter().any(|binding| binding.keys.len() == 2 && binding.keys[0] == token);
+    let exact = bindings
+        .iter()
+        .find(|binding| binding.keys.len() == 1 && binding.keys[0] == token);
+    let prefix = bindings
+        .iter()
+        .any(|binding| binding.keys.len() == 2 && binding.keys[0] == token);
     if prefix && exact.is_none() {
         set_pending(token);
         return Some(Action::ChordWait);
@@ -307,13 +328,18 @@ fn live_bindings() -> Vec<ShortcutBinding> {
 }
 
 fn store_bindings(bindings: &[ShortcutBinding]) {
-    *BINDINGS.lock().expect("shortcuts") = effective(bindings).into_iter().filter(|binding| !binding.keys.is_empty()).collect();
+    *BINDINGS.lock().expect("shortcuts") = effective(bindings)
+        .into_iter()
+        .filter(|binding| !binding.keys.is_empty())
+        .collect();
 }
 
 fn take_pending() -> Option<String> {
-    PENDING.lock().expect("chord").take().and_then(|(token, at)| {
-        (at.elapsed() < std::time::Duration::from_secs(1)).then_some(token)
-    })
+    PENDING
+        .lock()
+        .expect("chord")
+        .take()
+        .and_then(|(token, at)| (at.elapsed() < std::time::Duration::from_secs(1)).then_some(token))
 }
 
 fn set_pending(token: &str) {
@@ -359,12 +385,17 @@ fn digit(index: u32) -> Option<&'static str> {
 }
 
 fn letter(index: u32) -> Option<&'static str> {
-    const LETTERS: [&str; 26] = ["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z"];
+    const LETTERS: [&str; 26] = [
+        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r",
+        "s", "t", "u", "v", "w", "x", "y", "z",
+    ];
     Some(LETTERS[index as usize])
 }
 
 fn function_key(index: u32) -> Option<&'static str> {
-    const KEYS: [&str; 12] = ["f1","f2","f3","f4","f5","f6","f7","f8","f9","f10","f11","f12"];
+    const KEYS: [&str; 12] = [
+        "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
+    ];
     KEYS.get(index as usize).copied()
 }
 
@@ -424,7 +455,11 @@ pub fn defaults() -> Vec<ShortcutBinding> {
         bind("back", "Back", "alt+left"),
         bind("forward", "Forward", "alt+right"),
         bind("bookmark", "Bookmark this page", "ctrl+d"),
-        bind("toggle-bookmarks-bar", "Show or hide bookmarks bar", "ctrl+shift+b"),
+        bind(
+            "toggle-bookmarks-bar",
+            "Show or hide bookmarks bar",
+            "ctrl+shift+b",
+        ),
         bind("downloads", "Downloads", "ctrl+j"),
         bind("find", "Find in page", "ctrl+f"),
         bind("zoom-in", "Zoom in", "ctrl+plus"),
@@ -466,8 +501,15 @@ mod tests {
             keys: vec!["ctrl+shift+n".into()],
         }];
         let rows = effective(&saved);
-        assert!(rows.iter().any(|row| row.action == "new-tab" && row.keys == vec!["ctrl+shift+n".to_string()]));
-        assert!(rows.iter().any(|row| row.action == "command-palette" && row.keys == vec!["ctrl+k".to_string()]));
+        assert!(
+            rows.iter()
+                .any(|row| row.action == "new-tab" && row.keys == vec!["ctrl+shift+n".to_string()])
+        );
+        assert!(
+            rows.iter().any(
+                |row| row.action == "command-palette" && row.keys == vec!["ctrl+k".to_string()]
+            )
+        );
     }
 
     #[test]
