@@ -5,6 +5,7 @@ import { createTab, navigate, openPopupBelow, openPopup, closePopup } from "@/li
 import { BOOKMARK_DROP_END, useBookmarkDrag } from "@/lib/bookmark-drag";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { cn } from "@/lib/cn";
+import { focusRing } from "@/lib/focus-ring";
 import { faviconKey } from "@/lib/format";
 import { useSiteFavicons } from "@/lib/use-browser";
 import { BookmarkTree, BookmarkNode } from "@type/browser";
@@ -19,8 +20,10 @@ type BookmarksBarProps = {
 };
 
 /** Gap, icon and width are in `em`, so they follow the text size setting. */
-const itemClass =
-  "inline-flex max-w-[15em] shrink-0 items-center gap-[0.5em] rounded-md text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100";
+const itemClass = cn(
+  "inline-flex max-w-[15em] shrink-0 items-center gap-[0.5em] rounded-md text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100",
+  focusRing,
+);
 const iconClass = "size-[1.2em] shrink-0";
 
 const FOLDER_POPUP = { kind: "bookmark-folder", width: 300, height: 360 } as const;
@@ -171,6 +174,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding }: BookmarksBar
               id={`bookmarks-bar-${node.id}`}
               type="button"
               title={node.title}
+              aria-haspopup="menu"
               className={cn(itemClass, drag.dropChrome(node.id))}
               style={itemStyle}
               onContextMenu={(event) => openBarMenu(event, node)}
@@ -193,6 +197,8 @@ export function BookmarksBar({ tree, activeId, textSize, padding }: BookmarksBar
           id="bookmarks-bar-all"
           type="button"
           title="All bar bookmarks"
+          aria-label="All bar bookmarks"
+          aria-haspopup="menu"
           className={cn(itemClass, drag.dropChrome(tree.bar.id))}
           style={itemStyle}
           onClick={(event) => openFolder(event, tree.bar)}
@@ -206,6 +212,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding }: BookmarksBar
           id="bookmarks-bar-other"
           type="button"
           title="Other bookmarks"
+          aria-haspopup="menu"
           className={cn(itemClass, drag.dropChrome(tree.other.id))}
           style={itemStyle}
           onClick={(event) => openFolder(event, tree.other)}

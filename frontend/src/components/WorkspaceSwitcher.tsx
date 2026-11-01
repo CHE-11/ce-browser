@@ -2,6 +2,7 @@ import { ChevronDown } from "lucide-react";
 import type { Workspace } from "../../../types/browser";
 import { openPopupBelow } from "../lib/browser-client";
 import { cn } from "../lib/cn";
+import { focusRing } from "../lib/focus-ring";
 import { groupColorClasses } from "../lib/tab-rows";
 
 type WorkspaceSwitcherProps = {
@@ -24,8 +25,10 @@ export function WorkspaceSwitcher({ workspaces, current, compact = false, classN
       type="button"
       title={`Workspace: ${workspace.name}\nCtrl+Alt+1 to 9 switch workspaces`}
       aria-label={`Workspace ${workspace.name}`}
+      aria-haspopup="menu"
       className={cn(
         "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md text-xs text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100",
+        focusRing,
         compact ? "w-9 justify-center" : "max-w-36 px-2",
         className,
       )}

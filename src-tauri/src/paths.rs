@@ -262,6 +262,30 @@ pub fn http_origin(url: &str) -> Option<String> {
     (origin != "null").then_some(origin)
 }
 
+/// The part of a host a person registers, such as `example.co.uk` for `www.example.co.uk`.
+/// IP addresses, `localhost` and unknown suffixes give the host itself.
+pub fn registrable_domain(host: &str) -> String {
+    let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
+    if host.is_empty() || host.parse::<std::net::IpAddr>().is_ok() || host.starts_with('[') {
+        return host;
+    }
+    match psl::domain_str(&host) {
+        Some(domain) => domain.to_string(),
+        None => host,
+    }
+}
+
+/// Registrable domain of an `http` or `https` address. Empty for other schemes.
+pub fn site_of(url: &str) -> String {
+    let Ok(url) = Url::parse(url) else {
+        return String::new();
+    };
+    if url.scheme() != "http" && url.scheme() != "https" {
+        return String::new();
+    }
+    url.host_str().map(registrable_domain).unwrap_or_default()
+}
+
 fn is_local_host(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     lower == "localhost"
@@ -272,7 +296,17 @@ fn is_local_host(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{http_origin, pin_key};
+    use super::{http_origin, pin_key, registrable_domain, site_of};
+
+    #[test]
+    fn the_registrable_domain_drops_subdomains_but_keeps_public_suffixes() {
+        assert_eq!(registrable_domain("www.example.co.uk"), "example.co.uk");
+        assert_eq!(registrable_domain("docs.github.com"), "github.com");
+        assert_eq!(registrable_domain("localhost"), "localhost");
+        assert_eq!(registrable_domain("127.0.0.1"), "127.0.0.1");
+        assert_eq!(site_of("https://mail.google.com/inbox"), "google.com");
+        assert_eq!(site_of("ce://settings"), "");
+    }
 
     #[test]
     fn http_origin_keeps_the_site_and_drops_the_path() {

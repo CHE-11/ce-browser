@@ -16,7 +16,8 @@ tauri-build = { version = "2", features = [] }
 aes-gcm = "0.10"
 argon2 = "0.5"
 base64 = "0.22"
-image = { version = "0.25.9", default-features = false, features = ["png", "jpeg", "gif", "bmp", "ico"] }
+image = { version = "0.25.9", default-features = false, features = ["png", "jpeg", "gif", "bmp", "ico", "webp"] }
+psl = "2"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"

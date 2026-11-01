@@ -4,6 +4,7 @@ import { FavIcon } from "@/components/FavIcon";
 import { setTabsMuted, selectTabRange, toggleTabSelection, activateTab } from "@/lib/browser-client";
 import { accentTint } from "@/lib/accent";
 import { cn } from "@/lib/cn";
+import { focusRing } from "@/lib/focus-ring";
 import { useSettings } from "@/lib/use-browser";
 import { groupColorClasses } from "@/lib/tab-rows";
 import { TabInfo } from "@type/browser";
@@ -63,6 +64,7 @@ export function TabItem({
       aria-label={tab.muted ? `Unmute ${tab.title}` : `Mute ${tab.title}`}
       className={cn(
         "inline-flex size-5 shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100",
+        focusRing,
         compact && "absolute -right-0.5 -top-0.5 size-4 rounded-full bg-zinc-900",
       )}
       onMouseDown={(event) => event.stopPropagation()}
@@ -86,6 +88,7 @@ export function TabItem({
       tabIndex={0}
       className={cn(
         "group relative flex shrink-0 cursor-default select-none items-center gap-2 text-xs transition-colors",
+        focusRing,
         vertical ? "h-8 w-full rounded-lg px-2" : "h-7.5 rounded-t-lg px-2.5",
         !vertical && (compact ? "w-10 justify-center px-0" : "w-56 min-w-14 shrink"),
         vertical && compact && "w-9 justify-center px-0",
@@ -208,7 +211,8 @@ export function TabItem({
             aria-label={grouped ? "Close selected tabs" : `Close ${tab.title}`}
             className={cn(
               "inline-flex size-5 shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100",
-              !active && !grouped && "opacity-0 group-hover:opacity-100",
+              focusRing,
+              !active && !grouped && "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 group-focus-visible:opacity-100",
             )}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onClose}

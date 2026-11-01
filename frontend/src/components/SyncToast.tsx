@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { SyncStatus } from "../../../types/browser";
 import { onSyncStatus, syncStatus } from "../lib/browser-client";
+import { Button } from "./Button";
 
 export function SyncToast() {
   const [error, setError] = useState<string | null>(null);
@@ -35,14 +36,16 @@ export function SyncToast() {
       <p id="sync-toast-message" className="min-w-0 flex-1">
         Sync save error: {error}
       </p>
-      <button
+      <Button
         id="sync-toast-dismiss"
-        type="button"
+        variant="link"
+        size="xs"
+        aria-label="Dismiss sync error"
         className="shrink-0 text-red-300 hover:text-red-100"
         onClick={() => setDismissed(error)}
       >
         Dismiss
-      </button>
+      </Button>
     </div>
   );
 }

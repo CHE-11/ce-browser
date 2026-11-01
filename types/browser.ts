@@ -33,6 +33,53 @@ export type TabInfo = {
   errors: number;
   /** `#rrggbb` from the site's theme color or favicon. */
   accent: string | null;
+  /** Registrable domain of an http(s) page, such as `example.co.uk`. Empty for other pages. */
+  site: string;
+  /** When the tab was last selected, in milliseconds since 1970. Zero until it is shown. */
+  lastActive: number;
+  /** Load progress from 0 to 100. */
+  progress: number;
+  /** Why the page can't be shown. The browser UI draws this in place of the page. */
+  failure: TabFailure | null;
+};
+
+export type TabFailureKind = "crashed" | "offline" | "dns" | "certificate" | "timeout" | "refused" | "other";
+
+export type TabFailure = {
+  kind: TabFailureKind;
+  /** Address that failed, so Retry can load it again. */
+  url: string;
+  /** WebView2 error name, for example `HOST_NAME_NOT_RESOLVED`. */
+  code: string;
+  /** Extra text, such as the certificate issuer and expiry. */
+  detail: string;
+};
+
+/** One tab as it was when it closed. */
+export type ClosedTab = {
+  url: string;
+  title: string;
+  favicon: string | null;
+  pinned: boolean;
+  index: number;
+  window: string;
+  workspace: string;
+};
+
+export type ClosedGroup = {
+  name: string;
+  color: TabGroupColor;
+  container: string;
+};
+
+/** A closed tab, a closed group, or tabs closed together. Restored as one. */
+export type ClosedEntry = {
+  id: number;
+  /** Milliseconds since 1970. */
+  closedAt: number;
+  kind: "tab" | "group" | "batch";
+  group: ClosedGroup | null;
+  tabs: ClosedTab[];
 };
 
 export type SplitView = {
@@ -229,7 +276,15 @@ export type PeekInfo = {
   favicon: string | null;
 };
 
-export type BrowserCommand = "focus-address" | "find" | "bookmark" | "downloads" | "palette";
+export type BrowserCommand =
+  | "focus-address"
+  | "find"
+  | "bookmark"
+  | "downloads"
+  | "palette"
+  | "tab-search"
+  | "shortcut-sheet"
+  | "tab-switcher";
 
 export type PopupKind =
   | "downloads"
@@ -261,7 +316,16 @@ export type PopupKind =
   | "wayback"
   | "reading"
   | "assistant"
-  | "shopping";
+  | "shopping"
+  | "toast"
+  | "tab-search"
+  | "tab-switcher"
+  | "tab-hover"
+  | "shortcut-sheet"
+  | "unresponsive"
+  | "site-info"
+  | "find-all"
+  | "selection-translate";
 
 export type PopupRequest = {
   kind: PopupKind;
@@ -350,6 +414,8 @@ export type HistoryItem = {
   title: string;
   visitCount: number;
   lastVisited: number;
+  /** Visits that began with the address typed into the address bar. */
+  typedCount: number;
 };
 
 export type ExtensionInfo = {
@@ -518,6 +584,8 @@ export type ShortcutBinding = {
   label: string;
   /** One token, or two for a chord. Empty unbinds the action. */
   keys: string[];
+  /** Cheat sheet heading. Filled by the browser and never saved. */
+  category?: string;
 };
 
 export type TabSleepSettings = {

@@ -36,7 +36,9 @@ mod sync_conflicts;
 mod system;
 mod tab_sleep;
 mod tabs;
+mod thumbnails;
 mod tools;
+mod undo;
 mod user_styles;
 mod webview2;
 mod what_runs;
@@ -183,6 +185,31 @@ async fn duplicate_tab(app: AppHandle, id: u32) -> Result<u32, String> {
 #[tauri::command]
 async fn reopen_closed_tab(app: AppHandle) -> Result<Option<u32>, String> {
     tabs::reopen_closed(&app)
+}
+
+#[tauri::command]
+fn list_recently_closed(app: AppHandle) -> Vec<tabs::ClosedEntry> {
+    tabs::recently_closed(&app)
+}
+
+#[tauri::command]
+async fn restore_closed(app: AppHandle, id: Option<u32>) -> Result<Option<u32>, String> {
+    tabs::restore_closed(&app, id)
+}
+
+#[tauri::command]
+async fn tab_thumbnail(app: AppHandle, id: u32) -> Result<Option<String>, String> {
+    blocking(move || Ok(thumbnails::thumbnail(&app, id))).await
+}
+
+#[tauri::command]
+async fn undo_action(app: AppHandle, id: u32) -> Result<(), String> {
+    undo::undo(&app, id)
+}
+
+#[tauri::command]
+async fn dismiss_toast(app: AppHandle, id: u32) {
+    undo::dismiss(&app, id);
 }
 
 #[tauri::command]
@@ -615,8 +642,26 @@ fn move_bookmark(
 }
 
 #[tauri::command]
-fn delete_bookmark(app: AppHandle, id: String) -> Result<(), String> {
-    bookmarks::delete(&app, &id)
+async fn delete_bookmark(app: AppHandle, window: Window, id: String) -> Result<(), String> {
+    let (node, parent, index) = bookmarks::delete_returning(&app, &id)?;
+    let what = if node.separator {
+        "Deleted divider".to_string()
+    } else if node.url.is_none() {
+        format!("Deleted folder \u{201c}{}\u{201d}", node.title)
+    } else {
+        format!("Deleted bookmark \u{201c}{}\u{201d}", node.title)
+    };
+    undo::offer(
+        &app,
+        window.label(),
+        &what,
+        undo::UndoAction::Bookmark {
+            node,
+            parent,
+            index,
+        },
+    );
+    Ok(())
 }
 
 #[tauri::command]
@@ -706,13 +751,45 @@ fn list_history(app: AppHandle) -> Vec<HistoryItem> {
 }
 
 #[tauri::command]
-fn remove_history(app: AppHandle, id: u32) {
-    history::remove(&app, id);
+async fn remove_history(app: AppHandle, window: Window, id: u32) {
+    if let Some(item) = history::take(&app, id) {
+        undo::offer(
+            &app,
+            window.label(),
+            "Removed from history",
+            undo::UndoAction::History {
+                items: vec![item],
+                cleared: false,
+            },
+        );
+    }
 }
 
 #[tauri::command]
-fn clear_history(app: AppHandle) {
-    history::clear(&app);
+async fn clear_history(app: AppHandle, window: Window) {
+    let items = history::take_all(&app);
+    if items.is_empty() {
+        return;
+    }
+    let message = format!(
+        "Cleared {} history {}",
+        items.len(),
+        if items.len() == 1 { "entry" } else { "entries" }
+    );
+    undo::offer(
+        &app,
+        window.label(),
+        &message,
+        undo::UndoAction::History {
+            items,
+            cleared: true,
+        },
+    );
+}
+
+#[tauri::command]
+fn note_typed(url: String) {
+    history::note_typed(&url);
 }
 
 // Extensions. Every call waits for WebView2 on the main thread, so they run on the blocking pool.
@@ -1370,6 +1447,12 @@ pub fn run() {
             unpin_tab,
             duplicate_tab,
             reopen_closed_tab,
+            list_recently_closed,
+            restore_closed,
+            tab_thumbnail,
+            undo_action,
+            dismiss_toast,
+            note_typed,
             set_ui_insets,
             set_tabs_muted,
             toggle_selected_muted,

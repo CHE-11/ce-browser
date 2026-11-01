@@ -3,22 +3,40 @@ import { listShortcuts, onShortcutsChanged, resetShortcut, resetShortcuts, saveS
 import { useAppearanceFromSettings } from "@/lib/use-browser";
 import type { ShortcutBinding } from "@type/browser";
 
+/** Punctuation keys by physical position, so Shift and the keyboard layout don't change the name. */
+const CODE_NAMES: Record<string, string> = {
+  Equal: "plus",
+  NumpadAdd: "plus",
+  Minus: "minus",
+  NumpadSubtract: "minus",
+  Slash: "slash",
+  Comma: "comma",
+  Period: "period",
+  Semicolon: "semicolon",
+  Quote: "quote",
+  BracketLeft: "bracketleft",
+  BracketRight: "bracketright",
+  Backslash: "backslash",
+  Backquote: "backquote",
+};
+
 function tokenFrom(event: KeyboardEvent) {
-  const name = event.key.length === 1 ? event.key.toLowerCase() : event.key.toLowerCase();
+  const name = event.key.toLowerCase();
   const key =
-    name === "+" || name === "="
-      ? "plus"
-      : name === "-"
-        ? "minus"
-        : name === "arrowleft"
-          ? "left"
-          : name === "arrowright"
-            ? "right"
-            : name === "escape"
-              ? "esc"
-              : name === " "
-                ? "space"
-                : name;
+    CODE_NAMES[event.code] ??
+    (name === "arrowleft"
+      ? "left"
+      : name === "arrowright"
+        ? "right"
+        : name === "escape"
+          ? "esc"
+          : name === " "
+            ? "space"
+            : /^Digit\d$/.test(event.code)
+              ? event.code.slice(5)
+              : /^Key[A-Z]$/.test(event.code)
+                ? event.code.slice(3).toLowerCase()
+                : name);
   if (["control", "shift", "alt", "meta"].includes(key)) {
     return null;
   }

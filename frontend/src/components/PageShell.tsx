@@ -1,6 +1,7 @@
 import { Fragment, useEffect, type ReactNode } from "react";
 import { Bookmark, Download, Folder, History, Puzzle, Settings } from "lucide-react";
 import { cn } from "../lib/cn";
+import { focusRing } from "../lib/focus-ring";
 import { goToPage } from "../lib/route";
 import { useAppearanceFromSettings } from "../lib/use-browser";
 
@@ -67,8 +68,10 @@ export function PageShell({ id, page, title, actions, outline, lockHorizontalScr
             <button
               id={`${id}-nav-${item.page}`}
               type="button"
+              aria-current={item.page === page ? "page" : undefined}
               className={cn(
                 "flex h-9 items-center gap-3 rounded-md px-3 text-left text-sm text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100",
+                focusRing,
                 item.page === page && "bg-sky-950 text-sky-300 hover:bg-sky-950",
               )}
               onClick={() => goToPage(item.page)}
@@ -87,6 +90,7 @@ export function PageShell({ id, page, title, actions, outline, lockHorizontalScr
                     aria-current={entry.active ? "location" : undefined}
                     className={cn(
                       "truncate rounded-md px-2 py-1 text-left text-xs text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100",
+                      focusRing,
                       entry.active && "bg-sky-950 text-sky-300 hover:bg-sky-950",
                     )}
                     onClick={() => document.getElementById(entry.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}

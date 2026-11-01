@@ -753,6 +753,10 @@ pub(crate) fn merge_history_items(
             title: newer.title.clone(),
             visit_count: visit.max(1),
             last_visited: newer.last_visited,
+            typed_count: our_item
+                .map(|item| item.typed_count)
+                .unwrap_or(0)
+                .max(their_item.map(|item| item.typed_count).unwrap_or(0)),
         });
     }
     merged.sort_by(|left, right| right.last_visited.cmp(&left.last_visited));
@@ -1290,6 +1294,7 @@ mod tests {
             title: title.into(),
             visit_count: visits,
             last_visited: when,
+            typed_count: 0,
         }
     }
 

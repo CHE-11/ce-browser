@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes } from "react";
 import { cn } from "../lib/cn";
+import { focusRing } from "../lib/focus-ring";
 
 type ToggleProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "id" | "onClick" | "onChange"> & {
   id: string;
@@ -19,6 +20,7 @@ export function Toggle({ id, checked, onChange, className, disabled, size = "md"
       disabled={disabled}
       className={cn(
         "inline-flex shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+        focusRing,
         small ? "h-3 w-5 p-px" : "h-5 w-9 p-0.5",
         checked ? "bg-sky-600" : "bg-zinc-700",
         className,

@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import { Copy, Minus, Square, X } from "lucide-react";
 import { closeWindow, isWindowMaximized, minimizeWindow, onWindowResized, toggleMaximizeWindow } from "../lib/browser-client";
+import { cn } from "../lib/cn";
+import { focusRow } from "../lib/focus-ring";
 
-const buttonClass =
-  "inline-flex h-full w-11 items-center justify-center text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100 [&_svg]:size-3.5";
+const buttonClass = cn(
+  "inline-flex h-full w-11 items-center justify-center text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100 [&_svg]:size-3.5",
+  focusRow,
+);
 
 export function WindowControls() {
   const [maximized, setMaximized] = useState(false);
@@ -19,13 +23,14 @@ export function WindowControls() {
 
   return (
     <div id="window-controls" className="flex h-full shrink-0 items-stretch">
-      <button id="window-minimize" type="button" title="Minimize" className={buttonClass} onClick={() => void minimizeWindow()}>
+      <button id="window-minimize" type="button" title="Minimize" aria-label="Minimize" className={buttonClass} onClick={() => void minimizeWindow()}>
         <Minus aria-hidden />
       </button>
       <button
         id="window-maximize"
         type="button"
         title={maximized ? "Restore" : "Maximize"}
+        aria-label={maximized ? "Restore" : "Maximize"}
         className={buttonClass}
         onClick={() => void toggleMaximizeWindow()}
       >
@@ -35,7 +40,8 @@ export function WindowControls() {
         id="window-close"
         type="button"
         title="Close"
-        className={`${buttonClass} hover:bg-red-600 hover:text-white`}
+        aria-label="Close window"
+        className={cn(buttonClass, "hover:bg-red-600 hover:text-white")}
         onClick={() => void closeWindow()}
       >
         <X aria-hidden />

@@ -1,5 +1,6 @@
 import type { ButtonHTMLAttributes } from "react";
 import { cn } from "../lib/cn";
+import { focusRing } from "../lib/focus-ring";
 
 type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "destructive" | "link";
 type ButtonSize = "default" | "sm" | "xs";
@@ -24,6 +25,7 @@ export function Button({
       type={type}
       className={cn(
         "inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+        focusRing,
         size === "default" && "h-8 px-2.5 text-sm",
         size === "sm" && "h-7 px-2 text-xs",
         size === "xs" && "h-6 gap-1 px-1.5 text-xs",

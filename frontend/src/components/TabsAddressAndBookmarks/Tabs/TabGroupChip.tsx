@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import type { TabGroup, TabInfo } from "../../../../../types/browser";
 import { closePopup, openPopup, updateGroup, windowPoint } from "../../../lib/browser-client";
 import { cn } from "../../../lib/cn";
+import { focusRing } from "../../../lib/focus-ring";
 import { groupColorClasses, groupLabel } from "../../../lib/tab-rows";
 
 type TabGroupChipProps = {
@@ -67,8 +68,10 @@ export function TabGroupChip({ group, tabs, orientation, compact }: TabGroupChip
       type="button"
       title={`${label}\nClick to ${group.collapsed ? "expand" : "collapse"}. Right-click for options.`}
       aria-expanded={!group.collapsed}
+      aria-label={`${label}, ${group.collapsed ? "collapsed" : "expanded"} tab group`}
       className={cn(
-        "relative flex shrink-0 select-none items-center gap-1.5 rounded-md text-xs font-medium transition-colors",
+        "relative flex shrink-0 select-none items-center gap-1.5 rounded-md text-xs font-medium transition-[color,background-color,max-width] duration-200",
+        focusRing,
         colors.chip,
         vertical ? (compact ? "h-6 w-9 justify-center" : "h-7 w-full px-2") : "mb-1 h-6 max-w-40 px-2",
       )}

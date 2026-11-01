@@ -71,6 +71,69 @@ pub struct TabInfo {
     pub errors: u32,
     /// `#rrggbb` from the site's theme color or favicon. Not written into the session.
     pub accent: Option<String>,
+    /// Registrable domain of an http(s) page, such as `example.co.uk`. Empty for other pages.
+    pub site: String,
+    /// When the tab was last selected, in milliseconds since 1970. Zero until it is shown.
+    pub last_active: u64,
+    /// Load progress from 0 to 100. 100 once the page has finished.
+    pub progress: u8,
+    /// Why the page can't be shown. The browser UI draws this in place of the page.
+    pub failure: Option<TabFailure>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TabFailure {
+    /// `crashed`, `offline`, `dns`, `certificate`, `timeout`, `refused` or `other`.
+    pub kind: String,
+    /// Address that failed, so Retry can load it again.
+    pub url: String,
+    /// WebView2 error name, for example `HOST_NAME_NOT_RESOLVED`.
+    pub code: String,
+    /// Extra text, such as the certificate issuer and expiry.
+    pub detail: String,
+}
+
+/// One tab as it was when it closed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ClosedTab {
+    pub url: String,
+    pub title: String,
+    pub favicon: Option<String>,
+    pub pinned: bool,
+    /// Position in its strip when it closed.
+    pub index: usize,
+    pub window: String,
+    pub workspace: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ClosedGroup {
+    pub name: String,
+    pub color: String,
+    pub container: String,
+}
+
+/// A closed tab, a closed group, or tabs closed together, restored as one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ClosedEntry {
+    pub id: u32,
+    /// Milliseconds since 1970.
+    pub closed_at: u64,
+    /// `tab`, `group` or `batch`.
+    pub kind: String,
+    pub group: Option<ClosedGroup>,
+    pub tabs: Vec<ClosedTab>,
+}
+
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -197,15 +260,6 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone)]
-struct ClosedTab {
-    url: String,
-    title: String,
-    pinned: bool,
-    index: usize,
-    window: String,
-}
-
 struct Tab {
     info: TabInfo,
     /// Loaded when the page view is created: restored tabs wait until they are selected.
@@ -256,6 +310,8 @@ struct WindowChrome {
     ui_bottom: f64,
     fullscreen: bool,
     popup: Popup,
+    /// Toast view drawn over the bottom of the pages. Menus open and close without touching it.
+    toast: Option<String>,
     /// Page views on screen and where each one sits.
     shown: Vec<(String, Slot)>,
     split: Option<Split>,
@@ -278,6 +334,7 @@ impl WindowChrome {
             ui_bottom: 0.0,
             fullscreen: false,
             popup: Popup::default(),
+            toast: None,
             shown: Vec::new(),
             split: None,
             workspace: DEFAULT_WORKSPACE.to_string(),
@@ -320,13 +377,43 @@ pub struct TabsState {
     next_id: u32,
     next_window: u32,
     next_popup: u32,
-    closed: Vec<ClosedTab>,
+    /// Oldest first. Capped at `MAX_CLOSED` entries.
+    closed: Vec<ClosedEntry>,
+    next_closed: u32,
     groups: Vec<TabGroup>,
     next_group: u32,
     workspaces: Vec<Workspace>,
 }
 
 impl TabsState {
+    fn push_closed(&mut self, kind: &str, group: Option<ClosedGroup>, tabs: Vec<ClosedTab>) -> Option<u32> {
+        if tabs.is_empty() {
+            return None;
+        }
+        self.next_closed += 1;
+        let id = self.next_closed;
+        self.closed.push(ClosedEntry {
+            id,
+            closed_at: now_ms(),
+            kind: kind.to_string(),
+            group,
+            tabs,
+        });
+        if self.closed.len() > MAX_CLOSED {
+            let extra = self.closed.len() - MAX_CLOSED;
+            self.closed.drain(..extra);
+        }
+        Some(id)
+    }
+
+    fn take_closed(&mut self, id: Option<u32>) -> Option<ClosedEntry> {
+        let index = match id {
+            Some(id) => self.closed.iter().position(|entry| entry.id == id)?,
+            None => self.closed.len().checked_sub(1)?,
+        };
+        Some(self.closed.remove(index))
+    }
+
     fn workspace_of(&self, window: &str) -> String {
         self.chrome(window)
             .map(|chrome| chrome.workspace.clone())
@@ -542,7 +629,15 @@ impl TabsState {
     fn snapshot(&self) -> TabsSnapshot {
         let main = self.chrome(WINDOW);
         TabsSnapshot {
-            tabs: self.tabs.iter().map(|tab| tab.info.clone()).collect(),
+            tabs: self
+                .tabs
+                .iter()
+                .map(|tab| {
+                    let mut info = tab.info.clone();
+                    info.site = paths::site_of(&info.url);
+                    info
+                })
+                .collect(),
             active_id: main.and_then(|chrome| chrome.active),
             selected_ids: self.selection_in_order(None),
             can_reopen: !self.closed.is_empty(),
@@ -630,6 +725,7 @@ pub fn init(app: &AppHandle) {
         next_window: 1,
         next_popup: 0,
         closed: Vec::new(),
+        next_closed: 0,
         groups: Vec::new(),
         next_group: 1,
         workspaces: normalize_workspaces(Vec::new()),
@@ -934,6 +1030,10 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                     ephemeral: tab.ephemeral,
                     errors: 0,
                     accent: None,
+                    site: String::new(),
+                    last_active: 0,
+                    progress: 0,
+                    failure: None,
                 },
                 pending_url: Some(tab.url.clone()),
                 webview: None,
@@ -1503,10 +1603,9 @@ pub fn discard_window(app: &AppHandle, label: &str) {
             .map(|index| state.tabs[index].info.id)
             .collect::<Vec<_>>()
     });
-    for id in ids {
-        let _ = close_tab(app, id);
-    }
+    let _ = close_many(app, &ids, "batch", None);
     close_window_popup(app, label);
+    crate::undo::close_window(app, label);
     with_state(app, |state| {
         state.windows.retain(|window| window.label != label);
     });
@@ -1712,6 +1811,10 @@ pub fn activate(app: &AppHandle, id: u32) -> Result<(), String> {
 fn set_active(app: &AppHandle, id: u32, collapse: bool) -> Result<(), String> {
     if let Some(window) = with_state(app, |state| state.tab_window(id)) {
         crate::peek::close(app, &window);
+        let previous = with_state(app, |state| state.active_of(&window));
+        if let Some(previous) = previous.filter(|previous| *previous != id) {
+            crate::thumbnails::capture_later(app, previous);
+        }
     }
     let window = with_state(app, |state| {
         let window = state.tab_window(id)?;
@@ -1731,6 +1834,7 @@ fn set_active(app: &AppHandle, id: u32, collapse: bool) -> Result<(), String> {
         state.set_window_active(&window, Some(id));
         if let Some(tab) = state.tab_mut(id) {
             tab.info.changed = false;
+            tab.info.last_active = now_ms();
         }
         if collapse {
             state.select_only(id);
@@ -2070,6 +2174,47 @@ pub fn send_command(app: &AppHandle, window: &str, command: &str) {
 }
 
 pub fn close_tab(app: &AppHandle, id: u32) -> Result<(), String> {
+    let closed = close_tab_inner(app, id)?;
+    if let Some(tab) = closed {
+        with_state(app, |state| state.push_closed("tab", None, vec![tab]));
+        emit_tabs(app);
+    }
+    Ok(())
+}
+
+/// Closes tabs and remembers them as one entry, so they come back together.
+/// Returns the entry id when anything worth restoring closed.
+pub fn close_many(
+    app: &AppHandle,
+    ids: &[u32],
+    kind: &str,
+    group: Option<ClosedGroup>,
+) -> Result<Option<u32>, String> {
+    let mut closed = Vec::new();
+    let mut failure = None;
+    for id in ids {
+        match close_tab_inner(app, *id) {
+            Ok(Some(tab)) => closed.push(tab),
+            Ok(None) => {}
+            Err(error) => {
+                failure = Some(error);
+                break;
+            }
+        }
+    }
+    let kind = if closed.len() == 1 && group.is_none() { "tab" } else { kind };
+    let entry = with_state(app, |state| state.push_closed(kind, group, closed));
+    if entry.is_some() {
+        emit_tabs(app);
+    }
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(entry),
+    }
+}
+
+/// Closes one tab without adding it to the recently closed list. Returns what to remember.
+fn close_tab_inner(app: &AppHandle, id: u32) -> Result<Option<ClosedTab>, String> {
     let result = with_state(app, |state| {
         let (window, workspace, local) = state.local_index(id)?;
         let index = state.index_of(id)?;
@@ -2087,18 +2232,15 @@ pub fn close_tab(app: &AppHandle, id: u32) -> Result<(), String> {
         state.end_split_with(id);
         let tab = state.tabs.remove(index);
         state.normalize_groups();
-        if tab.info.url != paths::NEW_TAB {
-            state.closed.push(ClosedTab {
-                url: tab.info.url.clone(),
-                title: tab.info.title.clone(),
-                pinned: tab.info.pinned,
-                index: local,
-                window: window.clone(),
-            });
-            if state.closed.len() > MAX_CLOSED {
-                state.closed.remove(0);
-            }
-        }
+        let remembered = (tab.info.url != paths::NEW_TAB && !tab.info.ephemeral).then(|| ClosedTab {
+            url: tab.info.url.clone(),
+            title: tab.info.title.clone(),
+            favicon: tab.info.favicon.clone(),
+            pinned: tab.info.pinned,
+            index: local,
+            window: window.clone(),
+            workspace: workspace.clone(),
+        });
         let was_active = state.active_of(&window) == Some(id);
         if was_active {
             let indexes = state.strip_of(&window, &workspace);
@@ -2129,11 +2271,15 @@ pub fn close_tab(app: &AppHandle, id: u32) -> Result<(), String> {
             strip_empty,
             last_window,
             window,
+            remembered,
         ))
     });
-    let Some((label, was_active, next, empty, strip_empty, last_window, window)) = result else {
-        return Ok(());
+    let Some((label, was_active, next, empty, strip_empty, last_window, window, remembered)) =
+        result
+    else {
+        return Ok(None);
     };
+    crate::thumbnails::forget(id);
     if empty || strip_empty {
         retire_webview(app, label);
         if last_window || !empty {
@@ -2141,7 +2287,7 @@ pub fn close_tab(app: &AppHandle, id: u32) -> Result<(), String> {
         } else {
             emit_tabs(app);
         }
-        return Ok(());
+        return Ok(remembered);
     }
     let ensured = if was_active {
         match next {
@@ -2159,7 +2305,7 @@ pub fn close_tab(app: &AppHandle, id: u32) -> Result<(), String> {
     if was_active {
         focus_active(app, &window);
     }
-    Ok(())
+    Ok(remembered)
 }
 
 /// Closes every selected tab. A single selection closes the active tab.
@@ -2176,12 +2322,22 @@ pub fn close_selected(app: &AppHandle) -> Result<(), String> {
     } else {
         active.into_iter().collect()
     };
-    for id in targets.iter().copied().filter(|id| Some(*id) != active) {
-        close_tab(app, id)?;
-    }
+    let mut order: Vec<u32> = targets
+        .iter()
+        .copied()
+        .filter(|id| Some(*id) != active)
+        .collect();
     if let Some(id) = active.filter(|id| targets.contains(id)) {
-        close_tab(app, id)?;
+        order.push(id);
     }
+    if order.len() <= 1 {
+        return match order.first() {
+            Some(id) => close_tab(app, *id),
+            None => Ok(()),
+        };
+    }
+    let entry = close_many(app, &order, "batch", None)?;
+    crate::undo::offer_closed(app, &window, entry);
     Ok(())
 }
 
@@ -2199,9 +2355,9 @@ pub fn close_other_tabs(app: &AppHandle, id: u32) -> Result<(), String> {
             .collect()
     });
     activate(app, id)?;
-    for other in ids {
-        close_tab(app, other)?;
-    }
+    let window = with_state(app, |state| state.tab_window(id)).unwrap_or_else(|| WINDOW.into());
+    let entry = close_many(app, &ids, "batch", None)?;
+    crate::undo::offer_closed(app, &window, entry);
     Ok(())
 }
 
@@ -2225,36 +2381,138 @@ pub fn close_tabs_to_right(app: &AppHandle, id: u32) -> Result<(), String> {
             .map(|tab| tab.info.id)
             .collect()
     });
-    for other in ids {
-        close_tab(app, other)?;
-    }
+    let window = with_state(app, |state| state.tab_window(id)).unwrap_or_else(|| WINDOW.into());
+    let entry = close_many(app, &ids, "batch", None)?;
+    crate::undo::offer_closed(app, &window, entry);
     Ok(())
 }
 
 pub fn reopen_closed(app: &AppHandle) -> Result<Option<u32>, String> {
-    let Some(closed) = with_state(app, |state| state.closed.pop()) else {
+    restore_closed(app, None)
+}
+
+/// Toast text for a closed entry, such as `Closed group "Work"` or `Closed 4 tabs`.
+pub fn closed_summary(app: &AppHandle, id: u32) -> Option<String> {
+    with_state(app, |state| {
+        let entry = state.closed.iter().find(|entry| entry.id == id)?;
+        let count = entry.tabs.len();
+        let tabs = if count == 1 { "1 tab".to_string() } else { format!("{count} tabs") };
+        Some(match &entry.group {
+            Some(group) if !group.name.trim().is_empty() => {
+                format!("Closed group \u{201c}{}\u{201d} ({tabs})", group.name.trim())
+            }
+            Some(_) => format!("Closed a group of {tabs}"),
+            None => format!("Closed {tabs}"),
+        })
+    })
+}
+
+/// Recently closed tabs and groups, newest first.
+pub fn recently_closed(app: &AppHandle) -> Vec<ClosedEntry> {
+    with_state(app, |state| state.closed.iter().rev().cloned().collect())
+}
+
+/// Opens a recently closed entry again. `None` takes the newest. A group comes back as a group.
+/// Returns the first tab it opened.
+pub fn restore_closed(app: &AppHandle, id: Option<u32>) -> Result<Option<u32>, String> {
+    let Some(entry) = with_state(app, |state| state.take_closed(id)) else {
         return Ok(None);
     };
-    let url = resolve(app, &closed.url);
-    let window = if browser_labels(app)
-        .iter()
-        .any(|label| label == &closed.window)
-    {
-        closed.window
-    } else {
-        focused_window(app)
-    };
-    open(
-        app,
-        OpenTab {
-            index: Some(closed.index),
-            pinned: closed.pinned,
-            title: Some(closed.title),
-            window,
-            ..OpenTab::new(url)
-        },
-    )
-    .map(Some)
+    let windows = browser_labels(app);
+    let focused = focused_window(app);
+    let mut opened = Vec::new();
+    let many = entry.tabs.len() > 1;
+    for (position, closed) in entry.tabs.iter().enumerate() {
+        let url = resolve(app, &closed.url);
+        let window = if windows.iter().any(|label| label == &closed.window) {
+            closed.window.clone()
+        } else {
+            focused.clone()
+        };
+        let id = open(
+            app,
+            OpenTab {
+                index: Some(closed.index),
+                pinned: closed.pinned && entry.group.is_none(),
+                title: Some(closed.title.clone()),
+                background: many && position > 0,
+                lazy: many && position > 0,
+                window,
+                workspace: closed.workspace.clone(),
+                ..OpenTab::new(url)
+            },
+        )?;
+        if closed.favicon.is_some() {
+            let favicon = closed.favicon.clone();
+            update(app, id, |tab| tab.info.favicon = favicon);
+        }
+        opened.push(id);
+    }
+    if let Some(group) = entry.group.filter(|_| !opened.is_empty()) {
+        let container = if crate::privacy::known_container(app, &group.container) {
+            group.container
+        } else {
+            String::new()
+        };
+        with_state(app, |state| {
+            let Some(window) = opened.first().and_then(|id| state.tab_window(*id)) else {
+                return;
+            };
+            let id = state.next_group;
+            state.next_group += 1;
+            state.groups.push(TabGroup {
+                id,
+                name: group.name,
+                color: group_color(&group.color),
+                collapsed: false,
+                window,
+                container: container.clone(),
+            });
+            for tab in &opened {
+                if let Some(tab) = state.tab_mut(*tab) {
+                    tab.info.group_id = Some(id);
+                }
+            }
+            state.normalize_groups();
+        });
+        if !container.is_empty() {
+            for id in &opened {
+                rebuild_page(app, *id)?;
+            }
+        }
+    }
+    emit_tabs(app);
+    Ok(opened.first().copied())
+}
+
+/// Recently closed entries to keep in the session file.
+pub fn closed_for_session(app: &AppHandle) -> Vec<ClosedEntry> {
+    with_state(app, |state| state.closed.clone())
+}
+
+/// Puts the saved recently closed list back. Ids are renumbered.
+pub fn restore_closed_list(app: &AppHandle, entries: Vec<ClosedEntry>) {
+    with_state(app, |state| {
+        for entry in entries {
+            let tabs: Vec<ClosedTab> = entry
+                .tabs
+                .into_iter()
+                .filter(|tab| !tab.url.trim().is_empty())
+                .collect();
+            let kind = match entry.kind.as_str() {
+                "group" if entry.group.is_some() => "group",
+                _ if tabs.len() > 1 => "batch",
+                _ => "tab",
+            };
+            let group = if kind == "group" { entry.group } else { None };
+            if state.push_closed(kind, group, tabs).is_some()
+                && let Some(last) = state.closed.last_mut()
+                && entry.closed_at > 0
+            {
+                last.closed_at = entry.closed_at;
+            }
+        }
+    });
 }
 
 pub fn page_view(app: &AppHandle, id: u32) -> Option<Webview> {
@@ -2262,6 +2520,20 @@ pub fn page_view(app: &AppHandle, id: u32) -> Option<Webview> {
         state.tab_mut(id).and_then(|tab| tab.webview.clone())
     })?;
     app.get_webview(&label)
+}
+
+/// The page view exists, has drawn, and is not asleep or showing a failure, so it can be captured.
+pub fn capturable(app: &AppHandle, id: u32) -> bool {
+    with_state(app, |state| {
+        state.tabs.iter().any(|tab| {
+            tab.info.id == id
+                && tab.webview.is_some()
+                && tab.painted
+                && !tab.hidden
+                && !tab.info.sleeping
+                && tab.info.failure.is_none()
+        })
+    })
 }
 
 /// A page the status bar should describe. Shown pages are on screen, including both sides of a split.
@@ -2746,6 +3018,7 @@ pub fn layout(app: &AppHandle, window_label: &str) {
     place_pages(app, window_label, true);
     crate::peek::relayout(app, window_label);
     close_window_popup(app, window_label);
+    place_toast(app, window_label);
 }
 
 /// Window and webview fill, so a gap while a page view is created or destroyed matches the page.
@@ -3069,6 +3342,91 @@ fn popup_paint_script(color: Color) -> String {
         g = color.1,
         b = color.2,
     )
+}
+
+// Toasts
+
+const TOAST_WIDTH: f64 = 400.0;
+const TOAST_HEIGHT: f64 = 52.0;
+const TOAST_MARGIN: f64 = 16.0;
+
+/// Where the toast sits: centered near the bottom of the page area, in logical pixels.
+fn toast_rect(app: &AppHandle, window_label: &str) -> (LogicalPosition<f64>, LogicalSize<f64>) {
+    let (position, size) = page_rect(app, window_label);
+    let scale = app
+        .get_window(window_label)
+        .and_then(|window| window.scale_factor().ok())
+        .unwrap_or(1.0);
+    let left = position.x as f64 / scale;
+    let top = position.y as f64 / scale;
+    let width = size.width as f64 / scale;
+    let height = size.height as f64 / scale;
+    let toast_width = TOAST_WIDTH.min((width - 16.0).max(200.0));
+    (
+        LogicalPosition::new(
+            left + ((width - toast_width) / 2.0).max(8.0),
+            top + (height - TOAST_HEIGHT - TOAST_MARGIN).max(8.0),
+        ),
+        LogicalSize::new(toast_width, TOAST_HEIGHT),
+    )
+}
+
+/// Shows a toast over the bottom of the window's pages. A newer toast replaces the old one.
+/// `params` is the query string the toast page reads.
+pub fn show_toast(app: &AppHandle, window_label: &str, params: &str) -> Result<(), String> {
+    close_toast(app, window_label);
+    let window = app
+        .get_window(window_label)
+        .ok_or("The browser window is missing.")?;
+    let label = with_state(app, |state| {
+        state.next_popup += 1;
+        let label = format!("toast-{}", state.next_popup);
+        state.chrome_mut(window_label)?.toast = Some(label.clone());
+        Some(label)
+    })
+    .ok_or("The browser window is missing.")?;
+    let url = paths::internal_url(app, &format!("popup/toast?{params}"));
+    let surface = popup_surface_color(app);
+    let (position, size) = toast_rect(app, window_label);
+    let builder = base_builder(app, &label, WebviewUrl::External(url))
+        .disable_drag_drop_handler()
+        .background_color(surface)
+        .focused(false)
+        .initialization_script(popup_paint_script(surface));
+    match window.add_child(builder, position, size) {
+        Ok(webview) => {
+            if let Ok(main) = window.hwnd() {
+                let scale = window.scale_factor().unwrap_or(1.0);
+                webview2::round_popup(&webview, main.0 as isize, (10.0 * scale).round().max(1.0) as i32);
+            }
+            Ok(())
+        }
+        Err(error) => {
+            with_state(app, |state| {
+                if let Some(chrome) = state.chrome_mut(window_label) {
+                    chrome.toast = None;
+                }
+            });
+            Err(error.to_string())
+        }
+    }
+}
+
+pub fn close_toast(app: &AppHandle, window_label: &str) {
+    let label = with_state(app, |state| state.chrome_mut(window_label)?.toast.take());
+    if let Some(webview) = label.and_then(|label| app.get_webview(&label)) {
+        let _ = webview.close();
+    }
+}
+
+fn place_toast(app: &AppHandle, window_label: &str) {
+    let label = with_state(app, |state| state.chrome(window_label)?.toast.clone());
+    let Some(webview) = label.and_then(|label| app.get_webview(&label)) else {
+        return;
+    };
+    let (position, size) = toast_rect(app, window_label);
+    let _ = webview.set_size(size);
+    let _ = webview.set_position(position);
 }
 
 pub struct SessionTab {
@@ -3430,6 +3788,21 @@ pub fn sleep_other_tabs(app: &AppHandle, id: u32) -> Result<(), String> {
     Ok(())
 }
 
+/// Sleeps every selected tab that is not on screen.
+pub fn sleep_selected(app: &AppHandle, window: &str) -> Result<(), String> {
+    let ids = with_state(app, |state| {
+        state
+            .selection_in_order(Some(window))
+            .into_iter()
+            .filter(|id| !state.is_foreground(*id))
+            .collect::<Vec<_>>()
+    });
+    for id in ids {
+        let _ = sleep_tab(app, id);
+    }
+    Ok(())
+}
+
 /// Called when WebView2 answers a suspend request.
 pub fn finish_sleep(app: &AppHandle, id: u32, suspended: bool) {
     let result = with_state(app, |state| {
@@ -3765,17 +4138,30 @@ pub fn ungroup(app: &AppHandle, id: u32) -> Result<(), String> {
 }
 
 pub fn close_group(app: &AppHandle, id: u32) -> Result<(), String> {
-    let ids: Vec<u32> = with_state(app, |state| {
-        state
+    let (ids, group) = with_state(app, |state| {
+        let ids: Vec<u32> = state
             .tabs
             .iter()
             .filter(|tab| tab.info.group_id == Some(id))
             .map(|tab| tab.info.id)
-            .collect()
+            .collect();
+        let group = state.groups.iter().find(|group| group.id == id).map(|group| {
+            (
+                group.window.clone(),
+                ClosedGroup {
+                    name: group.name.clone(),
+                    color: group.color.clone(),
+                    container: group.container.clone(),
+                },
+            )
+        });
+        (ids, group)
     });
-    for tab in ids {
-        close_tab(app, tab)?;
-    }
+    let Some((window, group)) = group else {
+        return Err("That group no longer exists.".into());
+    };
+    let entry = close_many(app, &ids, "group", Some(group))?;
+    crate::undo::offer_closed(app, &window, entry);
     Ok(())
 }
 
@@ -3890,9 +4276,7 @@ pub fn delete_workspace(app: &AppHandle, id: &str) -> Result<(), String> {
             .map(|tab| tab.info.id)
             .collect()
     });
-    for tab in ids {
-        close_tab(app, tab)?;
-    }
+    close_many(app, &ids, "batch", None)?;
     with_state(app, |state| {
         state.workspaces.retain(|workspace| workspace.id != id);
         for chrome in &mut state.windows {
@@ -4273,6 +4657,10 @@ mod tests {
                 ephemeral: false,
                 errors: 0,
                 accent: None,
+                site: String::new(),
+                last_active: 0,
+                progress: 0,
+                failure: None,
             },
             pending_url: None,
             webview: None,
@@ -4297,6 +4685,7 @@ mod tests {
             next_window: 1,
             next_popup: 0,
             closed: Vec::new(),
+            next_closed: 0,
             groups: groups
                 .iter()
                 .map(|id| TabGroup {
@@ -4393,5 +4782,38 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list[1].name, "Workspace");
         assert_eq!(list[1].color, "grey");
+    }
+
+    #[test]
+    fn the_closed_list_keeps_the_newest_entries() {
+        let mut state = state(Vec::new(), &[]);
+        for number in 0..(MAX_CLOSED + 5) {
+            state.push_closed(
+                "tab",
+                None,
+                vec![ClosedTab {
+                    url: format!("https://{number}.example"),
+                    ..ClosedTab::default()
+                }],
+            );
+        }
+        assert_eq!(state.closed.len(), MAX_CLOSED);
+        assert_eq!(state.closed[0].tabs[0].url, "https://5.example");
+        let newest = state.take_closed(None).expect("an entry");
+        assert_eq!(
+            newest.tabs[0].url,
+            format!("https://{}.example", MAX_CLOSED + 4)
+        );
+        assert!(state.push_closed("tab", None, Vec::new()).is_none());
+    }
+
+    #[test]
+    fn an_older_closed_entry_without_new_keys_still_loads() {
+        let entry: ClosedEntry =
+            serde_json::from_str(r#"{"kind":"tab","tabs":[{"url":"https://a.example"}]}"#)
+                .expect("closed entry");
+        assert_eq!(entry.tabs[0].url, "https://a.example");
+        assert!(entry.group.is_none());
+        assert_eq!(entry.tabs[0].workspace, "");
     }
 }

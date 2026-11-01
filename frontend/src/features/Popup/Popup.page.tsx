@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { AppMenu } from "@components/AppMenu";
 import { StatusPopover } from "@/components/StatusPopover";
+import { Toast } from "@/components/Toast";
 import { PopupAppearanceContext, usePopupPainted } from "@lib/popup-ready";
 import { useAppearanceState } from "@lib/use-browser";
 import { AddressBarEllipsisMenu } from "@/components/TabsAddressAndBookmarks/Addressbar/AddressBarEllipsisMenu";
@@ -141,6 +142,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <TabGroupMenu groupId={Number(params.get("id"))} />;
     case "workspaces":
       return <WorkspaceMenu />;
+    case "toast":
+      return <Toast params={params} />;
     default:
       return <UnknownPopup />;
   }

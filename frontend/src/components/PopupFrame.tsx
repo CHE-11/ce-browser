@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 import { closePopup, resizePopup } from "../lib/browser-client";
 import { cn } from "../lib/cn";
 import { usePopupPainted } from "../lib/popup-ready";
@@ -68,64 +68,4 @@ export function PopupFrame({ id, children, className, fit = true, maxHeight = 64
   );
 }
 
-export function PopupMenu({ id, label, children }: { id: string; label: string; children: ReactNode }) {
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
-      return;
-    }
-    event.preventDefault();
-    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')];
-    const index = items.findIndex((item) => item === document.activeElement);
-    const delta = event.key === "ArrowDown" ? 1 : -1;
-    items[index < 0 ? 0 : (index + delta + items.length) % items.length]?.focus();
-  };
-  return (
-    <div id={id} role="menu" aria-label={label} className="flex flex-col gap-0.5 px-1.5 py-1.5" onKeyDown={onKeyDown}>
-      {children}
-    </div>
-  );
-}
-
-type PopupMenuItemProps = {
-  id: string;
-  icon?: ReactNode;
-  label: string;
-  shortcut?: string;
-  disabled?: boolean;
-  danger?: boolean;
-  onClick: () => void;
-  onContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void;
-};
-
-export function PopupMenuItem({ id, icon, label, shortcut, disabled, danger, onClick, onContextMenu }: PopupMenuItemProps) {
-  return (
-    <button
-      id={id}
-      type="button"
-      role="menuitem"
-      disabled={disabled}
-      className={cn(
-        "group flex h-9 w-full items-center gap-3 rounded-lg px-2.5 text-left text-sm text-zinc-100 transition-colors hover:bg-zinc-800 focus-visible:bg-zinc-800 focus-visible:outline-none disabled:opacity-40 disabled:hover:bg-transparent",
-        danger && "text-red-300",
-      )}
-      onClick={onClick}
-      onContextMenu={onContextMenu}
-    >
-      <span id={`${id}-icon`} className="inline-flex size-4 shrink-0 items-center justify-center text-zinc-400 group-hover:text-zinc-200 [&_svg]:size-4">
-        {icon}
-      </span>
-      <span id={`${id}-label`} className="min-w-0 flex-1 truncate">
-        {label}
-      </span>
-      {shortcut ? (
-        <span id={`${id}-shortcut`} className="shrink-0 text-[11px] text-zinc-500">
-          {shortcut}
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
-export function PopupMenuSeparator({ id }: { id: string }) {
-  return <div id={id} role="separator" className="mx-2 my-1 h-px bg-zinc-800" />;
-}
+export { Menu as PopupMenu, MenuItem as PopupMenuItem, MenuSeparator as PopupMenuSeparator } from "./Menu";

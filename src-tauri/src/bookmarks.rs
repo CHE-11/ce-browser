@@ -69,6 +69,27 @@ impl BookmarkNode {
         children.iter_mut().find_map(|child| child.take(id))
     }
 
+    /// Folder that holds `id`, and the position inside it.
+    fn parent_of(&self, id: &str) -> Option<(String, usize)> {
+        let children = self.children.as_ref()?;
+        if let Some(index) = children.iter().position(|child| child.id == id) {
+            return Some((self.id.clone(), index));
+        }
+        children.iter().find_map(|child| child.parent_of(id))
+    }
+
+    /// Links in this folder and every folder inside it, in order.
+    fn links(&self, out: &mut Vec<(String, String)>) {
+        if let Some(url) = self.url.as_ref().filter(|_| !self.separator) {
+            out.push((self.title.clone(), url.clone()));
+        }
+        if let Some(children) = self.children.as_ref() {
+            for child in children {
+                child.links(out);
+            }
+        }
+    }
+
     fn find_url(&self, url: &str) -> Option<&BookmarkNode> {
         if self.url.as_deref() == Some(url) {
             return Some(self);
@@ -323,15 +344,81 @@ pub fn move_to(
     })
 }
 
-pub fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
+/// Removes a bookmark and returns it with its folder and position, so it can be put back.
+pub fn delete_returning(app: &AppHandle, id: &str) -> Result<(BookmarkNode, String, usize), String> {
     if id == BAR || id == OTHER {
         return Err("The bookmarks bar and Other bookmarks cannot be deleted.".into());
     }
     change(app, |tree| {
-        tree.take(id)
-            .map(|_| ())
-            .ok_or("That bookmark no longer exists.".into())
+        let (parent, index) = tree
+            .roots()
+            .into_iter()
+            .find_map(|root| root.parent_of(id))
+            .ok_or("That bookmark no longer exists.")?;
+        let node = tree.take(id).ok_or("That bookmark no longer exists.")?;
+        Ok((node, parent, index))
     })
+}
+
+/// Puts a deleted bookmark back. A folder that is gone too sends it to Other bookmarks.
+pub fn restore(app: &AppHandle, node: BookmarkNode, parent: &str, index: usize) -> Result<(), String> {
+    change(app, |tree| {
+        if tree.find(&node.id).is_some() {
+            return Ok(());
+        }
+        let parent = if tree.find(parent).is_some_and(BookmarkNode::is_folder) {
+            parent.to_string()
+        } else {
+            OTHER.to_string()
+        };
+        tree.insert(&parent, Some(index), node)
+    })
+}
+
+/// A new folder under Other bookmarks holding these links. Returns the folder.
+pub fn add_folder_of_links(
+    app: &AppHandle,
+    title: &str,
+    links: &[(String, String)],
+) -> Result<BookmarkNode, String> {
+    let title = match title.trim() {
+        "" => "Saved tabs".to_string(),
+        title => title.to_string(),
+    };
+    let mut folder = BookmarkNode::folder(&new_id(), &title);
+    folder.children = Some(
+        links
+            .iter()
+            .filter(|(_, url)| !url.trim().is_empty())
+            .map(|(title, url)| BookmarkNode {
+                id: new_id(),
+                title: if title.trim().is_empty() {
+                    url.clone()
+                } else {
+                    title.trim().to_string()
+                },
+                url: Some(url.trim().to_string()),
+                children: None,
+                separator: false,
+                added_at: now_ms(),
+            })
+            .collect(),
+    );
+    let created = folder.clone();
+    change(app, |tree| tree.insert(OTHER, None, folder))?;
+    Ok(created)
+}
+
+/// A folder's title and the links inside it, including links in its subfolders.
+pub fn folder_links(app: &AppHandle, id: &str) -> Result<(String, Vec<(String, String)>), String> {
+    let tree = tree(app);
+    let folder = tree.find(id).ok_or("That folder no longer exists.")?;
+    if !folder.is_folder() {
+        return Err("Only a folder can open as a group.".into());
+    }
+    let mut links = Vec::new();
+    folder.links(&mut links);
+    Ok((folder.title.clone(), links))
 }
 
 pub fn find_by_url(app: &AppHandle, url: &str) -> Option<BookmarkNode> {

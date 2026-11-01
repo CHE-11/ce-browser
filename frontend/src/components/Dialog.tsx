@@ -12,6 +12,9 @@ type DialogProps = {
   bodyClassName?: string;
 };
 
+const FOCUSABLE =
+  'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
 function isTypingTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -20,8 +23,30 @@ function isTypingTarget(target: EventTarget | null) {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;
 }
 
+function focusables(panel: HTMLElement) {
+  return [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((element) => element.offsetParent !== null);
+}
+
 export function Dialog({ id, title, open, onClose, onEnter, children, panelClassName, bodyClassName }: DialogProps) {
   const ignoreBackdropUntil = useRef(0);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const panel = panelRef.current;
+    if (panel && !panel.contains(document.activeElement)) {
+      const first = panel.querySelector<HTMLElement>("[autofocus]") ?? focusables(panel)[0] ?? panel;
+      first.focus({ preventScroll: true });
+    }
+    return () => {
+      if (opener?.isConnected) {
+        opener.focus({ preventScroll: true });
+      }
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -30,6 +55,27 @@ export function Dialog({ id, title, open, onClose, onEnter, children, panelClass
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         onClose();
+        return;
+      }
+      const panel = panelRef.current;
+      if (event.key !== "Tab" || !panel) {
+        return;
+      }
+      const items = focusables(panel);
+      if (items.length === 0) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const inside = panel.contains(document.activeElement);
+      if (event.shiftKey && (!inside || document.activeElement === first)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (!inside || document.activeElement === last)) {
+        event.preventDefault();
+        first.focus();
       }
     };
     const onEnterKey = (event: KeyboardEvent) => {
@@ -73,11 +119,13 @@ export function Dialog({ id, title, open, onClose, onEnter, children, panelClass
     >
       <div
         id={id}
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={`${id}-title`}
+        tabIndex={-1}
         className={cn(
-          "flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl",
+          "flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl focus:outline-none",
           panelClassName,
         )}
         onClick={(event) => event.stopPropagation()}

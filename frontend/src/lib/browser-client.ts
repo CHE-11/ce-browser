@@ -18,6 +18,7 @@ import type {
   BrowserCommand,
   BrowserProfile,
   BrowserSettings,
+  ClosedEntry,
   ProfileIconChoice,
   DownloadItem,
   ExtractedPage,
@@ -165,6 +166,30 @@ export function duplicateTab(id: number) {
 
 export function reopenClosedTab() {
   return invoke<number | null>("reopen_closed_tab");
+}
+
+/** Recently closed tabs and groups, newest first. */
+export function listRecentlyClosed() {
+  return invoke<ClosedEntry[]>("list_recently_closed");
+}
+
+/** Opens a recently closed entry again. Without an id the newest comes back. */
+export function restoreClosed(id?: number) {
+  return invoke<number | null>("restore_closed", { id });
+}
+
+/** A JPEG data URL of what the tab last showed, or null when none was captured. */
+export function tabThumbnail(id: number) {
+  return invoke<string | null>("tab_thumbnail", { id });
+}
+
+export function undoAction(id: number) {
+  return invoke<void>("undo_action", { id });
+}
+
+/** The toast closed without Undo, so its action becomes final. */
+export function dismissToast(id: number) {
+  return invoke<void>("dismiss_toast", { id });
 }
 
 /** Chrome insets in CSS pixels. `bottom` is the status bar. Zero means that edge is hidden. */
@@ -820,6 +845,11 @@ export function removeHistory(id: number) {
 
 export function clearHistory() {
   return invoke<void>("clear_history");
+}
+
+/** The next visit to `url` began with the address typed into the address bar. */
+export function noteTyped(url: string) {
+  return invoke<void>("note_typed", { url });
 }
 
 export function onHistoryChanged(handler: (items: HistoryItem[]) => void): Promise<UnlistenFn> {

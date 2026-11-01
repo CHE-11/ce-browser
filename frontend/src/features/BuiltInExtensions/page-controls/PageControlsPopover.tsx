@@ -5,6 +5,8 @@ import { OptionRow, PopoverHeader } from "../PopoverParts";
 import { readPopoverTab } from "../shared";
 import { controlFor, siteKey } from "./site";
 import { PopupFrame } from "@/components/PopupFrame";
+import { cn } from "@/lib/cn";
+import { focusRing, focusRow } from "@/lib/focus-ring";
 import {
   closePopup,
   createTab,
@@ -34,6 +36,8 @@ const REFRESH = [
   { secs: 300, label: "5m" },
   { secs: 900, label: "15m" },
 ];
+
+const actionClass = cn("h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800", focusRow);
 
 const fieldClass =
   "h-8 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-sky-500";
@@ -273,7 +277,8 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
               id={`page-controls-device-${value || "off"}`}
               key={value || "off"}
               type="button"
-              className={`h-7 flex-1 rounded-md text-xs ${device === value ? "bg-sky-600 text-white" : "bg-zinc-800 text-zinc-300"}`}
+              aria-pressed={device === value}
+              className={cn("h-7 flex-1 rounded-md text-xs", focusRing, device === value ? "bg-sky-600 text-white" : "bg-zinc-800 text-zinc-300")}
               onClick={() => void setDevice(windowLabel, value)}
             >
               {label}
@@ -284,7 +289,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
           <button
             id="page-controls-reader"
             type="button"
-            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            className={actionClass}
             onClick={() => {
               void openReader(tab.id).finally(() => closePopup());
             }}
@@ -294,7 +299,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
           <button
             id="page-controls-zap"
             type="button"
-            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            className={actionClass}
             onClick={() => {
               void startZapper(tab.id).finally(() => closePopup());
             }}
@@ -306,7 +311,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
             <button
               id="page-controls-unhide"
               type="button"
-              className="h-9 rounded-lg px-2.5 text-left text-sm text-zinc-400 hover:bg-zinc-800"
+              className={cn(actionClass, "text-zinc-400")}
               onClick={() => apply({ clearHidden: true })}
             >
               Show hidden elements again
@@ -315,7 +320,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
           <button
             id="page-controls-network"
             type="button"
-            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            className={actionClass}
             onClick={(event) =>
               void openPopupBelow(event.currentTarget, {
                 kind: "network",
@@ -330,7 +335,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
           <button
             id="page-controls-permissions"
             type="button"
-            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            className={actionClass}
             onClick={() => {
               void createTab("ce://permissions").finally(() => closePopup());
             }}
@@ -340,7 +345,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
           <button
             id="page-controls-inspect"
             type="button"
-            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            className={actionClass}
             onClick={() => {
               void startInspector(tab.id).finally(() => closePopup());
             }}
@@ -350,7 +355,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
           <button
             id="page-controls-storage"
             type="button"
-            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            className={actionClass}
             onClick={() => {
               void createTab(`ce://storage?tab=${tab.id}`).finally(() => closePopup());
             }}
@@ -360,7 +365,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
           <button
             id="page-controls-rewrites"
             type="button"
-            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            className={actionClass}
             onClick={() => {
               void createTab("ce://rewrites").finally(() => closePopup());
             }}
@@ -370,7 +375,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
           <button
             id="page-controls-scripts"
             type="button"
-            className="h-9 rounded-lg px-2.5 text-left text-sm hover:bg-zinc-800"
+            className={actionClass}
             onClick={() => {
               void createTab(`ce://scripts?host=${encodeURIComponent(host)}`).finally(() => closePopup());
             }}

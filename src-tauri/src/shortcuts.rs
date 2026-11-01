@@ -40,6 +40,10 @@ pub enum Action {
     ClosePeek,
     Workspace(usize),
     CommandPalette,
+    TabSearch,
+    ShortcutSheet,
+    SleepTab,
+    SleepOtherTabs,
     /// The first half of a two-key shortcut. The key is swallowed.
     ChordWait,
 }
@@ -57,8 +61,17 @@ const VK_F4: u32 = 0x73;
 const VK_F5: u32 = 0x74;
 const VK_F6: u32 = 0x75;
 const VK_F12: u32 = 0x7B;
+const VK_OEM_1: u32 = 0xBA;
 const VK_OEM_PLUS: u32 = 0xBB;
+const VK_OEM_COMMA: u32 = 0xBC;
 const VK_OEM_MINUS: u32 = 0xBD;
+const VK_OEM_PERIOD: u32 = 0xBE;
+const VK_OEM_2: u32 = 0xBF;
+const VK_OEM_3: u32 = 0xC0;
+const VK_OEM_4: u32 = 0xDB;
+const VK_OEM_5: u32 = 0xDC;
+const VK_OEM_6: u32 = 0xDD;
+const VK_OEM_7: u32 = 0xDE;
 
 pub fn action_for(key: u32, ctrl: bool, shift: bool, alt: bool, target: Target) -> Option<Action> {
     if target == Target::Popup && key == VK_ESCAPE && !ctrl && !alt {
@@ -166,6 +179,21 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             tabs::send_command(app, &window, "palette");
             Ok(())
         }
+        Action::TabSearch => {
+            tabs::close_window_popup(app, &window);
+            tabs::send_command(app, &window, "tab-search");
+            Ok(())
+        }
+        Action::ShortcutSheet => {
+            tabs::close_window_popup(app, &window);
+            tabs::send_command(app, &window, "shortcut-sheet");
+            Ok(())
+        }
+        Action::SleepTab => tabs::sleep_selected(app, &window),
+        Action::SleepOtherTabs => match active {
+            Some(id) => tabs::sleep_other_tabs(app, id),
+            None => Ok(()),
+        },
         Action::ChordWait => Ok(()),
     }
 }
@@ -177,6 +205,34 @@ pub struct ShortcutBinding {
     pub label: String,
     /// One token, or two for a chord: `["ctrl+k", "t"]`. Empty unbinds the action.
     pub keys: Vec<String>,
+    /// Heading for the cheat sheet. Filled from the action, so `shortcuts.json` never stores it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub category: String,
+}
+
+/// Cheat sheet heading for an action.
+fn category_of(action: &str) -> &'static str {
+    if action.starts_with("select-tab-") {
+        return "Tabs";
+    }
+    if action.starts_with("workspace-") {
+        return "Workspaces";
+    }
+    match action {
+        "new-tab" | "new-window" | "close-tab" | "close-f4" | "reopen-tab" | "next-tab"
+        | "previous-tab" | "next-page" | "previous-page" | "last-tab" | "tab-search"
+        | "sleep-tab" | "sleep-other-tabs" => "Tabs",
+        "focus-address" | "alt-focus" | "focus-f6" | "command-palette" | "bookmark"
+        | "toggle-bookmarks-bar" => "Address bar and bookmarks",
+        "reload" | "reload-key" | "back" | "forward" | "find" | "zoom-in" | "zoom-in-shift"
+        | "zoom-out" | "zoom-reset" | "devtools" => "Page",
+        _ => "Browser",
+    }
+}
+
+fn with_category(mut binding: ShortcutBinding) -> ShortcutBinding {
+    binding.category = category_of(&binding.action).to_string();
+    binding
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -203,7 +259,7 @@ pub fn list(app: &AppHandle) -> Vec<ShortcutBinding> {
     if let Some(state) = app.try_state::<ShortcutState>() {
         return state.bindings.lock().expect("shortcuts").clone();
     }
-    defaults()
+    effective(&[])
 }
 
 pub fn save(
@@ -243,16 +299,20 @@ fn saved_or_empty(app: &AppHandle) -> Vec<ShortcutBinding> {
 
 /// Saved rows win. An action missing from the file keeps its default. An empty `keys` list unbinds it.
 pub fn effective(saved: &[ShortcutBinding]) -> Vec<ShortcutBinding> {
+    let defaults = defaults();
     let mut rows = Vec::new();
     for binding in saved {
-        if binding.keys.is_empty() {
+        let unbound_by_default = defaults
+            .iter()
+            .any(|item| item.action == binding.action && item.keys.is_empty());
+        if binding.keys.is_empty() && !unbound_by_default {
             continue;
         }
-        rows.push(binding.clone());
+        rows.push(with_category(binding.clone()));
     }
-    for binding in defaults() {
+    for binding in defaults {
         if !saved.iter().any(|item| item.action == binding.action) {
-            rows.push(binding);
+            rows.push(with_category(binding));
         }
     }
     rows
@@ -288,6 +348,7 @@ fn normalize_saved(bindings: &[ShortcutBinding]) -> Vec<ShortcutBinding> {
             action: binding.action.clone(),
             label,
             keys,
+            category: String::new(),
         });
     }
     rows
@@ -374,6 +435,15 @@ fn key_name(key: u32) -> Option<&'static str> {
         VK_RIGHT => Some("right"),
         VK_OEM_PLUS | VK_ADD => Some("plus"),
         VK_OEM_MINUS | VK_SUBTRACT => Some("minus"),
+        VK_OEM_1 => Some("semicolon"),
+        VK_OEM_COMMA => Some("comma"),
+        VK_OEM_PERIOD => Some("period"),
+        VK_OEM_2 => Some("slash"),
+        VK_OEM_3 => Some("backquote"),
+        VK_OEM_4 => Some("bracketleft"),
+        VK_OEM_5 => Some("backslash"),
+        VK_OEM_6 => Some("bracketright"),
+        VK_OEM_7 => Some("quote"),
         VK_PRIOR => Some("pageup"),
         VK_NEXT => Some("pagedown"),
         _ => None,
@@ -426,6 +496,10 @@ fn action_from(action: &str) -> Option<Action> {
         "zoom-reset" => Action::ZoomReset,
         "devtools" => Action::DevTools,
         "command-palette" => Action::CommandPalette,
+        "tab-search" => Action::TabSearch,
+        "shortcut-sheet" => Action::ShortcutSheet,
+        "sleep-tab" => Action::SleepTab,
+        "sleep-other-tabs" => Action::SleepOtherTabs,
         _ => return None,
     })
 }
@@ -435,12 +509,17 @@ fn bind(action: &str, label: &str, keys: &str) -> ShortcutBinding {
         action: action.into(),
         label: label.into(),
         keys: keys.split_whitespace().map(|key| key.to_string()).collect(),
+        category: String::new(),
     }
 }
 
 pub fn defaults() -> Vec<ShortcutBinding> {
     let mut rows = vec![
         bind("command-palette", "Command palette", "ctrl+k"),
+        bind("tab-search", "Search tabs and recently closed", "ctrl+shift+a"),
+        bind("shortcut-sheet", "Keyboard shortcut cheat sheet", "ctrl+slash"),
+        bind("sleep-tab", "Sleep selected background tabs", ""),
+        bind("sleep-other-tabs", "Sleep other tabs", ""),
         bind("new-tab", "New tab", "ctrl+t"),
         bind("close-tab", "Close tab", "ctrl+w"),
         bind("reopen-tab", "Reopen closed tab", "ctrl+shift+t"),
@@ -491,7 +570,30 @@ pub fn defaults() -> Vec<ShortcutBinding> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ShortcutBinding, effective};
+    use super::{ShortcutBinding, ShortcutFile, chord_token, effective, normalize_saved};
+
+    #[test]
+    fn slash_and_brackets_have_names() {
+        assert_eq!(chord_token(0xBF, true, false, false).as_deref(), Some("ctrl+slash"));
+        assert_eq!(chord_token(0xDB, false, false, false).as_deref(), Some("bracketleft"));
+    }
+
+    #[test]
+    fn categories_are_shown_but_not_saved() {
+        let rows = effective(&[]);
+        let sheet = rows
+            .iter()
+            .find(|row| row.action == "tab-search")
+            .expect("tab search");
+        assert_eq!(sheet.category, "Tabs");
+        let saved = normalize_saved(&rows);
+        let json = serde_json::to_string(&ShortcutFile { bindings: saved }).expect("json");
+        assert!(!json.contains("category"));
+        let old: ShortcutFile =
+            serde_json::from_str(r#"{"bindings":[{"action":"find","label":"Find","keys":["ctrl+g"]}]}"#)
+                .expect("older file");
+        assert_eq!(old.bindings[0].keys, vec!["ctrl+g".to_string()]);
+    }
 
     #[test]
     fn a_missing_action_keeps_the_default() {
@@ -499,6 +601,7 @@ mod tests {
             action: "new-tab".into(),
             label: "New tab".into(),
             keys: vec!["ctrl+shift+n".into()],
+            category: String::new(),
         }];
         let rows = effective(&saved);
         assert!(
@@ -518,6 +621,7 @@ mod tests {
             action: "find".into(),
             label: "Find".into(),
             keys: vec![],
+            category: String::new(),
         }];
         let rows = effective(&saved);
         assert!(rows.iter().all(|row| row.action != "find"));

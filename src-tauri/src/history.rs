@@ -19,6 +19,8 @@ pub struct HistoryItem {
     pub title: String,
     pub visit_count: u32,
     pub last_visited: u64,
+    /// Visits that began with the address typed into the address bar. Older files omit this.
+    pub typed_count: u32,
 }
 
 impl Default for HistoryItem {
@@ -29,7 +31,37 @@ impl Default for HistoryItem {
             title: String::new(),
             visit_count: 1,
             last_visited: 0,
+            typed_count: 0,
         }
+    }
+}
+
+/// Addresses typed into the address bar whose visit has not been recorded yet.
+static TYPED: Mutex<Vec<(String, u64)>> = Mutex::new(Vec::new());
+const TYPED_WINDOW_MS: u64 = 30_000;
+
+/// The next visit to `url` counts as typed.
+pub fn note_typed(url: &str) {
+    if !tracked(url) {
+        return;
+    }
+    let now = now_ms();
+    let mut typed = TYPED.lock().expect("typed");
+    typed.retain(|(_, at)| now.saturating_sub(*at) < TYPED_WINDOW_MS);
+    typed.push((paths::pin_key(url.trim()), now));
+}
+
+fn take_typed(url: &str) -> bool {
+    let key = paths::pin_key(url);
+    let now = now_ms();
+    let mut typed = TYPED.lock().expect("typed");
+    typed.retain(|(_, at)| now.saturating_sub(*at) < TYPED_WINDOW_MS);
+    match typed.iter().position(|(item, _)| *item == key) {
+        Some(index) => {
+            typed.remove(index);
+            true
+        }
+        None => false,
     }
 }
 
@@ -100,6 +132,7 @@ fn apply_visit(items: &mut Vec<HistoryItem>, next_id: &mut u32, url: &str, title
                 title: useful_title(url, title).unwrap_or_else(|| url.to_string()),
                 visit_count: 1,
                 last_visited: now,
+                typed_count: 0,
             },
         );
     }
@@ -232,6 +265,7 @@ pub fn visit(app: &AppHandle, url: &str, title: &str) {
     if !tracked(url) {
         return;
     }
+    let typed = take_typed(url.trim());
     with_state(app, |state| {
         apply_visit(
             &mut state.items,
@@ -240,6 +274,9 @@ pub fn visit(app: &AppHandle, url: &str, title: &str) {
             title,
             now_ms(),
         );
+        if typed && let Some(item) = state.items.first_mut() {
+            item.typed_count = item.typed_count.saturating_add(1);
+        }
     });
     changed(app);
 }
@@ -257,32 +294,71 @@ pub fn set_title(app: &AppHandle, url: &str, title: &str) {
     }
 }
 
-pub fn remove(app: &AppHandle, id: u32) {
+/// Removes one entry from the list. Its saved page text stays until `forget_text` runs,
+/// so an undo can bring the entry back whole.
+pub fn take(app: &AppHandle, id: u32) -> Option<HistoryItem> {
     let removed = with_state(app, |state| {
-        let url = state
-            .items
-            .iter()
-            .find(|item| item.id == id)
-            .map(|item| item.url.clone());
-        let before = state.items.len();
-        state.items.retain(|item| item.id != id);
-        url.filter(|_| state.items.len() != before)
+        let index = state.items.iter().position(|item| item.id == id)?;
+        Some(state.items.remove(index))
     });
-    if let Some(url) = removed {
+    if removed.is_some() {
         changed(app);
-        crate::history_index::forget(app, &url);
     }
+    removed
 }
 
-pub fn clear(app: &AppHandle) {
-    let had = with_state(app, |state| {
-        let had = !state.items.is_empty();
-        state.items.clear();
-        had
-    });
-    if had {
+/// Empties the list and returns what it held. The page-text index waits for `forget_text`.
+pub fn take_all(app: &AppHandle) -> Vec<HistoryItem> {
+    let items = with_state(app, |state| std::mem::take(&mut state.items));
+    if !items.is_empty() {
         changed(app);
+    }
+    items
+}
+
+/// Puts removed entries back. A page visited again since keeps its newer entry.
+pub fn restore(app: &AppHandle, items: Vec<HistoryItem>) {
+    if items.is_empty() {
+        return;
+    }
+    with_state(app, |state| {
+        for item in items {
+            let key = paths::pin_key(&item.url);
+            if state
+                .items
+                .iter()
+                .any(|existing| paths::pin_key(&existing.url) == key)
+            {
+                continue;
+            }
+            state.next_id = state.next_id.max(item.id.saturating_add(1));
+            state.items.push(item);
+        }
+        state
+            .items
+            .sort_by(|left, right| right.last_visited.cmp(&left.last_visited));
+        state.items.truncate(MAX_ITEMS);
+    });
+    changed(app);
+}
+
+/// Drops saved page text for entries that were removed for good.
+pub fn forget_text(app: &AppHandle, items: &[HistoryItem], cleared: bool) {
+    if cleared && with_state(app, |state| state.items.is_empty()) {
         crate::history_index::clear(app);
+        return;
+    }
+    for item in items {
+        let key = paths::pin_key(&item.url);
+        let kept = with_state(app, |state| {
+            state
+                .items
+                .iter()
+                .any(|existing| paths::pin_key(&existing.url) == key)
+        });
+        if !kept {
+            crate::history_index::forget(app, &item.url);
+        }
     }
 }
 

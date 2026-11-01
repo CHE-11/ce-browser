@@ -19,6 +19,8 @@ pub struct SessionFile {
     pub workspaces: Vec<tabs::Workspace>,
     pub active_workspace: String,
     pub split: Option<SessionSplitFile>,
+    /// Recently closed tabs and groups, oldest first. Older files omit this.
+    pub closed: Vec<tabs::ClosedEntry>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -132,12 +134,14 @@ pub fn save_now(app: &AppHandle) -> Result<(), String> {
         split: saved
             .split
             .map(|(left, right, ratio)| SessionSplitFile { left, right, ratio }),
+        closed: tabs::closed_for_session(app),
     };
     files::write_json(&paths::data_file(app, FILE), &file)
 }
 
 /// Stops the debounced writer so a late save cannot run after the window is gone.
 pub fn shutdown(app: &AppHandle) {
+    crate::undo::finish_all(app);
     let _ = save_now(app);
     crate::status::flush(app);
     if let Some(saver) = app.try_state::<SessionSaver>() {
@@ -146,7 +150,8 @@ pub fn shutdown(app: &AppHandle) {
 }
 
 pub fn restore(app: &AppHandle) -> Result<(), String> {
-    let file: SessionFile = files::read_json(&paths::data_file(app, FILE));
+    let mut file: SessionFile = files::read_json(&paths::data_file(app, FILE));
+    tabs::restore_closed_list(app, std::mem::take(&mut file.closed));
     let restore_all = settings::get(app).startup == "restore";
     let workspaces = tabs::normalize_workspaces(file.workspaces);
     let known = |id: &str| workspaces.iter().any(|workspace| workspace.id == id);
@@ -315,6 +320,7 @@ mod tests {
         assert!(file.tabs[0].group_id.is_none());
         assert!(file.groups.is_empty());
         assert!(file.split.is_none());
+        assert!(file.closed.is_empty());
         assert!(
             crate::tabs::normalize_workspaces(file.workspaces)
                 .iter()

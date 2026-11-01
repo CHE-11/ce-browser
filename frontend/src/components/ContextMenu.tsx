@@ -8,11 +8,15 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/cn";
+import { focusRow } from "../lib/focus-ring";
+import { moveMenuFocus } from "./Menu";
 
 export const contextMenuPanelClass = "min-w-48 rounded-md border border-zinc-700 bg-zinc-900 py-0.5 shadow-2xl";
 
-const itemClass =
-  "flex h-6 w-full items-center justify-between gap-2 whitespace-nowrap px-2 text-left text-xs leading-4 text-zinc-100 hover:bg-zinc-800 focus-visible:bg-zinc-800 focus-visible:outline-none disabled:opacity-40 disabled:hover:bg-transparent";
+const itemClass = cn(
+  "flex h-6 w-full items-center justify-between gap-2 whitespace-nowrap px-2 text-left text-xs leading-4 text-zinc-100 hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent",
+  focusRow,
+);
 
 type ContextMenuProps = {
   id: string;
@@ -40,6 +44,7 @@ export function ContextMenu({
   onEscape,
 }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const typeahead = useRef({ text: "", at: 0 });
   const [point, setPoint] = useState(() => clampMenuToViewport(x, y, 240, 200));
 
   useLayoutEffect(() => {
@@ -96,7 +101,7 @@ export function ContextMenu({
       onKeyDown={(event) => {
         onKeyDown?.(event);
         if (!event.defaultPrevented) {
-          moveMenuFocus(event);
+          moveMenuFocus(event, typeahead.current);
         }
       }}
     >
@@ -142,6 +147,7 @@ export function ContextMenuItem({
       id={id}
       type="button"
       role="menuitem"
+      data-label={label}
       data-scope={scope}
       title={title}
       aria-haspopup={hasPopup ? "menu" : undefined}
@@ -153,6 +159,7 @@ export function ContextMenuItem({
       <span id={`${id}-content`} className="flex min-w-0 items-center gap-1.5">
         <span
           id={`${id}-icon`}
+          aria-hidden
           className={cn(
             "inline-flex size-3.5 shrink-0 items-center justify-center [&_svg]:size-3.5",
             danger ? "text-current" : "text-zinc-400",
@@ -177,28 +184,4 @@ export function clampMenuToViewport(x: number, y: number, width: number, height:
     left: Math.min(Math.max(margin, x), maxLeft),
     top: Math.min(Math.max(margin, y), maxTop),
   };
-}
-
-function moveMenuFocus(event: ReactKeyboardEvent<HTMLElement>) {
-  if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") {
-    return;
-  }
-  const items = event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');
-  if (items.length === 0) {
-    return;
-  }
-  event.preventDefault();
-  const list = [...items];
-  const index = list.findIndex((item) => item === document.activeElement);
-  if (event.key === "Home") {
-    list[0]?.focus();
-    return;
-  }
-  if (event.key === "End") {
-    list[list.length - 1]?.focus();
-    return;
-  }
-  const delta = event.key === "ArrowDown" ? 1 : -1;
-  const next = index < 0 ? 0 : (index + delta + list.length) % list.length;
-  list[next]?.focus();
 }
