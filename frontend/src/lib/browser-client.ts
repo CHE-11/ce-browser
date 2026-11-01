@@ -22,6 +22,8 @@ import type {
   ProfileIconChoice,
   DownloadItem,
   ExtractedPage,
+  FindResult,
+  FindTabResult,
   HistoryItem,
   Keyword,
   ShortcutBinding,
@@ -293,8 +295,29 @@ export function restoreTranslation(id: number) {
   return invoke<void>("restore_translation", { id });
 }
 
-export function generatePassword(length: number, upper: boolean, lower: boolean, digits: boolean, symbols: boolean) {
-  return invoke<string>("generate_password", { length, upper, lower, digits, symbols });
+/** Translates text into the language from settings, with the configured provider. */
+export function translateSelection(text: string) {
+  return invoke<string>("translate_selection", { text });
+}
+
+export function generatePassword(
+  length: number,
+  upper: boolean,
+  lower: boolean,
+  digits: boolean,
+  symbols: boolean,
+  minSymbols: number,
+  avoidAmbiguous: boolean,
+) {
+  return invoke<string>("generate_password", { length, upper, lower, digits, symbols, minSymbols, avoidAmbiguous });
+}
+
+export function copyText(text: string) {
+  return invoke<void>("copy_text", { text });
+}
+
+export function showNotice(message: string) {
+  return invoke<void>("show_notice", { message });
 }
 
 export function waybackUrl(save: boolean, url: string) {
@@ -520,8 +543,20 @@ export function zoomTab(id: number, change: "in" | "out" | "reset") {
   return invoke<number>("zoom_tab", { id, change });
 }
 
-export function findInPage(id: number, query: string, backwards = false) {
-  return invoke<boolean>("find_in_page", { id, query, backwards });
+export type FindOptions = {
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  /** Move to the next or previous match. False searches again from the top of the view. */
+  step?: boolean;
+};
+
+export function findInPage(id: number, query: string, backwards = false, options: FindOptions = {}) {
+  return invoke<FindResult>("find_in_page", { id, query, backwards, ...options });
+}
+
+/** Counts matches in every tab of this window's workspace. */
+export function findInTabs(query: string, caseSensitive: boolean, wholeWord: boolean) {
+  return invoke<FindTabResult[]>("find_in_tabs", { query, caseSensitive, wholeWord });
 }
 
 export function clearFind(id: number) {

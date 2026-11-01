@@ -183,6 +183,9 @@ pub struct BrowserSettings {
     /// In recent order, Ctrl+Tab shows a switcher with thumbnails until Ctrl is released.
     #[serde(default = "default_true")]
     pub tab_switcher: bool,
+    /// Resting on a tab shows a small preview of its page.
+    #[serde(default = "default_true")]
+    pub tab_hover_preview: bool,
 }
 
 const TAB_LAYOUTS: &[&str] = &["horizontal", "vertical"];
@@ -486,6 +489,7 @@ impl Default for BrowserSettings {
             index_page_text: true,
             tab_cycle_order: default_tab_cycle_order(),
             tab_switcher: true,
+            tab_hover_preview: true,
         }
     }
 }
@@ -620,6 +624,20 @@ impl BrowserSettings {
             .find(|(id, _)| *id == self.search_engine)
             .map(|(_, url)| (*url).to_string())
             .unwrap_or_else(|| SEARCH_ENGINES[0].1.to_string())
+    }
+
+    /// Name of the search engine for labels, such as `Google`. A custom URL is `the web`.
+    pub fn search_engine_name(&self) -> &'static str {
+        match self.search_engine.as_str() {
+            "google" => "Google",
+            "bing" => "Bing",
+            "duckduckgo" => "DuckDuckGo",
+            "brave" => "Brave",
+            "startpage" => "Startpage",
+            "kagi" => "Kagi",
+            "mojeek" => "Mojeek",
+            _ => "the web",
+        }
     }
 
     pub fn download_dir(&self, app: &AppHandle) -> PathBuf {
@@ -1045,6 +1063,7 @@ mod tests {
         assert_eq!(loaded.vertical_tabs_width, 240);
         assert!(!loaded.mute_background_tabs);
         assert!(loaded.peek_on_shift_click);
+        assert!(loaded.tab_hover_preview);
         assert!(loaded.tab_sleep.enabled);
         assert_eq!(loaded.tab_sleep.minutes, 30);
     }

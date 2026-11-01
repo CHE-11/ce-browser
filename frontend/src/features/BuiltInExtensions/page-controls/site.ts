@@ -11,6 +11,7 @@ export const EMPTY_SITE: SiteControl = {
   blockFonts: false,
   hidden: [],
   referrer: "default",
+  zoom: 0,
 };
 
 /** Host of an http(s) page, without a leading `www.`. */
@@ -57,6 +58,7 @@ export function siteActive(site: SiteControl) {
     site.blockImages ||
     site.blockFonts ||
     site.hidden.length > 0 ||
-    site.referrer !== "default"
+    site.referrer !== "default" ||
+    (site.zoom ?? 0) !== 0
   );
 }

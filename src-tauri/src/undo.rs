@@ -11,6 +11,8 @@ use crate::{bookmarks, history, tabs};
 const KEEP: Duration = Duration::from_secs(120);
 
 pub enum UndoAction {
+    /// A message only. The toast has no Undo button.
+    Nothing,
     /// A recently closed entry. Undo opens it again.
     Closed(u32),
     /// Deleted bookmarks with their folder and position, in the order they were deleted.
@@ -34,6 +36,7 @@ static NEXT: AtomicU32 = AtomicU32::new(0);
 /// Shows a toast with Undo in `window`. A newer toast in the same window ends the older offer.
 pub fn offer(app: &AppHandle, window: &str, message: &str, action: UndoAction) -> u32 {
     let id = NEXT.fetch_add(1, Ordering::Relaxed) + 1;
+    let undoable = !matches!(action, UndoAction::Nothing);
     let ended = {
         let mut offers = OFFERS.lock().expect("undo");
         let (ended, kept): (Vec<Offer>, Vec<Offer>) = offers
@@ -54,12 +57,17 @@ pub fn offer(app: &AppHandle, window: &str, message: &str, action: UndoAction) -
     let params = form_urlencoded::Serializer::new(String::new())
         .append_pair("id", &id.to_string())
         .append_pair("message", message)
-        .append_pair("undo", "1")
+        .append_pair("undo", if undoable { "1" } else { "0" })
         .finish();
     if let Err(error) = tabs::show_toast(app, window, &params) {
         eprintln!("toast: {error}");
     }
     id
+}
+
+/// A toast with a message and no Undo.
+pub fn notice(app: &AppHandle, window: &str, message: &str) {
+    offer(app, window, message, UndoAction::Nothing);
 }
 
 /// Toast for tabs closed together. A single closed tab does not get one.
@@ -84,6 +92,7 @@ pub fn undo(app: &AppHandle, id: u32) -> Result<(), String> {
     let offer = take(id).ok_or("That can no longer be undone.")?;
     tabs::close_toast(app, &offer.window);
     match offer.action {
+        UndoAction::Nothing => Ok(()),
         UndoAction::Closed(entry) => tabs::restore_closed(app, Some(entry)).map(|_| ()),
         UndoAction::Bookmarks(removed) => {
             for (node, parent, index) in removed.into_iter().rev() {

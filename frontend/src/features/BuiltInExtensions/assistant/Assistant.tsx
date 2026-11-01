@@ -23,7 +23,7 @@ export function AssistantButton({ activeTab }: { activeTab: TabInfo | undefined 
 
 export function AssistantPopover({ params }: { params: URLSearchParams }) {
   const tab = readPopoverTab(params);
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(() => params.get("question") ?? "");
   const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

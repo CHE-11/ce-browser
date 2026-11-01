@@ -720,7 +720,7 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
             core11.add_ContextMenuRequested(
                 &ContextMenuRequestedEventHandler::create(Box::new(move |_, args| {
                     if let Some(args) = args {
-                        let _ = add_link_items(&menu_app, &environment, &args, id);
+                        let _ = add_page_items(&menu_app, &environment, &args, id);
                     }
                     Ok(())
                 })),
@@ -1185,6 +1185,123 @@ fn attach_downloads(app: &AppHandle, core: &ICoreWebView2) -> windows::core::Res
             })),
             &mut token,
         )
+    }
+}
+
+/// A menu entry that runs `action` on a worker thread when chosen.
+fn menu_command(
+    environment: &ICoreWebView2Environment9,
+    label: &str,
+    action: impl Fn() + Send + Sync + 'static,
+) -> windows::core::Result<ICoreWebView2ContextMenuItem> {
+    let action = Arc::new(action);
+    unsafe {
+        let item = environment.CreateContextMenuItem(
+            &HSTRING::from(label),
+            None::<&IStream>,
+            COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_COMMAND,
+        )?;
+        let mut token = 0i64;
+        item.add_CustomItemSelected(
+            &CustomItemSelectedEventHandler::create(Box::new(move |_, _| {
+                let action = action.clone();
+                std::thread::spawn(move || action());
+                Ok(())
+            })),
+            &mut token,
+        )?;
+        Ok(item)
+    }
+}
+
+/// Page menu entries for a link, selected text, or an image.
+fn add_page_items(
+    app: &AppHandle,
+    environment: &ICoreWebView2Environment9,
+    args: &ICoreWebView2ContextMenuRequestedEventArgs,
+    id: u32,
+) -> windows::core::Result<()> {
+    add_link_items(app, environment, args, id)?;
+    unsafe {
+        let target = args.ContextMenuTarget()?;
+        let selection = if read_bool(|value| target.HasSelection(value)) {
+            read_pwstr(|value| target.SelectionText(value)).trim().to_string()
+        } else {
+            String::new()
+        };
+        let mut kind = COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND::default();
+        let _ = target.Kind(&mut kind);
+        let image = (kind == COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_IMAGE && read_bool(|value| target.HasSourceUri(value)))
+            .then(|| read_pwstr(|value| target.SourceUri(value)))
+            .filter(|source| !source.is_empty());
+        if selection.is_empty() && image.is_none() {
+            return Ok(());
+        }
+        let page = read_pwstr(|value| target.PageUri(value));
+        let mut location = windows::Win32::Foundation::POINT::default();
+        let _ = args.Location(&mut location);
+        let mut entries = Vec::new();
+        if !selection.is_empty() {
+            let engine = crate::settings::get(app).search_engine_name();
+            let short = crate::page_menu::label_text(&selection, 28);
+            let (search_app, text) = (app.clone(), selection.clone());
+            entries.push(menu_command(environment, &format!("Search {engine} for \u{201c}{short}\u{201d}"), move || {
+                crate::page_menu::search_selection(&search_app, id, &text)
+            })?);
+            let (translate_app, text) = (app.clone(), selection.clone());
+            let (x, y) = (location.x, location.y);
+            entries.push(menu_command(environment, "Translate selection", move || {
+                let params = url::form_urlencoded::Serializer::new(String::new())
+                    .append_pair("tab", &id.to_string())
+                    .append_pair("text", &text)
+                    .finish();
+                crate::page_menu::open_popup_at(&translate_app, id, x, y, "selection-translate", params, 360.0, 240.0);
+            })?);
+            let (assistant_app, text, page_url) = (app.clone(), selection.clone(), page.clone());
+            entries.push(menu_command(environment, "Ask the assistant about this", move || {
+                let question = format!("Explain this passage from the page:\n\n\u{201c}{}\u{201d}", text.chars().take(2000).collect::<String>());
+                let params = url::form_urlencoded::Serializer::new(String::new())
+                    .append_pair("tab", &id.to_string())
+                    .append_pair("url", &page_url)
+                    .append_pair("title", "")
+                    .append_pair("question", &question)
+                    .finish();
+                crate::page_menu::open_popup_at(&assistant_app, id, x, y, "assistant", params, 360.0, 460.0);
+            })?);
+            let (link_app, text, page_url) = (app.clone(), selection.clone(), page.clone());
+            if page_url.starts_with("http") {
+                entries.push(menu_command(environment, "Copy link to highlight", move || {
+                    crate::page_menu::copy_link_to_text(&link_app, id, &page_url, &text)
+                })?);
+            }
+        }
+        if let Some(source) = image {
+            let (ocr_app, src) = (app.clone(), source.clone());
+            entries.push(menu_command(environment, "Copy text from image", move || {
+                crate::page_menu::copy_image_text(&ocr_app, id, &src)
+            })?);
+            let (lens_app, src) = (app.clone(), source.clone());
+            entries.push(menu_command(environment, "Search image with Google Lens", move || {
+                crate::page_menu::search_image(&lens_app, id, &src)
+            })?);
+            let (save_app, src) = (app.clone(), source);
+            entries.push(menu_command(environment, "Save image to Downloads", move || {
+                crate::page_menu::save_image(&save_app, id, &src)
+            })?);
+        }
+        let items = args.MenuItems()?;
+        let mut count = 0u32;
+        items.Count(&mut count)?;
+        let separator = environment.CreateContextMenuItem(
+            &HSTRING::new(),
+            None::<&IStream>,
+            COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
+        )?;
+        items.InsertValueAtIndex(count, &separator)?;
+        for (offset, entry) in entries.iter().enumerate() {
+            items.InsertValueAtIndex(count + 1 + offset as u32, entry)?;
+        }
+        Ok(())
     }
 }
 

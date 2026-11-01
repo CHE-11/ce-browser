@@ -8,6 +8,7 @@ import { TabStrip } from "@/components/TabsAddressAndBookmarks/Tabs/TabStrip";
 import { VerticalTabs } from "@/components/TabsAddressAndBookmarks/Tabs/VerticalTabs";
 import { VerticalToolbar } from "@/components/VerticalToolbar";
 import { onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
+import { leaveTab } from "@/lib/tab-hover";
 import { splitToolbar, toolbarPinned } from "@/lib/toolbar-pin";
 import { useTabs, useBookmarks, useDownloads, useHistory, useExtensions, useAppearanceFromSettings } from "@/lib/use-browser";
 import { useRef, useState, useEffect, useLayoutEffect } from "react";
@@ -28,6 +29,7 @@ export function BrowserPage() {
 
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const vertical = settings?.tabLayout === "vertical";
+  const hoverPreview = settings?.tabHoverPreview;
   const toolExtensionIds = extensions
     .filter((extension) => extension.enabled && toolbarPinned(settings, extension.id))
     .map((extension) => extension.id);
@@ -39,6 +41,12 @@ export function BrowserPage() {
   useEffect(() => {
     document.title = activeTab ? `${activeTab.title || activeTab.url} - ce-browser` : "ce-browser";
   }, [activeTab]);
+
+  useEffect(() => {
+    if (hoverPreview === false) {
+      leaveTab(true);
+    }
+  }, [hoverPreview]);
 
   useEffect(() => {
     const centered = (kind: PopupKind, width: number, height: number, params = "") =>

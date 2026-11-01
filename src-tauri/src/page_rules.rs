@@ -52,6 +52,9 @@ pub struct SiteControl {
     pub hidden: Vec<String>,
     /// `default`, `none`, `origin` or `same-origin`.
     pub referrer: String,
+    /// Page zoom in percent remembered for this site. Zero follows the default page zoom.
+    /// Older files omit this.
+    pub zoom: u32,
 }
 
 impl Default for SiteControl {
@@ -67,6 +70,7 @@ impl Default for SiteControl {
             block_fonts: false,
             hidden: Vec::new(),
             referrer: "default".into(),
+            zoom: 0,
         }
     }
 }
@@ -79,6 +83,9 @@ impl SiteControl {
         self.video_speed = snap_speed(self.video_speed);
         self.hidden = clean_selectors(self.hidden);
         self.referrer = crate::privacy::normalize_referrer(&self.referrer);
+        if self.zoom != 0 {
+            self.zoom = self.zoom.clamp(25, 300);
+        }
         self
     }
 
@@ -97,6 +104,7 @@ impl SiteControl {
             || self.block_fonts
             || !self.hidden.is_empty()
             || self.referrer != "default"
+            || self.zoom != 0
     }
 }
 
@@ -158,6 +166,8 @@ pub struct SitePatch {
     pub hide: Option<String>,
     pub clear_hidden: Option<bool>,
     pub referrer: Option<String>,
+    /// Percent. Zero forgets the site's zoom.
+    pub zoom: Option<u32>,
 }
 
 struct RulesState {
@@ -237,6 +247,9 @@ pub fn update_site(app: &AppHandle, host: &str, patch: SitePatch) -> Result<Page
     }
     if let Some(value) = patch.referrer {
         site.referrer = value;
+    }
+    if let Some(value) = patch.zoom {
+        site.zoom = value;
     }
     if patch.clear_hidden == Some(true) {
         site.hidden.clear();
@@ -394,6 +407,43 @@ pub fn remember_speed(app: &AppHandle, page_url: &str, speed: f64) {
             ..SitePatch::default()
         },
     );
+}
+
+/// Stores the zoom for the page's site. Zero forgets it. Nothing on the page changes, so the
+/// page scripts are not run again the way other control changes do.
+pub fn remember_zoom(app: &AppHandle, page_url: &str, percent: u32) {
+    let host = settings::sleep_site_key(page_url);
+    if host.is_empty() {
+        return;
+    }
+    let mut rules = get(app);
+    let mut site = rules.sites.get(&host).cloned().unwrap_or_default();
+    if site.zoom == percent {
+        return;
+    }
+    site.zoom = percent;
+    site = site.normalize();
+    if site.active() {
+        rules.sites.insert(host, site);
+    } else {
+        rules.sites.remove(&host);
+    }
+    let rules = rules.normalize();
+    if let Err(error) = write(app, &rules) {
+        eprintln!("site zoom: {error}");
+        return;
+    }
+    *state(app).rules.lock().expect("page rules") = rules.clone();
+    let _ = app.emit("page-rules-changed", &rules);
+}
+
+/// Zoom stored for the site of `url` as a factor, or `None` to use the default.
+pub fn zoom_for(app: &AppHandle, url: &str) -> Option<f64> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return None;
+    }
+    let zoom = control_for(app, url).zoom;
+    (zoom != 0).then(|| f64::from(zoom) / 100.0)
 }
 
 pub fn remember_zap(app: &AppHandle, page_url: &str, selector: &str) {
@@ -809,6 +859,21 @@ const ZAPPER_JS: &str = r##"(function () {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_site_saved_before_zoom_still_loads_and_a_zoom_alone_is_kept() {
+        let rules: PageRules =
+            serde_json::from_str(r#"{"sites":{"example.com":{"cleanPage":true}}}"#).unwrap();
+        let rules = rules.normalize();
+        assert_eq!(rules.sites["example.com"].zoom, 0);
+        let zoomed = SiteControl {
+            zoom: 900,
+            ..SiteControl::default()
+        }
+        .normalize();
+        assert!(zoomed.active());
+        assert_eq!(zoomed.zoom, 300);
+    }
 
     #[test]
     fn an_empty_file_loads() {

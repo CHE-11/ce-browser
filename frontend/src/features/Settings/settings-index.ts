@@ -24,6 +24,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { id: "settings-tab-layout", label: "Tab layout", section: "settings-tabs", keywords: "vertical horizontal sidebar" },
   { id: "settings-tab-cycle", label: "Ctrl+Tab order", section: "settings-tabs", keywords: "recent switcher" },
   { id: "settings-tab-switcher", label: "Show the tab switcher", section: "settings-tabs", keywords: "thumbnails ctrl+tab" },
+  { id: "settings-tab-hover", label: "Show a preview when hovering a tab", section: "settings-tabs", keywords: "thumbnail hover card" },
   { id: "settings-peek", label: "Shift+click opens links in a peek", section: "settings-tabs" },
   { id: "settings-mute-background", label: "Mute tabs in the background", section: "settings-tabs", keywords: "sound audio" },
   { id: "settings-sleep", label: "Put background tabs to sleep", section: "settings-tabs", keywords: "memory suspend" },

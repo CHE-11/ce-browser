@@ -19,7 +19,9 @@ import {
   startInspector,
   startZapper,
   updateSiteControl,
+  zoomTab,
 } from "@/lib/browser-client";
+import { Button } from "@/components/Button";
 import { usePageRules, useSettings, useTabs } from "@/lib/use-browser";
 import type { ReferrerMode, SitePatch } from "@type/browser";
 
@@ -202,6 +204,22 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
             </option>
           </select>
         </label>
+        <div id="page-controls-zoom" className="flex items-center gap-3 px-2.5 py-1.5 text-sm">
+          <span id="page-controls-zoom-label" className="min-w-0 flex-1">
+            Zoom on this site
+            <span id="page-controls-zoom-hint" className="block text-[11px] text-zinc-500">
+              {site.zoom ? "Remembered from Ctrl +/-" : "Follows the default page zoom"}
+            </span>
+          </span>
+          <span id="page-controls-zoom-value" className="tabular-nums text-zinc-300">
+            {site.zoom ? `${site.zoom}%` : `${Math.round((live?.zoom ?? 1) * 100)}%`}
+          </span>
+          {site.zoom ? (
+            <Button id="page-controls-zoom-reset" size="xs" variant="outline" onClick={() => void zoomTab(tab.id, "reset")}>
+              Reset
+            </Button>
+          ) : null}
+        </div>
         <OptionRow
           id="page-controls-https"
           label="Allow http on this site"

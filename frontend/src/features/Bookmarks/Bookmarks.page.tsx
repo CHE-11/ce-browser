@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { hostOf } from "@/lib/format";
 import { useRoute } from "@/lib/route";
 import { BookmarkDropPlace, useAppearanceFromSettings, useBookmarks, findFolder, bookmarkRootsOf, bookmarkContains, BOOKMARK_DRAG_TYPE, bookmarkDropPlace, findBookmarkParent, listFolders } from "@/lib/use-browser";
-import { ChevronRight, Search, LayoutGrid, List, Type, Upload, Download, Plus, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, Link2 } from "lucide-react";
+import { ChevronRight, Columns3, Search, LayoutGrid, List, Type, Upload, Download, Plus, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, Link2 } from "lucide-react";
 import { useRef, useState, useEffect, useMemo, useCallback, type DragEvent, type MouseEvent } from "react";
 import { BookmarkHealthProgress, BookmarkHealthReport, BookmarkNode, BookmarkTree } from "../../../../types/browser";
 
@@ -21,7 +21,7 @@ type MenuState = { node: BookmarkNode; x: number; y: number };
 
 type DropState = { id: string; place: BookmarkDropPlace };
 
-type BookmarkView = "cards" | "list" | "headlines";
+type BookmarkView = "columns" | "cards" | "list" | "headlines";
 
 const ROOT_FOLDERS = new Set(["bar", "other"]);
 const VIEW_KEY = "ce-bookmarks-view";
@@ -29,13 +29,13 @@ const VIEW_KEY = "ce-bookmarks-view";
 function storedView(): BookmarkView {
   try {
     const value = localStorage.getItem(VIEW_KEY);
-    if (value === "cards" || value === "list" || value === "headlines") {
+    if (value === "columns" || value === "cards" || value === "list" || value === "headlines") {
       return value;
     }
   } catch {
-    // Private mode can block storage. The cards view is the default.
+    // Private mode can block storage. Columns is the default.
   }
-  return "cards";
+  return "columns";
 }
 
 function folderPath(tree: BookmarkTree | null, id: string): BookmarkNode[] {
@@ -177,6 +177,13 @@ export function BookmarksPage() {
 
   const closeMenu = useCallback(() => setMenu(null), []);
 
+  const endDrag = () => {
+    setDrop(null);
+    window.setTimeout(() => {
+      dragged.current = false;
+    });
+  };
+
   const orderedIds = (ids: string[]) => {
     const wanted = new Set(ids);
     const visible = rows.map((row) => row.id).filter((id) => wanted.has(id));
@@ -264,16 +271,16 @@ export function BookmarksPage() {
     report(moveBookmark(id, folderId));
   };
 
-  const pickRow = (event: MouseEvent, node: BookmarkNode, index: number) => {
+  const pickRow = (event: MouseEvent, node: BookmarkNode, index: number, list: BookmarkNode[] = rows) => {
     if (dragged.current) {
       dragged.current = false;
       return;
     }
     if (event.shiftKey && !event.ctrlKey && !event.metaKey) {
-      const anchor = rows.findIndex((row) => row.id === anchorId.current);
+      const anchor = list.findIndex((row) => row.id === anchorId.current);
       const start = anchor < 0 ? index : Math.min(anchor, index);
       const end = anchor < 0 ? index : Math.max(anchor, index);
-      setPicked(rows.slice(start, end + 1).map((row) => row.id));
+      setPicked(list.slice(start, end + 1).map((row) => row.id));
       return;
     }
     if (event.ctrlKey || event.metaKey) {
@@ -282,6 +289,10 @@ export function BookmarksPage() {
       return;
     }
     if (node.url) {
+      if (view === "columns") {
+        setPicked([node.id]);
+        anchorId.current = node.id;
+      }
       void createTab(node.url);
       return;
     }
@@ -343,6 +354,7 @@ export function BookmarksPage() {
         <div id="bookmarks-page-views" className="flex items-center rounded-md border border-zinc-800 p-0.5">
           {(
             [
+              ["columns", Columns3, "Columns"],
               ["cards", LayoutGrid, "Cards"],
               ["list", List, "List"],
               ["headlines", Type, "Headlines"],
@@ -434,7 +446,7 @@ export function BookmarksPage() {
       ) : null}
       <div
         id="bookmarks-page-items"
-        className="min-h-0 flex-1 overflow-y-auto p-3"
+        className={cn("min-h-0 flex-1", view === "columns" && !results ? "overflow-hidden" : "overflow-y-auto p-3")}
         onClick={(event) => {
           if (event.target === event.currentTarget) {
             setPicked([]);
@@ -446,7 +458,7 @@ export function BookmarksPage() {
           }
         }}
         onDrop={(event) => {
-          if (!selected || results) {
+          if (!selected || results || view === "columns") {
             return;
           }
           const id = event.dataTransfer.getData(BOOKMARK_DRAG_TYPE);
@@ -458,47 +470,68 @@ export function BookmarksPage() {
           report(moveBookmark(id, selected.id));
         }}
       >
-        {results ? (
-          <p id="bookmarks-page-results" className="mb-2 text-xs text-zinc-500">
-            {results.length} results for “{query.trim()}”
-          </p>
-        ) : null}
-        {rows.length === 0 ? (
+        {view === "columns" && !results && tree ? (
+          <BookmarkColumns
+            roots={[tree.bar, tree.other]}
+            path={path}
+            picked={picked}
+            drop={drop}
+            onPick={pickRow}
+            onContextMenu={openRowMenu}
+            onDragStart={onDragStart}
+            onDragEnd={endDrag}
+            onDragOver={allowDrop}
+            onDrop={commitDrop}
+            onDropInto={dropIntoFolder}
+            onClearPick={() => setPicked([])}
+          />
+        ) : results ? (
+          <>
+            <p id="bookmarks-page-results" className="mb-2 text-xs text-zinc-500">
+              {results.length} results for “{query.trim()}”
+            </p>
+            {rows.length === 0 ? (
+              <p id="bookmarks-page-empty" className="px-1 py-8 text-center text-sm text-zinc-500">
+                No bookmarks match that search.
+              </p>
+            ) : (
+              <BookmarkGrid
+                rows={rows}
+                view={view === "columns" ? "list" : view}
+                axis={axis}
+                picked={picked}
+                drop={drop}
+                onPick={pickRow}
+                onContextMenu={openRowMenu}
+                onDragStart={onDragStart}
+                onDragEnd={endDrag}
+                onDragOver={allowDrop}
+                onDrop={commitDrop}
+                onEdit={(node) => setEditor({ mode: "edit", node })}
+                onDelete={(node) => void removeIds([node.id])}
+              />
+            )}
+          </>
+        ) : rows.length === 0 ? (
           <p id="bookmarks-page-empty" className="px-1 py-8 text-center text-sm text-zinc-500">
-            {results ? "No bookmarks match that search." : "This folder is empty. Drag bookmarks here or add one."}
+            This folder is empty. Drag bookmarks here or add one.
           </p>
         ) : (
-          <div
-            id="bookmarks-page-grid"
-            className={cn(
-              view === "cards" && "grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2",
-              view === "list" && "flex flex-col gap-0.5",
-              view === "headlines" && "flex flex-col",
-            )}
-          >
-            {rows.map((node, index) => (
-              <BookmarkItem
-                key={node.id}
-                node={node}
-                view={view}
-                chosen={picked.includes(node.id)}
-                dropClass={dropChrome(drop, node.id, axis)}
-                onClick={(event) => pickRow(event, node, index)}
-                onContextMenu={(event) => openRowMenu(event, node)}
-                onDragStart={(event) => onDragStart(event, node)}
-                onDragEnd={() => {
-                  setDrop(null);
-                  window.setTimeout(() => {
-                    dragged.current = false;
-                  });
-                }}
-                onDragOver={(event) => allowDrop(event, node)}
-                onDrop={(event) => commitDrop(event, node)}
-                onEdit={() => setEditor({ mode: "edit", node })}
-                onDelete={() => void removeIds([node.id])}
-              />
-            ))}
-          </div>
+          <BookmarkGrid
+            rows={rows}
+                view={view === "columns" ? "list" : view}
+            axis={axis}
+            picked={picked}
+            drop={drop}
+            onPick={pickRow}
+            onContextMenu={openRowMenu}
+            onDragStart={onDragStart}
+            onDragEnd={endDrag}
+            onDragOver={allowDrop}
+            onDrop={commitDrop}
+            onEdit={(node) => setEditor({ mode: "edit", node })}
+            onDelete={(node) => void removeIds([node.id])}
+          />
         )}
       </div>
 
@@ -617,9 +650,276 @@ export function BookmarksPage() {
   );
 }
 
+type ItemView = Exclude<BookmarkView, "columns">;
+
+type BookmarkColumn = {
+  key: string;
+  title: string;
+  parentId: string | null;
+  nodes: BookmarkNode[];
+  activeId: string | null;
+};
+
+type BookmarkColumnsProps = {
+  roots: [BookmarkNode, BookmarkNode];
+  path: BookmarkNode[];
+  picked: string[];
+  drop: DropState | null;
+  onPick: (event: MouseEvent, node: BookmarkNode, index: number, list: BookmarkNode[]) => void;
+  onContextMenu: (event: MouseEvent, node: BookmarkNode) => void;
+  onDragStart: (event: DragEvent, node: BookmarkNode) => void;
+  onDragEnd: () => void;
+  onDragOver: (event: DragEvent, node: BookmarkNode) => void;
+  onDrop: (event: DragEvent, node: BookmarkNode) => void;
+  onDropInto: (event: DragEvent, folderId: string) => void;
+  onClearPick: () => void;
+};
+
+function BookmarkColumns({
+  roots,
+  path,
+  picked,
+  drop,
+  onPick,
+  onContextMenu,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  onDropInto,
+  onClearPick,
+}: BookmarkColumnsProps) {
+  const endRef = useRef<HTMLDivElement>(null);
+  const pathKey = path.map((folder) => folder.id).join("/");
+  const columns: BookmarkColumn[] = [
+    {
+      key: "root",
+      title: "Bookmarks",
+      parentId: null,
+      nodes: roots,
+      activeId: path[0]?.id ?? null,
+    },
+    ...path.map((folder, index) => ({
+      key: folder.id,
+      title: folder.title || "Folder",
+      parentId: folder.id,
+      nodes: folder.children ?? [],
+      activeId: path[index + 1]?.id ?? null,
+    })),
+  ];
+
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
+  }, [pathKey]);
+
+  return (
+    <div id="bookmarks-page-columns" className="flex h-full overflow-x-auto overflow-y-hidden">
+      {columns.map((column, columnIndex) => {
+        const last = columnIndex === columns.length - 1;
+        return (
+          <div
+            key={column.key}
+            id={`bookmarks-column-${column.key}`}
+            ref={last ? endRef : undefined}
+            className="flex h-full w-72 shrink-0 flex-col border-r border-zinc-800"
+            onDragOver={(event) => {
+              if (column.parentId && event.dataTransfer.types.includes(BOOKMARK_DRAG_TYPE)) {
+                event.preventDefault();
+              }
+            }}
+            onDrop={(event) => {
+              if (!column.parentId) {
+                return;
+              }
+              const target = event.target;
+              if (target instanceof Element && target.closest("[id^='bookmarks-item-']")) {
+                return;
+              }
+              onDropInto(event, column.parentId);
+            }}
+          >
+            <div id={`bookmarks-column-${column.key}-header`} className="flex h-9 shrink-0 items-center gap-2 border-b border-zinc-800 px-3">
+              <span id={`bookmarks-column-${column.key}-title`} className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-300">
+                {column.title}
+              </span>
+              <span id={`bookmarks-column-${column.key}-count`} className="text-[11px] tabular-nums text-zinc-500">
+                {column.nodes.length}
+              </span>
+            </div>
+            <div
+              id={`bookmarks-column-${column.key}-items`}
+              role="listbox"
+              aria-label={column.title}
+              className="min-h-0 flex-1 overflow-y-auto py-1"
+              onClick={(event) => {
+                if (event.target === event.currentTarget) {
+                  onClearPick();
+                }
+              }}
+            >
+              {column.nodes.length === 0 ? (
+                <p id={`bookmarks-column-${column.key}-empty`} className="px-3 py-6 text-center text-xs text-zinc-500">
+                  Empty folder
+                </p>
+              ) : (
+                column.nodes.map((node, index) => (
+                  <BookmarkColumnRow
+                    key={node.id}
+                    node={node}
+                    active={column.activeId === node.id}
+                    chosen={picked.includes(node.id)}
+                    dropClass={dropChrome(drop, node.id, "y")}
+                    onClick={(event) => onPick(event, node, index, column.nodes)}
+                    onContextMenu={(event) => onContextMenu(event, node)}
+                    onDragStart={(event) => onDragStart(event, node)}
+                    onDragEnd={onDragEnd}
+                    onDragOver={(event) => onDragOver(event, node)}
+                    onDrop={(event) => onDrop(event, node)}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+type BookmarkColumnRowProps = {
+  node: BookmarkNode;
+  active: boolean;
+  chosen: boolean;
+  dropClass: string;
+  onClick: (event: MouseEvent) => void;
+  onContextMenu: (event: MouseEvent) => void;
+  onDragStart: (event: DragEvent) => void;
+  onDragEnd: () => void;
+  onDragOver: (event: DragEvent) => void;
+  onDrop: (event: DragEvent) => void;
+};
+
+function BookmarkColumnRow({
+  node,
+  active,
+  chosen,
+  dropClass,
+  onClick,
+  onContextMenu,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+}: BookmarkColumnRowProps) {
+  const domId = `bookmarks-item-${node.id}`;
+  const folder = !node.url && !node.separator;
+  return (
+    <div
+      id={domId}
+      role="option"
+      aria-selected={active || chosen}
+      draggable={!ROOT_FOLDERS.has(node.id) && !node.separator}
+      title={node.url ?? node.title}
+      className={cn(
+        "mx-1 flex h-8 cursor-default items-center gap-2 rounded-md px-2 text-left select-none",
+        active ? "bg-sky-900 text-zinc-50" : "hover:bg-zinc-900",
+        chosen && !active && "bg-sky-950/60 ring-1 ring-inset ring-sky-800",
+        dropClass,
+      )}
+      onClick={onClick}
+      onContextMenu={onContextMenu}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      {node.separator ? (
+        <div id={`${domId}-line`} role="separator" className="h-px flex-1 bg-zinc-700" />
+      ) : node.url ? (
+        <FavIcon id={`${domId}-icon`} url={node.url} className="size-4" />
+      ) : (
+        <Folder id={`${domId}-icon`} className="size-4 shrink-0 text-amber-400" aria-hidden />
+      )}
+      {node.separator ? (
+        <span id={`${domId}-title`} className="shrink-0 text-xs text-zinc-500">
+          Divider
+        </span>
+      ) : (
+        <span id={`${domId}-title`} className="min-w-0 flex-1 truncate text-sm">
+          {node.title || node.url}
+        </span>
+      )}
+      {folder ? (
+        <ChevronRight id={`${domId}-chevron`} className={cn("size-3.5 shrink-0", active ? "text-zinc-200" : "text-zinc-600")} aria-hidden />
+      ) : null}
+    </div>
+  );
+}
+
+type BookmarkGridProps = {
+  rows: BookmarkNode[];
+  view: ItemView;
+  axis: "x" | "y";
+  picked: string[];
+  drop: DropState | null;
+  onPick: (event: MouseEvent, node: BookmarkNode, index: number) => void;
+  onContextMenu: (event: MouseEvent, node: BookmarkNode) => void;
+  onDragStart: (event: DragEvent, node: BookmarkNode) => void;
+  onDragEnd: () => void;
+  onDragOver: (event: DragEvent, node: BookmarkNode) => void;
+  onDrop: (event: DragEvent, node: BookmarkNode) => void;
+  onEdit: (node: BookmarkNode) => void;
+  onDelete: (node: BookmarkNode) => void;
+};
+
+function BookmarkGrid({
+  rows,
+  view,
+  axis,
+  picked,
+  drop,
+  onPick,
+  onContextMenu,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  onEdit,
+  onDelete,
+}: BookmarkGridProps) {
+  return (
+    <div
+      id="bookmarks-page-grid"
+      className={cn(
+        view === "cards" && "grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2",
+        view === "list" && "flex flex-col gap-0.5",
+        view === "headlines" && "flex flex-col",
+      )}
+    >
+      {rows.map((node, index) => (
+        <BookmarkItem
+          key={node.id}
+          node={node}
+          view={view}
+          chosen={picked.includes(node.id)}
+          dropClass={dropChrome(drop, node.id, axis)}
+          onClick={(event) => onPick(event, node, index)}
+          onContextMenu={(event) => onContextMenu(event, node)}
+          onDragStart={(event) => onDragStart(event, node)}
+          onDragEnd={onDragEnd}
+          onDragOver={(event) => onDragOver(event, node)}
+          onDrop={(event) => onDrop(event, node)}
+          onEdit={() => onEdit(node)}
+          onDelete={() => onDelete(node)}
+        />
+      ))}
+    </div>
+  );
+}
+
 type BookmarkItemProps = {
   node: BookmarkNode;
-  view: BookmarkView;
+  view: ItemView;
   chosen: boolean;
   dropClass: string;
   onClick: (event: MouseEvent) => void;

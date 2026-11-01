@@ -1192,11 +1192,12 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
     Ok(webview)
 }
 
+/// Zoom a page opens at: 100% for `ce://` pages, the site's remembered zoom, or the default.
 fn page_zoom_for(app: &AppHandle, url: &str) -> f64 {
     if url.starts_with(paths::INTERNAL_SCHEME) {
         1.0
     } else {
-        settings::get(app).page_zoom_factor()
+        crate::page_rules::zoom_for(app, url).unwrap_or_else(|| settings::get(app).page_zoom_factor())
     }
 }
 
@@ -1832,7 +1833,8 @@ pub fn show_unresponsive(app: &AppHandle, id: u32) -> Result<(), String> {
 
 pub fn update_url(app: &AppHandle, id: u32, raw: &str) {
     let url = paths::display_url(app, raw);
-    let default_zoom = settings::get(app).page_zoom_factor();
+    let opening_zoom = page_zoom_for(app, &url);
+    let new_site = settings::sleep_site_key(&url);
     let change = with_state(app, |state| {
         let Some(tab) = state.tab_mut(id) else {
             return None;
@@ -1842,12 +1844,15 @@ pub fn update_url(app: &AppHandle, id: u32, raw: &str) {
         }
         let was_internal = tab.info.url.starts_with(paths::INTERNAL_SCHEME);
         let now_internal = url.starts_with(paths::INTERNAL_SCHEME);
+        let site_changed = settings::sleep_site_key(&tab.info.url) != new_site;
         let loading = tab.info.loading;
         tab.title_ready = false;
         tab.info.url = url.clone();
+        // A different site opens at its own zoom. Moving around one site keeps Ctrl +/- changes.
         let zoom = match (was_internal, now_internal) {
             (_, true) if !was_internal => Some(1.0),
-            (true, false) => Some(default_zoom),
+            (true, false) => Some(opening_zoom),
+            (false, false) if site_changed && (tab.info.zoom - opening_zoom).abs() > 0.001 => Some(opening_zoom),
             _ => None,
         };
         if let Some(zoom) = zoom {
@@ -3020,14 +3025,48 @@ pub fn zoom(app: &AppHandle, id: u32, change: &str) -> Result<f64, String> {
         }
         .unwrap_or(current);
         tab.info.zoom = next;
-        Some(next)
+        Some((next, tab.info.url.clone()))
     })
     .ok_or("That tab is no longer open.")?;
+    let (next, url) = next;
     if let Some(webview) = page_view(app, id) {
         webview.set_zoom(next).map_err(|error| error.to_string())?;
     }
+    if url.starts_with("http://") || url.starts_with("https://") {
+        let percent = (next * 100.0).round() as u32;
+        let default_percent = (default_zoom * 100.0).round() as u32;
+        let remembered = if change == "reset" || percent == default_percent { 0 } else { percent };
+        crate::page_rules::remember_zoom(app, &url, remembered);
+        apply_site_zoom(app, &url, next, id);
+    }
     emit_tabs(app);
     Ok(next)
+}
+
+/// Other open tabs on the same site follow a zoom change.
+fn apply_site_zoom(app: &AppHandle, url: &str, zoom: f64, except: u32) {
+    let site = settings::sleep_site_key(url);
+    if site.is_empty() {
+        return;
+    }
+    let ids = with_state(app, |state| {
+        let mut ids = Vec::new();
+        for tab in &mut state.tabs {
+            if tab.info.id != except
+                && settings::sleep_site_key(&tab.info.url) == site
+                && (tab.info.zoom - zoom).abs() > 0.001
+            {
+                tab.info.zoom = zoom;
+                ids.push(tab.info.id);
+            }
+        }
+        ids
+    });
+    for id in ids {
+        if let Some(webview) = page_view(app, id) {
+            let _ = webview.set_zoom(zoom);
+        }
+    }
 }
 
 /// Pages still on the previous default follow a new default. A page zoomed with Ctrl +/- stays put.
@@ -3068,28 +3107,34 @@ pub fn open_devtools(app: &AppHandle, id: u32) {
     }
 }
 
-pub fn find_in_page(
-    app: &AppHandle,
-    id: u32,
-    query: &str,
-    backwards: bool,
-) -> Result<bool, String> {
-    let webview = page_view(app, id).ok_or("That tab has no page loaded.")?;
-    let query = serde_json::to_string(query).map_err(|error| error.to_string())?;
-    let script = format!("window.find({query}, false, {backwards}, true, false, false, false)");
-    let (tx, rx) = std::sync::mpsc::channel();
-    webview
-        .eval_with_callback(script, move |result| {
-            let _ = tx.send(result.trim() == "true");
-        })
-        .map_err(|error| error.to_string())?;
-    Ok(rx.recv_timeout(Duration::from_secs(2)).unwrap_or(false))
+/// One tab in a window's current strip, for searches across tabs.
+pub struct StripTab {
+    pub id: u32,
+    pub title: String,
+    pub url: String,
+    pub loaded: bool,
+    pub sleeping: bool,
+    pub failed: bool,
 }
 
-pub fn clear_find(app: &AppHandle, id: u32) {
-    if let Some(webview) = page_view(app, id) {
-        let _ = webview.eval("window.getSelection()?.removeAllRanges()");
-    }
+pub fn strip_tabs(app: &AppHandle, window: &str) -> Vec<StripTab> {
+    with_state(app, |state| {
+        state
+            .strip_indexes(window)
+            .into_iter()
+            .map(|index| {
+                let tab = &state.tabs[index];
+                StripTab {
+                    id: tab.info.id,
+                    title: tab.info.title.clone(),
+                    url: tab.info.url.clone(),
+                    loaded: tab.webview.is_some() && tab.painted,
+                    sleeping: tab.info.sleeping || tab.hidden,
+                    failed: tab.info.failure.is_some(),
+                }
+            })
+            .collect()
+    })
 }
 
 pub fn set_fullscreen(app: &AppHandle, id: u32, fullscreen: bool) {
@@ -4928,6 +4973,11 @@ pub fn run_inspector(app: &AppHandle, id: u32) -> Result<(), String> {
     webview
         .eval(crate::page_rules::inspector_script())
         .map_err(|error| error.to_string())
+}
+
+/// Browser window that shows tab `id`.
+pub fn tab_window_label(app: &AppHandle, id: u32) -> Option<String> {
+    with_state(app, |state| state.tab_window(id))
 }
 
 pub fn tab_page_url(app: &AppHandle, id: u32) -> Option<String> {

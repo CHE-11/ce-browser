@@ -10,6 +10,7 @@ mod downloads;
 mod extensions;
 mod favicons;
 mod files;
+mod find;
 mod history;
 mod history_index;
 mod keywords;
@@ -17,6 +18,7 @@ mod library;
 mod media;
 mod ocr;
 mod page_errors;
+mod page_menu;
 mod page_rules;
 mod paths;
 mod peek;
@@ -440,18 +442,49 @@ async fn zoom_tab(app: AppHandle, id: u32, change: String) -> Result<f64, String
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn find_in_page(
     app: AppHandle,
     id: u32,
     query: String,
     backwards: bool,
-) -> Result<bool, String> {
-    blocking(move || tabs::find_in_page(&app, id, &query, backwards)).await
+    case_sensitive: Option<bool>,
+    whole_word: Option<bool>,
+    step: Option<bool>,
+) -> Result<find::FindResult, String> {
+    blocking(move || {
+        find::find(
+            &app,
+            id,
+            &query,
+            backwards,
+            case_sensitive.unwrap_or(false),
+            whole_word.unwrap_or(false),
+            step.unwrap_or(true),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-async fn clear_find(app: AppHandle, id: u32) {
-    tabs::clear_find(&app, id);
+async fn clear_find(app: AppHandle, id: u32) -> Result<(), String> {
+    blocking(move || {
+        find::clear(&app, id);
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn find_in_tabs(
+    app: AppHandle,
+    window: Window,
+    query: String,
+    case_sensitive: bool,
+    whole_word: bool,
+) -> Result<Vec<find::FindTabResult>, String> {
+    let label = window.label().to_string();
+    blocking(move || Ok(find::find_in_tabs(&app, &label, &query, case_sensitive, whole_word))).await
 }
 
 #[tauri::command]
@@ -1078,14 +1111,39 @@ async fn restore_translation(app: AppHandle, id: u32) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn translate_selection(app: AppHandle, text: String) -> Result<String, String> {
+    blocking(move || tools::translate_selection(&app, &text)).await
+}
+
+#[tauri::command]
 fn generate_password(
     length: usize,
     upper: bool,
     lower: bool,
     digits: bool,
     symbols: bool,
+    min_symbols: usize,
+    avoid_ambiguous: bool,
 ) -> Result<String, String> {
-    tools::random_password(length, upper, lower, digits, symbols)
+    tools::random_password(
+        length,
+        upper,
+        lower,
+        digits,
+        symbols,
+        min_symbols,
+        avoid_ambiguous,
+    )
+}
+
+#[tauri::command]
+fn copy_text(text: String) -> Result<(), String> {
+    ocr::copy_text(&text)
+}
+
+#[tauri::command]
+fn show_notice(app: AppHandle, window: Window, message: String) {
+    undo::notice(&app, window.label(), &message);
 }
 
 #[tauri::command]
@@ -1573,6 +1631,7 @@ pub fn run() {
             zoom_tab,
             find_in_page,
             clear_find,
+            find_in_tabs,
             open_devtools,
             open_popup,
             close_popup,
@@ -1658,7 +1717,10 @@ pub fn run() {
             translation_active,
             translate_page,
             restore_translation,
+            translate_selection,
             generate_password,
+            copy_text,
+            show_notice,
             wayback_url,
             reading_stats,
             list_prices,

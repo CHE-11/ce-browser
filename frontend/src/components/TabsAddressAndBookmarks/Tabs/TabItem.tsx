@@ -47,6 +47,7 @@ export function TabItem({
   onDragOver,
 }: TabItemProps) {
   const settings = useSettings();
+  const hoverPreview = settings?.tabHoverPreview !== false;
   const accent = settings?.siteAccent && tab.accent ? tab.accent : null;
   const domId = `tab-${tab.id}`;
   const vertical = orientation === "vertical";
@@ -87,7 +88,11 @@ export function TabItem({
       aria-label={`${tab.title || tab.url}${tab.sleeping ? ", asleep" : ""}${tab.audible ? ", playing sound" : ""}`}
       draggable
       tabIndex={0}
-      onMouseEnter={(event) => hoverTab(tab.id, event.currentTarget, vertical)}
+      onMouseEnter={(event) => {
+        if (hoverPreview) {
+          hoverTab(tab.id, event.currentTarget, vertical);
+        }
+      }}
       onMouseLeave={() => leaveTab()}
       className={cn(
         "group relative flex shrink-0 cursor-default select-none items-center gap-2 text-xs transition-colors",

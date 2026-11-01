@@ -24,6 +24,7 @@ import { PrintPdfPopover } from "@features/BuiltInExtensions/print-pdf/PrintPdfP
 import { ReadingPopover } from "@features/BuiltInExtensions/reading/Reading";
 import { ShoppingPopover } from "@features/BuiltInExtensions/shopping/Shopping";
 import { TranslatePopover } from "@features/BuiltInExtensions/translate/Translate";
+import { SelectionTranslatePopover } from "@features/BuiltInExtensions/translate/SelectionTranslate";
 import { WaybackPopover } from "@features/BuiltInExtensions/wayback/Wayback";
 import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
 import { CommandPalette } from "@features/CommandPalette/CommandPalette";
@@ -32,6 +33,7 @@ import { TabSwitcher } from "@features/TabSwitcher/TabSwitcher";
 import { TabHoverCard } from "@features/TabHover/TabHoverCard";
 import { UnresponsivePrompt } from "@features/PageRecovery/UnresponsivePrompt";
 import { SiteInfoPanel } from "@features/SiteInfo/SiteInfoPanel";
+import { FindAllPopover } from "@features/FindAll/FindAllPopover";
 import { NetworkPopover } from "@features/Network/NetworkPopover";
 import { DownloadsPanel } from "@features/Downloads/DownloadsPanel";
 import { MediaGrid } from "@features/Media/MediaGrid";
@@ -159,6 +161,10 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <UnresponsivePrompt tabId={Number(params.get("id"))} />;
     case "site-info":
       return <SiteInfoPanel tabId={Number(params.get("id"))} />;
+    case "selection-translate":
+      return <SelectionTranslatePopover params={params} />;
+    case "find-all":
+      return <FindAllPopover params={params} />;
     default:
       return <UnknownPopup />;
   }

@@ -5,6 +5,7 @@ use tauri::AppHandle;
 use crate::capture;
 
 const FAILURE: &str = "Couldn't read the text in this image.";
+const COPY_FAILURE: &str = "Couldn't copy that.";
 
 pub fn recognize_visible(app: &AppHandle, id: u32) -> Result<String, String> {
     capture::store_visible(app, id)?;
@@ -71,7 +72,7 @@ pub fn recognize_png(bytes: &[u8]) -> Result<String, String> {
     Ok(text)
 }
 
-pub(crate) fn copy_text(text: &str) -> Result<(), String> {
+pub fn copy_text(text: &str) -> Result<(), String> {
     use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL};
     use windows::Win32::System::DataExchange::{
         CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
@@ -82,15 +83,15 @@ pub(crate) fn copy_text(text: &str) -> Result<(), String> {
     wide.push(0);
     let bytes = unsafe { std::slice::from_raw_parts(wide.as_ptr().cast::<u8>(), wide.len() * 2) };
     unsafe {
-        OpenClipboard(None).map_err(|error| format!("{FAILURE} {error}"))?;
+        OpenClipboard(None).map_err(|error| format!("{COPY_FAILURE} {error}"))?;
         let result = (|| {
-            EmptyClipboard().map_err(|error| format!("{FAILURE} {error}"))?;
+            EmptyClipboard().map_err(|error| format!("{COPY_FAILURE} {error}"))?;
             let memory = GlobalAlloc(GMEM_MOVEABLE, bytes.len())
-                .map_err(|error| format!("{FAILURE} {error}"))?;
+                .map_err(|error| format!("{COPY_FAILURE} {error}"))?;
             let target = GlobalLock(memory);
             if target.is_null() {
                 let _ = GlobalFree(Some(memory));
-                return Err(FAILURE.to_string());
+                return Err(COPY_FAILURE.to_string());
             }
             std::ptr::copy_nonoverlapping(bytes.as_ptr(), target.cast::<u8>(), bytes.len());
             let _ = GlobalUnlock(memory);
@@ -98,7 +99,7 @@ pub(crate) fn copy_text(text: &str) -> Result<(), String> {
                 SetClipboardData(u32::from(CF_UNICODETEXT.0), Some(HANDLE(memory.0)))
             {
                 let _ = GlobalFree(Some(HGLOBAL(memory.0)));
-                return Err(format!("{FAILURE} {error}"));
+                return Err(format!("{COPY_FAILURE} {error}"));
             }
             Ok(())
         })();

@@ -16,6 +16,8 @@ const CYCLE_LABEL = "Ctrl+Tab order";
 const CYCLE_HINT = "Recently used goes to the tab you used last, then the one before it.";
 const SWITCHER_LABEL = "Show the tab switcher";
 const SWITCHER_HINT = "With recently used order, Ctrl+Tab shows thumbnails until you let go of Ctrl.";
+const HOVER_LABEL = "Show a preview when hovering a tab";
+const HOVER_HINT = "After a moment, a small card shows the page, its title, and its address.";
 const PEEK_LABEL = "Shift+click opens links in a peek";
 const PEEK_HINT = "A peek shows the page over the current tab. Esc closes it.";
 const MUTE_LABEL = "Mute tabs in the background";
@@ -49,6 +51,9 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
     SWITCHER_LABEL,
     SWITCHER_HINT,
     "ctrl+tab",
+    HOVER_LABEL,
+    HOVER_HINT,
+    "thumbnail",
     PEEK_LABEL,
     PEEK_HINT,
     MUTE_LABEL,
@@ -114,6 +119,13 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
           checked={settings.tabSwitcher}
           disabled={settings.tabCycleOrder !== "recent"}
           onChange={(tabSwitcher) => onUpdate({ tabSwitcher })}
+        />
+      </Row>
+      <Row id="settings-tab-hover" label={HOVER_LABEL} hint={HOVER_HINT} search={["thumbnail", "preview", "card"]}>
+        <Toggle
+          id="settings-tab-hover-toggle"
+          checked={settings.tabHoverPreview}
+          onChange={(tabHoverPreview) => onUpdate({ tabHoverPreview })}
         />
       </Row>
       <Row id="settings-peek" label={PEEK_LABEL} hint={PEEK_HINT}>

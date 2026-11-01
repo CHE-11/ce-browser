@@ -235,6 +235,8 @@ export type SiteControl = {
   hidden: string[];
   /** `default`, `none`, `origin` or `same-origin`. */
   referrer: ReferrerMode;
+  /** Page zoom in percent remembered for this site. Zero follows the default page zoom. */
+  zoom: number;
 };
 
 export type ReferrerMode = "default" | "none" | "origin" | "same-origin";
@@ -269,6 +271,8 @@ export type SitePatch = {
   hide?: string;
   clearHidden?: boolean;
   referrer?: ReferrerMode;
+  /** Percent. Zero forgets the site's zoom. */
+  zoom?: number;
 };
 
 export type PeekInfo = {
@@ -539,6 +543,8 @@ export type BrowserSettings = {
   tabCycleOrder: "strip" | "recent";
   /** In recent order, Ctrl+Tab shows a switcher with thumbnails until Ctrl is released. */
   tabSwitcher: boolean;
+  /** Resting on a tab shows a small preview of its page. */
+  tabHoverPreview: boolean;
 };
 
 /** One on-screen page in a status snapshot. */
@@ -889,6 +895,23 @@ export type OmniboxSuggestion = {
   workspace?: string;
   /** Set for `history` suggestions, so Shift+Delete can remove the entry. */
   historyId?: number;
+};
+
+/** Text matches on one page. `index` is the highlighted match, or -1. */
+export type FindResult = {
+  count: number;
+  index: number;
+};
+
+/** Matches in one tab for "Find in all tabs". */
+export type FindTabResult = {
+  id: number;
+  title: string;
+  url: string;
+  /** Null when the tab was not searched. */
+  count: number | null;
+  /** Why the tab was not searched, such as `Not loaded`. */
+  skipped: string;
 };
 
 export type CertificateInfo = {
