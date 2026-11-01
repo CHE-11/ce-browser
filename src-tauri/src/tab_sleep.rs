@@ -21,6 +21,7 @@ pub fn init(app: &AppHandle) {
                 crate::system::refresh_tray(&app);
             }
             if crate::system::saver_active(&app) || ticks.is_multiple_of(SLEEP_EVERY) {
+                tabs::wake_pinned(&app);
                 for id in tabs::sleep_candidates(&app) {
                     let _ = tabs::sleep_tab(&app, id);
                 }

@@ -611,6 +611,7 @@ export type TabSleepSettings = {
   enabled: boolean;
   /** Minutes a tab stays off screen before it sleeps, 5 to 720. */
   minutes: number;
+  /** Older settings files may still contain this. Pinned tabs never sleep, and load clears it. */
   sleepPinned: boolean;
   /** Hosts that never sleep, lowercase and without a leading `www.`. */
   neverSleepSites: string[];

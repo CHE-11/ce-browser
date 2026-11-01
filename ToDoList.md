@@ -14,7 +14,6 @@ Sizes: S is a small change, M touches a few files on both sides of the bridge, L
 - [ ] **Command palette** (S) - jump to any setting, recently closed, workspaces, extension actions, fuzzy matching.
 - [ ] **Ctrl+Tab in recent-use order** (S) - optional switcher overlay with thumbnails.
 - [ ] **Page right-click menu** (S) - for selections: search, translate, ask assistant, copy clean link-to-text; for images: copy text (OCR), search image, save.
-- [ ] **Remember zoom per site** (S) - store in `site-controls.json` alongside other per-site rules.
 - [ ] **Find in page** (S) - match case, whole word, and "find in all tabs".
 - [ ] **Sleeping tabs** (S) - "Sleep this tab" / "Sleep other tabs" actions and memory saved shown in the status bar.
 - [ ] **Tab groups** (S) - save a group to bookmarks, reopen a bookmark folder as a group, auto-group by site.

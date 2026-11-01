@@ -11,6 +11,7 @@ import {
   Info,
   Lock,
   PanelRight,
+  Pin,
   Puzzle,
   RotateCw,
   Search,
@@ -51,6 +52,7 @@ import {
   openPopupBelow,
   reload,
   resizePopup,
+  restorePinnedTabs,
   saveSettings,
   sendOmniboxState,
   splitWith,
@@ -80,6 +82,148 @@ type AddressBarProps = {
 
 const EMPTY_OMNIBOX: OmniboxState = { suggestions: [], selected: 0 };
 
+type PinParts = { scheme: string; host: string; port: string; path: string };
+
+/** Host, port, and path used to tell two pins apart. `www` and a trailing slash are ignored. */
+function pinParts(raw: string): PinParts | null {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.slice(0, 5).toLowerCase() === "ce://") {
+    const page = trimmed.slice(5).split(/[?#]/)[0].replace(/^\/+|\/+$/g, "").toLowerCase();
+    return { scheme: "ce", host: page, port: "", path: "" };
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  const scheme = parsed.protocol.replace(":", "").toLowerCase();
+  let host = parsed.hostname.toLowerCase();
+  if (host.startsWith("www.")) {
+    host = host.slice(4);
+  }
+  let port = parsed.port;
+  if (!port && (scheme === "http" || scheme === "https")) {
+    port = scheme === "https" ? "443" : "80";
+  }
+  const path = parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/+$/, "");
+  return { scheme, host, port, path };
+}
+
+function schemesMatch(left: string, right: string) {
+  return left === right || ((left === "http" || left === "https") && (right === "http" || right === "https"));
+}
+
+function portsMatch(left: PinParts, right: PinParts) {
+  if (left.port === right.port) {
+    return true;
+  }
+  const usual = (parts: PinParts) =>
+    (parts.scheme === "http" && parts.port === "80") || (parts.scheme === "https" && parts.port === "443");
+  return left.scheme !== right.scheme && schemesMatch(left.scheme, right.scheme) && usual(left) && usual(right);
+}
+
+function pathsAlign(left: string, right: string) {
+  if (left === right) {
+    return true;
+  }
+  const shorter = left.length <= right.length ? left : right;
+  const longer = left.length <= right.length ? right : left;
+  return longer.startsWith(shorter) && (shorter.length === 0 || longer[shorter.length] === "/");
+}
+
+/** A redirect, `www`, or a path under the saved pin is still that pin. */
+function samePin(pin: string, url: string) {
+  const left = pinParts(pin);
+  const right = pinParts(url);
+  if (!left || !right) {
+    return false;
+  }
+  return schemesMatch(left.scheme, right.scheme) && left.host === right.host && portsMatch(left, right) && pathsAlign(left.path, right.path);
+}
+
+function samePinPage(pin: string, url: string) {
+  const left = pinParts(pin);
+  const right = pinParts(url);
+  if (!left || !right) {
+    return false;
+  }
+  return schemesMatch(left.scheme, right.scheme) && left.host === right.host && portsMatch(left, right) && left.path === right.path;
+}
+
+/** A pin sent to a login page is still on its site. */
+function samePinSite(pin: string, url: string) {
+  const left = pinParts(pin);
+  const right = pinParts(url);
+  if (!left || !right) {
+    return false;
+  }
+  return schemesMatch(left.scheme, right.scheme) && left.host === right.host && portsMatch(left, right);
+}
+
+/**
+ * Saved pins that have no open tab yet. A tab under the saved address counts as open, and a pinned
+ * tab elsewhere on the pin's site is the fallback. Mirrors `paths::match_pins`.
+ */
+function closedPinUrls(pins: string[], tabs: { url: string; pinned: boolean }[]) {
+  const claimed = new Set<number>();
+  const bound = pins.map(() => "missing" as "tab" | "duplicate" | "missing");
+  const order = pins
+    .map((_, index) => index)
+    .sort((left, right) => (pinParts(pins[right])?.path.length ?? 0) - (pinParts(pins[left])?.path.length ?? 0));
+  for (const index of order) {
+    if (!pinParts(pins[index])) {
+      bound[index] = "duplicate";
+      continue;
+    }
+    let best: number | null = null;
+    let bestPinned = false;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    tabs.forEach((tab, tabIndex) => {
+      if (claimed.has(tabIndex) || !samePin(pins[index], tab.url)) {
+        return;
+      }
+      const distance = Math.abs((pinParts(tab.url)?.path.length ?? 0) - (pinParts(pins[index])?.path.length ?? 0));
+      const closer = tab.pinned === bestPinned && distance < bestDistance;
+      const pinnedWins = tab.pinned && !bestPinned;
+      if (best === null || pinnedWins || closer) {
+        best = tabIndex;
+        bestPinned = tab.pinned;
+        bestDistance = distance;
+      }
+    });
+    if (best !== null) {
+      claimed.add(best);
+      bound[index] = "tab";
+    }
+  }
+  for (const index of order) {
+    if (bound[index] !== "missing") {
+      continue;
+    }
+    const fallback = tabs.findIndex((tab, tabIndex) => tab.pinned && !claimed.has(tabIndex) && samePinSite(pins[index], tab.url));
+    if (fallback !== -1) {
+      claimed.add(fallback);
+      bound[index] = "tab";
+    }
+  }
+  for (const index of order) {
+    if (bound[index] !== "missing") {
+      continue;
+    }
+    const duplicate =
+      bound.some((kind, other) => kind === "tab" && samePinPage(pins[index], pins[other])) ||
+      tabs.some((tab, tabIndex) => claimed.has(tabIndex) && samePinPage(pins[index], tab.url));
+    if (duplicate) {
+      bound[index] = "duplicate";
+    }
+  }
+  return pins.filter((_, index) => bound[index] === "missing");
+}
+
 function addressText(tab: TabInfo | undefined) {
   if (!tab || tab.url === "ce://newtab") {
     return "";
@@ -100,6 +244,22 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       .reverse()
       .find((tab) => !tab.pinned);
   const canSplit = !!activeTab && !activeTab.pinned && !!splitPartner;
+  const savedPins = settings?.pinnedTabs ?? [];
+  const closedPins = closedPinUrls(savedPins, snapshot.windowTabs);
+  const [restoringPins, setRestoringPins] = useState(false);
+  const restorePins = () => {
+    if (restoringPins || closedPins.length === 0) {
+      return;
+    }
+    setRestoringPins(true);
+    void restorePinnedTabs().finally(() => setRestoringPins(false));
+  };
+  const pinLabel =
+    savedPins.length === 0
+      ? "No pinned tabs in settings"
+      : closedPins.length === 0
+        ? "Pinned tabs are open"
+        : "Reopen closed pinned tabs";
 
   const toggleSplit = () => {
     if (inSplit) {
@@ -723,6 +883,14 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         onClick={toggleSplit}
       >
         <Columns2 id="address-split-icon" aria-hidden />
+      </IconButton>
+      <IconButton
+        id="address-restore-pins"
+        label={pinLabel}
+        disabled={closedPins.length === 0 || restoringPins}
+        onClick={restorePins}
+      >
+        <Pin id="address-restore-pins-icon" aria-hidden />
       </IconButton>
       <IconButton
         id="address-status"

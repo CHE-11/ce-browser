@@ -26,19 +26,6 @@ type DropState = { id: string; place: BookmarkDropPlace };
 type BookmarkView = "columns" | "cards" | "list" | "headlines";
 
 const ROOT_FOLDERS = new Set(["bar", "other"]);
-const VIEW_KEY = "ce-bookmarks-view";
-
-function storedView(): BookmarkView {
-  try {
-    const value = localStorage.getItem(VIEW_KEY);
-    if (value === "columns" || value === "cards" || value === "list" || value === "headlines") {
-      return value;
-    }
-  } catch {
-    // Private mode can block storage. Columns is the default.
-  }
-  return "columns";
-}
 
 function folderPath(tree: BookmarkTree | null, id: string): BookmarkNode[] {
   if (!tree) {
@@ -84,7 +71,7 @@ export function BookmarksPage() {
   const appliedFolder = useRef<string | null>(null);
   const [selectedId, setSelectedId] = useState("bar");
   const [query, setQuery] = useState("");
-  const [view, setView] = useState<BookmarkView>(storedView);
+  const [view, setView] = useState<BookmarkView>("columns");
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -161,15 +148,6 @@ export function BookmarksPage() {
     setPicked([]);
     anchorId.current = null;
   }, [selectedId, query]);
-
-  const chooseView = (next: BookmarkView) => {
-    setView(next);
-    try {
-      localStorage.setItem(VIEW_KEY, next);
-    } catch {
-      // The view still changes for this visit.
-    }
-  };
 
   const report = (action: Promise<unknown>, success?: string) => {
     action
@@ -373,7 +351,7 @@ export function BookmarksPage() {
                 "inline-flex size-6 items-center justify-center rounded text-zinc-400 hover:text-zinc-100",
                 view === id && "bg-zinc-800 text-zinc-100",
               )}
-              onClick={() => chooseView(id)}
+              onClick={() => setView(id)}
             >
               <Icon id={`bookmarks-page-view-${id}-icon`} className="size-3.5" aria-hidden />
             </button>

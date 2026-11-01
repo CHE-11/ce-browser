@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::webview::{Color, PageLoadEvent};
@@ -38,6 +39,74 @@ pub struct PeekState(Mutex<HashMap<String, Peek>>);
 
 static NEXT: AtomicU32 = AtomicU32::new(1);
 
+/// One open at a time, and the last shift-click, so the page message and the new-window
+/// request for the same click do not build two peeks.
+static OPEN_GATE: Mutex<Option<(u32, String, Instant)>> = Mutex::new(None);
+
+/// Set from the page as soon as the click is seen. The new-window handler runs later,
+/// after Shift may already be up, and would otherwise open a tab.
+static CLICK: Mutex<Option<(u32, String, Instant)>> = Mutex::new(None);
+
+/// Page-focus events caused by the click that opened the peek. They must not close it.
+static FOCUS_HOLD: LazyLock<Mutex<HashMap<String, Instant>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+const FOCUS_HOLD_FOR: Duration = Duration::from_millis(500);
+const REPEAT_FOR: Duration = Duration::from_millis(500);
+
+/// Shift+click on an http(s) link. Ctrl and Alt keep their own actions.
+pub fn from_new_window(shift: bool, ctrl: bool, alt: bool, scheme: &str) -> bool {
+    shift && !ctrl && !alt && matches!(scheme, "http" | "https")
+}
+
+/// The page reported a shift-click. `blank_tab` reads this when the key is already up.
+pub fn note_click(opener: u32, raw: &str) {
+    let Some(url) = http_url(raw) else {
+        return;
+    };
+    *CLICK.lock().expect("peek click") = Some((opener, url, Instant::now()));
+}
+
+pub fn remembers_click(opener: u32, raw: &str) -> bool {
+    let Some(url) = http_url(raw) else {
+        return false;
+    };
+    let click = CLICK.lock().expect("peek click");
+    matches!(
+        click.as_ref(),
+        Some((id, previous, at))
+            if *id == opener && previous == &url && at.elapsed() < REPEAT_FOR
+    )
+}
+
+fn http_url(raw: &str) -> Option<String> {
+    let url = Url::parse(raw).ok()?;
+    matches!(url.scheme(), "http" | "https").then(|| url.to_string())
+}
+
+/// Ignore page focus on the opener's window for a moment. Call this before the peek is
+/// created: the click's focus event can arrive while the card is still opening.
+pub fn hold_focus(app: &AppHandle, opener: u32) {
+    let Some(window) = tabs::tab_window_label(app, opener) else {
+        return;
+    };
+    FOCUS_HOLD
+        .lock()
+        .expect("peek focus")
+        .insert(window, Instant::now());
+}
+
+pub fn ignore_page_focus(window: &str) -> bool {
+    let mut held = FOCUS_HOLD.lock().expect("peek focus");
+    let fresh = held
+        .get(window)
+        .is_some_and(|at| at.elapsed() < FOCUS_HOLD_FOR);
+    if !fresh {
+        held.remove(window);
+    }
+    fresh
+}
+
 pub fn init(app: &AppHandle) {
     app.manage(PeekState::default());
 }
@@ -70,14 +139,28 @@ pub fn request(app: &AppHandle, opener: u32, raw: &str) {
     let Ok(url) = Url::parse(raw) else {
         return;
     };
-    if !matches!(url.scheme(), "http" | "https") {
+    if !from_new_window(true, false, false, url.scheme()) {
         return;
     }
+    let mut recent = OPEN_GATE.lock().expect("peek open");
+    if let Some((id, previous, at)) = recent.as_ref()
+        && *id == opener
+        && previous == url.as_str()
+        && at.elapsed() < REPEAT_FOR
+    {
+        return;
+    }
+    *recent = Some((opener, url.as_str().to_string(), Instant::now()));
     if !settings::get(app).peek_on_shift_click {
+        drop(recent);
         let _ = tabs::open_beside(app, opener, url, true);
         return;
     }
-    open_for_tab(app, opener, raw);
+    // Keep the gate until the card exists so a second request waits and then sees `recent`.
+    if let Err(error) = open_for_tab_locked(app, opener, &url) {
+        *recent = None;
+        eprintln!("peek: {error}");
+    }
 }
 
 /// Opens a peek over the window that shows tab `opener`.
@@ -85,15 +168,20 @@ pub fn open_for_tab(app: &AppHandle, opener: u32, raw: &str) {
     let Ok(url) = Url::parse(raw) else {
         return;
     };
+    let _gate = OPEN_GATE.lock().expect("peek open");
+    if let Err(error) = open_for_tab_locked(app, opener, &url) {
+        eprintln!("peek: {error}");
+    }
+}
+
+fn open_for_tab_locked(app: &AppHandle, opener: u32, url: &Url) -> Result<(), String> {
     let window = tabs::snapshot(app)
         .tabs
         .iter()
         .find(|tab| tab.id == opener)
         .map(|tab| tab.window.clone())
         .unwrap_or_else(|| tabs::WINDOW.to_string());
-    if let Err(error) = open(app, &window, url) {
-        eprintln!("peek: {error}");
-    }
+    open(app, &window, url.clone())
 }
 
 /// Card and page rectangles in physical pixels.
@@ -133,6 +221,12 @@ fn rects(
 }
 
 pub fn open(app: &AppHandle, window_label: &str, url: Url) -> Result<(), String> {
+    // The click that asked for this peek also focuses the page. That focus event closes
+    // a peek, so ignore it until the card has had a moment to appear.
+    FOCUS_HOLD
+        .lock()
+        .expect("peek focus")
+        .insert(window_label.to_string(), Instant::now());
     // Focusing the tab here would close the new peek too, once its focus event arrives.
     close_views(app, window_label, false);
     let window = app
@@ -337,4 +431,33 @@ fn active_local(app: &AppHandle, window: &str) -> Option<usize> {
         .filter(|tab| tab.window == window && tab.workspace == workspace)
         .position(|tab| tab.id == active)
         .map(|index| index + 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::from_new_window;
+
+    #[test]
+    fn shift_click_on_a_web_link_opens_a_peek() {
+        assert!(from_new_window(true, false, false, "https"));
+        assert!(from_new_window(true, false, false, "http"));
+    }
+
+    #[test]
+    fn other_modifiers_and_schemes_stay_tabs() {
+        assert!(!from_new_window(false, false, false, "https"));
+        assert!(!from_new_window(true, true, false, "https"));
+        assert!(!from_new_window(true, false, true, "https"));
+        assert!(!from_new_window(true, false, false, "javascript"));
+        assert!(!from_new_window(true, false, false, "ce"));
+    }
+
+    #[test]
+    fn a_reported_click_is_remembered_for_the_new_window() {
+        super::note_click(7, "https://example.com/peek");
+        assert!(super::remembers_click(7, "https://example.com/peek"));
+        assert!(!super::remembers_click(7, "https://example.com/other"));
+        assert!(!super::remembers_click(8, "https://example.com/peek"));
+        assert!(!super::remembers_click(7, "javascript:void(0)"));
+    }
 }

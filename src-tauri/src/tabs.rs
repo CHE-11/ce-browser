@@ -1202,9 +1202,22 @@ fn page_zoom_for(app: &AppHandle, url: &str) -> f64 {
 }
 
 /// Shift+click on a web link asks the browser for a peek. `page_hooks` reads the message.
+/// The click itself is left alone: WebView2 also raises a new-window request for it, and
+/// cancelling the click here drops that request when the message never arrives.
 const PEEK_CLICK_SCRIPT: &str = r#"(function () {
-  if (!window.chrome || !window.chrome.webview) return;
   if (!/^https?:$/.test(location.protocol)) return;
+  function linkHref(event) {
+    var path = event.composedPath ? event.composedPath() : [event.target];
+    for (var i = 0; i < path.length; i++) {
+      var node = path[i];
+      if (!node || node.nodeType !== 1) continue;
+      var link = node.tagName === "A" ? node : (node.closest ? node.closest("a[href]") : null);
+      if (!link) continue;
+      var href = typeof link.href === "string" ? link.href : "";
+      if (/^https?:/i.test(href)) return href;
+    }
+    return "";
+  }
   document.addEventListener("mousedown", function (event) {
     if (event.button !== 2) return;
     window.__ceGestureStart = { x: event.clientX, y: event.clientY, moved: false };
@@ -1235,14 +1248,10 @@ const PEEK_CLICK_SCRIPT: &str = r#"(function () {
     }
   }, true);
   document.addEventListener("click", function (event) {
-    if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
-    if (event.button !== 0 || event.defaultPrevented) return;
-    var target = event.target;
-    var link = target && target.closest ? target.closest("a[href]") : null;
-    if (!link || !/^https?:/i.test(link.href)) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    window.chrome.webview.postMessage({ type: "ce-peek", url: link.href });
+    if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.button !== 0) return;
+    var href = linkHref(event);
+    if (!href || !window.chrome || !window.chrome.webview) return;
+    window.chrome.webview.postMessage({ type: "ce-peek", url: href });
   }, true);
 })();"#;
 
@@ -1321,6 +1330,23 @@ fn blank_tab(
 ) -> NewWindowResponse<Wry> {
     if features.size().is_some() {
         return script_window(app, url, features);
+    }
+    // Shift+click is a new-window request. Opening a tab for it focuses that tab and
+    // closes the peek the page script just asked for.
+    let (shift, ctrl, alt) = webview2::pointer_modifiers();
+    let remembered = opener.is_some_and(|id| crate::peek::remembers_click(id, url.as_str()));
+    if let Some(id) = opener
+        && (crate::peek::from_new_window(shift, ctrl, alt, url.scheme()) || remembered)
+    {
+        let app = app.clone();
+        let raw = url.to_string();
+        if settings::get(&app).peek_on_shift_click {
+            crate::peek::hold_focus(&app, id);
+        }
+        tauri::async_runtime::spawn(async move {
+            crate::peek::request(&app, id, &raw);
+        });
+        return NewWindowResponse::Deny;
     }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -1748,6 +1774,7 @@ pub fn clear_errors(app: &AppHandle, id: u32) {
 /// A main-frame navigation began. A failure is cleared, so the page view shows again.
 /// Runs inside the WebView2 event on the main thread, so moving views is left to a task.
 pub fn navigation_started(app: &AppHandle, id: u32) {
+    crate::page_errors::clear_unresponsive(id);
     let recovered = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
         tab.info.progress = 10;
@@ -1794,6 +1821,9 @@ pub fn set_failure(app: &AppHandle, id: u32, kind: &str, code: &str, detail: Str
     });
     if let Some(window) = window {
         crate::thumbnails::forget(id);
+        if kind == "crashed" && popup_kind(app, &window).as_deref() == Some("unresponsive") {
+            close_window_popup(app, &window);
+        }
         place_pages(app, &window, true);
         emit_tabs(app);
     }
@@ -2241,6 +2271,7 @@ fn retire_webview(app: &AppHandle, label: Option<String>) {
         .and_then(|id| id.parse().ok())
     {
         crate::adblock::forget(id);
+        crate::hang_guard::end_frozen_page(id);
         crate::page_errors::forget_tab(id);
     }
     let Some(webview) = label.and_then(|label| app.get_webview(&label)) else {
@@ -2798,30 +2829,121 @@ pub fn clear_site_cache(app: &AppHandle, id: u32) -> Result<(), String> {
 }
 
 pub fn move_tab(app: &AppHandle, id: u32, to: usize) {
-    let moved = with_state(app, |state| {
-        let Some(from) = state.index_of(id) else {
+    let moved = with_state(app, |state| state.relocate(id, to));
+    if moved {
+        emit_tabs(app);
+    }
+}
+
+#[derive(Clone)]
+enum PinBind {
+    /// An open tab already stands for this pin.
+    Tab(u32),
+    /// Another saved pin already claimed that same address.
+    Duplicate,
+    /// Nothing open matches, so the pin should be created.
+    Missing,
+}
+
+/// Pairs each saved pin with an open tab in `window`. See `paths::match_pins`.
+fn bind_pins(state: &TabsState, window: &str, pins: &[String]) -> Vec<PinBind> {
+    let mut candidates: Vec<&Tab> = state
+        .tabs
+        .iter()
+        .filter(|tab| tab.info.window == window)
+        .collect();
+    candidates.sort_by_key(|tab| tab.info.id);
+    let open: Vec<(&str, bool)> = candidates
+        .iter()
+        .map(|tab| (tab.info.url.as_str(), tab.info.pinned))
+        .collect();
+    paths::match_pins(pins, &open)
+        .into_iter()
+        .map(|found| match found {
+            paths::PinMatch::Open(at) => PinBind::Tab(candidates[at].info.id),
+            paths::PinMatch::Duplicate => PinBind::Duplicate,
+            paths::PinMatch::Missing => PinBind::Missing,
+        })
+        .collect()
+}
+
+fn pinned_local(state: &TabsState, window: &str, workspace: &str, id: u32) -> Option<usize> {
+    state
+        .strip_of(window, workspace)
+        .iter()
+        .position(|global| {
+            let tab = &state.tabs[*global];
+            tab.info.id == id && tab.info.pinned
+        })
+}
+
+/// Opens settings pins that were closed and lines the saved pins up in list order.
+pub fn restore_saved_pins(app: &AppHandle, window: &str) -> Result<(), String> {
+    let pins = settings::get(app).pinned_tabs;
+    let (workspace, bound) = with_state(app, |state| {
+        let workspace = state.workspace_of(window);
+        let bound = bind_pins(state, window, &pins);
+        (workspace, bound)
+    });
+    let mut next_local = 0usize;
+    for (index, pin) in pins.iter().enumerate() {
+        match bound.get(index) {
+            Some(PinBind::Tab(id)) => {
+                let id = *id;
+                let local = with_state(app, |state| pinned_local(state, window, &workspace, id));
+                if let Some(local) = local {
+                    if local != next_local {
+                        move_tab(app, id, next_local);
+                    }
+                    next_local += 1;
+                }
+            }
+            Some(PinBind::Missing) => {
+                let url = resolve(app, pin);
+                open(
+                    app,
+                    OpenTab {
+                        background: true,
+                        index: Some(next_local),
+                        pinned: true,
+                        window: window.to_string(),
+                        workspace: workspace.clone(),
+                        ..OpenTab::new(url)
+                    },
+                )?;
+                next_local += 1;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+impl TabsState {
+    fn relocate(&mut self, id: u32, to: usize) -> bool {
+        let Some(from) = self.index_of(id) else {
             return false;
         };
-        let window = state.tabs[from].info.window.clone();
-        let workspace = state.tabs[from].info.workspace.clone();
-        let mut tab = state.tabs.remove(from);
-        let owned = state.strip_of(&window, &workspace).len();
-        let pinned_count = state.pinned_count_of(&window, &workspace);
+        let window = self.tabs[from].info.window.clone();
+        let workspace = self.tabs[from].info.workspace.clone();
+        let mut tab = self.tabs.remove(from);
+        let owned = self.strip_of(&window, &workspace).len();
+        let pinned_count = self.pinned_count_of(&window, &workspace);
         let local = if tab.info.pinned {
             to.min(pinned_count)
         } else {
             to.clamp(pinned_count, owned)
         };
-        let index = state.global_index_of(&window, &workspace, local);
+        let index = self.global_index_of(&window, &workspace, local);
         if !tab.info.pinned {
-            let strip = state.strip_of(&window, &workspace);
+            let strip = self.strip_of(&window, &workspace);
             let before = local
                 .checked_sub(1)
                 .and_then(|at| strip.get(at))
-                .and_then(|at| state.tabs[*at].info.group_id);
+                .and_then(|at| self.tabs[*at].info.group_id);
             let after = strip
                 .get(local)
-                .and_then(|at| state.tabs[*at].info.group_id);
+                .and_then(|at| self.tabs[*at].info.group_id);
             tab.info.group_id = match (before, after) {
                 (Some(before), Some(after)) if before == after => Some(before),
                 _ if tab.info.group_id.is_some()
@@ -2832,12 +2954,9 @@ pub fn move_tab(app: &AppHandle, id: u32, to: usize) {
                 _ => None,
             };
         }
-        state.tabs.insert(index, tab);
-        state.normalize_groups();
+        self.tabs.insert(index, tab);
+        self.normalize_groups();
         true
-    });
-    if moved {
-        emit_tabs(app);
     }
 }
 
@@ -2861,9 +2980,61 @@ pub fn set_pinned(app: &AppHandle, id: u32, pinned: bool) {
         Some(window)
     });
     if let Some(window) = changed {
+        if pinned {
+            ready_pinned(app, id);
+        }
         place_pages(app, &window, true);
         emit_tabs(app);
     }
+}
+
+/// Wakes every pinned tab that was suspended and loads any pinned tab that has no page view yet.
+pub fn wake_pinned(app: &AppHandle) {
+    let ids = with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .filter(|tab| tab.info.pinned)
+            .map(|tab| tab.info.id)
+            .collect::<Vec<_>>()
+    });
+    let changed = ids.into_iter().any(|id| ready_pinned(app, id));
+    if changed {
+        emit_tabs(app);
+    }
+}
+
+/// A pinned tab keeps its page view and comes back if it was suspended.
+fn ready_pinned(app: &AppHandle, id: u32) -> bool {
+    let plan = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        if !tab.info.pinned {
+            return None;
+        }
+        let needs_view = tab.webview.is_none();
+        let sleeping = tab.info.sleeping || tab.hidden;
+        if !needs_view && !sleeping {
+            return None;
+        }
+        if sleeping {
+            tab.hidden = false;
+            tab.info.sleeping = false;
+            tab.info.sleep_saved = 0;
+        }
+        Some((tab.webview.clone(), needs_view, sleeping))
+    });
+    let Some((label, needs_view, sleeping)) = plan else {
+        return false;
+    };
+    if sleeping {
+        if let Some(webview) = label.and_then(|label| app.get_webview(&label)) {
+            webview2::wake(&webview);
+        }
+    }
+    if needs_view {
+        let _ = ensure_webview(app, id);
+    }
+    true
 }
 
 pub fn duplicate_tab(app: &AppHandle, id: u32) -> Result<u32, String> {
@@ -3776,7 +3947,8 @@ pub fn restore(app: &AppHandle, restored: RestoreState) -> Result<(), String> {
                 background: true,
                 pinned: tab.pinned,
                 title: Some(tab.title),
-                lazy: true,
+                // Pinned tabs load now so they are ready. Every other restored tab waits until it is selected.
+                lazy: !tab.pinned,
                 window: WINDOW.to_string(),
                 workspace: tab.workspace,
                 muted: tab.muted,
@@ -3851,6 +4023,7 @@ pub fn restore(app: &AppHandle, restored: RestoreState) -> Result<(), String> {
             .or_else(|| ids.iter().find(|id| in_workspace(id)))
             .copied()
     });
+    wake_pinned(app);
     match target {
         Some(id) => activate(app, id),
         None => create_tab(app, None, false, None).map(|_| ()),
@@ -3990,7 +4163,7 @@ pub fn sleep_candidates(app: &AppHandle) -> Vec<u32> {
                     && !tab.info.sleeping
                     && !tab.info.audible
                     && !tab.info.loading
-                    && (sleep.sleep_pinned || !tab.info.pinned)
+                    && !tab.info.pinned
                     && tab.last_shown.elapsed() >= after
                     && !sleep.never_sleeps(&tab.info.url)
             })
@@ -4006,7 +4179,7 @@ pub fn sleep_tab(app: &AppHandle, id: u32) -> Result<(), String> {
             return Err("The tab on screen can't sleep.".to_string());
         }
         let tab = state.tabs.iter().find(|tab| tab.info.id == id).ok_or("That tab is no longer open.")?;
-        Ok(!tab.info.sleeping && !tab.hidden && tab.webview.is_some())
+        Ok(!tab.info.pinned && !tab.info.sleeping && !tab.hidden && tab.webview.is_some())
     })?;
     if !eligible {
         return Ok(());
@@ -4017,7 +4190,7 @@ pub fn sleep_tab(app: &AppHandle, id: u32) -> Result<(), String> {
             return None;
         }
         let tab = state.tab_mut(id)?;
-        if tab.info.sleeping || tab.hidden {
+        if tab.info.pinned || tab.info.sleeping || tab.hidden {
             return None;
         }
         let label = tab.webview.clone()?;
@@ -4224,7 +4397,9 @@ pub fn page_focused(app: &AppHandle, id: u32) {
     let Some(window) = with_state(app, |state| state.tab_window(id)) else {
         return;
     };
-    crate::peek::dismiss(app, &window);
+    if !crate::peek::ignore_page_focus(&window) {
+        crate::peek::dismiss(app, &window);
+    }
     let changed = with_state(app, |state| {
         let chrome = state.chrome(&window)?;
         let split = chrome.split?;
@@ -5084,6 +5259,122 @@ mod tests {
 
     fn ids(state: &TabsState) -> Vec<u32> {
         state.tabs.iter().map(|tab| tab.info.id).collect()
+    }
+
+    fn insert_pinned(state: &mut TabsState, url: &str, local: usize) {
+        let mut tab = tab(state.next_id, None, DEFAULT_WORKSPACE);
+        state.next_id += 1;
+        tab.info.url = url.to_string();
+        tab.info.pinned = true;
+        let pinned_count = state.pinned_count_of(WINDOW, DEFAULT_WORKSPACE);
+        let at = local.min(pinned_count);
+        let index = state.global_index_of(WINDOW, DEFAULT_WORKSPACE, at);
+        state.tabs.insert(index, tab);
+    }
+
+    /// Same steps as `restore_saved_pins`, with new tabs inserted instead of webviews.
+    fn replay_pin_restore(state: &mut TabsState, pins: &[&str]) {
+        let workspace = DEFAULT_WORKSPACE.to_string();
+        let saved: Vec<String> = pins.iter().map(|pin| (*pin).to_string()).collect();
+        let bound = bind_pins(state, WINDOW, &saved);
+        let mut next_local = 0usize;
+        for (index, pin) in saved.iter().enumerate() {
+            match bound.get(index) {
+                Some(PinBind::Tab(id)) => {
+                    let id = *id;
+                    if let Some(local) = pinned_local(state, WINDOW, &workspace, id) {
+                        if local != next_local {
+                            state.relocate(id, next_local);
+                        }
+                        next_local += 1;
+                    }
+                }
+                Some(PinBind::Missing) => {
+                    insert_pinned(state, pin, next_local);
+                    next_local += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn pinned_url(url: &str, id: u32) -> Tab {
+        let mut tab = tab(id, None, DEFAULT_WORKSPACE);
+        tab.info.url = url.to_string();
+        tab.info.pinned = true;
+        tab
+    }
+
+    #[test]
+    fn closed_saved_pins_reopen_in_settings_order() {
+        let mut loose = tab(4, None, DEFAULT_WORKSPACE);
+        loose.info.url = "https://loose.example".into();
+        let mut state = state(
+            vec![
+                pinned_url("https://c.example/", 2),
+                pinned_url("https://other.example", 3),
+                pinned_url("https://a.example", 1),
+                loose,
+            ],
+            &[],
+        );
+        replay_pin_restore(
+            &mut state,
+            &[
+                "https://a.example",
+                "https://b.example",
+                "https://c.example",
+            ],
+        );
+        let urls: Vec<String> = state.tabs.iter().map(|tab| tab.info.url.clone()).collect();
+        assert_eq!(
+            urls,
+            vec![
+                "https://a.example",
+                "https://b.example",
+                "https://c.example/",
+                "https://other.example",
+                "https://loose.example",
+            ]
+        );
+        assert!(state.tabs[..4].iter().all(|tab| tab.info.pinned));
+        assert!(!state.tabs[4].info.pinned);
+    }
+
+    #[test]
+    fn an_open_saved_pin_is_not_opened_again() {
+        let mut open = tab(1, None, DEFAULT_WORKSPACE);
+        open.info.url = "https://a.example".into();
+        let mut elsewhere = tab(2, None, "work");
+        elsewhere.info.url = "https://b.example".into();
+        elsewhere.info.pinned = true;
+        let mut state = state(vec![open, elsewhere], &[]);
+        replay_pin_restore(&mut state, &["https://a.example/", "https://b.example"]);
+        assert_eq!(state.tabs.len(), 2);
+        assert!(!state.tabs[0].info.pinned);
+        assert_eq!(state.tabs[0].info.url, "https://a.example");
+    }
+
+    #[test]
+    fn an_open_pin_that_navigated_is_not_opened_again() {
+        let mut state = state(
+            vec![
+                pinned_url("https://www.a.example/inbox", 1),
+                pinned_url("https://b.example/mail/u/0", 2),
+            ],
+            &[],
+        );
+        replay_pin_restore(
+            &mut state,
+            &[
+                "https://a.example",
+                "https://a.example/",
+                "https://b.example/mail",
+            ],
+        );
+        assert_eq!(state.tabs.len(), 2);
+        assert_eq!(state.tabs[0].info.url, "https://www.a.example/inbox");
+        assert_eq!(state.tabs[1].info.url, "https://b.example/mail/u/0");
     }
 
     #[test]

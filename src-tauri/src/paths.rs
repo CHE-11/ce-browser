@@ -233,6 +233,205 @@ pub fn pin_key(url: &str) -> String {
     stripped.to_string()
 }
 
+struct PinParts {
+    scheme: String,
+    host: String,
+    port: u16,
+    /// Path without a trailing slash. Empty is the site root.
+    path: String,
+}
+
+fn pin_parts(raw: &str) -> Option<PinParts> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(page) = trimmed
+        .get(..5)
+        .filter(|prefix| prefix.eq_ignore_ascii_case("ce://"))
+        .map(|_| &trimmed[5..])
+    {
+        let page = page
+            .split(['?', '#'])
+            .next()
+            .unwrap_or("")
+            .trim_matches('/')
+            .to_ascii_lowercase();
+        return Some(PinParts {
+            scheme: "ce".into(),
+            host: page,
+            port: 0,
+            path: String::new(),
+        });
+    }
+    let url = Url::parse(trimmed).ok()?;
+    let raw_host = url.host_str().unwrap_or("").to_ascii_lowercase();
+    let host = raw_host
+        .strip_prefix("www.")
+        .unwrap_or(&raw_host)
+        .to_string();
+    let scheme = url.scheme().to_ascii_lowercase();
+    let mut path = url.path().to_string();
+    while path.ends_with('/') {
+        path.pop();
+    }
+    if path == "/" {
+        path.clear();
+    }
+    Some(PinParts {
+        scheme,
+        host,
+        port: url.port_or_known_default().unwrap_or(0),
+        path,
+    })
+}
+
+fn schemes_match(left: &str, right: &str) -> bool {
+    left == right
+        || (matches!(left, "http" | "https") && matches!(right, "http" | "https"))
+}
+
+fn default_port(parts: &PinParts) -> bool {
+    matches!(
+        (parts.scheme.as_str(), parts.port),
+        ("http", 80) | ("https", 443)
+    )
+}
+
+/// `http://` and `https://` on their usual ports are the same pin. A custom port stays distinct.
+fn ports_match(left: &PinParts, right: &PinParts) -> bool {
+    left.port == right.port
+        || (left.scheme != right.scheme
+            && schemes_match(&left.scheme, &right.scheme)
+            && default_port(left)
+            && default_port(right))
+}
+
+fn paths_align(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    let (shorter, longer) = if left.len() <= right.len() {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    longer.starts_with(shorter)
+        && (shorter.is_empty() || longer[shorter.len()..].starts_with('/'))
+}
+
+/// A saved pin and an open tab are the same slot. A redirect, `www`, or a path under the pin still matches.
+pub fn same_pin(pin: &str, url: &str) -> bool {
+    let Some(pin) = pin_parts(pin) else {
+        return false;
+    };
+    let Some(url) = pin_parts(url) else {
+        return false;
+    };
+    schemes_match(&pin.scheme, &url.scheme)
+        && pin.host == url.host
+        && ports_match(&pin, &url)
+        && paths_align(&pin.path, &url.path)
+}
+
+/// The same address, not merely a page under it. `www` and a trailing slash do not count as different.
+pub fn same_pin_page(pin: &str, url: &str) -> bool {
+    let Some(pin) = pin_parts(pin) else {
+        return false;
+    };
+    let Some(url) = pin_parts(url) else {
+        return false;
+    };
+    schemes_match(&pin.scheme, &url.scheme)
+        && pin.host == url.host
+        && ports_match(&pin, &url)
+        && pin.path == url.path
+}
+
+/// Same scheme, host and port, whatever the path. A pin sent to a login page is still on its site.
+pub fn same_pin_site(pin: &str, url: &str) -> bool {
+    let Some(pin) = pin_parts(pin) else {
+        return false;
+    };
+    let Some(url) = pin_parts(url) else {
+        return false;
+    };
+    schemes_match(&pin.scheme, &url.scheme) && pin.host == url.host && ports_match(&pin, &url)
+}
+
+/// Longer paths are more specific, so `/mail` is claimed before the site root.
+pub fn pin_specificity(url: &str) -> usize {
+    pin_parts(url).map(|parts| parts.path.len()).unwrap_or(0)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinMatch {
+    /// Index of the open tab that already stands for this pin.
+    Open(usize),
+    /// Another saved pin already claimed that same address.
+    Duplicate,
+    /// Nothing open matches, so the pin should be created.
+    Missing,
+}
+
+/// Pairs each saved pin with one open tab, given as `(url, pinned)`. A navigated, `www`, or
+/// trailing-slash address matches first. A pinned tab elsewhere on the pin's site is the fallback.
+pub fn match_pins(pins: &[String], open: &[(&str, bool)]) -> Vec<PinMatch> {
+    let mut claimed = vec![false; open.len()];
+    let mut order: Vec<usize> = (0..pins.len()).collect();
+    order.sort_by(|&left, &right| pin_specificity(&pins[right]).cmp(&pin_specificity(&pins[left])));
+    let mut matches = vec![PinMatch::Missing; pins.len()];
+    for &index in &order {
+        if pin_key(&pins[index]).is_empty() {
+            matches[index] = PinMatch::Duplicate;
+            continue;
+        }
+        let wanted = pin_specificity(&pins[index]);
+        let best = open
+            .iter()
+            .enumerate()
+            .filter(|(at, (url, _))| !claimed[*at] && same_pin(&pins[index], url))
+            .min_by_key(|(at, (url, pinned))| {
+                (!pinned, pin_specificity(url).abs_diff(wanted), *at)
+            })
+            .map(|(at, _)| at);
+        if let Some(at) = best {
+            claimed[at] = true;
+            matches[index] = PinMatch::Open(at);
+        }
+    }
+    for &index in &order {
+        if matches[index] != PinMatch::Missing {
+            continue;
+        }
+        let fallback = (0..open.len()).find(|&at| {
+            let (url, pinned) = open[at];
+            pinned && !claimed[at] && same_pin_site(&pins[index], url)
+        });
+        if let Some(at) = fallback {
+            claimed[at] = true;
+            matches[index] = PinMatch::Open(at);
+        }
+    }
+    for &index in &order {
+        if matches[index] != PinMatch::Missing {
+            continue;
+        }
+        let duplicate = matches.iter().enumerate().any(|(other, found)| {
+            other != index
+                && matches!(found, PinMatch::Open(_))
+                && same_pin_page(&pins[index], &pins[other])
+        }) || open
+            .iter()
+            .enumerate()
+            .any(|(at, (url, _))| claimed[at] && same_pin_page(&pins[index], url));
+        if duplicate {
+            matches[index] = PinMatch::Duplicate;
+        }
+    }
+    matches
+}
+
 fn looks_like_host(text: &str) -> bool {
     let host = text
         .split(['/', '?', '#'])
@@ -300,7 +499,10 @@ fn is_local_host(text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{http_origin, pin_key, registrable_domain, site_of};
+    use super::{
+        PinMatch, http_origin, match_pins, pin_key, registrable_domain, same_pin, same_pin_page,
+        site_of,
+    };
 
     #[test]
     fn the_registrable_domain_drops_subdomains_but_keeps_public_suffixes() {
@@ -328,6 +530,46 @@ mod tests {
         );
         assert_eq!(http_origin("ce://newtab"), None);
         assert_eq!(http_origin("file:///C:/page.html"), None);
+    }
+
+    #[test]
+    fn a_navigated_pin_still_matches_the_saved_url() {
+        assert!(same_pin("https://a.example", "https://a.example/inbox"));
+        assert!(same_pin("https://a.example", "https://www.a.example/"));
+        assert!(same_pin("http://a.example/mail", "https://a.example/mail/u/0"));
+        assert!(same_pin("ce://bookmarks", "ce://bookmarks"));
+        assert!(!same_pin("https://a.example/mail", "https://a.example/mailbox"));
+        assert!(!same_pin("ce://bookmarks", "ce://history"));
+        assert!(same_pin_page(
+            "https://www.a.example/",
+            "https://a.example"
+        ));
+        assert!(!same_pin_page(
+            "https://a.example",
+            "https://a.example/inbox"
+        ));
+    }
+
+    #[test]
+    fn a_pinned_tab_sent_to_a_login_page_still_matches_its_pin() {
+        let pins = vec![
+            "https://app.example/today".to_string(),
+            "https://cms.example".to_string(),
+        ];
+        let open = [
+            ("https://cms.example/sign-in?next=%2F", true),
+            ("https://app.example/auth/login", true),
+            ("https://other.example/auth/login", true),
+        ];
+        assert_eq!(
+            match_pins(&pins, &open),
+            vec![PinMatch::Open(1), PinMatch::Open(0)]
+        );
+        let loose = [("https://app.example/auth/login", false)];
+        assert_eq!(
+            match_pins(&pins[..1], &loose),
+            vec![PinMatch::Missing]
+        );
     }
 
     #[test]

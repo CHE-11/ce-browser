@@ -8,7 +8,9 @@ use webview2_com::*;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn};
 use windows::Win32::System::Com::IStream;
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
+};
 use windows::Win32::UI::WindowsAndMessaging::{EnumChildWindows, GetClientRect};
 use windows::core::{BOOL, HSTRING, Interface, PWSTR};
 
@@ -254,6 +256,16 @@ fn cookie_header(list: Option<&ICoreWebView2CookieList>) -> String {
 
 fn key_down(key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> bool {
     unsafe { GetKeyState(key.0 as i32) < 0 }
+}
+
+/// Shift, Ctrl, and Alt as held right now. Read from a new-window request: that is how
+/// WebView2 delivers Shift+click on a link.
+pub fn pointer_modifiers() -> (bool, bool, bool) {
+    (async_key(VK_SHIFT), async_key(VK_CONTROL), async_key(VK_MENU))
+}
+
+fn async_key(key: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY) -> bool {
+    unsafe { (GetAsyncKeyState(i32::from(key.0)) as u16) & 0x8000 != 0 }
 }
 
 fn read_stream(stream: &IStream) -> Option<Vec<u8>> {
@@ -574,6 +586,10 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                         if let Some(url) = message.get("url").and_then(|url| url.as_str()) {
                             let app = message_app.clone();
                             let url = url.to_string();
+                            crate::peek::note_click(id, &url);
+                            if crate::settings::get(&app).peek_on_shift_click {
+                                crate::peek::hold_focus(&app, id);
+                            }
                             tauri::async_runtime::spawn(async move {
                                 crate::peek::request(&app, id, &url);
                             });
@@ -789,20 +805,27 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
                         crate::page_errors::browser_process_exited(&app)
                     });
                 } else if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED {
-                    let detail = args
-                        .cast::<ICoreWebView2ProcessFailedEventArgs2>()
-                        .ok()
-                        .map(|args| {
-                            let mut reason = COREWEBVIEW2_PROCESS_FAILED_REASON::default();
-                            let _ = args.Reason(&mut reason);
-                            process_failed_reason(reason).to_string()
-                        })
-                        .unwrap_or_default();
+                    crate::page_errors::clear_unresponsive(id);
+                    let detail = if crate::hang_guard::ended_recently() {
+                        "It stopped responding, so it was ended to keep the rest of the browser working."
+                            .to_string()
+                    } else {
+                        args.cast::<ICoreWebView2ProcessFailedEventArgs2>()
+                            .ok()
+                            .map(|args| {
+                                let mut reason = COREWEBVIEW2_PROCESS_FAILED_REASON::default();
+                                let _ = args.Reason(&mut reason);
+                                process_failed_reason(reason).to_string()
+                            })
+                            .unwrap_or_default()
+                    };
                     tauri::async_runtime::spawn(async move {
                         tabs::set_failure(&app, id, "crashed", "RENDER_PROCESS_EXITED", detail)
                     });
                 } else if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE {
-                    tauri::async_runtime::spawn(async move {
+                    tauri::async_runtime::spawn_blocking(move || {
+                        let pids = crate::status::renderer_pids(&app, id);
+                        crate::page_errors::note_unresponsive(id, pids);
                         if let Err(error) = tabs::show_unresponsive(&app, id) {
                             eprintln!("unresponsive page: {error}");
                         }

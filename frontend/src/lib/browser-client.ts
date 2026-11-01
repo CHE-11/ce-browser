@@ -176,6 +176,11 @@ export function unpinTab(id: number) {
   return invoke<void>("unpin_tab", { id });
 }
 
+/** Reopens settings pins that were closed, in the saved order. */
+export function restorePinnedTabs() {
+  return invoke<void>("restore_pinned_tabs");
+}
+
 export function duplicateTab(id: number) {
   return invoke<number>("duplicate_tab", { id });
 }

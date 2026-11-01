@@ -12,6 +12,7 @@ mod extensions;
 mod favicons;
 mod files;
 mod find;
+mod hang_guard;
 mod history;
 mod history_index;
 mod keywords;
@@ -206,6 +207,11 @@ async fn pin_tab(app: AppHandle, id: u32) {
 #[tauri::command]
 async fn unpin_tab(app: AppHandle, id: u32) {
     tabs::set_pinned(&app, id, false);
+}
+
+#[tauri::command]
+async fn restore_pinned_tabs(app: AppHandle, window: Window) -> Result<(), String> {
+    tabs::restore_saved_pins(&app, window.label())
 }
 
 #[tauri::command]
@@ -1144,7 +1150,7 @@ fn copy_text(text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn show_notice(app: AppHandle, window: Window, message: String) {
+async fn show_notice(app: AppHandle, window: Window, message: String) {
     undo::notice(&app, window.label(), &message);
 }
 
@@ -1512,6 +1518,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle().clone();
+            hang_guard::init(&handle);
             sync::attach(&handle);
             profiles::init(&handle);
             if !tauri::is_dev() {
@@ -1626,6 +1633,7 @@ pub fn run() {
             detach_tab,
             pin_tab,
             unpin_tab,
+            restore_pinned_tabs,
             duplicate_tab,
             reopen_closed_tab,
             list_recently_closed,

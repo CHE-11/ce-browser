@@ -1,10 +1,15 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
 use url::Url;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
+
+/// WebView2 repeats the unresponsive report while a page stays hung, so an older one has
+/// probably recovered.
+const UNRESPONSIVE_FOR: Duration = Duration::from_secs(30);
 
 /// Hosts whose certificate error the user chose to pass this session. Not saved.
 static ALLOWED_CERTIFICATES: Mutex<Option<HashSet<String>>> = Mutex::new(None);
@@ -12,6 +17,8 @@ static RESTARTING: AtomicBool = AtomicBool::new(false);
 static EXITING: AtomicBool = AtomicBool::new(false);
 /// Address each tab's current main-frame navigation is loading.
 static TARGETS: Mutex<Option<HashMap<u32, String>>> = Mutex::new(None);
+/// Renderer processes of tabs WebView2 reported as not answering, and when it last said so.
+static UNRESPONSIVE: Mutex<Option<HashMap<u32, (Vec<u32>, Instant)>>> = Mutex::new(None);
 
 pub fn note_navigation(id: u32, url: &str) {
     TARGETS
@@ -25,6 +32,50 @@ pub fn forget_tab(id: u32) {
     if let Some(targets) = TARGETS.lock().expect("navigation targets").as_mut() {
         targets.remove(&id);
     }
+    clear_unresponsive(id);
+}
+
+pub fn note_unresponsive(id: u32, pids: Vec<u32>) {
+    let mut guard = UNRESPONSIVE.lock().expect("unresponsive pages");
+    let pages = guard.get_or_insert_with(HashMap::new);
+    let known = pages
+        .remove(&id)
+        .map(|(known, _)| known)
+        .unwrap_or_default();
+    let pids = if pids.is_empty() { known } else { pids };
+    pages.insert(id, (pids, Instant::now()));
+}
+
+pub fn clear_unresponsive(id: u32) {
+    if let Some(pages) = UNRESPONSIVE.lock().expect("unresponsive pages").as_mut() {
+        pages.remove(&id);
+    }
+}
+
+/// Renderer processes of tab `id` while it is reported as hung. Empty once it recovered.
+pub fn unresponsive_pids(id: u32) -> Vec<u32> {
+    UNRESPONSIVE
+        .lock()
+        .expect("unresponsive pages")
+        .as_ref()
+        .and_then(|pages| pages.get(&id))
+        .filter(|(_, at)| at.elapsed() < UNRESPONSIVE_FOR)
+        .map(|(pids, _)| pids.clone())
+        .unwrap_or_default()
+}
+
+/// Renderer processes of every page currently reported as hung.
+pub fn all_unresponsive_pids() -> Vec<u32> {
+    let guard = UNRESPONSIVE.lock().expect("unresponsive pages");
+    let mut pids: Vec<u32> = guard
+        .iter()
+        .flat_map(|pages| pages.values())
+        .filter(|(_, at)| at.elapsed() < UNRESPONSIVE_FOR)
+        .flat_map(|(pids, _)| pids.iter().copied())
+        .collect();
+    pids.sort_unstable();
+    pids.dedup();
+    pids
 }
 
 /// The certificate error is for the page itself, not an image or script on another host.

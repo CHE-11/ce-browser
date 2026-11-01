@@ -17,6 +17,9 @@ const SAVE_EVERY: Duration = Duration::from_secs(30);
 const MAX_TICK: u64 = 15_000;
 
 static STARTED: LazyLock<SystemTime> = LazyLock::new(SystemTime::now);
+/// Renderer processes of the pages on screen at the last sample. Kept for when the main
+/// thread is stuck and WebView2 can't be asked.
+static SHOWN_RENDERERS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -254,6 +257,13 @@ pub fn renderer_pids(app: &AppHandle, id: u32) -> Vec<u32> {
     pids_for(&frames, &page_candidates(app, &url))
 }
 
+pub fn shown_renderers() -> Vec<u32> {
+    SHOWN_RENDERERS
+        .lock()
+        .map(|shown| shown.clone())
+        .unwrap_or_default()
+}
+
 /// Memory one tab uses now: its renderer working set, or its JavaScript heap when the
 /// renderer can't be matched. Waits on the main thread, so call it from a worker thread.
 pub fn tab_memory(app: &AppHandle, id: u32) -> Option<u64> {
@@ -297,6 +307,9 @@ fn tab_samples(
             pids = pids_for(&frames, &candidates);
         }
         matched.insert(target.id, pids);
+    }
+    if let Ok(mut shown) = SHOWN_RENDERERS.lock() {
+        *shown = matched.values().flatten().copied().collect();
     }
 
     let mut samples = HashMap::new();
@@ -429,18 +442,38 @@ fn app_working_set() -> u64 {
     if !snapshot_processes(&mut rows) {
         return working_set(root);
     }
+    let mut keep: HashSet<u32> = descendants(root, &rows)
+        .into_iter()
+        .map(|(pid, _)| pid)
+        .collect();
+    keep.insert(root);
+    sum_working_set(&keep.into_iter().collect::<Vec<_>>())
+}
+
+/// Processes this app started, directly or through WebView2, with their executable names.
+pub fn child_processes() -> Vec<(u32, String)> {
+    let mut rows = Vec::new();
+    if !snapshot_processes(&mut rows) {
+        return Vec::new();
+    }
+    descendants(unsafe { GetCurrentProcessId() }, &rows)
+}
+
+fn descendants(root: u32, rows: &[ProcessRow]) -> Vec<(u32, String)> {
     let mut keep = HashSet::new();
     keep.insert(root);
+    let mut found = Vec::new();
     let mut grew = true;
     while grew {
         grew = false;
-        for &(pid, parent) in &rows {
-            if parent != 0 && keep.contains(&parent) && keep.insert(pid) {
+        for row in rows {
+            if row.parent != 0 && keep.contains(&row.parent) && keep.insert(row.pid) {
+                found.push((row.pid, row.exe.clone()));
                 grew = true;
             }
         }
     }
-    sum_working_set(&keep.into_iter().collect::<Vec<_>>())
+    found
 }
 
 fn sum_working_set(pids: &[u32]) -> u64 {
@@ -452,7 +485,13 @@ fn sum_working_set(pids: &[u32]) -> u64 {
         .sum()
 }
 
-fn snapshot_processes(rows: &mut Vec<(u32, u32)>) -> bool {
+struct ProcessRow {
+    pid: u32,
+    parent: u32,
+    exe: String,
+}
+
+fn snapshot_processes(rows: &mut Vec<ProcessRow>) -> bool {
     let snap = unsafe { CreateToolhelp32Snapshot(0x0000_0002, 0) };
     if invalid_handle(snap) {
         return false;
@@ -464,7 +503,16 @@ fn snapshot_processes(rows: &mut Vec<(u32, u32)>) -> bool {
         return false;
     }
     loop {
-        rows.push((entry.pid, entry.parent));
+        let end = entry
+            .exe
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(entry.exe.len());
+        rows.push(ProcessRow {
+            pid: entry.pid,
+            parent: entry.parent,
+            exe: String::from_utf16_lossy(&entry.exe[..end]),
+        });
         entry.size = size_of::<ProcessEntry>() as u32;
         if unsafe { Process32NextW(snap, &mut entry) } == 0 {
             break;

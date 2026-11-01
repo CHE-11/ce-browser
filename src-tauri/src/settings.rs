@@ -248,6 +248,7 @@ pub struct TabSleepSettings {
     pub enabled: bool,
     /// Minutes a tab stays off screen before it sleeps.
     pub minutes: u32,
+    /// Older files may set this. Pinned tabs never sleep, so load maps it to false.
     pub sleep_pinned: bool,
     /// Hosts that never sleep, lowercase and without a leading `www.`.
     pub never_sleep_sites: Vec<String>,
@@ -267,6 +268,7 @@ impl Default for TabSleepSettings {
 impl TabSleepSettings {
     fn normalize(mut self) -> Self {
         self.minutes = self.minutes.clamp(5, 720);
+        self.sleep_pinned = false;
         let mut sites: Vec<String> = Vec::new();
         for raw in &self.never_sleep_sites {
             let host = sleep_site_key(raw);
@@ -1088,6 +1090,18 @@ mod tests {
         assert!(loaded.tab_hover_preview);
         assert!(loaded.tab_sleep.enabled);
         assert_eq!(loaded.tab_sleep.minutes, 30);
+        assert!(!loaded.tab_sleep.sleep_pinned);
+    }
+
+    #[test]
+    fn an_older_file_that_let_pinned_tabs_sleep_keeps_them_awake() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"tabSleep":{"enabled":true,"minutes":30,"sleepPinned":true,"neverSleepSites":[]}}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert!(!loaded.tab_sleep.sleep_pinned);
+        assert!(loaded.tab_sleep.enabled);
     }
 
     #[test]

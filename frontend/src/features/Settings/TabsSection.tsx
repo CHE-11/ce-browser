@@ -23,12 +23,11 @@ const PEEK_HINT = "A peek shows the page over the current tab. Esc closes it.";
 const MUTE_LABEL = "Mute tabs in the background";
 const MUTE_HINT = "Only the tab on screen plays sound.";
 const SLEEP_LABEL = "Put background tabs to sleep";
-const SLEEP_HINT = "Sleeping tabs free memory and CPU, and wake when you select them.";
+const SLEEP_HINT = "Sleeping tabs free memory and CPU, and wake when you select them. Pinned tabs stay loaded.";
 const MINUTES_LABEL = "Sleep after";
 const MINUTES_HINT = "Minutes a tab stays in the background first.";
-const PINNED_SLEEP_LABEL = "Pinned tabs can sleep too";
 const NEVER_LABEL = "Never sleep on these sites";
-const NEVER_HINT = "Tabs on these sites and their subdomains stay awake. Tabs playing sound never sleep.";
+const NEVER_HINT = "Tabs on these sites and their subdomains stay awake. Pinned tabs and tabs playing sound never sleep.";
 const NEVER_EMPTY = "No sites yet. You can also add one from a tab's right-click menu.";
 
 export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSectionProps) {
@@ -64,7 +63,6 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
     MINUTES_HINT,
     "minutes",
     sleepMinutesDraft,
-    PINNED_SLEEP_LABEL,
     NEVER_LABEL,
     NEVER_HINT,
     NEVER_EMPTY,
@@ -172,14 +170,6 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
         <span id="settings-sleep-minutes-unit" className="text-xs text-zinc-500">
           minutes
         </span>
-      </Row>
-      <Row id="settings-sleep-pinned" label={PINNED_SLEEP_LABEL}>
-        <Toggle
-          id="settings-sleep-pinned-toggle"
-          checked={settings.tabSleep.sleepPinned}
-          disabled={!settings.tabSleep.enabled}
-          onChange={(sleepPinned) => onUpdate({ tabSleep: { ...settings.tabSleep, sleepPinned } })}
-        />
       </Row>
       <NeverSleep settings={settings} draft={neverSleepDraft} setDraft={setNeverSleepDraft} onAdd={addNeverSleep} onUpdate={onUpdate} />
     </Section>

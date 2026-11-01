@@ -29,7 +29,6 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { id: "settings-mute-background", label: "Mute tabs in the background", section: "settings-tabs", keywords: "sound audio" },
   { id: "settings-sleep", label: "Put background tabs to sleep", section: "settings-tabs", keywords: "memory suspend" },
   { id: "settings-sleep-minutes", label: "Sleep after", section: "settings-tabs", keywords: "minutes" },
-  { id: "settings-sleep-pinned", label: "Pinned tabs can sleep too", section: "settings-tabs" },
   { id: "settings-never-sleep", label: "Never sleep on these sites", section: "settings-tabs" },
   { id: "settings-strip-tracking", label: "Strip tracking parameters", section: "settings-privacy", keywords: "utm fbclid" },
   { id: "settings-fingerprint", label: "Fingerprint shield", section: "settings-privacy", keywords: "canvas webgl" },

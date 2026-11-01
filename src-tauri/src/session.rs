@@ -257,41 +257,46 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
 }
 
 /// Settings pins open first. A tab already in the session keeps its title and favicon and is pinned.
+/// It matches the pin the same way the reopen-pins button does, so a redirected pin is not opened twice.
+/// Extra pinned copies of the same address on a pin's site are dropped.
 fn merge_startup_pins(saved: Vec<SessionTabFile>, pins: &[String]) -> Vec<SessionTabFile> {
+    let open: Vec<(&str, bool)> = saved
+        .iter()
+        .map(|tab| (tab.url.as_str(), tab.pinned))
+        .collect();
+    let matches = paths::match_pins(pins, &open);
     let mut used = vec![false; saved.len()];
     let mut merged = Vec::new();
-    let mut seen = Vec::new();
-    for pin in pins {
-        let key = paths::pin_key(pin);
-        if key.is_empty() || seen.iter().any(|existing: &String| existing == &key) {
-            continue;
-        }
-        seen.push(key.clone());
-        let mut found = None;
-        for (index, tab) in saved.iter().enumerate() {
-            if !used[index] && paths::pin_key(&tab.url) == key {
-                found = Some(index);
-                break;
+    for (pin, found) in pins.iter().zip(matches) {
+        match found {
+            paths::PinMatch::Open(index) => {
+                let mut tab = saved[index].clone();
+                tab.pinned = true;
+                used[index] = true;
+                merged.push(tab);
             }
-        }
-        if let Some(index) = found {
-            let mut tab = saved[index].clone();
-            tab.pinned = true;
-            used[index] = true;
-            merged.push(tab);
-        } else {
-            merged.push(SessionTabFile {
-                url: key,
+            paths::PinMatch::Missing => merged.push(SessionTabFile {
+                url: paths::pin_key(pin),
                 pinned: true,
                 workspace: crate::tabs::DEFAULT_WORKSPACE.to_string(),
                 ..SessionTabFile::default()
-            });
+            }),
+            paths::PinMatch::Duplicate => {}
         }
     }
+    let mut kept: Vec<String> = merged.iter().map(|tab| paths::pin_key(&tab.url)).collect();
     for (index, tab) in saved.into_iter().enumerate() {
-        if !used[index] {
-            merged.push(tab);
+        if used[index] {
+            continue;
         }
+        if tab.pinned && pins.iter().any(|pin| paths::same_pin_site(pin, &tab.url)) {
+            let key = paths::pin_key(&tab.url);
+            if kept.contains(&key) {
+                continue;
+            }
+            kept.push(key);
+        }
+        merged.push(tab);
     }
     merged
 }
@@ -349,5 +354,42 @@ mod tests {
         assert!(merged[1].pinned);
         assert!(!merged[2].pinned);
         assert_eq!(merged[2].url, "https://news.example/");
+    }
+
+    #[test]
+    fn redirected_pins_are_reused_and_their_copies_dropped() {
+        let sign_in = "https://cms.example/sign-in?redirect_url=%2F";
+        let login = "https://app.example/auth/login?success_page=%2Fapp%2Ftoday";
+        let saved = vec![
+            tab("https://chat.example/", true),
+            tab(sign_in, true),
+            tab("https://app.example/app/today", true),
+            tab(sign_in, true),
+            tab(login, true),
+            tab(sign_in, true),
+            tab(login, true),
+            tab("https://chat.example/c/123", true),
+            tab("https://news.example/", false),
+        ];
+        let merged = merge_startup_pins(
+            saved,
+            &[
+                "https://chat.example".into(),
+                "https://cms.example".into(),
+                "https://app.example/app/today".into(),
+            ],
+        );
+        let urls: Vec<&str> = merged.iter().map(|tab| tab.url.as_str()).collect();
+        assert_eq!(
+            urls,
+            vec![
+                "https://chat.example/",
+                sign_in,
+                "https://app.example/app/today",
+                login,
+                "https://chat.example/c/123",
+                "https://news.example/",
+            ]
+        );
     }
 }

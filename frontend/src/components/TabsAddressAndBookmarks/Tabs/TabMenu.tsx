@@ -209,7 +209,8 @@ export function TabMenu({ tabId }: TabMenuProps) {
           id="tab-menu-sleep"
           icon={<Moon />}
           label="Sleep tab"
-          disabled={foreground || tab.sleeping || !tab.loaded}
+          title={tab.pinned ? "Pinned tabs stay awake" : undefined}
+          disabled={foreground || tab.pinned || tab.sleeping || !tab.loaded}
           onClick={run(() => sleepTab(tab.id))}
         />
         <PopupMenuItem id="tab-menu-sleep-others" icon={<MoonStar />} label="Sleep other tabs" onClick={run(() => sleepOtherTabs(tab.id))} />
