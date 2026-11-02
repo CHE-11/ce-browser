@@ -190,7 +190,8 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
     saved = merge_startup_pins(saved, &pins);
     if saved.is_empty() {
         let url = (!restore_all).then(|| tabs::home_url(app).to_string());
-        return tabs::create_tab(app, url, false, None).map(|_| ());
+        tabs::create_tab(app, url, false, None)?;
+        return tabs::ensure_bookmarks_host(app, tabs::WINDOW);
     }
     saved.sort_by_key(|tab| !tab.pinned);
     let position_of = |origin: usize| saved.iter().position(|tab| tab.origin == Some(origin));
@@ -253,7 +254,7 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
     if !restore_all {
         tabs::create_tab(app, Some(tabs::home_url(app).to_string()), false, None)?;
     }
-    Ok(())
+    tabs::ensure_bookmarks_host(app, tabs::WINDOW)
 }
 
 /// Settings pins open first. A tab already in the session keeps its title and favicon and is pinned.

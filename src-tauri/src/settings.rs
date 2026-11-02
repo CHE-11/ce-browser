@@ -144,6 +144,9 @@ pub struct BrowserSettings {
     /// Built-in ad blocker. An older file omits this, so blocking starts on with no paused sites.
     #[serde(default)]
     pub adblock: AdblockSettings,
+    /// The workspace button on the tab strip. An older file omits this, so workspaces stay on.
+    #[serde(default = "default_true")]
+    pub workspaces_enabled: bool,
     /// `horizontal` puts tabs above the address bar, `vertical` in a sidebar on the left.
     #[serde(default)]
     pub tab_layout: String,
@@ -511,6 +514,7 @@ impl Default for BrowserSettings {
             summon_hotkey: default_hotkey(),
             battery_saver: true,
             adblock: AdblockSettings::default(),
+            workspaces_enabled: true,
             tab_layout: "horizontal".into(),
             vertical_tabs_collapsed: false,
             vertical_tabs_width: default_vertical_tabs_width(),
@@ -1118,6 +1122,7 @@ mod tests {
             serde_json::from_str(r#"{"searchEngine":"bing"}"#).expect("settings parse");
         let loaded = loaded.normalize();
         assert_eq!(loaded.tab_layout, "horizontal");
+        assert!(loaded.workspaces_enabled);
         assert!(!loaded.vertical_tabs_collapsed);
         assert_eq!(loaded.vertical_tabs_width, 240);
         assert!(!loaded.mute_background_tabs);

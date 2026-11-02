@@ -7,9 +7,9 @@ import { SkeletonRows } from "@/components/Skeleton";
 import { IconButton } from "@/components/IconButton";
 import { deleteBookmark, deleteBookmarks, moveBookmark, createTab, importBookmarksHtml, exportBookmarksHtml, updateBookmark, addBookmark, checkBookmarkHealth, onBookmarkHealth, openFolderAsGroup } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
-import { hostOf } from "@/lib/format";
-import { useRoute } from "@/lib/route";
-import { BookmarkDropPlace, useAppearanceFromSettings, useBookmarks, findFolder, bookmarkRootsOf, bookmarkContains, BOOKMARK_DRAG_TYPE, bookmarkDropPlace, findBookmarkParent, listFolders } from "@/lib/use-browser";
+import { faviconKey, hostOf } from "@/lib/format";
+import { parseRoute, useRoute } from "@/lib/route";
+import { BookmarkDropPlace, useAppearanceFromSettings, useBookmarks, useSiteFavicons, findFolder, bookmarkRootsOf, bookmarkContains, BOOKMARK_DRAG_TYPE, bookmarkDropPlace, findBookmarkParent, listFolders } from "@/lib/use-browser";
 import { ChevronRight, Columns3, Search, SearchX, LayoutGrid, List, Type, Upload, Download, Plus, FolderOpen, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, Link2, SeparatorHorizontal } from "lucide-react";
 import { useRef, useState, useEffect, useMemo, useCallback, type DragEvent, type MouseEvent } from "react";
 import { BookmarkHealthProgress, BookmarkHealthReport, BookmarkNode, BookmarkTree } from "../../../../types/browser";
@@ -122,6 +122,20 @@ export function BookmarksPage() {
       setSelectedId(requestedFolder);
     }
   }, [requestedFolder, tree]);
+
+  useEffect(() => {
+    const onHash = () => {
+      const next = parseRoute(window.location.hash);
+      const folder = next.kind === "page" ? next.params.get("folder") : null;
+      if (folder && findFolder(tree, folder)) {
+        appliedFolder.current = folder;
+        setSelectedId(folder);
+        setQuery("");
+      }
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, [tree]);
 
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -720,6 +734,8 @@ function BookmarkColumns({
     endRef.current?.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
   }, [pathKey]);
 
+  const icons = useSiteFavicons(columns.flatMap((column) => column.nodes.map((node) => node.url)));
+
   return (
     <div id="bookmarks-page-columns" className="flex h-full overflow-x-auto overflow-y-hidden">
       {columns.map((column, columnIndex) => {
@@ -777,6 +793,7 @@ function BookmarkColumns({
                     active={column.activeId === node.id}
                     chosen={picked.includes(node.id)}
                     dropClass={dropChrome(drop, node.id, "y")}
+                    icon={cachedIcon(icons, node.url)}
                     onClick={(event) => onPick(event, node, index, column.nodes)}
                     onContextMenu={(event) => onContextMenu(event, node)}
                     onDragStart={(event) => onDragStart(event, node)}
@@ -799,6 +816,7 @@ type BookmarkColumnRowProps = {
   active: boolean;
   chosen: boolean;
   dropClass: string;
+  icon: string;
   onClick: (event: MouseEvent) => void;
   onContextMenu: (event: MouseEvent) => void;
   onDragStart: (event: DragEvent) => void;
@@ -812,6 +830,7 @@ function BookmarkColumnRow({
   active,
   chosen,
   dropClass,
+  icon,
   onClick,
   onContextMenu,
   onDragStart,
@@ -844,7 +863,7 @@ function BookmarkColumnRow({
       {node.separator ? (
         <div id={`${domId}-line`} role="separator" className="h-px flex-1 bg-zinc-700" />
       ) : node.url ? (
-        <FavIcon id={`${domId}-icon`} url={node.url} className="size-4" />
+        <FavIcon id={`${domId}-icon`} url={node.url} src={icon} className="size-4" />
       ) : (
         <Folder id={`${domId}-icon`} className="size-4 shrink-0 text-amber-400" aria-hidden />
       )}
@@ -895,6 +914,7 @@ function BookmarkGrid({
   onEdit,
   onDelete,
 }: BookmarkGridProps) {
+  const icons = useSiteFavicons(rows.map((node) => node.url));
   return (
     <div
       id="bookmarks-page-grid"
@@ -911,6 +931,7 @@ function BookmarkGrid({
           view={view}
           chosen={picked.includes(node.id)}
           dropClass={dropChrome(drop, node.id, axis)}
+          icon={cachedIcon(icons, node.url)}
           onClick={(event) => onPick(event, node, index)}
           onContextMenu={(event) => onContextMenu(event, node)}
           onDragStart={(event) => onDragStart(event, node)}
@@ -930,6 +951,7 @@ type BookmarkItemProps = {
   view: ItemView;
   chosen: boolean;
   dropClass: string;
+  icon: string;
   onClick: (event: MouseEvent) => void;
   onContextMenu: (event: MouseEvent) => void;
   onDragStart: (event: DragEvent) => void;
@@ -945,6 +967,7 @@ function BookmarkItem({
   view,
   chosen,
   dropClass,
+  icon,
   onClick,
   onContextMenu,
   onDragStart,
@@ -980,7 +1003,7 @@ function BookmarkItem({
       {node.separator ? (
         <div id={`${domId}-line`} role="separator" className="h-px flex-1 bg-zinc-700" />
       ) : node.url ? (
-        <FavIcon id={`${domId}-icon`} url={node.url} className={view === "cards" ? "size-5" : "size-4"} />
+        <FavIcon id={`${domId}-icon`} url={node.url} src={icon} className={view === "cards" ? "size-5" : "size-4"} />
       ) : (
         <Folder id={`${domId}-icon`} className={cn("shrink-0 text-amber-400", view === "cards" ? "size-5" : "size-4")} aria-hidden />
       )}
@@ -1138,6 +1161,15 @@ function BookmarkDialog({ editor, onClose, onSave }: BookmarkDialogProps) {
       </form>
     </Dialog>
   );
+}
+
+/** Cached site icon, or an empty src so the row does not request /favicon.ico. */
+function cachedIcon(icons: Record<string, string>, url?: string | null) {
+  const key = faviconKey(url);
+  if (!key) {
+    return "";
+  }
+  return icons[key] ?? "";
 }
 
 function withoutBookmark(report: BookmarkHealthReport, id: string): BookmarkHealthReport {

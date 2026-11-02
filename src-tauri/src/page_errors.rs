@@ -64,6 +64,17 @@ pub fn unresponsive_pids(id: u32) -> Vec<u32> {
         .unwrap_or_default()
 }
 
+/// Tabs WebView2 still reports as hung. An older report has probably recovered.
+pub fn unresponsive_ids() -> HashSet<u32> {
+    let guard = UNRESPONSIVE.lock().expect("unresponsive pages");
+    guard
+        .iter()
+        .flat_map(|pages| pages.iter())
+        .filter(|(_, (_, at))| at.elapsed() < UNRESPONSIVE_FOR)
+        .map(|(id, _)| *id)
+        .collect()
+}
+
 /// Renderer processes of every page currently reported as hung.
 pub fn all_unresponsive_pids() -> Vec<u32> {
     let guard = UNRESPONSIVE.lock().expect("unresponsive pages");

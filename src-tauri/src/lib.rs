@@ -9,6 +9,7 @@ mod bookmarks;
 mod browsers;
 mod capture;
 mod downloads;
+mod extension_store;
 mod extensions;
 mod favicons;
 mod files;
@@ -392,8 +393,17 @@ fn ctrl_held() -> bool {
 
 // Workspaces
 
+fn workspaces_on(app: &AppHandle) -> Result<(), String> {
+    if settings::get(app).workspaces_enabled {
+        Ok(())
+    } else {
+        Err("Workspaces are turned off in Settings.".into())
+    }
+}
+
 #[tauri::command]
 async fn create_workspace(app: AppHandle, name: String, color: String) -> Result<String, String> {
+    workspaces_on(&app)?;
     tabs::create_workspace(&app, &name, &color)
 }
 
@@ -404,16 +414,19 @@ async fn rename_workspace(
     name: String,
     color: String,
 ) -> Result<(), String> {
+    workspaces_on(&app)?;
     tabs::rename_workspace(&app, &id, &name, &color)
 }
 
 #[tauri::command]
 async fn delete_workspace(app: AppHandle, id: String) -> Result<(), String> {
+    workspaces_on(&app)?;
     tabs::delete_workspace(&app, &id)
 }
 
 #[tauri::command]
 async fn switch_workspace(app: AppHandle, window: Window, id: String) -> Result<(), String> {
+    workspaces_on(&app)?;
     tabs::switch_workspace(&app, window.label(), &id)
 }
 
@@ -423,6 +436,7 @@ async fn move_tabs_to_workspace(
     ids: Vec<u32>,
     workspace: String,
 ) -> Result<(), String> {
+    workspaces_on(&app)?;
     tabs::move_tabs_to_workspace(&app, &ids, &workspace)
 }
 
@@ -879,6 +893,12 @@ async fn show_download_in_folder(app: AppHandle, id: u32) -> Result<(), String> 
     blocking(move || downloads::show_in_folder(&app, id)).await
 }
 
+/// Synchronous so `DoDragDrop` runs on the UI thread, which already owns a message loop.
+#[tauri::command]
+fn drag_download(app: AppHandle, window: Window, id: u32) -> Result<(), String> {
+    downloads::drag_file(&app, &window, id)
+}
+
 #[tauri::command]
 async fn remove_download(app: AppHandle, id: u32) -> Result<(), String> {
     blocking(move || downloads::remove(&app, id)).await
@@ -959,6 +979,24 @@ async fn install_extension_folder(app: AppHandle, path: String) -> Result<Extens
 #[tauri::command]
 async fn install_extension_zip(app: AppHandle, path: String) -> Result<ExtensionInfo, String> {
     blocking(move || extensions::install_zip(&app, &PathBuf::from(path))).await
+}
+
+#[tauri::command]
+async fn install_extension_from_store(
+    app: AppHandle,
+    url: String,
+) -> Result<ExtensionInfo, String> {
+    blocking(move || extensions::install_from_store(&app, &url)).await
+}
+
+#[tauri::command]
+async fn check_extension_updates(app: AppHandle) -> Result<Vec<ExtensionInfo>, String> {
+    blocking(move || extensions::check_store_updates(&app, false)).await
+}
+
+#[tauri::command]
+async fn update_extension(app: AppHandle, id: String) -> Result<ExtensionInfo, String> {
+    blocking(move || extensions::update_extension(&app, &id)).await
 }
 
 #[tauri::command]
@@ -1712,10 +1750,14 @@ pub fn run() {
             build_window(&handle)?;
             system::start(&handle);
             update::start(&handle);
+            extension_store::start(&handle);
 
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = session::restore(&handle) {
                     eprintln!("session restore: {error}");
+                    if let Err(error) = tabs::ensure_bookmarks_host(&handle, tabs::WINDOW) {
+                        eprintln!("bookmarks: {error}");
+                    }
                 }
                 system::apply_launch(&handle);
                 update::note_version(&handle);
@@ -1890,6 +1932,7 @@ pub fn run() {
             cancel_download,
             open_download,
             show_download_in_folder,
+            drag_download,
             remove_download,
             clear_downloads,
             list_history,
@@ -1900,6 +1943,9 @@ pub fn run() {
             list_extensions,
             install_extension_folder,
             install_extension_zip,
+            install_extension_from_store,
+            check_extension_updates,
+            update_extension,
             set_extension_enabled,
             remove_extension,
             open_extension_options,

@@ -4,7 +4,7 @@ import { Button } from "@/components/Button";
 import { SkeletonRows } from "@/components/Skeleton";
 import { cn } from "@/lib/cn";
 import { formatKeys, formatKeyToken } from "@/lib/shortcut-keys";
-import { useAppearanceFromSettings } from "@/lib/use-browser";
+import { useAppearanceFromSettings, useSettings } from "@/lib/use-browser";
 import type { ShortcutBinding } from "@type/browser";
 
 /** Punctuation keys by physical position, so Shift and the keyboard layout don't change the name. */
@@ -60,6 +60,7 @@ function tokenFrom(event: KeyboardEvent) {
 
 export function ShortcutsPage() {
   useAppearanceFromSettings();
+  const settings = useSettings();
   const [bindings, setBindings] = useState<ShortcutBinding[] | null>(null);
   const [recording, setRecording] = useState<string | null>(null);
   const [first, setFirst] = useState<string | null>(null);
@@ -146,7 +147,9 @@ export function ShortcutsPage() {
         ) : null}
         {bindings === null && !error ? <SkeletonRows id="shortcuts-loading" rows={8} className="rounded-lg border border-zinc-800 p-4" /> : null}
         <ul id="shortcuts-list" className={cn("flex flex-col divide-y divide-zinc-800 rounded-lg border border-zinc-800", bindings === null && "hidden")}>
-          {(bindings ?? []).map((binding) => {
+          {(bindings ?? [])
+            .filter((binding) => settings?.workspacesEnabled !== false || binding.category !== "Workspaces")
+            .map((binding) => {
             const other = conflict(binding);
             return (
               <li id={`shortcut-${binding.action}`} key={binding.action} className="flex items-center gap-3 px-4 py-3">

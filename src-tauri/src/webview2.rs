@@ -549,6 +549,12 @@ pub fn attach_popup_blur(app: &AppHandle, webview: &Webview, label: &str) {
         let blur_app = app.clone();
         let mut token = 0i64;
         let handler = FocusChangedEventHandler::create(Box::new(move |_, _| {
+            // A file drag takes focus for its own message loop. Closing the popup then
+            // would destroy this webview on the UI thread, under DoDragDrop.
+            if downloads::dragging_file() {
+                downloads::close_popup_when_drag_ends();
+                return Ok(());
+            }
             let app = blur_app.clone();
             let label = label.clone();
             tauri::async_runtime::spawn(async move { tabs::popup_lost_focus(&app, &label) });
@@ -744,6 +750,19 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                             });
                         }
                     }
+                    Some("ce-zoom") => {
+                        let change = message
+                            .get("change")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("");
+                        if change == "in" || change == "out" {
+                            let app = message_app.clone();
+                            let change = change.to_string();
+                            tauri::async_runtime::spawn(async move {
+                                let _ = tabs::zoom(&app, id, &change);
+                            });
+                        }
+                    }
                     Some("ce-gesture") => {
                         if !crate::settings::get(&message_app).mouse_gestures {
                             return Ok(());
@@ -926,6 +945,7 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
                     tauri::async_runtime::spawn_blocking(move || {
                         let pids = crate::status::renderer_pids(&app, id);
                         crate::page_errors::note_unresponsive(id, pids);
+                        tabs::set_unresponsive(&app, id, true);
                         if let Err(error) = tabs::show_unresponsive(&app, id) {
                             eprintln!("unresponsive page: {error}");
                         }

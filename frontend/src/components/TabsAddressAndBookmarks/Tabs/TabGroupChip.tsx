@@ -5,6 +5,7 @@ import { closePopup, openPopup, updateGroup, windowPoint } from "../../../lib/br
 import { cn } from "../../../lib/cn";
 import { focusRing } from "../../../lib/focus-ring";
 import { groupColorClasses, groupLabel } from "../../../lib/tab-rows";
+import { TabAlertDot } from "./TabAlertDot";
 
 type TabGroupChipProps = {
   group: TabGroup;
@@ -12,11 +13,13 @@ type TabGroupChipProps = {
   orientation: "horizontal" | "vertical";
   /** Collapsed vertical sidebar: show only a colored dot. */
   compact: boolean;
+  /** Problems on tabs this collapsed group is hiding. */
+  alert: string | null;
 };
 
 const HOVER_DELAY = 300;
 
-export function TabGroupChip({ group, tabs, orientation, compact }: TabGroupChipProps) {
+export function TabGroupChip({ group, tabs, orientation, compact, alert }: TabGroupChipProps) {
   const domId = `tab-group-${group.id}`;
   const colors = groupColorClasses(group.color);
   const label = groupLabel(group, tabs.length);
@@ -66,9 +69,9 @@ export function TabGroupChip({ group, tabs, orientation, compact }: TabGroupChip
     <button
       id={domId}
       type="button"
-      title={`${label}\nClick to ${group.collapsed ? "expand" : "collapse"}. Right-click for options.`}
+      title={`${label}\nClick to ${group.collapsed ? "expand" : "collapse"}. Right-click for options.${alert ? `\n${alert}` : ""}`}
       aria-expanded={!group.collapsed}
-      aria-label={`${label}, ${group.collapsed ? "collapsed" : "expanded"} tab group`}
+      aria-label={`${label}, ${group.collapsed ? "collapsed" : "expanded"} tab group${alert ? `. ${alert.replaceAll("\n", ". ")}` : ""}`}
       className={cn(
         "relative flex shrink-0 select-none items-center gap-1.5 rounded-md text-xs font-medium transition-[color,background-color,max-width] duration-200",
         focusRing,
@@ -96,6 +99,7 @@ export function TabGroupChip({ group, tabs, orientation, compact }: TabGroupChip
       onMouseLeave={clearHover}
     >
       <span id={`${domId}-swatch`} className={cn("size-2 shrink-0 rounded-full", colors.swatch)} />
+      {alert ? <TabAlertDot id={`${domId}-alert`} title={alert} className="-right-1 -top-1" /> : null}
       {compact ? null : (
         <>
           <span id={`${domId}-label`} className="min-w-0 flex-1 truncate text-left">

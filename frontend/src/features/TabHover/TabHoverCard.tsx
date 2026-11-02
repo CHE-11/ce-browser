@@ -5,6 +5,7 @@ import { PopupFrame } from "@/components/PopupFrame";
 import { closePopup, tabMemory, tabThumbnail } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { formatBytes, hostOf } from "@/lib/format";
+import { HIGH_TAB_MEMORY, tabProblemTitle } from "@/lib/tab-alert";
 import { groupColorClasses, groupLabel } from "@/lib/tab-rows";
 import { useTabs } from "@/lib/use-browser";
 
@@ -69,6 +70,8 @@ export function TabHoverCard({ tabId }: TabHoverCardProps) {
     return <PopupFrame id="tab-hover" ready={false}>{null}</PopupFrame>;
   }
 
+  const heavy = memory !== null && memory >= HIGH_TAB_MEMORY;
+  const problem = tabProblemTitle(tab, null);
   const state = sleeping
     ? tab.sleepSaved > 0
       ? `Asleep, about ${formatBytes(tab.sleepSaved)} saved`
@@ -108,7 +111,16 @@ export function TabHoverCard({ tabId }: TabHoverCardProps) {
             </span>
           ) : null}
           {sleeping ? <Moon id="tab-hover-asleep-icon" className="size-3" aria-hidden /> : null}
-          {state ? <span id="tab-hover-state">{state}</span> : null}
+          {state ? (
+            <span id="tab-hover-state" className={heavy ? "text-red-400" : undefined}>
+              {state}
+            </span>
+          ) : null}
+          {problem ? (
+            <span id="tab-hover-problem" className="text-red-400">
+              {problem}
+            </span>
+          ) : null}
           {tab.audible ? <Volume2 id="tab-hover-audible" className="size-3 text-sky-400" aria-label="Playing sound" /> : null}
           {tab.ephemeral ? <Glasses id="tab-hover-ephemeral" className="size-3 text-violet-300" aria-label="Ephemeral tab" /> : null}
         </div>

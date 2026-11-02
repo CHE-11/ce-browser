@@ -9,7 +9,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Window};
 use tauri_plugin_dialog::DialogExt;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{BytesReceivedChangedEventHandler, StateChangedEventHandler};
@@ -520,6 +520,166 @@ pub fn open(app: &AppHandle, id: u32) -> Result<(), String> {
 pub fn show_in_folder(app: &AppHandle, id: u32) -> Result<(), String> {
     let item = item(app, id)?;
     files::reveal_path(Path::new(&item.path))
+}
+
+static FILE_DRAG: AtomicBool = AtomicBool::new(false);
+static CLOSE_POPUP_AFTER_DRAG: AtomicBool = AtomicBool::new(false);
+
+/// True while `DoDragDrop` is running on the UI thread.
+pub fn dragging_file() -> bool {
+    FILE_DRAG.load(Ordering::Acquire)
+}
+
+/// The downloads popup lost focus because a file drag started. Close it once the drag ends.
+pub fn close_popup_when_drag_ends() {
+    CLOSE_POPUP_AFTER_DRAG.store(true, Ordering::Release);
+}
+
+struct FileDragFlag;
+
+impl FileDragFlag {
+    fn enter() -> Self {
+        CLOSE_POPUP_AFTER_DRAG.store(false, Ordering::Release);
+        FILE_DRAG.store(true, Ordering::Release);
+        Self
+    }
+}
+
+impl Drop for FileDragFlag {
+    fn drop(&mut self) {
+        FILE_DRAG.store(false, Ordering::Release);
+    }
+}
+
+/// Drags a finished download as a real file (`CF_HDROP`) so pages and other programs can take it.
+pub fn drag_file(app: &AppHandle, window: &Window, id: u32) -> Result<(), String> {
+    let found = item(app, id)?;
+    if found.state != COMPLETED {
+        return Err("The download has not finished.".into());
+    }
+    let path = PathBuf::from(&found.path);
+    if !path.is_file() {
+        return Err("That file is no longer on disk.".into());
+    }
+    let icon = file_icon_png(&path).unwrap_or_default();
+    let _flag = FileDragFlag::enter();
+    // The webview still owns the mouse. Release it so the drag can leave the window.
+    unsafe {
+        let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+    }
+    let result = drag::start_drag(
+        window,
+        drag::DragItem::Files(vec![path]),
+        drag::Image::Raw(icon),
+        |_, _| {},
+        drag::Options::default(),
+    )
+    .map_err(|_| "The file could not be dragged.".to_string());
+    let close = CLOSE_POPUP_AFTER_DRAG.swap(false, Ordering::AcqRel);
+    drop(_flag);
+    if close {
+        let app = app.clone();
+        let label = window.label().to_string();
+        let _ = app.clone().run_on_main_thread(move || {
+            tabs::close_window_popup(&app, &label);
+        });
+    }
+    result
+}
+
+/// A PNG of the Windows icon for this file, used as the drag image.
+fn file_icon_png(path: &Path) -> Option<Vec<u8>> {
+    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
+    use windows::Win32::UI::Shell::{SHFILEINFOW, SHGFI_ICON, SHGetFileInfoW};
+    use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
+    use windows::core::HSTRING;
+
+    unsafe {
+        let mut info = SHFILEINFOW::default();
+        let wide = HSTRING::from(path.as_os_str());
+        let found = SHGetFileInfoW(
+            &wide,
+            FILE_ATTRIBUTE_NORMAL,
+            Some(&mut info),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON,
+        );
+        if found == 0 || info.hIcon.is_invalid() {
+            return None;
+        }
+        let icon = info.hIcon;
+        let png = icon_png(icon);
+        let _ = DestroyIcon(icon);
+        png
+    }
+}
+
+fn icon_png(icon: windows::Win32::UI::WindowsAndMessaging::HICON) -> Option<Vec<u8>> {
+    use std::ffi::c_void;
+
+    use image::RgbaImage;
+    use windows::Win32::Graphics::Gdi::{
+        BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
+        DeleteDC, DeleteObject, SelectObject,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{DI_NORMAL, DrawIconEx};
+
+    const SIZE: i32 = 32;
+    unsafe {
+        let memory = CreateCompatibleDC(None);
+        if memory.is_invalid() {
+            return None;
+        }
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: SIZE,
+                biHeight: -SIZE,
+                biPlanes: 1,
+                biBitCount: 32,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits: *mut c_void = std::ptr::null_mut();
+        let bitmap = match CreateDIBSection(Some(memory), &info, DIB_RGB_COLORS, &mut bits, None, 0)
+        {
+            Ok(bitmap) => bitmap,
+            Err(_) => {
+                let _ = DeleteDC(memory);
+                return None;
+            }
+        };
+        let previous = SelectObject(memory, bitmap.into());
+        if !bits.is_null() {
+            std::ptr::write_bytes(bits, 0, (SIZE * SIZE * 4) as usize);
+        }
+        let drawn = DrawIconEx(memory, 0, 0, icon, SIZE, SIZE, 0, None, DI_NORMAL);
+        let png = if drawn.is_ok() && !bits.is_null() {
+            let count = (SIZE * SIZE) as usize;
+            let bytes = std::slice::from_raw_parts(bits.cast::<u8>(), count * 4);
+            let mut image = RgbaImage::new(SIZE as u32, SIZE as u32);
+            let mut opaque = false;
+            for (pixel, chunk) in image.pixels_mut().zip(bytes.chunks_exact(4)) {
+                if chunk[3] != 0 {
+                    opaque = true;
+                }
+                *pixel = image::Rgba([chunk[2], chunk[1], chunk[0], chunk[3]]);
+            }
+            if !opaque {
+                for pixel in image.pixels_mut() {
+                    pixel[3] = 255;
+                }
+            }
+            crate::profile_icons::encode_png(&image).ok()
+        } else {
+            None
+        };
+        SelectObject(memory, previous);
+        let _ = DeleteObject(bitmap.into());
+        let _ = DeleteDC(memory);
+        png
+    }
 }
 
 pub fn remove(app: &AppHandle, id: u32) -> Result<(), String> {

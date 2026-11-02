@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Plus } from "lucide-react";
-import { createEphemeralTab, createTab, openPopupBelow } from "@/lib/browser-client";
+import { createEphemeralTab, createTab, openPopupBelow, zoomTab } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { useTabDrag } from "@/lib/tab-drag";
 import { useTabMotion } from "@/lib/tab-motion";
 import { buildTabRows } from "@/lib/tab-rows";
-import type { WindowTabsState } from "@/lib/use-browser";
+import { useSettings, type WindowTabsState } from "@/lib/use-browser";
+import { zoomWheelStep } from "@/lib/zoom";
 import { IconButton } from "@/components/IconButton";
 import { TabRowsView } from "./TabRowsView";
 import { WindowControls } from "@/components/WindowControls";
@@ -38,11 +39,16 @@ function useOverflow(element: HTMLElement | null) {
 }
 
 export function TabStrip({ snapshot }: TabStripProps) {
+  const settings = useSettings();
+  const workspacesEnabled = settings?.workspacesEnabled !== false;
   const drag = useTabDrag(snapshot.tabs, "x");
   const shown = useTabMotion(snapshot, drag.dragging !== null);
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const overflowing = useOverflow(scroller);
   const lastActive = useRef<number | null>(null);
+  const activeId = useRef(snapshot.activeId);
+  const zoomBucket = useRef(0);
+  activeId.current = snapshot.activeId;
   const rows = useMemo(
     () => buildTabRows(shown.tabs, shown.groups, shown.activeId, shown.split),
     [shown.tabs, shown.groups, shown.activeId, shown.split],
@@ -53,7 +59,18 @@ export function TabStrip({ snapshot }: TabStripProps) {
       return;
     }
     const onWheel = (event: WheelEvent) => {
-      if (scroller.scrollWidth <= scroller.clientWidth || event.ctrlKey) {
+      if (event.ctrlKey) {
+        event.preventDefault();
+        const stepped = zoomWheelStep(zoomBucket.current, event.deltaY, event.deltaMode);
+        zoomBucket.current = stepped.bucket;
+        const id = activeId.current;
+        if (id !== null && stepped.change) {
+          void zoomTab(id, stepped.change);
+        }
+        return;
+      }
+      zoomBucket.current = 0;
+      if (scroller.scrollWidth <= scroller.clientWidth) {
         return;
       }
       const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
@@ -78,13 +95,15 @@ export function TabStrip({ snapshot }: TabStripProps) {
 
   return (
     <div id="tab-strip" className="flex h-9 shrink-0 items-stretch bg-zinc-950">
-      <div id="tab-strip-workspace" className="flex shrink-0 items-end pb-1 pl-2">
-        <WorkspaceSwitcher
-          workspaces={snapshot.workspaces}
-          current={snapshot.workspace}
-          compact={snapshot.workspaces.length <= 1}
-        />
-      </div>
+      {workspacesEnabled ? (
+        <div id="tab-strip-workspace" className="flex shrink-0 items-end pb-1 pl-2">
+          <WorkspaceSwitcher
+            workspaces={snapshot.workspaces}
+            current={snapshot.workspace}
+            compact={snapshot.workspaces.length <= 1}
+          />
+        </div>
+      ) : null}
       <div
         id="tab-strip-tabs"
         ref={setScroller}

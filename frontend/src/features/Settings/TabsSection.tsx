@@ -10,6 +10,8 @@ import { inputClass, matchesQuery, Row, Section, Segmented, useReportMatch, useS
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-tabs")!;
 
+const WORKSPACES_LABEL = "Workspaces";
+const WORKSPACES_HINT = "The button on the left of the tab strip. Off hides switching, and the tabs you are looking at stay where they are.";
 const LAYOUT_LABEL = "Tab layout";
 const LAYOUT_HINT = "Vertical tabs sit in a sidebar left of the page.";
 const CYCLE_LABEL = "Ctrl+Tab order";
@@ -41,6 +43,8 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
   const visible = matchesQuery(
     query,
     section.title,
+    WORKSPACES_LABEL,
+    WORKSPACES_HINT,
     LAYOUT_LABEL,
     LAYOUT_HINT,
     "horizontal",
@@ -87,6 +91,13 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
 
   return (
     <Section id={section.id} title={section.title}>
+      <Row id="settings-workspaces" setting="workspacesEnabled" label={WORKSPACES_LABEL} hint={WORKSPACES_HINT} search={["switcher", "tab strip"]}>
+        <Toggle
+          id="settings-workspaces-toggle"
+          checked={settings.workspacesEnabled}
+          onChange={(workspacesEnabled) => onUpdate({ workspacesEnabled })}
+        />
+      </Row>
       <Row id="settings-tab-layout" setting="tabLayout" label={LAYOUT_LABEL} hint={LAYOUT_HINT} search={["horizontal", "vertical"]}>
         <Segmented
           id="settings-tab-layout-options"

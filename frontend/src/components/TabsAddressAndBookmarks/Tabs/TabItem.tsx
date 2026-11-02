@@ -5,10 +5,12 @@ import { setTabsMuted, selectTabRange, toggleTabSelection, activateTab } from "@
 import { accentTint } from "@/lib/accent";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
+import { tabProblemTitle, type HeavyTab } from "@/lib/tab-alert";
 import { useSettings } from "@/lib/use-browser";
 import { hoverTab, leaveTab } from "@/lib/tab-hover";
 import { groupColorClasses } from "@/lib/tab-rows";
 import { TabInfo } from "@type/browser";
+import { TabAlertDot } from "./TabAlertDot";
 
 
 type TabItemProps = {
@@ -21,6 +23,8 @@ type TabItemProps = {
   /** Icon only: pinned tabs, or the collapsed vertical sidebar. */
   compact: boolean;
   groupColor: string | null;
+  /** This tab's renderer is over the memory mark. */
+  heavy: HeavyTab | null;
   split: "left" | "right" | null;
   drop: "before" | "after" | null;
   onContextMenu: (event: MouseEvent) => void;
@@ -38,6 +42,7 @@ export function TabItem({
   orientation,
   compact,
   groupColor,
+  heavy,
   split,
   drop,
   onContextMenu,
@@ -52,6 +57,7 @@ export function TabItem({
   const domId = `tab-${tab.id}`;
   const vertical = orientation === "vertical";
   const showAudio = tab.audible || tab.muted;
+  const alert = tabProblemTitle(tab, heavy);
 
   const toggleMute = (event: MouseEvent) => {
     event.stopPropagation();
@@ -85,7 +91,8 @@ export function TabItem({
       id={domId}
       role="tab"
       aria-selected={selected}
-      aria-label={`${tab.title || tab.url}${tab.sleeping ? ", asleep" : ""}${tab.audible ? ", playing sound" : ""}`}
+      aria-label={`${tab.title || tab.url}${tab.sleeping ? ", asleep" : ""}${tab.audible ? ", playing sound" : ""}${alert ? `, ${alert}` : ""}`}
+      title={!hoverPreview && alert ? alert : undefined}
       draggable
       tabIndex={0}
       onMouseEnter={(event) => {
@@ -114,7 +121,10 @@ export function TabItem({
         ...(accent
           ? {
               backgroundColor: active ? accentTint(accent, 0.28) : undefined,
-              boxShadow: vertical ? `inset 3px 0 0 ${accent}` : `inset 0 2px 0 ${accent}`,
+              // Horizontal tabs only keep the accent along the top edge when pinned.
+              ...(vertical || tab.pinned
+                ? { boxShadow: vertical ? `inset 3px 0 0 ${accent}` : `inset 0 2px 0 ${accent}` }
+                : null),
             }
           : null),
       }}
@@ -197,6 +207,13 @@ export function TabItem({
           />
         ) : null}
         {compact ? audioButton : null}
+        {alert ? (
+          <TabAlertDot
+            id={`${domId}-alert`}
+            title={alert}
+            className={compact && showAudio ? "-left-0.5 -top-0.5" : "-right-0.5 -top-0.5"}
+          />
+        ) : null}
       </span>
       {compact ? null : (
         <>
@@ -209,18 +226,8 @@ export function TabItem({
           {tab.changed ? (
             <span id={`${domId}-changed`} className="size-2 shrink-0 rounded-full bg-sky-400" title="This page changed" />
           ) : null}
-          {tab.errors > 0 ? (
-            <span id={`${domId}-errors`} className="shrink-0 rounded-full bg-rose-500 px-1.5 text-[10px] font-semibold text-white" title="Page errors">
-              {tab.errors > 99 ? "99+" : tab.errors}
-            </span>
-          ) : null}
           {tab.sleeping ? <Moon id={`${domId}-sleeping`} className="size-3 shrink-0 text-zinc-500" aria-label="Sleeping" /> : null}
           {audioButton}
-          {tab.zoom !== 1 ? (
-            <span id={`${domId}-zoom`} className="shrink-0 text-[10px] text-zinc-500">
-              {Math.round(tab.zoom * 100)}%
-            </span>
-          ) : null}
           <button
             id={`${domId}-close`}
             type="button"

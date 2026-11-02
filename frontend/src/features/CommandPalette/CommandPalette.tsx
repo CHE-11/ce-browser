@@ -170,15 +170,18 @@ export function CommandPalette() {
       group: "Recently closed",
       run: () => restoreClosed(entry.id),
     }));
-    const workspaces: Hit[] = snapshot.workspaces
-      .filter((workspace) => workspace.id !== snapshot.workspace)
-      .map((workspace) => ({
-        id: `workspace-${workspace.id}`,
-        title: `Switch to ${workspace.name}`,
-        hint: "Workspace",
-        group: "Workspace",
-        run: () => switchWorkspace(workspace.id),
-      }));
+    const workspaces: Hit[] =
+      settings?.workspacesEnabled === false
+        ? []
+        : snapshot.workspaces
+            .filter((workspace) => workspace.id !== snapshot.workspace)
+            .map((workspace) => ({
+              id: `workspace-${workspace.id}`,
+              title: `Switch to ${workspace.name}`,
+              hint: "Workspace",
+              group: "Workspace" as const,
+              run: () => switchWorkspace(workspace.id),
+            }));
     const sectionTitle = (id: string) => SETTINGS_SECTIONS.find((section) => section.id === id)?.title ?? "Settings";
     const settingsHits: Hit[] = SETTINGS_INDEX.map((entry) => ({
       id: `setting-${entry.id}`,

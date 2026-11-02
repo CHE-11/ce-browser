@@ -31,6 +31,8 @@ export type TabInfo = {
   ephemeral: boolean;
   /** Page errors since the last navigation. */
   errors: number;
+  /** The page stopped answering. Cleared on the next navigation, or once it recovers. */
+  unresponsive: boolean;
   /** `#rrggbb` from the site's theme color or favicon. */
   accent: string | null;
   /** Registrable domain of an http(s) page, such as `example.co.uk`. Empty for other pages. */
@@ -445,6 +447,10 @@ export type ExtensionInfo = {
   popup: string | null;
   optionsPage: string | null;
   folder: string | null;
+  /** `chrome` or `edge` when the package can be updated from that store. */
+  store: "chrome" | "edge" | null;
+  /** Newer store version waiting for the user to install it. */
+  updateVersion: string | null;
 };
 
 export type SearchEngine =
@@ -528,6 +534,8 @@ export type BrowserSettings = {
   batterySaver: boolean;
   /** Built-in ad blocker. */
   adblock: AdblockSettings;
+  /** The workspace button on the tab strip. Off hides switching. */
+  workspacesEnabled: boolean;
   /** `horizontal` puts tabs above the address bar, `vertical` in a sidebar on the left. */
   tabLayout: "horizontal" | "vertical";
   /** The vertical sidebar shows icons only. */

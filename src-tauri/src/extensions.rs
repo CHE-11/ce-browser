@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
@@ -20,6 +21,7 @@ use webview2_com::{
 use windows::Win32::Foundation::E_POINTER;
 use windows::core::{HSTRING, Interface};
 
+use crate::extension_store::{self, VerifiedCrx};
 use crate::webview2::{read_bool, read_pwstr};
 use crate::{files, paths, tabs};
 
@@ -40,6 +42,10 @@ pub struct ExtensionInfo {
     pub popup: Option<String>,
     pub options_page: Option<String>,
     pub folder: Option<String>,
+    /// `chrome` or `edge` when the package has a store key and update URL.
+    pub store: Option<String>,
+    /// Newer store version waiting for the user to install it.
+    pub update_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -48,7 +54,12 @@ struct ExtensionRecord {
     id: String,
     /// Folder name inside `<data>/extensions`.
     folder: String,
+    /// Newer store version waiting for the user. Empty when there is nothing to install.
+    #[serde(default)]
+    available_version: String,
 }
+
+static STORE_BUSY: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -268,14 +279,17 @@ pub fn list(app: &AppHandle) -> Result<Vec<ExtensionInfo>, String> {
     Ok(installed
         .into_iter()
         .map(|extension| {
-            let folder = records
-                .iter()
-                .find(|record| record.id == extension.id)
-                .map(|record| record.folder.clone());
+            let record = records.iter().find(|record| record.id == extension.id);
+            let folder = record.map(|record| record.folder.clone());
             let manifest = folder
                 .as_ref()
-                .map(|folder| Manifest::read(&root.join(folder)));
-            let manifest = manifest.unwrap_or_default();
+                .map(|folder| Manifest::read(&root.join(folder)))
+                .unwrap_or_default();
+            let version = manifest.version.clone().unwrap_or_default();
+            let update_version = record.and_then(|record| {
+                extension_store::version_is_newer(&record.available_version, &version)
+                    .then(|| record.available_version.clone())
+            });
             ExtensionInfo {
                 name: manifest
                     .name
@@ -283,13 +297,15 @@ pub fn list(app: &AppHandle) -> Result<Vec<ExtensionInfo>, String> {
                     .filter(|name| !name.is_empty())
                     .unwrap_or(extension.name),
                 id: extension.id,
-                version: manifest.version.clone().unwrap_or_default(),
+                version,
                 description: manifest.description.clone().unwrap_or_default(),
                 enabled: extension.enabled,
                 icon: manifest.icon.clone(),
                 popup: manifest.popup.clone(),
                 options_page: manifest.options_page.clone(),
                 folder,
+                store: manifest.store.map(|store| store.as_str().to_string()),
+                update_version,
             }
         })
         .collect())
@@ -356,8 +372,18 @@ pub fn sync_on_startup(app: &AppHandle) -> Result<(), String> {
         }
         match add_to_profile(app, &folder) {
             Ok((id, _)) => {
+                let available_version = records
+                    .iter()
+                    .find(|record| record.folder == name)
+                    .map(|record| record.available_version.clone())
+                    .unwrap_or_default();
+                let available_version = kept_available(&folder, &available_version);
                 records.retain(|record| record.folder != name && record.id != id);
-                records.push(ExtensionRecord { id, folder: name });
+                records.push(ExtensionRecord {
+                    id,
+                    folder: name,
+                    available_version,
+                });
                 changed = true;
             }
             Err(error) => eprintln!("extension {}: {error}", folder.display()),
@@ -399,35 +425,118 @@ pub fn install_folder(app: &AppHandle, source: &Path) -> Result<ExtensionInfo, S
     let root = paths::extensions_dir(app);
     let target = unique_folder(&root, manifest.name.as_deref().unwrap_or("extension"));
     files::copy_dir(&source, &target)?;
-    install_from(app, target)
+    install_from(app, target, None)
 }
 
 pub fn install_zip(app: &AppHandle, archive: &Path) -> Result<ExtensionInfo, String> {
+    let bytes = fs::read(archive)
+        .map_err(|error| format!("Could not open {}: {error}", archive.display()))?;
+    if bytes.len() > MAX_EXTENSION_ZIP {
+        return Err("That extension is too large to install.".into());
+    }
+    let decoded = extension_store::decode_archive(&bytes)?;
     let root = paths::extensions_dir(app);
-    let staging = unique_folder(&root, ".staging");
-    extract_zip(archive, &staging).inspect_err(|_| {
-        let _ = fs::remove_dir_all(&staging);
-    })?;
-    let Some(source) = find_manifest_root(&staging) else {
-        let _ = fs::remove_dir_all(&staging);
-        return Err("That zip does not contain a manifest.json.".into());
-    };
-    let manifest = Manifest::read(&source);
+    let unpacked = unpack_zip(&decoded.zip)?;
+    let manifest = Manifest::read(&unpacked.manifest);
     let target = unique_folder(&root, manifest.name.as_deref().unwrap_or("extension"));
-    let moved = fs::rename(&source, &target);
-    let _ = fs::remove_dir_all(&staging);
-    moved.map_err(|error| format!("Could not unpack the extension: {error}"))?;
-    install_from(app, target)
+    unpacked.into_dir(&target)?;
+    install_from(app, target, decoded.public_key.as_deref())
 }
 
-fn install_from(app: &AppHandle, target: PathBuf) -> Result<ExtensionInfo, String> {
+pub fn install_from_store(app: &AppHandle, url: &str) -> Result<ExtensionInfo, String> {
+    let _busy = store_busy();
+    let listing = extension_store::parse_listing(url)?;
+    let verified = verified_download(listing.store, &listing.id)?;
+    if records(app).iter().any(|record| record.id == listing.id) {
+        return match update_verified(app, &listing.id, &verified) {
+            Err(error) if error == "That extension is already up to date." => {
+                Err("That extension is already installed.".into())
+            }
+            result => result,
+        };
+    }
+    let unpacked = unpack_zip(&verified.zip)?;
+    let manifest = Manifest::read(&unpacked.manifest);
+    let target = unique_folder(
+        &paths::extensions_dir(app),
+        manifest.name.as_deref().unwrap_or("extension"),
+    );
+    unpacked.into_dir(&target)?;
+    install_from(app, target, Some(verified.public_key.as_slice()))
+}
+
+pub fn update_extension(app: &AppHandle, id: &str) -> Result<ExtensionInfo, String> {
+    let _busy = store_busy();
+    let record = records(app)
+        .into_iter()
+        .find(|record| record.id == id)
+        .ok_or_else(|| "That extension is not installed.".to_string())?;
+    let manifest = Manifest::read(&paths::extensions_dir(app).join(&record.folder));
+    let store = manifest.store.ok_or_else(|| {
+        "That extension did not come from the Chrome Web Store or Edge Add-ons.".to_string()
+    })?;
+    let verified = verified_download(store, id)?;
+    update_verified(app, id, &verified)
+}
+
+/// Checks store extensions for a newer version. Nothing is installed.
+pub fn check_store_updates(app: &AppHandle, announce: bool) -> Result<Vec<ExtensionInfo>, String> {
+    let watches = store_watches(app);
+    if watches.is_empty() {
+        return list(app);
+    }
+    let mut noted = Vec::new();
+    let mut errors = Vec::new();
+    for watch in &watches {
+        match extension_store::latest_version(watch.store, &watch.id, &watch.version) {
+            Ok(version) => noted.push((watch.id.clone(), version.unwrap_or_default())),
+            Err(error) => {
+                eprintln!("extension update {}: {error}", watch.id);
+                errors.push(error);
+            }
+        }
+    }
+    if noted.is_empty() && !errors.is_empty() {
+        return Err(errors.remove(0));
+    }
+    {
+        let _busy = store_busy();
+        note_available_versions(app, &noted)?;
+    }
+    if announce {
+        announce_updates(app);
+    }
+    list(app)
+}
+
+fn install_from(
+    app: &AppHandle,
+    target: PathBuf,
+    public_key: Option<&[u8]>,
+) -> Result<ExtensionInfo, String> {
     let folder = target
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
+    prepare_extension_dir(&target, public_key).inspect_err(|_| {
+        let _ = fs::remove_dir_all(&target);
+    })?;
+    let expected = public_key.map(extension_store::extension_id);
+    if expected
+        .as_ref()
+        .is_some_and(|expected| records(app).iter().any(|record| record.id == *expected))
+    {
+        let _ = fs::remove_dir_all(&target);
+        return Err("That extension is already installed.".into());
+    }
     let (id, _) = add_to_profile(app, &target).inspect_err(|_| {
         let _ = fs::remove_dir_all(&target);
     })?;
+    if expected.as_ref().is_some_and(|expected| expected != &id) {
+        let _ = act_on(app, &id, None);
+        let _ = fs::remove_dir_all(&target);
+        return Err("WebView2 gave this extension a different id, so it was not installed.".into());
+    }
     let replaced: Vec<String> = records(app)
         .into_iter()
         .filter(|record| record.id == id && record.folder != folder)
@@ -441,6 +550,7 @@ fn install_from(app: &AppHandle, target: PathBuf) -> Result<ExtensionInfo, Strin
         records.push(ExtensionRecord {
             id: id.clone(),
             folder,
+            available_version: String::new(),
         });
     })?;
     emit(app);
@@ -448,6 +558,86 @@ fn install_from(app: &AppHandle, target: PathBuf) -> Result<ExtensionInfo, Strin
         .into_iter()
         .find(|extension| extension.id == id)
         .ok_or_else(|| "The extension was added but WebView2 does not list it.".to_string())
+}
+
+fn verified_download(store: extension_store::Store, id: &str) -> Result<VerifiedCrx, String> {
+    let bytes = extension_store::download_crx(store, id)?;
+    let verified = extension_store::open_crx(&bytes)?;
+    if extension_store::extension_id(&verified.public_key) != id {
+        return Err("The downloaded package is not the extension that was requested.".into());
+    }
+    Ok(verified)
+}
+
+fn update_verified(
+    app: &AppHandle,
+    id: &str,
+    verified: &VerifiedCrx,
+) -> Result<ExtensionInfo, String> {
+    let record = records(app)
+        .into_iter()
+        .find(|record| record.id == id)
+        .ok_or_else(|| "That extension is not installed.".to_string())?;
+    let dest = paths::extensions_dir(app).join(&record.folder);
+    let manifest = Manifest::read(&dest);
+    let saved = manifest.key.ok_or_else(|| {
+        "That extension has no saved key, so it cannot be updated from the store.".to_string()
+    })?;
+    if saved != verified.public_key {
+        return Err("The update is signed by a different key, so it was not installed.".into());
+    }
+    let unpacked = unpack_zip(&verified.zip)?;
+    prepare_extension_dir(&unpacked.manifest, Some(verified.public_key.as_slice()))?;
+    let new_version = Manifest::read(&unpacked.manifest)
+        .version
+        .unwrap_or_default();
+    let current = manifest.version.unwrap_or_default();
+    if !extension_store::version_is_newer(&new_version, &current) {
+        return Err("That extension is already up to date.".into());
+    }
+    let enabled = installed(app)?
+        .iter()
+        .find(|item| item.id == id)
+        .map(|item| item.enabled)
+        .unwrap_or(true);
+    act_on(app, id, None)?;
+    let backup = match swap_extension_dir(&dest, unpacked) {
+        Ok(backup) => backup,
+        Err(error) => {
+            restore_installed(app, &dest, enabled);
+            return Err(error);
+        }
+    };
+    match add_to_profile(app, &dest) {
+        Ok((new_id, _)) if new_id == id => {
+            let _ = fs::remove_dir_all(&backup);
+            let _ = act_on(app, id, Some(enabled));
+        }
+        Ok((new_id, _)) => {
+            let _ = act_on(app, &new_id, None);
+            restore_tree(&dest, &backup);
+            restore_installed(app, &dest, enabled);
+            return Err(
+                "WebView2 gave this extension a different id, so the update was not installed."
+                    .into(),
+            );
+        }
+        Err(error) => {
+            restore_tree(&dest, &backup);
+            restore_installed(app, &dest, enabled);
+            return Err(error);
+        }
+    }
+    save_records(app, |records| {
+        if let Some(record) = records.iter_mut().find(|record| record.id == id) {
+            record.available_version.clear();
+        }
+    })?;
+    emit(app);
+    list(app)?
+        .into_iter()
+        .find(|extension| extension.id == id)
+        .ok_or_else(|| "The extension was updated but WebView2 does not list it.".to_string())
 }
 
 pub fn set_enabled(app: &AppHandle, id: &str, enabled: bool) -> Result<(), String> {
@@ -542,30 +732,252 @@ fn find_manifest_root(path: &Path) -> Option<PathBuf> {
     }
 }
 
-/// A `.crx` is a zip behind a `Cr24` header. Version 2 stores key and signature lengths, version 3 a header length.
-fn zip_offset(bytes: &[u8]) -> Result<usize, String> {
-    if bytes.len() < 16 || &bytes[..4] != b"Cr24" {
-        return Ok(0);
-    }
-    let read_u32 = |at: usize| {
-        u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]) as usize
-    };
-    let offset = match read_u32(4) {
-        2 => 16 + read_u32(8) + read_u32(12),
-        3 => 12 + read_u32(8),
-        version => return Err(format!("Unsupported .crx version {version}.")),
-    };
-    if offset >= bytes.len() {
-        return Err("That .crx file is truncated.".into());
-    }
-    Ok(offset)
+fn store_busy() -> std::sync::MutexGuard<'static, ()> {
+    STORE_BUSY
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
 }
 
-fn extract_zip(archive: &Path, target: &Path) -> Result<(), String> {
-    let bytes = fs::read(archive)
-        .map_err(|error| format!("Could not open {}: {error}", archive.display()))?;
-    let offset = zip_offset(&bytes)?;
-    extract_zip_bytes(&bytes[offset..], target)
+fn kept_available(folder: &Path, available: &str) -> String {
+    let version = Manifest::read(folder).version.unwrap_or_default();
+    if extension_store::version_is_newer(available, &version) {
+        available.to_string()
+    } else {
+        String::new()
+    }
+}
+
+struct StoreWatch {
+    id: String,
+    version: String,
+    store: extension_store::Store,
+}
+
+fn store_watches(app: &AppHandle) -> Vec<StoreWatch> {
+    let root = paths::extensions_dir(app);
+    records(app)
+        .into_iter()
+        .filter_map(|record| {
+            if record.id.is_empty() {
+                return None;
+            }
+            let manifest = Manifest::read(&root.join(&record.folder));
+            Some(StoreWatch {
+                id: record.id,
+                version: manifest.version.unwrap_or_default(),
+                store: manifest.store?,
+            })
+        })
+        .collect()
+}
+
+fn note_available_versions(app: &AppHandle, noted: &[(String, String)]) -> Result<(), String> {
+    if noted.is_empty() {
+        return Ok(());
+    }
+    let root = paths::extensions_dir(app);
+    let mut next = records(app);
+    let mut changed = false;
+    for record in &mut next {
+        let Some((_, available)) = noted.iter().find(|(id, _)| id == &record.id) else {
+            continue;
+        };
+        let current = Manifest::read(&root.join(&record.folder))
+            .version
+            .unwrap_or_default();
+        let value = if extension_store::version_is_newer(available, &current) {
+            available.clone()
+        } else {
+            String::new()
+        };
+        if record.available_version != value {
+            record.available_version = value;
+            changed = true;
+        }
+    }
+    if changed {
+        save_records(app, |saved| *saved = next)?;
+        emit(app);
+    }
+    Ok(())
+}
+
+struct PendingUpdate {
+    id: String,
+    name: String,
+    version: String,
+}
+
+fn announce_updates(app: &AppHandle) {
+    let root = paths::extensions_dir(app);
+    let mut pending = Vec::new();
+    for record in records(app) {
+        if record.available_version.is_empty() {
+            continue;
+        }
+        let manifest = Manifest::read(&root.join(&record.folder));
+        let current = manifest.version.clone().unwrap_or_default();
+        if !extension_store::version_is_newer(&record.available_version, &current) {
+            continue;
+        }
+        let name = manifest
+            .name
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| record.id.clone());
+        pending.push(PendingUpdate {
+            id: record.id,
+            name,
+            version: record.available_version,
+        });
+    }
+    if pending.is_empty() {
+        return;
+    }
+    let mut parts: Vec<String> = pending
+        .iter()
+        .map(|item| format!("{}@{}", item.id, item.version))
+        .collect();
+    parts.sort();
+    if !extension_store::claim_announcement(&parts.join("\n")) {
+        return;
+    }
+    let (message, action, label, extension_id) = if pending.len() == 1 {
+        let item = &pending[0];
+        (
+            format!("{} {} is available", item.name, item.version),
+            "extension-update",
+            "Update",
+            item.id.clone(),
+        )
+    } else {
+        (
+            format!("{} extension updates are available", pending.len()),
+            "extension-updates",
+            "View",
+            String::new(),
+        )
+    };
+    let params = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("id", "0")
+        .append_pair("message", &message)
+        .append_pair("undo", "0")
+        .append_pair("action", action)
+        .append_pair("actionLabel", label)
+        .append_pair("extensionId", &extension_id)
+        .finish();
+    let window = tabs::focused_window(app);
+    if let Err(error) = tabs::show_toast(app, &window, &params) {
+        eprintln!("extension update toast: {error}");
+    }
+}
+
+fn prepare_extension_dir(folder: &Path, public_key: Option<&[u8]>) -> Result<(), String> {
+    let metadata = folder.join("_metadata");
+    if metadata.exists() {
+        fs::remove_dir_all(&metadata).map_err(|error| error.to_string())?;
+    }
+    let Some(public_key) = public_key else {
+        return Ok(());
+    };
+    let path = folder.join("manifest.json");
+    let text = fs::read_to_string(&path)
+        .map_err(|error| format!("Could not read the manifest: {error}"))?;
+    let mut json: Value = serde_json::from_str(text.trim_start_matches('\u{feff}'))
+        .map_err(|error| format!("Could not read the manifest: {error}"))?;
+    json["key"] = Value::String(extension_store::encode_extension_key(public_key));
+    let bytes = serde_json::to_vec_pretty(&json).map_err(|error| error.to_string())?;
+    fs::write(&path, bytes).map_err(|error| format!("Could not write the manifest: {error}"))
+}
+
+struct Unpacked {
+    root: PathBuf,
+    manifest: PathBuf,
+    cleanup: bool,
+}
+
+impl Drop for Unpacked {
+    fn drop(&mut self) {
+        if self.cleanup {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+}
+
+impl Unpacked {
+    fn into_dir(mut self, dest: &Path) -> Result<(), String> {
+        self.cleanup = false;
+        match fs::rename(&self.manifest, dest) {
+            Ok(()) => {
+                if self.manifest != self.root {
+                    let _ = fs::remove_dir_all(&self.root);
+                }
+                Ok(())
+            }
+            Err(error) => {
+                let _ = fs::remove_dir_all(&self.root);
+                Err(format!("Could not unpack the extension: {error}"))
+            }
+        }
+    }
+}
+
+fn unpack_zip(bytes: &[u8]) -> Result<Unpacked, String> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "ce-extension-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    if let Err(error) = fs::create_dir_all(&root) {
+        return Err(error.to_string());
+    }
+    if let Err(error) = extract_zip_bytes(bytes, &root) {
+        let _ = fs::remove_dir_all(&root);
+        return Err(error);
+    }
+    let Some(manifest) = find_manifest_root(&root) else {
+        let _ = fs::remove_dir_all(&root);
+        return Err("That extension does not contain a manifest.json.".into());
+    };
+    Ok(Unpacked {
+        root,
+        manifest,
+        cleanup: true,
+    })
+}
+
+fn swap_extension_dir(dest: &Path, unpacked: Unpacked) -> Result<PathBuf, String> {
+    let name = dest
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "extension".to_string());
+    let backup = dest.with_file_name(format!("{name}.previous"));
+    if backup.exists() {
+        fs::remove_dir_all(&backup)
+            .map_err(|error| format!("Could not replace the extension: {error}"))?;
+    }
+    fs::rename(dest, &backup)
+        .map_err(|error| format!("Could not replace the extension: {error}"))?;
+    if let Err(error) = unpacked.into_dir(dest) {
+        let _ = fs::rename(&backup, dest);
+        return Err(error);
+    }
+    Ok(backup)
+}
+
+fn restore_tree(dest: &Path, backup: &Path) {
+    if dest.exists() {
+        let _ = fs::remove_dir_all(dest);
+    }
+    let _ = fs::rename(backup, dest);
+}
+
+fn restore_installed(app: &AppHandle, folder: &Path, enabled: bool) {
+    if let Ok((id, _)) = add_to_profile(app, folder)
+        && !enabled
+    {
+        let _ = act_on(app, &id, Some(false));
+    }
 }
 
 fn extract_zip_bytes(bytes: &[u8], target: &Path) -> Result<(), String> {
@@ -590,7 +1002,7 @@ fn extract_zip_bytes(bytes: &[u8], target: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const MAX_EXTENSION_ZIP: usize = 200 * 1024 * 1024;
+pub(crate) const MAX_EXTENSION_ZIP: usize = 200 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct ExtensionState {
@@ -623,6 +1035,7 @@ pub fn stage_incoming(profile_dir: &Path, incoming: &[IncomingExtension]) -> Res
         records.push(ExtensionRecord {
             id: String::new(),
             folder: extension.folder.clone(),
+            available_version: String::new(),
         });
     }
     files::write_json(
@@ -700,8 +1113,13 @@ pub fn apply_extensions(app: &AppHandle, incoming: &[IncomingExtension]) -> Resu
         let present = known
             .as_ref()
             .is_some_and(|record| installed_now.iter().any(|item| item.id == record.id));
-        let id = if current_hash.as_deref() == Some(extension.hash.as_str()) && present {
-            known.expect("present record").id
+        let previous = known
+            .as_ref()
+            .map(|record| record.available_version.clone())
+            .unwrap_or_default();
+        let same = current_hash.as_deref() == Some(extension.hash.as_str()) && present;
+        let id = if same {
+            known.as_ref().expect("present record").id.clone()
         } else {
             if let Some(record) = &known {
                 if installed_now.iter().any(|item| item.id == record.id) {
@@ -724,6 +1142,11 @@ pub fn apply_extensions(app: &AppHandle, incoming: &[IncomingExtension]) -> Resu
             let (id, _) = add_to_profile(app, &dest)?;
             id
         };
+        let available_version = if same {
+            kept_available(&dest, &previous)
+        } else {
+            String::new()
+        };
         if installed(app)?
             .iter()
             .find(|item| item.id == id)
@@ -735,6 +1158,7 @@ pub fn apply_extensions(app: &AppHandle, incoming: &[IncomingExtension]) -> Resu
         records.push(ExtensionRecord {
             id,
             folder: extension.folder.clone(),
+            available_version,
         });
         save_records(app, |saved| *saved = records.clone())?;
     }
@@ -877,6 +1301,9 @@ struct Manifest {
     icon: Option<String>,
     popup: Option<String>,
     options_page: Option<String>,
+    /// Set when the manifest has a publisher key and a Chrome or Edge update URL.
+    store: Option<extension_store::Store>,
+    key: Option<Vec<u8>>,
 }
 
 impl Manifest {
@@ -912,6 +1339,15 @@ impl Manifest {
             .or_else(|| json.get("options_page"))
             .and_then(Value::as_str)
             .map(str::to_string);
+        let key = json
+            .get("key")
+            .and_then(Value::as_str)
+            .and_then(extension_store::decode_extension_key);
+        let store = key.as_ref().and_then(|_| {
+            json.get("update_url")
+                .and_then(Value::as_str)
+                .and_then(extension_store::store_of_update_url)
+        });
         Self {
             name: text("short_name")
                 .filter(|name| !name.is_empty())
@@ -921,6 +1357,8 @@ impl Manifest {
             icon,
             popup,
             options_page,
+            store,
+            key,
         }
     }
 }

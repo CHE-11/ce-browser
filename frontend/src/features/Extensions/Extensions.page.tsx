@@ -4,7 +4,8 @@ import { ExtensionIcon } from "@/components/ExtensionIcon";
 import { PageShell } from "@/components/PageShell";
 import { Skeleton } from "@/components/Skeleton";
 import { Toggle } from "@/components/Toggle";
-import { installExtensionZip, installExtensionFolder, setExtensionEnabled, openExtensionOptions, removeExtension, saveSettings } from "@/lib/browser-client";
+import { installExtensionZip, installExtensionFolder, installExtensionFromStore, checkExtensionUpdates, updateExtension, setExtensionEnabled, openExtensionOptions, removeExtension, saveSettings } from "@/lib/browser-client";
+import { storeLabel } from "@/lib/extension-store";
 import { cn } from "@/lib/cn";
 import { saveToolbarPin, toolbarPinned } from "@/lib/toolbar-pin";
 import { useExtensions, useSettings } from "@/lib/use-browser";
@@ -19,15 +20,48 @@ export function ExtensionsPage() {
   const settings = useSettings();
   const [status, setStatus] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [storeUrl, setStoreUrl] = useState("");
 
-  const install = async (installer: () => Promise<ExtensionInfo | null>) => {
+  const install = async (installer: () => Promise<ExtensionInfo | null>, verb: "Installed" | "Updated" = "Installed") => {
     setBusy(true);
     setStatus(null);
     try {
       const extension = await installer();
       if (extension) {
-        setStatus({ tone: "info", text: `Installed ${extension.name} ${extension.version}.` });
+        setStatus({ tone: "info", text: `${verb} ${extension.name} ${extension.version}.` });
       }
+    } catch (reason) {
+      setStatus({ tone: "error", text: String(reason) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const installFromStore = () => {
+    const url = storeUrl.trim();
+    if (!url) {
+      return;
+    }
+    void install(async () => {
+      const extension = await installExtensionFromStore(url);
+      setStoreUrl("");
+      return extension;
+    });
+  };
+
+  const checkUpdates = async () => {
+    setBusy(true);
+    setStatus(null);
+    try {
+      const list = await checkExtensionUpdates();
+      const waiting = list.filter((extension) => extension.updateVersion).length;
+      const watched = list.filter((extension) => extension.store).length;
+      const text = waiting
+        ? `${waiting} update${waiting === 1 ? "" : "s"} available.`
+        : watched
+          ? "Extensions are up to date."
+          : "No store extensions to check.";
+      setStatus({ tone: "info", text });
     } catch (reason) {
       setStatus({ tone: "error", text: String(reason) });
     } finally {
@@ -72,6 +106,37 @@ export function ExtensionsPage() {
       }
     >
       <div id="extensions-page-content" className="mx-auto flex max-w-4xl flex-col gap-6 pb-10">
+        <section id="extensions-page-store" className="flex flex-col gap-3 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+          <h2 id="extensions-page-store-title" className="text-sm font-semibold">
+            Install from a store
+          </h2>
+          <p id="extensions-page-store-hint" className="text-xs text-zinc-400">
+            Paste a Chrome Web Store or Edge Add-ons link, or an extension id.
+          </p>
+          <form
+            id="extensions-page-store-form"
+            className="flex flex-col gap-2 sm:flex-row"
+            onSubmit={(event) => {
+              event.preventDefault();
+              installFromStore();
+            }}
+          >
+            <input
+              id="extensions-page-store-url"
+              value={storeUrl}
+              spellCheck={false}
+              placeholder="https://chromewebstore.google.com/detail/…"
+              className="h-8 min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-sky-500"
+              onChange={(event) => setStoreUrl(event.target.value)}
+            />
+            <Button id="extensions-page-store-install" type="submit" variant="primary" disabled={busy || storeUrl.trim() === ""}>
+              Install from store
+            </Button>
+            <Button id="extensions-page-store-check" variant="outline" disabled={busy} onClick={() => void checkUpdates()}>
+              Check for updates
+            </Button>
+          </form>
+        </section>
         {status || loadError ? (
           <div
             id="extensions-page-status"
@@ -95,7 +160,7 @@ export function ExtensionsPage() {
             id="extensions-page-empty"
             icon={Puzzle}
             title="No extensions installed yet"
-            hint="Install a Chrome extension from a .zip or .crx file, or load an unpacked folder."
+            hint="Paste a Chrome Web Store or Edge Add-ons link, or install a .zip, .crx, or unpacked folder."
             className="rounded-lg border border-dashed border-zinc-700"
             action={
               <Button id="extensions-page-empty-install" size="sm" disabled={busy} onClick={() => void install(installExtensionZip)}>
@@ -138,6 +203,11 @@ export function ExtensionsPage() {
                       <p id={`${domId}-id`} className="mt-1 truncate font-mono text-[11px] text-zinc-600">
                         {extension.id}
                       </p>
+                      {extension.store ? (
+                        <p id={`${domId}-store`} className="mt-1 text-[11px] text-zinc-500">
+                          {storeLabel(extension.store)}
+                        </p>
+                      ) : null}
                     </div>
                     <Toggle
                       id={`${domId}-toggle`}
@@ -146,7 +216,18 @@ export function ExtensionsPage() {
                       onChange={(enabled) => act(setExtensionEnabled(extension.id, enabled))}
                     />
                   </div>
-                  <div id={`${domId}-actions`} className="flex justify-end gap-2">
+                  <div id={`${domId}-actions`} className="flex flex-wrap justify-end gap-2">
+                    {extension.updateVersion ? (
+                      <Button
+                        id={`${domId}-update`}
+                        size="sm"
+                        variant="primary"
+                        disabled={busy}
+                        onClick={() => void install(() => updateExtension(extension.id), "Updated")}
+                      >
+                        Update to {extension.updateVersion}
+                      </Button>
+                    ) : null}
                     <Button
                       id={`${domId}-pin`}
                       size="sm"
@@ -270,8 +351,8 @@ export function ExtensionsPage() {
           </h2>
           <ol id="extensions-page-install-steps" className="mt-3 list-decimal space-y-1.5 pl-5 text-sm text-zinc-300">
             <li id="extensions-page-install-step-1">
-              Download a Chromium build of the extension: a <code>.crx</code> from the Chrome Web Store (with a CRX
-              downloader), a <code>.zip</code> from the extension releases, or an unpacked folder that contains a <code>manifest.json</code>.
+              Paste a Chrome Web Store or Edge Add-ons link above. A <code>.crx</code>, a <code>.zip</code>, or an unpacked
+              folder with a <code>manifest.json</code> still works from the buttons at the top of the page.
             </li>
             <li id="extensions-page-install-step-2">
               Click <strong>Install .zip or .crx</strong> and pick the file. An unzipped folder works with <strong>Load unpacked</strong>.

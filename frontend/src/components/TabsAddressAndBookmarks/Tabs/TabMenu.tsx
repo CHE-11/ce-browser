@@ -4,7 +4,7 @@ import { closePopup, createEphemeralTab, createWorkspace, moveTabsToWorkspace, c
 import type { ExternalBrowser } from "@type/browser";
 import { cn } from "@/lib/cn";
 import { groupColorClasses, GROUP_COLORS, groupLabel } from "@/lib/tab-rows";
-import { useTabs } from "@/lib/use-browser";
+import { useSettings, useTabs } from "@/lib/use-browser";
 import {
   AppWindow,
   AppWindowMac,
@@ -42,6 +42,8 @@ function Swatch({ id, color }: { id: string; color: string }) {
 
 export function TabMenu({ tabId }: TabMenuProps) {
   const snapshot = useTabs();
+  const settings = useSettings();
+  const workspacesEnabled = settings?.workspacesEnabled !== false;
   const [browsers, setBrowsers] = useState<ExternalBrowser[]>([]);
   useEffect(() => {
     void installedBrowsers().then(setBrowsers).catch(() => setBrowsers([]));
@@ -189,21 +191,25 @@ export function TabMenu({ tabId }: TabMenuProps) {
           title="Loose tabs that share a site go into one group named after it"
           onClick={run(() => groupBySite())}
         />
-        {otherWorkspaces.map((workspace) => (
+        {workspacesEnabled
+          ? otherWorkspaces.map((workspace) => (
+              <PopupMenuItem
+                key={workspace.id}
+                id={`tab-menu-workspace-${workspace.id}`}
+                icon={<Swatch id={`tab-menu-workspace-${workspace.id}-swatch`} color={workspace.color} />}
+                label={`Move to ${workspace.name}`}
+                onClick={run(() => moveTabsToWorkspace(targets, workspace.id))}
+              />
+            ))
+          : null}
+        {workspacesEnabled ? (
           <PopupMenuItem
-            key={workspace.id}
-            id={`tab-menu-workspace-${workspace.id}`}
-            icon={<Swatch id={`tab-menu-workspace-${workspace.id}-swatch`} color={workspace.color} />}
-            label={`Move to ${workspace.name}`}
-            onClick={run(() => moveTabsToWorkspace(targets, workspace.id))}
+            id="tab-menu-workspace-new"
+            icon={<Layers />}
+            label={grouped ? "Move tabs to new workspace" : "Move to new workspace"}
+            onClick={run(moveToNewWorkspace)}
           />
-        ))}
-        <PopupMenuItem
-          id="tab-menu-workspace-new"
-          icon={<Layers />}
-          label={grouped ? "Move tabs to new workspace" : "Move to new workspace"}
-          onClick={run(moveToNewWorkspace)}
-        />
+        ) : null}
         <PopupMenuSeparator id="tab-menu-separator-sleep" />
         <PopupMenuItem
           id="tab-menu-sleep"

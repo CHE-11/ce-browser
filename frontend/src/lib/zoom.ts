@@ -7,6 +7,25 @@ export const PAGE_ZOOM_LEVELS = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150,
 
 const BASE_FONT_PX = 16;
 
+/**
+ * Turns wheel movement into one zoom step. Negative `deltaY` zooms in.
+ * `bucket` keeps leftover movement so a trackpad does not jump several steps at once.
+ */
+export function zoomWheelStep(bucket: number, deltaY: number, deltaMode: number): { bucket: number; change: "in" | "out" | null } {
+  if (deltaY === 0) {
+    return { bucket, change: null };
+  }
+  if (deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    return { bucket: 0, change: deltaY < 0 ? "in" : "out" };
+  }
+  const next = bucket + deltaY;
+  const notch = deltaMode === WheelEvent.DOM_DELTA_LINE ? 1 : 100;
+  if (Math.abs(next) < notch) {
+    return { bucket: next, change: null };
+  }
+  return { bucket: 0, change: next < 0 ? "in" : "out" };
+}
+
 export function stepPageZoom(current: number, direction: -1 | 1) {
   const index = PAGE_ZOOM_LEVELS.findIndex((level) => level >= current);
   const at = index < 0 ? PAGE_ZOOM_LEVELS.length - 1 : index;

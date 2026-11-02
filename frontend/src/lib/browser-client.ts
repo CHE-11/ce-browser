@@ -1015,6 +1015,11 @@ export function showDownloadInFolder(id: number) {
   return invoke<void>("show_download_in_folder", { id });
 }
 
+/** Starts a Windows file drag for a finished download. Resolves when the drop ends. */
+export function dragDownload(id: number) {
+  return invoke<void>("drag_download", { id });
+}
+
 export function removeDownload(id: number) {
   return invoke<void>("remove_download", { id });
 }
@@ -1111,6 +1116,18 @@ export function removeExtension(id: string) {
 
 export function openExtensionOptions(id: string) {
   return invoke<number>("open_extension_options", { id });
+}
+
+export function installExtensionFromStore(url: string) {
+  return invoke<ExtensionInfo>("install_extension_from_store", { url });
+}
+
+export function checkExtensionUpdates() {
+  return invoke<ExtensionInfo[]>("check_extension_updates");
+}
+
+export function updateExtension(id: string) {
+  return invoke<ExtensionInfo>("update_extension", { id });
 }
 
 export function onExtensionsChanged(handler: (extensions: ExtensionInfo[]) => void): Promise<UnlistenFn> {

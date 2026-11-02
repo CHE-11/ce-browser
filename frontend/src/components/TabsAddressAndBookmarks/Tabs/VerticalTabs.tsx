@@ -1,13 +1,14 @@
 import { forwardRef, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import type { BrowserSettings } from "../../../../../types/browser";
-import { createEphemeralTab, createTab, saveSettings } from "../../../lib/browser-client";
+import { createEphemeralTab, createTab, saveSettings, zoomTab } from "../../../lib/browser-client";
 import { cn } from "../../../lib/cn";
 import { focusRing } from "../../../lib/focus-ring";
 import { useTabDrag } from "../../../lib/tab-drag";
 import { useTabMotion } from "../../../lib/tab-motion";
 import { buildTabRows } from "../../../lib/tab-rows";
 import type { WindowTabsState } from "../../../lib/use-browser";
+import { zoomWheelStep } from "../../../lib/zoom";
 import { TabRowsView } from "./TabRowsView";
 import { WorkspaceSwitcher } from "../../WorkspaceSwitcher";
 
@@ -23,6 +24,9 @@ const MAX_WIDTH = 400;
 /** Tabs in a sidebar left of the pages. Its width is reported to the backend as the page inset. */
 export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function VerticalTabs({ snapshot, settings }, ref) {
   const collapsed = settings.verticalTabsCollapsed;
+  const activeId = useRef(snapshot.activeId);
+  const zoomBucket = useRef(0);
+  activeId.current = snapshot.activeId;
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
   const drag = useTabDrag(snapshot.tabs, "y");
@@ -38,6 +42,28 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
   useEffect(() => {
     setDragWidth(null);
   }, [settings.verticalTabsWidth]);
+
+  useEffect(() => {
+    const aside = document.getElementById("vertical-tabs");
+    if (!aside) {
+      return;
+    }
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) {
+        zoomBucket.current = 0;
+        return;
+      }
+      event.preventDefault();
+      const stepped = zoomWheelStep(zoomBucket.current, event.deltaY, event.deltaMode);
+      zoomBucket.current = stepped.bucket;
+      const id = activeId.current;
+      if (id !== null && stepped.change) {
+        void zoomTab(id, stepped.change);
+      }
+    };
+    aside.addEventListener("wheel", onWheel, { passive: false });
+    return () => aside.removeEventListener("wheel", onWheel);
+  }, []);
 
   const toggleCollapsed = () => void saveSettings({ ...settings, verticalTabsCollapsed: !collapsed });
 
@@ -75,12 +101,14 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
       style={{ width }}
     >
       <div id="vertical-tabs-top" className={cn("flex shrink-0 items-center gap-1 px-1.5 pb-1 pt-2", collapsed && "flex-col")}>
-        <WorkspaceSwitcher
-          workspaces={snapshot.workspaces}
-          current={snapshot.workspace}
-          compact={collapsed}
-          className={collapsed ? undefined : "min-w-0 flex-1"}
-        />
+        {settings.workspacesEnabled ? (
+          <WorkspaceSwitcher
+            workspaces={snapshot.workspaces}
+            current={snapshot.workspace}
+            compact={collapsed}
+            className={collapsed ? undefined : "min-w-0 flex-1"}
+          />
+        ) : null}
         <button
           id="vertical-tabs-new"
           type="button"

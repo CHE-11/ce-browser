@@ -21,6 +21,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { id: "settings-ask-save", label: "Ask where to save each file", section: "settings-downloads" },
   { id: "settings-accelerate", label: "Accelerate large downloads", section: "settings-downloads" },
   { id: "settings-download-name", label: "Download file name", section: "settings-downloads", keywords: "template rename" },
+  { id: "settings-workspaces", label: "Workspaces", section: "settings-tabs", keywords: "switcher tab strip" },
   { id: "settings-tab-layout", label: "Tab layout", section: "settings-tabs", keywords: "vertical horizontal sidebar" },
   { id: "settings-tab-cycle", label: "Ctrl+Tab order", section: "settings-tabs", keywords: "recent switcher" },
   { id: "settings-tab-switcher", label: "Show the tab switcher", section: "settings-tabs", keywords: "thumbnails ctrl+tab" },

@@ -125,6 +125,7 @@ pub fn emit_status_text(app: &AppHandle, tab_id: u32, text: String) {
 
 /// Adds foreground time, and every couple of seconds publishes memory and the clocks.
 pub fn tick(app: &AppHandle) {
+    tabs::refresh_unresponsive(app);
     let targets = tabs::status_targets(app);
     let open = tabs::open_page_urls(app);
     let now = Instant::now();
@@ -196,7 +197,7 @@ fn publish(app: &AppHandle, targets: &[tabs::StatusPageTarget], open: &[(u32, St
         let state = lock();
         (state.sites.clone(), state.session.clone())
     };
-    let pages: Vec<StatusPage> = targets
+    let mut pages: Vec<StatusPage> = targets
         .iter()
         .map(|target| {
             let key = site_key(&target.url);
@@ -213,6 +214,29 @@ fn publish(app: &AppHandle, targets: &[tabs::StatusPageTarget], open: &[(u32, St
             }
         })
         .collect();
+    let mut seen: HashSet<u32> = pages.iter().map(|page| page.id).collect();
+    for (id, url) in open {
+        if !seen.insert(*id) {
+            continue;
+        }
+        let Some(sample) = samples.get(id) else {
+            continue;
+        };
+        if sample.used.is_none() && sample.heap.is_none() {
+            continue;
+        }
+        let key = site_key(url);
+        pages.push(StatusPage {
+            id: *id,
+            tab_used: sample.used,
+            tab_shared: sample.shared,
+            tab_heap: sample.heap,
+            site_host: key.clone(),
+            site_all_time_ms: sites.get(&key).copied().unwrap_or(0),
+            tab_session_ms: session.get(id).copied().unwrap_or(0),
+            shown: false,
+        });
+    }
     let focused =
         tabs::active_id(app).and_then(|id| pages.iter().find(|page| page.id == id).cloned());
     let focused = focused.unwrap_or(StatusPage {
@@ -308,23 +332,60 @@ fn tab_samples(
         }
         matched.insert(target.id, pids);
     }
+
+    // One environment lists every renderer. If the on-screen pages returned nothing, ask
+    // one other awake page, then match again.
+    if frames.is_empty() {
+        let awake = tabs::awake_ids(app);
+        for (id, _) in open {
+            if !awake.contains(id) {
+                continue;
+            }
+            if let Some(webview) = tabs::page_view(app, *id) {
+                frames.extend(webview2::renderer_frames(&webview));
+                if !frames.is_empty() {
+                    break;
+                }
+            }
+        }
+        if !frames.is_empty() {
+            for target in targets.iter().filter(|target| target.shown) {
+                let empty = matched.get(&target.id).is_none_or(|pids| pids.is_empty());
+                if !empty {
+                    continue;
+                }
+                let pids = pids_for(&frames, &page_candidates(app, &target.url));
+                if !pids.is_empty() {
+                    matched.insert(target.id, pids);
+                }
+            }
+        }
+    }
     if let Ok(mut shown) = SHOWN_RENDERERS.lock() {
-        *shown = matched.values().flatten().copied().collect();
+        *shown = targets
+            .iter()
+            .filter(|target| target.shown)
+            .filter_map(|target| matched.get(&target.id))
+            .flatten()
+            .copied()
+            .collect();
+    }
+
+    let awake = tabs::awake_ids(app);
+    for (id, url) in open {
+        if matched.contains_key(id) || !awake.contains(id) {
+            continue;
+        }
+        let pids = pids_for(&frames, &page_candidates(app, url));
+        if !pids.is_empty() {
+            matched.insert(*id, pids);
+        }
     }
 
     let mut samples = HashMap::new();
     for target in targets.iter().filter(|target| target.shown) {
-        let key = site_key(&target.url);
         let pids = matched.get(&target.id).cloned().unwrap_or_default();
-        let shared = (!key.is_empty()
-            && open
-                .iter()
-                .any(|(id, url)| *id != target.id && site_key(url) == key))
-            || pids.iter().any(|pid| {
-                matched
-                    .iter()
-                    .any(|(other, other_pids)| *other != target.id && other_pids.contains(pid))
-            });
+        let shared = memory_shared(target.id, &target.url, &pids, open, &matched);
         let bytes = sum_working_set(&pids);
         let (used, heap) = if bytes > 0 {
             (Some(bytes), None)
@@ -335,7 +396,47 @@ fn tab_samples(
         };
         samples.insert(target.id, TabSample { used, heap, shared });
     }
+    for (id, url) in open {
+        if samples.contains_key(id) {
+            continue;
+        }
+        let Some(pids) = matched.get(id).cloned() else {
+            continue;
+        };
+        let bytes = sum_working_set(&pids);
+        if bytes == 0 {
+            continue;
+        }
+        let shared = memory_shared(*id, url, &pids, open, &matched);
+        samples.insert(
+            *id,
+            TabSample {
+                used: Some(bytes),
+                heap: None,
+                shared,
+            },
+        );
+    }
     samples
+}
+
+fn memory_shared(
+    id: u32,
+    url: &str,
+    pids: &[u32],
+    open: &[(u32, String)],
+    matched: &HashMap<u32, Vec<u32>>,
+) -> bool {
+    let key = site_key(url);
+    (!key.is_empty()
+        && open
+            .iter()
+            .any(|(other, other_url)| *other != id && site_key(other_url) == key))
+        || pids.iter().any(|pid| {
+            matched
+                .iter()
+                .any(|(other, other_pids)| *other != id && other_pids.contains(pid))
+        })
 }
 
 fn pids_for(frames: &[(u32, Vec<String>)], candidates: &[String]) -> Vec<u32> {

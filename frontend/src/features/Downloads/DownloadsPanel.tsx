@@ -1,8 +1,10 @@
-import { Button } from "@/components/Button";
+import { IconButton } from "@/components/IconButton";
 import { PopupFrame } from "@/components/PopupFrame";
 import { createTab, closePopup } from "@/lib/browser-client";
+import { cn } from "@/lib/cn";
+import { focusRow } from "@/lib/focus-ring";
 import { useDownloadsState } from "@/lib/use-browser";
-import { Download } from "lucide-react";
+import { Download, SquareArrowOutUpRight, X } from "lucide-react";
 import { DownloadRow } from "./DownloadRow";
 
 
@@ -14,10 +16,13 @@ export function DownloadsPanel() {
 
   return (
     <PopupFrame id="downloads-panel" maxHeight={520} ready={loaded}>
-      <div id="downloads-panel-header" className="flex items-center justify-between px-4 pb-1 pt-3">
-        <h2 id="downloads-panel-title" className="text-sm font-semibold">
-          Recent downloads
+      <div id="downloads-panel-header" className="flex items-center justify-between gap-2 py-1 pr-1 pl-4">
+        <h2 id="downloads-panel-title" className="text-sm font-medium">
+          Recent download history
         </h2>
+        <IconButton id="downloads-panel-close" label="Close" onClick={() => void closePopup()}>
+          <X id="downloads-panel-close-icon" aria-hidden />
+        </IconButton>
       </div>
       <div id="downloads-panel-list" className="px-1 pb-1">
         {recent.length === 0 ? (
@@ -29,18 +34,22 @@ export function DownloadsPanel() {
           recent.map((item) => <DownloadRow key={item.id} item={item} compact />)
         )}
       </div>
-      <div id="downloads-panel-footer" className="border-t border-zinc-800 p-2">
-        <Button
+      <div id="downloads-panel-footer" className="border-t border-zinc-800">
+        <button
           id="downloads-panel-all"
-          variant="ghost"
-          className="w-full justify-start"
+          type="button"
+          className={cn(
+            "flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm hover:bg-zinc-800",
+            focusRow,
+          )}
           onClick={() => {
             void createTab("ce://downloads");
             void closePopup();
           }}
         >
-          Show all downloads
-        </Button>
+          <span id="downloads-panel-all-label">Full download history</span>
+          <SquareArrowOutUpRight id="downloads-panel-all-icon" className="size-4 shrink-0 text-zinc-400" aria-hidden />
+        </button>
       </div>
     </PopupFrame>
   );

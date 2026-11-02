@@ -1,5 +1,6 @@
 
 import { openTabMenu, closeTabOrSelection } from "@/lib/tab-actions";
+import { groupProblemTitle, useHeavyTabs } from "@/lib/tab-alert";
 import { useTabDrag } from "@/lib/tab-drag";
 import { TabRow } from "@/lib/tab-rows";
 import { WindowTabsState } from "@/lib/use-browser";
@@ -19,6 +20,7 @@ type TabRowsViewProps = {
 export function TabRowsView({ snapshot, rows, orientation, compact, drag }: TabRowsViewProps) {
   const multi = (id: number) => snapshot.selectedIds.length > 1 && snapshot.selectedIds.includes(id);
   const lastIndex = snapshot.tabs.length - 1;
+  const heavy = useHeavyTabs();
 
   return (
     <>
@@ -31,6 +33,7 @@ export function TabRowsView({ snapshot, rows, orientation, compact, drag }: TabR
               tabs={row.tabs}
               orientation={orientation}
               compact={compact}
+              alert={row.group.collapsed ? groupProblemTitle(row.tabs, heavy, snapshot.activeId) : null}
             />
           );
         }
@@ -51,6 +54,7 @@ export function TabRowsView({ snapshot, rows, orientation, compact, drag }: TabR
             orientation={orientation}
             compact={compact || tab.pinned}
             groupColor={row.group?.color ?? null}
+            heavy={heavy.get(tab.id) ?? null}
             split={row.split}
             drop={drop}
             onContextMenu={(event) => openTabMenu(event, tab, multi(tab.id))}

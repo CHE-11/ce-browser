@@ -32,10 +32,13 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # webview2-com and windows must match the versions wry is built against, or the
 # WebView2 interface types will not line up with `PlatformWebview::controller()`.
 [target.'cfg(windows)'.dependencies]
+drag = "2.1"
 webview2-com = "0.38"
 windows = { version = "0.61", features = [
     "Win32_Foundation",
+    "Win32_Security_Cryptography",
     "Win32_System_Com",
+    "Win32_System_Registry",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_DataExchange",
     "Win32_System_Memory",

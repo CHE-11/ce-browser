@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Undo2, X } from "lucide-react";
-import { dismissToast, installUpdate, undoAction } from "../lib/browser-client";
+import { createTab, dismissToast, installUpdate, undoAction, updateExtension } from "../lib/browser-client";
 import { Button } from "./Button";
 import { IconButton } from "./IconButton";
 
@@ -20,6 +20,7 @@ export function Toast({ params }: ToastProps) {
   /** `update` installs the waiting update. */
   const action = params.get("action");
   const actionLabel = params.get("actionLabel") ?? "";
+  const extensionId = params.get("extensionId") ?? "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hovered, setHovered] = useState(false);
@@ -51,15 +52,29 @@ export function Toast({ params }: ToastProps) {
   };
 
   const runAction = () => {
-    if (action !== "update") {
-      return;
-    }
     setBusy(true);
     setError(null);
-    installUpdate().catch((reason: unknown) => {
+    const fail = (reason: unknown) => {
       setBusy(false);
       setError(String(reason));
-    });
+    };
+    if (action === "update") {
+      installUpdate().catch(fail);
+      return;
+    }
+    if (action === "extension-update" && extensionId) {
+      updateExtension(extensionId)
+        .then(() => dismissToast(id))
+        .catch(fail);
+      return;
+    }
+    if (action === "extension-updates") {
+      createTab("ce://extensions")
+        .then(() => dismissToast(id))
+        .catch(fail);
+      return;
+    }
+    setBusy(false);
   };
 
   return (
@@ -83,7 +98,7 @@ export function Toast({ params }: ToastProps) {
       ) : null}
       {action && actionLabel && !error ? (
         <Button id="toast-action" variant="ghost" size="sm" disabled={busy} className="text-sky-300" onClick={runAction}>
-          {busy ? "Downloading…" : actionLabel}
+          {busy ? (action === "extension-updates" ? "Opening…" : "Downloading…") : actionLabel}
         </Button>
       ) : null}
       <IconButton id="toast-close" label="Close" className="size-7" onClick={() => void dismissToast(id)}>

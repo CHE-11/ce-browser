@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Settings compatibility
 
-Users already have a data folder (`%APPDATA%\com.ce.browser`). It holds `settings.json`, `session.json`, `bookmarks.json`, `downloads.json` and `extensions.json`. The WebView2 profile lives in `%LOCALAPPDATA%\com.ce.browser\profile`. A new build must open those files, keep every value the user already set, and apply defaults only for data the file does not contain.
+Users already have a data folder (`%APPDATA%\com.ce.browser`) or a selected sync directory. It holds `settings.json`, `session.json`, `bookmarks.json`, `downloads.json` and `extensions.json`. The WebView2 profile lives in `%LOCALAPPDATA%\com.ce.browser\profile` or the selected sync directory. A new build must open those files, keep every value the user already set, and apply defaults only for data the file does not contain.
 
 - Add a field with `#[serde(default)]` on the struct, plus a `Default` value. An older file that omits the key must still deserialize. Mirror the field in `types/browser.ts` and in the UI that reads it. Wire names stay `camelCase`.
 - Rename or move a field by still reading the old key (`#[serde(alias = "...")]` or an explicit load) and writing the new key. Do not make the user edit the file.

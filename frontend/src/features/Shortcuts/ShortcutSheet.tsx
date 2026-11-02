@@ -3,6 +3,7 @@ import { Keyboard, Pencil } from "lucide-react";
 import { Button } from "@/components/Button";
 import { SkeletonRows } from "@/components/Skeleton";
 import { closePopup, createTab, listShortcuts, onShortcutsChanged } from "@/lib/browser-client";
+import { useSettings } from "@/lib/use-browser";
 import { usePopupPainted } from "@/lib/popup-ready";
 import { formatKeyToken } from "@/lib/shortcut-keys";
 import type { ShortcutBinding } from "@type/browser";
@@ -17,6 +18,7 @@ function slug(text: string) {
 
 /** Ctrl+/ overlay: every bound shortcut, grouped. Several actions with one label share a row. */
 export function ShortcutSheet() {
+  const settings = useSettings();
   const [bindings, setBindings] = useState<ShortcutBinding[] | null>(null);
 
   usePopupPainted(bindings !== null);
@@ -48,6 +50,9 @@ export function ShortcutSheet() {
         continue;
       }
       const category = binding.category || "Browser";
+      if (category === "Workspaces" && settings?.workspacesEnabled === false) {
+        continue;
+      }
       const rows = byCategory.get(category) ?? [];
       const existing = rows.find((row) => row.label === binding.label);
       if (existing) {
@@ -62,7 +67,7 @@ export function ShortcutSheet() {
       return index < 0 ? CATEGORY_ORDER.length : index;
     };
     return [...byCategory.entries()].sort(([left], [right]) => rank(left) - rank(right));
-  }, [bindings]);
+  }, [bindings, settings?.workspacesEnabled]);
 
   return (
     <div

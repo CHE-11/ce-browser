@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Fuse from "fuse.js";
 import { Layers, Moon, RotateCcw, X } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
+import { TabAlertDot } from "@/components/TabsAddressAndBookmarks/Tabs/TabAlertDot";
 import { activateTab, closePopup, closeTab, restoreClosed } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { hostOf } from "@/lib/format";
+import { tabProblemTitle, useHeavyTabs } from "@/lib/tab-alert";
 import { usePopupPainted } from "@/lib/popup-ready";
 import { groupColorClasses } from "@/lib/tab-rows";
 import { relativeTime } from "@/lib/time";
@@ -44,6 +46,7 @@ function closedHint(entry: ClosedEntry) {
  * only the current workspace, for the tab strip's overflow button. */
 export function TabSearch({ params }: TabSearchProps) {
   const snapshot = useTabs();
+  const heavy = useHeavyTabs();
   const closed = useRecentlyClosed();
   const onlyWorkspace = params.get("scope") === "workspace";
   const [query, setQuery] = useState("");
@@ -144,6 +147,7 @@ export function TabSearch({ params }: TabSearchProps) {
             if (row.kind === "tab") {
               lastWorkspace = row.workspace;
             }
+            const problem = row.kind === "tab" ? tabProblemTitle(row.tab, heavy.get(row.tab.id) ?? null) : null;
             return (
               <div id={`tab-search-row-${row.key}`} key={row.key}>
                 {heading ? (
@@ -156,6 +160,7 @@ export function TabSearch({ params }: TabSearchProps) {
                     id={`tab-search-${row.key}`}
                     role="option"
                     aria-selected={index === selected}
+                    aria-label={problem ? `${row.tab.title || row.tab.url}, ${problem}` : undefined}
                     data-index={index}
                     className={cn(
                       "group flex h-10 w-full cursor-default items-center gap-3 rounded-lg px-2.5 text-left text-sm",
@@ -164,7 +169,12 @@ export function TabSearch({ params }: TabSearchProps) {
                     onMouseEnter={() => setSelected(index)}
                     onClick={() => choose(row)}
                   >
-                    <FavIcon id={`tab-search-${row.key}-icon`} url={row.tab.url} src={row.tab.favicon} />
+                    <span id={`tab-search-${row.key}-icon-wrap`} className="relative inline-flex shrink-0">
+                      <FavIcon id={`tab-search-${row.key}-icon`} url={row.tab.url} src={row.tab.favicon} />
+                      {problem ? (
+                        <TabAlertDot id={`tab-search-${row.key}-alert`} title={problem} className="-right-0.5 -top-0.5 ring-zinc-900" />
+                      ) : null}
+                    </span>
                     <span id={`tab-search-${row.key}-text`} className="min-w-0 flex-1">
                       <span id={`tab-search-${row.key}-title`} className="block truncate">
                         {row.tab.title || row.tab.url}

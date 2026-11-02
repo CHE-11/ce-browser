@@ -24,6 +24,10 @@ const POPUP_TOGGLE_WINDOW: Duration = Duration::from_millis(400);
 const POPUP_REVEAL_FALLBACK: Duration = Duration::from_millis(1500);
 /// Extension pages cannot report a painted frame. Wait a couple of frames after load instead.
 const EXTENSION_POPUP_SETTLE: Duration = Duration::from_millis(32);
+/// Extension popouts (`chrome.windows.create`) often arrive with no size. A tab then
+/// shows the popup layout in the corner of the page. This is a typical popout.
+const EXTENSION_POPOUT_WIDTH: f64 = 400.0;
+const EXTENSION_POPOUT_HEIGHT: f64 = 640.0;
 /// Restored pinned tabs wait this long, so the selected page loads first.
 const PIN_LOAD_DELAY: Duration = Duration::from_millis(1500);
 /// Gap between two restored pinned tabs starting to load.
@@ -76,6 +80,8 @@ pub struct TabInfo {
     pub ephemeral: bool,
     /// Page errors since the last navigation. Not written into the session.
     pub errors: u32,
+    /// The page stopped answering. Not written into the session.
+    pub unresponsive: bool,
     /// `#rrggbb` from the site's theme color or favicon. Not written into the session.
     pub accent: Option<String>,
     /// Registrable domain of an http(s) page, such as `example.co.uk`. Empty for other pages.
@@ -300,6 +306,8 @@ struct Tab {
     content_mark: Option<String>,
     /// The accent came from theme-color, so a later favicon does not replace it.
     accent_locked: bool,
+    /// Resident bookmarks page parked off the strip. The webview stays loaded.
+    shelf: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -339,6 +347,10 @@ struct WindowChrome {
     active_by_workspace: HashMap<String, u32>,
     /// `phone`, `tablet`, `laptop`, or empty.
     device: String,
+    /// Resident bookmarks tab for this window. Its page stays loaded while shelved.
+    bookmarks: Option<u32>,
+    /// The window is closing, so the resident bookmarks tab is destroyed with the rest.
+    discarding: bool,
 }
 
 impl WindowChrome {
@@ -359,6 +371,8 @@ impl WindowChrome {
             workspace: DEFAULT_WORKSPACE.to_string(),
             active_by_workspace: HashMap::new(),
             device: String::new(),
+            bookmarks: None,
+            discarding: false,
         }
     }
 }
@@ -482,7 +496,9 @@ impl TabsState {
         self.tabs
             .iter()
             .enumerate()
-            .filter(|(_, tab)| tab.info.window == window && tab.info.workspace == workspace)
+            .filter(|(_, tab)| {
+                tab.info.window == window && tab.info.workspace == workspace && !tab.shelf
+            })
             .map(|(index, _)| index)
             .collect()
     }
@@ -652,7 +668,7 @@ impl TabsState {
     fn page_loading(&self) -> bool {
         self.tabs
             .iter()
-            .any(|tab| tab.webview.is_some() && tab.info.loading)
+            .any(|tab| !tab.shelf && tab.webview.is_some() && tab.info.loading)
     }
 
     /// First pinned tab, in strip order, that has no page view and is not in `skip`.
@@ -661,6 +677,18 @@ impl TabsState {
             .iter()
             .find(|tab| tab.info.pinned && tab.webview.is_none() && !skip.contains(&tab.info.id))
             .map(|tab| tab.info.id)
+    }
+
+    /// The window's resident bookmarks tab, when that tab is still open.
+    fn resident_bookmarks(&self, window: &str) -> Option<u32> {
+        let id = self.chrome(window)?.bookmarks?;
+        self.index_of(id)?;
+        Some(id)
+    }
+
+    fn is_resident_bookmarks(&self, id: u32) -> bool {
+        self.tab_window(id)
+            .is_some_and(|window| self.resident_bookmarks(&window) == Some(id))
     }
 
     fn tab_window(&self, id: u32) -> Option<String> {
@@ -703,6 +731,7 @@ impl TabsState {
             tabs: self
                 .tabs
                 .iter()
+                .filter(|tab| !tab.shelf)
                 .map(|tab| {
                     let mut info = tab.info.clone();
                     info.site = paths::site_of(&info.url);
@@ -741,6 +770,7 @@ impl TabsState {
         let workspace = window.map(|label| self.workspace_of(label));
         self.tabs
             .iter()
+            .filter(|tab| !tab.shelf)
             .filter(|tab| window.is_none_or(|label| tab.info.window == label))
             .filter(|tab| {
                 workspace
@@ -972,6 +1002,10 @@ pub struct OpenTab {
     pub group: Option<u32>,
     pub muted: bool,
     pub ephemeral: bool,
+    /// Session restore opens a bookmarks tab instead of revealing the resident page.
+    pub keep_bookmarks: bool,
+    /// Park the tab off the strip. The resident bookmarks page is created this way.
+    pub shelf: bool,
 }
 
 impl OpenTab {
@@ -988,6 +1022,8 @@ impl OpenTab {
             group: None,
             muted: false,
             ephemeral: false,
+            keep_bookmarks: false,
+            shelf: false,
         }
     }
 }
@@ -1029,6 +1065,16 @@ pub fn create_tab_on(
 
 pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
     let display = paths::display_url(app, tab.url.as_str());
+    if !tab.keep_bookmarks
+        && let Some(target) = bookmarks_target(&display)
+    {
+        let window = if tab.window.is_empty() {
+            focused_window(app)
+        } else {
+            tab.window
+        };
+        return reveal_bookmarks(app, &window, target.folder.as_deref());
+    }
     let zoom = page_zoom_for(app, &display);
     let window = if tab.window.is_empty() {
         focused_window(app)
@@ -1100,6 +1146,7 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                     changed: false,
                     ephemeral: tab.ephemeral,
                     errors: 0,
+                    unresponsive: false,
                     accent: None,
                     site: String::new(),
                     last_active: 0,
@@ -1117,12 +1164,13 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                 last_refresh: Instant::now(),
                 content_mark: None,
                 accent_locked: false,
+                shelf: tab.shelf,
             },
         );
         state.normalize_groups();
         let current = workspace == state.workspace_of(&window);
         let none_active = state.active_of(&window).is_none();
-        if current && (!tab.background || (none_active && !tab.lazy)) {
+        if !tab.shelf && current && (!tab.background || (none_active && !tab.lazy)) {
             state.set_window_active(&window, Some(id));
         }
         id
@@ -1191,6 +1239,7 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
         .focused(false)
         .initialization_script(page_background_script(app))
         .initialization_script(PEEK_CLICK_SCRIPT)
+        .initialization_script(ZOOM_WHEEL_SCRIPT)
         .on_page_load(move |_, payload| {
             let finished = matches!(payload.event(), PageLoadEvent::Finished);
             let loading = matches!(payload.event(), PageLoadEvent::Started);
@@ -1271,6 +1320,34 @@ fn page_zoom_for(app: &AppHandle, url: &str) -> f64 {
     }
 }
 
+/// Ctrl+scroll zooms the page. A site that already handled the wheel, such as a map, is left alone.
+const ZOOM_WHEEL_SCRIPT: &str = r#"(function () {
+  var bucket = 0;
+  window.addEventListener("wheel", function (event) {
+    if (!event.ctrlKey || event.defaultPrevented || event.deltaY === 0) {
+      if (!event.ctrlKey) bucket = 0;
+      return;
+    }
+    event.preventDefault();
+    if (event.deltaMode === 2) {
+      bucket = 0;
+      post(event.deltaY < 0 ? "in" : "out");
+      return;
+    }
+    bucket += event.deltaY;
+    var notch = event.deltaMode === 1 ? 1 : 100;
+    if (Math.abs(bucket) < notch) return;
+    var change = bucket < 0 ? "in" : "out";
+    bucket = 0;
+    post(change);
+  }, { passive: false });
+  function post(change) {
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage({ type: "ce-zoom", change: change });
+    }
+  }
+})();"#;
+
 /// Shift+click on a web link asks the browser for a peek. `page_hooks` reads the message.
 /// The click itself is left alone: WebView2 also raises a new-window request for it, and
 /// cancelling the click here drops that request when the message never arrives.
@@ -1346,7 +1423,8 @@ pub fn page_background_script(app: &AppHandle) -> String {
 }
 
 /// `target="_blank"` links become tabs. Script popups that ask for a size (OAuth sign-in,
-/// payment windows) open as real windows so `window.opener` keeps working.
+/// payment windows) open as real windows so `window.opener` keeps working. A
+/// `chrome-extension:` popout does too, even when the request leaves the size out.
 pub fn new_window(
     app: &AppHandle,
     opener: Option<u32>,
@@ -1360,9 +1438,17 @@ pub fn new_window(
 /// environment. Letting WebView2 build the default popup freezes this process and leaves
 /// a window with no title bar, because every page view here is a child of the browser window.
 fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewWindowResponse<Wry> {
-    let Some(size) = features.size() else {
+    let extension = url.scheme() == "chrome-extension";
+    let Some(size) = features.size().or_else(|| {
+        extension.then_some(LogicalSize::new(
+            EXTENSION_POPOUT_WIDTH,
+            EXTENSION_POPOUT_HEIGHT,
+        ))
+    }) else {
         return NewWindowResponse::Deny;
     };
+    let width = size.width.max(240.0);
+    let height = size.height.max(160.0);
     let label = with_state(app, |state| {
         state.next_popup += 1;
         format!("script-{}", state.next_popup)
@@ -1371,16 +1457,28 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
     let position = features.position();
     let host = app.clone();
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
-        .title("ce-browser")
-        .inner_size(size.width.max(240.0), size.height.max(160.0))
+        .title(if extension { "Extension" } else { "ce-browser" })
+        .inner_size(width, height)
         .min_inner_size(240.0, 160.0)
         .decorations(true)
         .shadow(true)
         .focused(true)
         .with_environment(environment)
         .on_new_window(move |url, features| new_window(&host, None, url, features));
+    if extension {
+        builder = builder
+            .background_color(settings::page_color(app))
+            .on_document_title_changed(|window, title| {
+                let title = title.trim();
+                if !title.is_empty() {
+                    let _ = window.set_title(title);
+                }
+            });
+    }
     if let Some(position) = position {
         builder = builder.position(position.x, position.y);
+    } else if extension && let Some((x, y)) = centered_on_browser(app, width, height) {
+        builder = builder.position(x, y);
     }
     match builder.build() {
         Ok(window) => NewWindowResponse::Create { window },
@@ -1391,6 +1489,20 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
     }
 }
 
+/// Screen position that puts a `width` by `height` window over the browser the user is in.
+fn centered_on_browser(app: &AppHandle, width: f64, height: f64) -> Option<(f64, f64)> {
+    let window = app.get_window(&focused_window(app))?;
+    let scale = window.scale_factor().ok()?;
+    if scale <= f64::EPSILON {
+        return None;
+    }
+    let origin = window.outer_position().ok()?;
+    let outer = window.outer_size().ok()?;
+    let x = origin.x as f64 / scale + (outer.width as f64 / scale - width) / 2.0;
+    let y = origin.y as f64 / scale + (outer.height as f64 / scale - height) / 2.0;
+    Some((x, y))
+}
+
 fn blank_tab(
     app: &AppHandle,
     host: Option<String>,
@@ -1398,7 +1510,7 @@ fn blank_tab(
     url: Url,
     features: NewWindowFeatures,
 ) -> NewWindowResponse<Wry> {
-    if features.size().is_some() {
+    if features.size().is_some() || url.scheme() == "chrome-extension" {
         return script_window(app, url, features);
     }
     // Shift+click is a new-window request. Opening a tab for it focuses that tab and
@@ -1509,6 +1621,7 @@ pub fn open_site_window(app: &AppHandle, title: &str, url: &str) -> Result<Strin
         let _ = window.set_title(title);
     }
     let _ = create_tab_on(app, &label, Some(url.to_string()), false, None);
+    let _ = ensure_bookmarks_host(app, &label);
     Ok(label)
 }
 
@@ -1636,6 +1749,14 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
             tab.info.group_id = None;
             workspace = tab.info.workspace.clone();
         }
+        if state.chrome(&source).and_then(|chrome| chrome.bookmarks) == Some(id) {
+            if let Some(chrome) = state.chrome_mut(&source) {
+                chrome.bookmarks = None;
+            }
+            if let Some(chrome) = state.chrome_mut(&label) {
+                chrome.bookmarks = Some(id);
+            }
+        }
         if let Some(chrome) = state.chrome_mut(&label) {
             chrome.workspace = workspace;
         }
@@ -1688,6 +1809,10 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
     ensure_webview(app, id)?;
     place_pages(app, &label, true);
     layout(app, &label);
+    if with_state(app, |state| state.chrome(&source).is_some()) {
+        let _ = ensure_bookmarks_host(app, &source);
+    }
+    let _ = ensure_bookmarks_host(app, &label);
     emit_tabs(app);
     Ok(())
 }
@@ -1709,6 +1834,11 @@ pub fn discard_window(app: &AppHandle, label: &str) {
     if !browser_labels(app).iter().any(|item| item == label) {
         return;
     }
+    with_state(app, |state| {
+        if let Some(chrome) = state.chrome_mut(label) {
+            chrome.discarding = true;
+        }
+    });
     crate::peek::dismiss(app, label);
     crate::backdrop::forget(label);
     let ids = with_state(app, |state| {
@@ -1846,12 +1976,59 @@ pub fn clear_errors(app: &AppHandle, id: u32) {
     }
 }
 
+/// Marks a tab whose page stopped answering. The tab strip shows that until it recovers.
+pub fn set_unresponsive(app: &AppHandle, id: u32, hung: bool) {
+    let changed = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        if tab.info.unresponsive == hung {
+            return Some(false);
+        }
+        tab.info.unresponsive = hung;
+        Some(true)
+    });
+    if changed == Some(true) {
+        emit_tabs(app);
+    }
+}
+
+/// Copies the hung-page set onto each tab. A report older than the hang window drops off.
+pub fn refresh_unresponsive(app: &AppHandle) {
+    let hung = crate::page_errors::unresponsive_ids();
+    let changed = with_state(app, |state| {
+        let mut changed = false;
+        for tab in &mut state.tabs {
+            let next = hung.contains(&tab.info.id);
+            if tab.info.unresponsive != next {
+                tab.info.unresponsive = next;
+                changed = true;
+            }
+        }
+        changed
+    });
+    if changed {
+        emit_tabs(app);
+    }
+}
+
+/// Loaded tabs that still have a page view, so their renderer memory can be measured.
+pub fn awake_ids(app: &AppHandle) -> HashSet<u32> {
+    with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .filter(|tab| tab.info.loaded && !tab.info.sleeping && tab.webview.is_some())
+            .map(|tab| tab.info.id)
+            .collect()
+    })
+}
+
 /// A main-frame navigation began. A failure is cleared, so the page view shows again.
 /// Runs inside the WebView2 event on the main thread, so moving views is left to a task.
 pub fn navigation_started(app: &AppHandle, id: u32) {
     crate::page_errors::clear_unresponsive(id);
     let recovered = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
+        tab.info.unresponsive = false;
         tab.info.progress = 10;
         tab.info.failure.take().map(|_| tab.info.window.clone())
     });
@@ -1884,6 +2061,7 @@ pub fn set_progress(app: &AppHandle, id: u32, progress: u8) {
 pub fn set_failure(app: &AppHandle, id: u32, kind: &str, code: &str, detail: String) {
     let window = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
+        tab.info.unresponsive = false;
         tab.info.failure = Some(TabFailure {
             kind: kind.to_string(),
             url: tab.info.url.clone(),
@@ -2462,6 +2640,22 @@ pub fn close_many(
 
 /// Closes one tab without adding it to the recently closed list. Returns what to remember.
 fn close_tab_inner(app: &AppHandle, id: u32) -> Result<Option<ClosedTab>, String> {
+    let plan = with_state(app, |state| {
+        let window = state.tab_window(id)?;
+        let resident = state.resident_bookmarks(&window) == Some(id);
+        let discarding = state
+            .chrome(&window)
+            .is_some_and(|chrome| chrome.discarding);
+        Some(resident && !discarding)
+    });
+    match plan {
+        None => return Ok(None),
+        Some(true) => {
+            shelf_bookmarks(app, id)?;
+            return Ok(None);
+        }
+        Some(false) => {}
+    }
     let result = with_state(app, |state| {
         let (window, workspace, local) = state.local_index(id)?;
         let index = state.index_of(id)?;
@@ -2479,8 +2673,8 @@ fn close_tab_inner(app: &AppHandle, id: u32) -> Result<Option<ClosedTab>, String
         state.end_split_with(id);
         let tab = state.tabs.remove(index);
         state.normalize_groups();
-        let remembered =
-            (tab.info.url != paths::NEW_TAB && !tab.info.ephemeral).then(|| ClosedTab {
+        let remembered = (tab.info.url != paths::NEW_TAB && !tab.info.ephemeral && !tab.shelf)
+            .then(|| ClosedTab {
                 url: tab.info.url.clone(),
                 title: tab.info.title.clone(),
                 favicon: tab.info.favicon.clone(),
@@ -2857,9 +3051,216 @@ pub fn open_page_urls(app: &AppHandle) -> Vec<(u32, String)> {
     })
 }
 
+struct BookmarksTarget {
+    folder: Option<String>,
+}
+
+/// `ce://bookmarks` and `ce://bookmarks?folder=...`. Other addresses are `None`.
+fn bookmarks_target(url: &str) -> Option<BookmarksTarget> {
+    let rest = url.strip_prefix(paths::BOOKMARKS)?;
+    if rest.is_empty() {
+        return Some(BookmarksTarget { folder: None });
+    }
+    let query = rest.strip_prefix('?')?;
+    let folder = query.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key == "folder" && !value.is_empty()).then(|| value.to_string())
+    });
+    Some(BookmarksTarget { folder })
+}
+
+/// Loads the window's bookmarks page in the background when it does not have one yet.
+/// A bookmarks tab already in the window is adopted, including one restored from the session.
+pub fn ensure_bookmarks_host(app: &AppHandle, window: &str) -> Result<(), String> {
+    let existing = with_state(app, |state| state.resident_bookmarks(window));
+    if let Some(id) = existing {
+        let needs_view = with_state(app, |state| {
+            state
+                .index_of(id)
+                .is_some_and(|index| state.tabs[index].webview.is_none())
+        });
+        if needs_view {
+            ensure_webview(app, id)?;
+        }
+        return Ok(());
+    }
+    let adopted = with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .find(|tab| tab.info.window == window && bookmarks_target(&tab.info.url).is_some())
+            .map(|tab| tab.info.id)
+    });
+    if let Some(id) = adopted {
+        with_state(app, |state| {
+            if let Some(chrome) = state.chrome_mut(window) {
+                chrome.bookmarks = Some(id);
+            }
+        });
+        let needs_view = with_state(app, |state| {
+            state
+                .index_of(id)
+                .is_some_and(|index| state.tabs[index].webview.is_none())
+        });
+        if needs_view {
+            ensure_webview(app, id)?;
+        }
+        return Ok(());
+    }
+    let url = paths::internal_url(app, "bookmarks");
+    let id = open(
+        app,
+        OpenTab {
+            background: true,
+            window: window.to_string(),
+            keep_bookmarks: true,
+            shelf: true,
+            ..OpenTab::new(url)
+        },
+    )?;
+    with_state(app, |state| {
+        if let Some(chrome) = state.chrome_mut(window) {
+            chrome.bookmarks = Some(id);
+        }
+    });
+    Ok(())
+}
+
+/// Shows the resident bookmarks page. `folder` selects that folder in the page.
+pub fn reveal_bookmarks(
+    app: &AppHandle,
+    window: &str,
+    folder: Option<&str>,
+) -> Result<u32, String> {
+    ensure_bookmarks_host(app, window)?;
+    let id = with_state(app, |state| state.resident_bookmarks(window))
+        .ok_or("Bookmarks is not ready.")?;
+    let moved = with_state(app, |state| {
+        let workspace = state.workspace_of(window);
+        let tab = state.tab_mut(id)?;
+        let moved = tab.info.workspace != workspace;
+        tab.shelf = false;
+        tab.info.window = window.to_string();
+        tab.info.workspace = workspace;
+        if let Some(folder) = folder.filter(|folder| !folder.is_empty()) {
+            tab.info.url = format!("{}?folder={folder}", paths::BOOKMARKS);
+        }
+        Some(moved)
+    })
+    .unwrap_or(false);
+    if moved {
+        with_state(app, |state| {
+            state.relocate(id, usize::MAX);
+        });
+    }
+    activate(app, id)?;
+    show_bookmarks_folder(app, id, folder);
+    Ok(id)
+}
+
+fn show_bookmarks_folder(app: &AppHandle, id: u32, folder: Option<&str>) {
+    let Some(folder) = folder.filter(|folder| !folder.is_empty()) else {
+        return;
+    };
+    let hash = format!("#/bookmarks?folder={folder}");
+    let painted = with_state(app, |state| {
+        state
+            .index_of(id)
+            .is_some_and(|index| state.tabs[index].painted)
+    });
+    let Some(webview) = page_view(app, id) else {
+        return;
+    };
+    if painted {
+        let _ = webview.eval(hash_script(None, &hash));
+        return;
+    }
+    let url = paths::internal_url(app, &format!("bookmarks?folder={folder}"));
+    let _ = webview.navigate(url);
+}
+
+/// Parks the resident bookmarks page without destroying its webview.
+fn shelf_bookmarks(app: &AppHandle, id: u32) -> Result<(), String> {
+    let already = with_state(app, |state| {
+        state
+            .index_of(id)
+            .is_some_and(|index| state.tabs[index].shelf)
+    });
+    if already {
+        return Ok(());
+    }
+    let plan = with_state(app, |state| {
+        let (window, workspace, local) = state.local_index(id)?;
+        state.end_split_with(id);
+        if let Some(tab) = state.tab_mut(id) {
+            tab.shelf = true;
+            tab.info.group_id = None;
+        }
+        let was_active = state.active_of(&window) == Some(id);
+        if was_active {
+            let indexes = state.strip_of(&window, &workspace);
+            let next = indexes
+                .get(local)
+                .or_else(|| {
+                    local
+                        .checked_sub(1)
+                        .and_then(|previous| indexes.get(previous))
+                })
+                .map(|tab_index| state.tabs[*tab_index].info.id);
+            state.set_window_active(&window, next);
+        }
+        state.forget_tab(id, &window);
+        let next = state.active_of(&window);
+        let strip_empty = state.strip_indexes(&window).is_empty();
+        Some((window, was_active, next, strip_empty))
+    });
+    let Some((window, was_active, next, strip_empty)) = plan else {
+        return Ok(());
+    };
+    if strip_empty {
+        create_tab_on(app, &window, None, false, None)?;
+    } else if was_active {
+        if let Some(next) = next {
+            ensure_webview(app, next)?;
+        }
+        place_pages(app, &window, false);
+        focus_active(app, &window);
+    } else {
+        place_pages(app, &window, false);
+    }
+    emit_tabs(app);
+    Ok(())
+}
+
+/// Opens `url` where the bookmarks tab sits, and parks the bookmarks page again.
+fn leave_bookmarks(app: &AppHandle, id: u32, url: Url) -> Result<(), String> {
+    let (window, workspace, local) =
+        with_state(app, |state| state.local_index(id)).ok_or("That tab is no longer open.")?;
+    open(
+        app,
+        OpenTab {
+            index: Some(local),
+            window,
+            workspace,
+            ..OpenTab::new(url)
+        },
+    )?;
+    shelf_bookmarks(app, id)?;
+    Ok(())
+}
+
 pub fn navigate(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
     let url = resolve(app, input);
     let display = paths::display_url(app, url.as_str());
+    if let Some(target) = bookmarks_target(&display) {
+        let window =
+            with_state(app, |state| state.tab_window(id)).unwrap_or_else(|| focused_window(app));
+        reveal_bookmarks(app, &window, target.folder.as_deref())?;
+        return Ok(());
+    }
+    if with_state(app, |state| state.is_resident_bookmarks(id)) {
+        return leave_bookmarks(app, id, url);
+    }
     let label = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
         tab.info.url = display.clone();
@@ -3761,7 +4162,9 @@ fn create_app_popup_host(app: &AppHandle, window_label: &str, label: &str) -> Re
         .initialization_script(popup_paint_script(surface))
         .on_new_window(move |url, features| {
             let response = new_window(&popup_app, None, url, features);
-            close_window_popup(&popup_app, &popup_window);
+            // Close after this handler returns. WebView2 still has to adopt the new
+            // window, and navigating the opener first cancels that request.
+            defer_close_popup(&popup_app, &popup_window);
             response
         });
     let webview = window
@@ -3815,7 +4218,7 @@ fn create_extension_popup_host(
         })
         .on_new_window(move |url, features| {
             let response = new_window(&popup_app, None, url, features);
-            close_window_popup(&popup_app, &popup_window);
+            defer_close_popup(&popup_app, &popup_window);
             response
         });
     let webview = window
@@ -3824,6 +4227,15 @@ fn create_extension_popup_host(
     webview2::attach_popup_hooks(app, &webview, label);
     webview2::attach_popup_blur(app, &webview, label);
     Ok(())
+}
+
+/// Parks the toolbar popup once WebView2 has finished adopting the window it asked for.
+fn defer_close_popup(app: &AppHandle, window_label: &str) {
+    let app = app.clone();
+    let window_label = window_label.to_string();
+    let _ = app
+        .clone()
+        .run_on_main_thread(move || close_window_popup(&app, &window_label));
 }
 
 fn host_is_ready(popup: &Popup, extension: bool) -> bool {
@@ -4425,10 +4837,21 @@ pub struct SessionState {
 
 pub fn session_tabs(app: &AppHandle) -> SessionState {
     with_state(app, |state| {
+        let position = |id: u32| -> Option<usize> {
+            let index = state.index_of(id)?;
+            if state.tabs[index].info.ephemeral || state.tabs[index].shelf {
+                return None;
+            }
+            let skipped = state.tabs[..index]
+                .iter()
+                .filter(|tab| tab.shelf || tab.info.ephemeral)
+                .count();
+            Some(index - skipped)
+        };
         let tabs = state
             .tabs
             .iter()
-            .filter(|tab| !tab.info.ephemeral)
+            .filter(|tab| !tab.info.ephemeral && !tab.shelf)
             .map(|tab| SessionTab {
                 url: tab.info.url.clone(),
                 title: tab.info.title.clone(),
@@ -4441,14 +4864,10 @@ pub fn session_tabs(app: &AppHandle) -> SessionState {
                 watch_changes: tab.info.watch_changes,
             })
             .collect();
-        let active = state.active_of(WINDOW).and_then(|id| state.index_of(id));
+        let active = state.active_of(WINDOW).and_then(position);
         let split = state.chrome(WINDOW).and_then(|chrome| {
             let split = chrome.split?;
-            Some((
-                state.index_of(split.left)?,
-                state.index_of(split.right)?,
-                split.ratio,
-            ))
+            Some((position(split.left)?, position(split.right)?, split.ratio))
         });
         SessionState {
             tabs,
@@ -4501,6 +4920,7 @@ pub fn restore(app: &AppHandle, restored: RestoreState) -> Result<(), String> {
                 window: WINDOW.to_string(),
                 workspace: tab.workspace,
                 muted: tab.muted,
+                keep_bookmarks: true,
                 ..OpenTab::new(url)
             },
         )?;
@@ -4702,6 +5122,11 @@ pub fn sleep_candidates(app: &AppHandle) -> Vec<u32> {
     };
     with_state(app, |state| {
         let shown = state.shown_labels();
+        let residents: Vec<u32> = state
+            .windows
+            .iter()
+            .filter_map(|chrome| chrome.bookmarks)
+            .collect();
         state
             .tabs
             .iter()
@@ -4712,6 +5137,7 @@ pub fn sleep_candidates(app: &AppHandle) -> Vec<u32> {
                     && !tab.hidden
                     && !tab.info.sleeping
                     && !tab.info.audible
+                    && !residents.contains(&tab.info.id)
                     && !tab.info.loading
                     && !tab.info.pinned
                     && tab.last_shown.elapsed() >= after
@@ -4733,7 +5159,8 @@ pub fn sleep_tab(app: &AppHandle, id: u32) -> Result<(), String> {
             .iter()
             .find(|tab| tab.info.id == id)
             .ok_or("That tab is no longer open.")?;
-        Ok(!tab.info.pinned && !tab.info.sleeping && !tab.hidden && tab.webview.is_some())
+        let ready = !tab.info.pinned && !tab.info.sleeping && !tab.hidden && tab.webview.is_some();
+        Ok(ready && !state.is_resident_bookmarks(id))
     })?;
     if !eligible {
         return Ok(());
@@ -5764,6 +6191,7 @@ mod tests {
                 changed: false,
                 ephemeral: false,
                 errors: 0,
+                unresponsive: false,
                 accent: None,
                 site: String::new(),
                 last_active: 0,
@@ -5781,6 +6209,7 @@ mod tests {
             last_refresh: Instant::now(),
             content_mark: None,
             accent_locked: false,
+            shelf: false,
         }
     }
 
@@ -5817,6 +6246,33 @@ mod tests {
 
     fn ids(state: &TabsState) -> Vec<u32> {
         state.tabs.iter().map(|tab| tab.info.id).collect()
+    }
+
+    #[test]
+    fn bookmarks_urls_and_a_shelved_tab_stay_out_of_the_strip() {
+        assert!(bookmarks_target("ce://bookmarks").is_some_and(|target| target.folder.is_none()));
+        assert_eq!(
+            bookmarks_target("ce://bookmarks?folder=bar")
+                .and_then(|target| target.folder)
+                .as_deref(),
+            Some("bar")
+        );
+        assert!(bookmarks_target("ce://history").is_none());
+        assert!(bookmarks_target("https://example.com").is_none());
+
+        let mut shelved = tab(1, None, DEFAULT_WORKSPACE);
+        shelved.shelf = true;
+        shelved.info.url = "ce://bookmarks".into();
+        let visible = tab(2, None, DEFAULT_WORKSPACE);
+        let mut state = state(vec![shelved, visible], &[]);
+        state.windows[0].bookmarks = Some(1);
+        let strip = state.strip_of(WINDOW, DEFAULT_WORKSPACE);
+        assert_eq!(strip, vec![1]);
+        assert_eq!(state.tabs[strip[0]].info.id, 2);
+        assert!(state.is_resident_bookmarks(1));
+        assert!(!state.is_resident_bookmarks(2));
+        let shown: Vec<u32> = state.snapshot().tabs.iter().map(|tab| tab.id).collect();
+        assert_eq!(shown, vec![2]);
     }
 
     fn insert_pinned(state: &mut TabsState, url: &str, local: usize) {

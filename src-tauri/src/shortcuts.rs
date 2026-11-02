@@ -192,7 +192,12 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             crate::peek::close(app, &window);
             Ok(())
         }
-        Action::Workspace(index) => tabs::switch_workspace_index(app, index),
+        Action::Workspace(index) => {
+            if !settings::get(app).workspaces_enabled {
+                return Ok(());
+            }
+            tabs::switch_workspace_index(app, index)
+        }
         Action::CommandPalette => {
             tabs::close_window_popup(app, &window);
             tabs::send_command(app, &window, "palette");

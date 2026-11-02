@@ -35,6 +35,7 @@ import {
   closePopup,
   createTab,
   exitSplit,
+  installExtensionFromStore,
   goBack,
   goForward,
   navigate,
@@ -54,10 +55,13 @@ import {
   resizePopup,
   restorePinnedTabs,
   saveSettings,
+  showNotice,
   sendOmniboxState,
   splitWith,
   stop,
+  updateExtension,
 } from "../../../lib/browser-client";
+import { storeListing } from "../../../lib/extension-store";
 import { accentTint } from "../../../lib/accent";
 import { cn } from "../../../lib/cn";
 import { reorderToolbar, splitToolbar, toolbarPinned } from "../../../lib/toolbar-pin";
@@ -281,6 +285,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const [editing, setEditing] = useState(false);
   const [omnibox, setOmnibox] = useState<OmniboxState>(EMPTY_OMNIBOX);
   const [downloadFlash, setDownloadFlash] = useState(false);
+  const [storeBusy, setStoreBusy] = useState(false);
   const omniboxRef = useRef(omnibox);
   const popupOpenRef = useRef(false);
   const blurTimer = useRef<number | null>(null);
@@ -299,6 +304,29 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
 
   const bookmarkLinks = useMemo(() => flattenBookmarks(bookmarks), [bookmarks]);
   const bookmarked = !!activeTab && bookmarkLinks.some((link) => link.url === activeTab.url);
+  const listing = activeTab ? storeListing(activeTab.url) : null;
+  const listed = listing ? extensions.find((extension) => extension.id === listing.id) : undefined;
+  const storeAction = !listing ? null : listed?.updateVersion ? "update" : listed ? null : "install";
+
+  const runStoreAction = () => {
+    if (!listing || !storeAction || storeBusy) {
+      return;
+    }
+    setStoreBusy(true);
+    const work =
+      storeAction === "update" && listed
+        ? updateExtension(listed.id)
+        : installExtensionFromStore(activeTab?.url ?? listing.id);
+    void work
+      .then((extension) => {
+        const message = storeAction === "update" ? `Updated ${extension.name}` : `Installed ${extension.name}`;
+        void showNotice(message).catch(() => undefined);
+      })
+      .catch((reason: unknown) => {
+        void showNotice(String(reason)).catch(() => undefined);
+      })
+      .finally(() => setStoreBusy(false));
+  };
 
   useEffect(() => {
     if (!editing) {
@@ -778,6 +806,18 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           <span id="address-zoom" className="shrink-0 rounded bg-zinc-700 px-1.5 text-[11px] text-zinc-300">
             {Math.round(activeTab.zoom * 100)}%
           </span>
+        ) : null}
+        {storeAction ? (
+          <button
+            id="address-store-extension"
+            type="button"
+            disabled={storeBusy}
+            title={storeAction === "update" ? `Update to ${listed?.updateVersion}` : "Install this extension"}
+            className="shrink-0 rounded-full bg-sky-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-sky-500 disabled:opacity-40"
+            onClick={runStoreAction}
+          >
+            {storeBusy ? "Working…" : storeAction === "update" ? "Update" : "Install"}
+          </button>
         ) : null}
         <button
           id="address-star"
