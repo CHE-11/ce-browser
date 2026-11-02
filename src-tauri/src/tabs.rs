@@ -9,7 +9,7 @@ use tauri::webview::{
 use tauri::window::WindowBuilder;
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize,
-    Webview, WebviewBuilder, WebviewUrl, Wry,
+    Position, Rect, Size, Webview, WebviewBuilder, WebviewUrl, Wry,
 };
 use url::Url;
 
@@ -20,10 +20,12 @@ pub const UI: &str = "ui";
 const MAX_CLOSED: usize = 25;
 const DEFAULT_UI_HEIGHT: f64 = 84.0;
 const POPUP_TOGGLE_WINDOW: Duration = Duration::from_millis(400);
-/// A popup that never reports its first frame is shown anyway after this long.
+/// A popup that never reports its first frame, and an extension page that never reports a
+/// size, is shown anyway after this long.
 const POPUP_REVEAL_FALLBACK: Duration = Duration::from_millis(1500);
-/// Extension pages cannot report a painted frame. Wait a couple of frames after load instead.
-const EXTENSION_POPUP_SETTLE: Duration = Duration::from_millis(32);
+/// Chrome's limit for a toolbar popup. A larger document scrolls inside the popup.
+const EXTENSION_POPUP_MAX_WIDTH: f64 = 800.0;
+const EXTENSION_POPUP_MAX_HEIGHT: f64 = 600.0;
 /// Extension popouts (`chrome.windows.create`) often arrive with no size. A tab then
 /// shows the popup layout in the corner of the page. This is a typical popout.
 const EXTENSION_POPOUT_WIDTH: f64 = 400.0;
@@ -394,6 +396,10 @@ struct Popup {
     focus: bool,
     anchor_x: f64,
     anchor_y: f64,
+    /// Logical size last requested. A resize keeps this instead of reading the HWND, which
+    /// still has the previous size until Win32 applies the posted move.
+    width: f64,
+    height: f64,
     revealed: bool,
     /// True from the open until the matching paint moves the host on screen.
     awaiting: bool,
@@ -4213,7 +4219,7 @@ fn create_extension_popup_host(
                 Some((popup.ext_label.clone()?, popup.generation))
             });
             if let Some((label, generation)) = found {
-                reveal_popup_after(&load_app, &label, generation, EXTENSION_POPUP_SETTLE);
+                measure_extension_popup(&load_app, &load_window, &label, generation);
             }
         })
         .on_new_window(move |url, features| {
@@ -4262,13 +4268,16 @@ fn retire_popup(app: &AppHandle, window_label: &str, reset_document: bool) -> bo
         popup.awaiting = false;
         popup.shape.clear();
         popup.ext_url = None;
-        Some((label, focused, app_host))
+        let width = popup.width.max(120.0);
+        let height = popup.height.max(40.0);
+        Some((label, focused, app_host, width, height))
     });
-    let Some((label, focused, app_host)) = retired else {
+    let Some((label, focused, app_host, width, height)) = retired else {
         return false;
     };
     if let Some(webview) = app.get_webview(&label) {
-        let _ = webview.set_position(parked_position());
+        let parked = parked_position();
+        let _ = apply_popup_bounds(&webview, parked.x, parked.y, width, height);
         if reset_document {
             if app_host {
                 let _ = webview.eval(hash_script(None, "#/popup/ready"));
@@ -4441,6 +4450,8 @@ fn present_popup(
         popup.focus = request.focus;
         popup.anchor_x = x;
         popup.anchor_y = y;
+        popup.width = width;
+        popup.height = height;
         popup.revealed = false;
         popup.awaiting = true;
         popup.shape.clear();
@@ -4454,10 +4465,10 @@ fn present_popup(
         retire_popup(app, window_label, true);
         return Err("The popup host is missing.".into());
     };
-    let _ = webview.set_position(parked_position());
-    if let Err(error) = webview.set_size(LogicalSize::new(width, height)) {
+    let parked = parked_position();
+    if let Err(error) = apply_popup_bounds(&webview, parked.x, parked.y, width, height) {
         retire_popup(app, window_label, true);
-        return Err(error.to_string());
+        return Err(error);
     }
     round_open_popup(app, &webview);
     let navigated = if let Some(url) = extension_url {
@@ -4481,7 +4492,8 @@ fn present_popup(
         retire_popup(app, window_label, true);
         return Err(error);
     }
-    // The page load reveals an extension popup sooner. This covers a menu that never reports a frame.
+    // An extension page is measured and shown from its load handler. This covers a menu that
+    // never reports a frame, and an extension page that never reports a size.
     reveal_popup_after(app, &label, generation, POPUP_REVEAL_FALLBACK);
     emit_popup(
         app,
@@ -4524,33 +4536,44 @@ pub fn resize_popup(
     width: Option<f64>,
     height: f64,
 ) -> Result<(), String> {
-    let (label, anchor_y, revealed) = with_state(app, |state| {
-        let popup = &state.chrome(window_label)?.popup;
-        if !popup.accepts(generation) {
-            return None;
-        }
-        let label = popup.label.clone()?;
-        Some((label, popup.anchor_y, popup.revealed))
-    })
-    .ok_or("No popup is open.")?;
-    let webview = app.get_webview(&label).ok_or("No popup is open.")?;
     let window = app
         .get_window(window_label)
         .ok_or("The browser window is missing.")?;
     let size = window.inner_size().map_err(|error| error.to_string())?;
     let scale = window.scale_factor().unwrap_or(1.0);
-    let position = webview.position().map_err(|error| error.to_string())?;
-    let current = webview.size().map_err(|error| error.to_string())?;
-    let top = if revealed {
-        position.y as f64 / scale
-    } else {
-        anchor_y
-    };
-    let max_height = size.height as f64 / scale - top - 8.0;
-    let width = width.unwrap_or(current.width as f64 / scale);
-    webview
-        .set_size(LogicalSize::new(width, height.min(max_height).max(40.0)))
-        .map_err(|error| error.to_string())?;
+    let window_w = size.width as f64 / scale;
+    let window_h = size.height as f64 / scale;
+    let placed = with_state(app, |state| {
+        let popup = &mut state.chrome_mut(window_label)?.popup;
+        if !popup.accepts(generation) {
+            return None;
+        }
+        let label = popup.label.clone()?;
+        let width = width.unwrap_or(popup.width);
+        let (x, y, width, height) = fit_on_screen(
+            window_w,
+            window_h,
+            popup.anchor_x,
+            popup.anchor_y,
+            width,
+            height,
+        );
+        popup.anchor_x = x;
+        popup.anchor_y = y;
+        popup.width = width;
+        popup.height = height;
+        let origin = if popup.revealed {
+            (x, y)
+        } else {
+            let parked = parked_position();
+            (parked.x, parked.y)
+        };
+        Some((label, origin.0, origin.1, width, height))
+    })
+    .ok_or("No popup is open.")?;
+    let (label, x, y, width, height) = placed;
+    let webview = app.get_webview(&label).ok_or("No popup is open.")?;
+    apply_popup_bounds(&webview, x, y, width, height)?;
     round_open_popup(app, &webview);
     Ok(())
 }
@@ -4600,7 +4623,13 @@ fn reveal_popup_after(app: &AppHandle, label: &str, generation: u64, delay: Dura
     let label = label.to_string();
     std::thread::spawn(move || {
         std::thread::sleep(delay);
-        show_popup(&app, &label, generation);
+        let app = app.clone();
+        let label = label.clone();
+        // Hop to the UI thread so this cannot apply an older size over a measurement that
+        // already ran there.
+        let _ = app
+            .clone()
+            .run_on_main_thread(move || show_popup(&app, &label, generation));
     });
 }
 
@@ -4612,17 +4641,23 @@ fn show_popup(app: &AppHandle, label: &str, generation: u64) {
         }
         popup.revealed = true;
         popup.awaiting = false;
-        Some((popup.focus, popup.anchor_x, popup.anchor_y))
+        Some((
+            popup.focus,
+            popup.anchor_x,
+            popup.anchor_y,
+            popup.width,
+            popup.height,
+        ))
     });
-    let Some((focus, x, y)) = place else {
+    let Some((focus, x, y, width, height)) = place else {
         return;
     };
     let Some(webview) = app.get_webview(label) else {
         return;
     };
+    let _ = apply_popup_bounds(&webview, x, y, width, height);
     round_open_popup(app, &webview);
     webview2::raise_popup(&webview);
-    let _ = webview.set_position(LogicalPosition::new(x, y));
     if focus {
         let _ = webview.set_focus();
     }
@@ -4636,15 +4671,17 @@ fn round_open_popup(app: &AppHandle, webview: &Webview) {
                 (
                     window.label.clone(),
                     window.popup.kind.as_deref() == Some("extension"),
+                    window.popup.width,
+                    window.popup.height,
                     window.popup.shape.clone(),
                 )
             })
         })
     });
-    let Some((window_label, extension, shape)) = owner else {
+    let Some((window_label, extension, width, height, shape)) = owner else {
         return;
     };
-    if extension {
+    if extension || width < 8.0 || height < 8.0 {
         return;
     }
     let Some(window) = app.get_window(&window_label) else {
@@ -4653,22 +4690,111 @@ fn round_open_popup(app: &AppHandle, webview: &Webview) {
     let Ok(main) = window.hwnd() else {
         return;
     };
-    let scale = window.scale_factor().unwrap_or(1.0);
     let shape = shape
         .iter()
-        .map(|rect| windows::Win32::Foundation::RECT {
-            left: (rect.x * scale).round() as i32,
-            top: (rect.y * scale).round() as i32,
-            right: ((rect.x + rect.width) * scale).round() as i32,
-            bottom: ((rect.y + rect.height) * scale).round() as i32,
+        .map(|rect| webview2::PopupClipRect {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
         })
         .collect();
-    webview2::round_popup(
-        webview,
-        main.0 as isize,
-        (12.0 * scale).round().max(1.0) as i32,
-        shape,
-    );
+    webview2::round_popup(webview, main.0 as isize, width, height, 12.0, shape, true);
+}
+
+/// Sets the popup's position and size together. `set_size` and `set_position` each read the
+/// HWND back and write the whole rectangle, and that read is still the previous size.
+fn apply_popup_bounds(
+    webview: &Webview,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    webview
+        .set_bounds(Rect {
+            position: Position::Logical(LogicalPosition::new(x, y)),
+            size: Size::Logical(LogicalSize::new(width.max(1.0), height.max(1.0))),
+        })
+        .map_err(|error| error.to_string())
+}
+
+/// Keeps the popup inside the window. A panel that would pass the bottom moves up, and is
+/// shortened only when it still does not fit, so the page scroller takes the rest.
+fn fit_on_screen(
+    window_w: f64,
+    window_h: f64,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> (f64, f64, f64, f64) {
+    let width = width.clamp(120.0, (window_w - 8.0).max(120.0));
+    let mut height = height.max(40.0);
+    let mut y = y;
+    let bottom = window_h - 8.0;
+    if y + height > bottom {
+        y = (bottom - height).max(4.0);
+    }
+    if y + height > bottom {
+        height = (bottom - y).max(40.0);
+    }
+    let right = window_w - 4.0;
+    let x = if x + width > right {
+        (right - width).max(4.0)
+    } else {
+        x.max(4.0)
+    };
+    (x, y, width, height)
+}
+
+/// Sizes an extension toolbar popup to its document, then shows it. The 1500 ms fallback
+/// shows the placeholder if this never reports a size.
+fn measure_extension_popup(app: &AppHandle, window_label: &str, label: &str, generation: u64) {
+    let Some(webview) = app.get_webview(label) else {
+        return;
+    };
+    let app = app.clone();
+    let window_label = window_label.to_string();
+    let label = label.to_string();
+    webview2::measure_document(&webview, move |width, height| {
+        let app = app.clone();
+        let _ = app.clone().run_on_main_thread(move || {
+            apply_extension_size(&app, &window_label, &label, generation, width, height);
+        });
+    });
+}
+
+fn apply_extension_size(
+    app: &AppHandle,
+    window_label: &str,
+    label: &str,
+    generation: u64,
+    width: f64,
+    height: f64,
+) {
+    let width = width.clamp(120.0, EXTENSION_POPUP_MAX_WIDTH);
+    let height = height.clamp(40.0, EXTENSION_POPUP_MAX_HEIGHT);
+    let ready = with_state(app, |state| {
+        let popup = &mut state.chrome_mut(window_label)?.popup;
+        if popup.generation != generation
+            || popup.kind.as_deref() != Some("extension")
+            || !popup.live()
+        {
+            return None;
+        }
+        // The toolbar button opens the popup to its left, so the right edge stays put
+        // when the document is narrower than the 380px placeholder.
+        popup.anchor_x = (popup.anchor_x + popup.width - width).max(4.0);
+        Some(())
+    });
+    if ready.is_none() {
+        return;
+    }
+    if resize_popup(app, window_label, Some(generation), Some(width), height).is_err() {
+        return;
+    }
+    show_popup(app, label, generation);
 }
 
 fn popup_surface_color(app: &AppHandle) -> Color {
@@ -4775,12 +4901,14 @@ pub fn show_toast(app: &AppHandle, window_label: &str, params: &str) -> Result<(
     match window.add_child(builder, position, size) {
         Ok(webview) => {
             if let Ok(main) = window.hwnd() {
-                let scale = window.scale_factor().unwrap_or(1.0);
                 webview2::round_popup(
                     &webview,
                     main.0 as isize,
-                    (10.0 * scale).round().max(1.0) as i32,
+                    size.width,
+                    size.height,
+                    10.0,
                     Vec::new(),
+                    true,
                 );
             }
             Ok(())
@@ -6517,5 +6645,19 @@ mod tests {
         assert_eq!(entry.tabs[0].url, "https://a.example");
         assert!(entry.group.is_none());
         assert_eq!(entry.tabs[0].workspace, "");
+    }
+
+    #[test]
+    fn a_popup_moves_up_before_it_is_shortened() {
+        let (x, y, width, height) = fit_on_screen(800.0, 500.0, 400.0, 400.0, 340.0, 200.0);
+        assert_eq!((x, width, height), (400.0, 340.0, 200.0));
+        assert_eq!(y, 292.0);
+    }
+
+    #[test]
+    fn a_popup_shrinks_only_when_the_window_cannot_hold_it() {
+        let (_, y, _, height) = fit_on_screen(800.0, 100.0, 10.0, 80.0, 200.0, 400.0);
+        assert_eq!(y, 4.0);
+        assert_eq!(height, 88.0);
     }
 }

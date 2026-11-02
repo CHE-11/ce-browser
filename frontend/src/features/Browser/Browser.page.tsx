@@ -6,7 +6,7 @@ import { AddressBar } from "@/components/TabsAddressAndBookmarks/Addressbar/Addr
 import { BookmarksBar } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarksBar";
 import { TabStrip } from "@/components/TabsAddressAndBookmarks/Tabs/TabStrip";
 import { VerticalTabs } from "@/components/TabsAddressAndBookmarks/Tabs/VerticalTabs";
-import { VerticalToolbar } from "@/components/VerticalToolbar";
+import { VerticalToolbar } from "@/components/TabsAddressAndBookmarks/VerticalToolbar/VerticalToolbar";
 import { backdropSupport, onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
 import { leaveTab } from "@/lib/tab-hover";
 import { splitToolbar, toolbarPinned } from "@/lib/toolbar-pin";

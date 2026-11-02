@@ -5,18 +5,23 @@ use tauri::webview::PlatformWebview;
 use tauri::{AppHandle, Webview};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::*;
-use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     CombineRgn, CreateRoundRectRgn, DeleteObject, HGDIOBJ, HRGN, RGN_OR, SetWindowRgn,
 };
 use windows::Win32::System::Com::IStream;
+use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
 };
+use windows::Win32::UI::Shell::{
+    DefSubclassProc, GetWindowSubclass, RemoveWindowSubclass, SetWindowSubclass,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, GW_CHILD, GW_HWNDNEXT, GWL_STYLE, GetClientRect, GetParent, GetWindow,
-    GetWindowLongPtrW, HWND_TOP, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_CLIPSIBLINGS,
+    GetWindowLongPtrW, HWND_TOP, SIZE_MINIMIZED, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WM_NCDESTROY, WM_SIZE,
+    WS_CLIPSIBLINGS,
 };
 use windows::core::{BOOL, HSTRING, Interface, PWSTR};
 
@@ -412,11 +417,32 @@ fn clip_siblings(hwnd: HWND) {
     }
 }
 
-/// Clips the popup's own window to rounded rectangles. `shape` is in physical pixels of the
-/// popup; empty means the whole popup. Outside the shape the window below shows and takes the
-/// mouse. The main window is left alone.
-pub fn round_popup(webview: &Webview, main: isize, radius: i32, shape: Vec<RECT>) {
-    let radius = radius.max(1);
+/// One rectangle of a popup, in CSS pixels of the popup document.
+pub struct PopupClipRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Clips the popup to rounded rectangles. `width` and `height` are the size just requested.
+/// The HWND may still be the previous size, because its move is posted and not applied yet,
+/// so the region is built from this size rather than from `GetClientRect`. When `logical` is
+/// set, the size, radius and `shape` are CSS pixels and are scaled by the popup window's DPI.
+/// Otherwise they are already physical pixels. `shape` empty means the whole popup. Outside
+/// the shape the window below shows and takes the mouse. The main window is left alone.
+pub fn round_popup(
+    webview: &Webview,
+    main: isize,
+    width: f64,
+    height: f64,
+    radius: f64,
+    shape: Vec<PopupClipRect>,
+    logical: bool,
+) {
+    if width < 8.0 || height < 8.0 {
+        return;
+    }
     let _ = webview.with_webview(move |platform| {
         let main = HWND(main as *mut std::ffi::c_void);
         let mut hwnd = HWND(std::ptr::null_mut());
@@ -432,38 +458,223 @@ pub fn round_popup(webview: &Webview, main: isize, radius: i32, shape: Vec<RECT>
         if hwnd.0.is_null() || hwnd == main {
             return;
         }
-        let Some((width, height)) = client_size(hwnd) else {
+        let scale = if logical { hwnd_scale(hwnd) } else { 1.0 };
+        let width = (width * scale).round().max(1.0) as i32;
+        let height = (height * scale).round().max(1.0) as i32;
+        let radius = (radius.max(1.0) * scale).round().max(1.0) as i32;
+        let shape = shape
+            .iter()
+            .map(|rect| RECT {
+                left: (rect.x * scale).round() as i32,
+                top: (rect.y * scale).round() as i32,
+                right: ((rect.x + rect.width) * scale).round() as i32,
+                bottom: ((rect.y + rect.height) * scale).round() as i32,
+            })
+            .collect::<Vec<_>>();
+        remember_region(hwnd, radius, shape.clone(), width, height);
+        apply_region(hwnd, radius, &shape, width, height);
+    });
+}
+
+/// Reads the document's scroll size. The callback runs on the UI thread once the script finishes.
+pub fn measure_document(webview: &Webview, done: impl FnOnce(f64, f64) + Send + 'static) {
+    let slot = Arc::new(Mutex::new(Some(done)));
+    let _ = webview.with_webview(move |platform| {
+        let Ok(core) = core(&platform) else {
             return;
         };
-        clip_round(hwnd, radius, &shape);
-        let clip = Clip {
-            radius,
-            width,
-            height,
-            shape,
-        };
-        let _ = unsafe {
-            EnumChildWindows(
-                Some(hwnd),
-                Some(clip_matching_child),
-                LPARAM(std::ptr::addr_of!(clip) as isize),
-            )
-        };
+        let slot = slot.clone();
+        let handler = ExecuteScriptCompletedHandler::create(Box::new(move |result, value| {
+            if result.is_ok()
+                && let Some(done) = slot.lock().ok().and_then(|mut guard| guard.take())
+                && let Some(size) = parse_document_size(&value)
+            {
+                done(size.0, size.1);
+            }
+            Ok(())
+        }));
+        let script = HSTRING::from(DOCUMENT_SIZE_SCRIPT);
+        let _ = unsafe { core.ExecuteScript(&script, &handler) };
     });
+}
+
+const DOCUMENT_SIZE_SCRIPT: &str = r#"(function () {
+  var root = document.documentElement;
+  var body = document.body;
+  function box(el) {
+    if (!el) return [0, 0];
+    return [
+      Math.max(el.scrollWidth || 0, el.offsetWidth || 0),
+      Math.max(el.scrollHeight || 0, el.offsetHeight || 0)
+    ];
+  }
+  var a = box(root);
+  var b = box(body);
+  return { w: Math.ceil(Math.max(a[0], b[0])), h: Math.ceil(Math.max(a[1], b[1])) };
+})()"#;
+
+fn parse_document_size(raw: &str) -> Option<(f64, f64)> {
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let value = match value {
+        serde_json::Value::String(inner) => serde_json::from_str(&inner).ok()?,
+        other => other,
+    };
+    let width = value.get("w")?.as_f64()?;
+    let height = value.get("h")?.as_f64()?;
+    (width.is_finite() && height.is_finite() && width >= 1.0 && height >= 1.0)
+        .then_some((width, height))
+}
+
+/// The popup HWND's DPI, as a scale from 96. This is the factor wry uses when it turns a
+/// logical size into physical pixels.
+fn hwnd_scale(hwnd: HWND) -> f64 {
+    let dpi = unsafe { GetDpiForWindow(hwnd) };
+    if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 }
+}
+
+/// Region state kept on the popup window so a later `WM_SIZE` can clip to the size the
+/// window actually landed on. A window region does not follow a resize by itself.
+struct PopupRegion {
+    radius: i32,
+    /// Physical pixels. Empty means the whole client area.
+    shape: Vec<RECT>,
+    /// Physical size last requested. A `WM_SIZE` that still reports the previous, smaller
+    /// window must not shrink the region back to that hole.
+    width: i32,
+    height: i32,
+}
+
+const POPUP_REGION_SUBCLASS: usize = 0x00CE_0001;
+
+fn remember_region(hwnd: HWND, radius: i32, shape: Vec<RECT>, width: i32, height: i32) {
+    let Some(state) = region_state(hwnd) else {
+        return;
+    };
+    unsafe {
+        (*state).radius = radius;
+        (*state).shape = shape;
+        (*state).width = width;
+        (*state).height = height;
+    }
+}
+
+fn region_state(hwnd: HWND) -> Option<*mut PopupRegion> {
+    let mut data = 0usize;
+    let found = unsafe {
+        GetWindowSubclass(
+            hwnd,
+            Some(popup_region_proc),
+            POPUP_REGION_SUBCLASS,
+            Some(&mut data),
+        )
+    };
+    if found.as_bool() && data != 0 {
+        return Some(data as *mut PopupRegion);
+    }
+    let state = Box::into_raw(Box::new(PopupRegion {
+        radius: 1,
+        shape: Vec::new(),
+        width: 0,
+        height: 0,
+    }));
+    let installed = unsafe {
+        SetWindowSubclass(
+            hwnd,
+            Some(popup_region_proc),
+            POPUP_REGION_SUBCLASS,
+            state as usize,
+        )
+    };
+    if !installed.as_bool() {
+        unsafe { drop(Box::from_raw(state)) };
+        return None;
+    }
+    Some(state)
+}
+
+unsafe extern "system" fn popup_region_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    data: usize,
+) -> LRESULT {
+    if msg == WM_SIZE && wparam.0 != SIZE_MINIMIZED as usize && data != 0 {
+        let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+        let state = unsafe { &*(data as *const PopupRegion) };
+        if let Some((mut width, mut height)) = client_size(hwnd) {
+            // The posted resize may not have landed. Keep the requested clip until it does.
+            if state.shape.is_empty() {
+                if width + 2 < state.width {
+                    width = state.width;
+                }
+                if height + 2 < state.height {
+                    height = state.height;
+                }
+            }
+            apply_region(hwnd, state.radius, &state.shape, width, height);
+        }
+        return result;
+    }
+    if msg == WM_NCDESTROY && data != 0 {
+        unsafe {
+            let _ = SetWindowSubclass(hwnd, Some(popup_region_proc), POPUP_REGION_SUBCLASS, 0);
+            let _ = RemoveWindowSubclass(hwnd, Some(popup_region_proc), POPUP_REGION_SUBCLASS);
+            drop(Box::from_raw(data as *mut PopupRegion));
+        }
+    }
+    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
 
 struct Clip {
     radius: i32,
-    width: i32,
-    height: i32,
+    /// Client size a child must be close to before it is clipped. The WebView2 child matches
+    /// the popup window; smaller children are left alone.
+    match_width: i32,
+    match_height: i32,
+    draw_width: i32,
+    draw_height: i32,
     shape: Vec<RECT>,
+}
+
+fn apply_region(hwnd: HWND, radius: i32, shape: &[RECT], width: i32, height: i32) {
+    clip_round(hwnd, radius, shape, width, height);
+    let Some((match_width, match_height)) = client_size(hwnd) else {
+        return;
+    };
+    let clip = Clip {
+        radius,
+        match_width,
+        match_height,
+        draw_width: width,
+        draw_height: height,
+        shape: shape.to_vec(),
+    };
+    let _ = unsafe {
+        EnumChildWindows(
+            Some(hwnd),
+            Some(clip_matching_child),
+            LPARAM(std::ptr::addr_of!(clip) as isize),
+        )
+    };
 }
 
 unsafe extern "system" fn clip_matching_child(child: HWND, param: LPARAM) -> BOOL {
     let clip = unsafe { &*(param.0 as *const Clip) };
     if let Some((width, height)) = client_size(child) {
-        if (width - clip.width).abs() <= 8 && (height - clip.height).abs() <= 8 {
-            clip_round(child, clip.radius, &clip.shape);
+        let near_window =
+            (width - clip.match_width).abs() <= 8 && (height - clip.match_height).abs() <= 8;
+        let near_target =
+            (width - clip.draw_width).abs() <= 8 && (height - clip.draw_height).abs() <= 8;
+        if near_window || near_target {
+            clip_round(
+                child,
+                clip.radius,
+                &clip.shape,
+                clip.draw_width,
+                clip.draw_height,
+            );
         }
     }
     BOOL(1)
@@ -483,10 +694,10 @@ fn client_size(hwnd: HWND) -> Option<(i32, i32)> {
     }
 }
 
-fn clip_round(hwnd: HWND, radius: i32, shape: &[RECT]) {
-    let Some((width, height)) = client_size(hwnd) else {
+fn clip_round(hwnd: HWND, radius: i32, shape: &[RECT], width: i32, height: i32) {
+    if width < 8 || height < 8 {
         return;
-    };
+    }
     let whole = [RECT {
         left: 0,
         top: 0,

@@ -270,8 +270,11 @@ pub fn open(app: &AppHandle, window_label: &str, url: Url) -> Result<(), String>
         webview2::round_popup(
             &frame,
             hwnd.0 as isize,
-            (10.0 * scale).round() as i32,
+            f64::from(card_size.width),
+            f64::from(card_size.height),
+            (10.0 * scale).round(),
             Vec::new(),
+            false,
         );
     }
 
@@ -369,8 +372,11 @@ pub fn relayout(app: &AppHandle, window: &str) {
                 webview2::round_popup(
                     &frame,
                     hwnd.0 as isize,
-                    (10.0 * scale).round() as i32,
+                    f64::from(card_size.width),
+                    f64::from(card_size.height),
+                    (10.0 * scale).round(),
                     Vec::new(),
+                    false,
                 );
             }
         }

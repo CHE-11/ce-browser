@@ -70,8 +70,8 @@ import { flattenBookmarks, type WindowTabsState } from "../../../lib/use-browser
 import { focusRing } from "../../../lib/focus-ring";
 import { IconButton } from "../../IconButton";
 import { LoadBar } from "../../LoadBar";
-import { ToolbarEntry } from "../../VerticalToolbar";
 import { WindowControls } from "../../WindowControls";
+import { ToolbarEntry } from "../VerticalToolbar/VerticalToolbar";
 
 type AddressBarProps = {
   snapshot: WindowTabsState;

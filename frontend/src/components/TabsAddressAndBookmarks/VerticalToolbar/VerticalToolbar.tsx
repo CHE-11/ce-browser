@@ -6,9 +6,10 @@ import { builtinTool } from "@features/BuiltInExtensions/builtin";
 import { openPopupBelow, saveSettings } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { openToolbarPinMenu, reorderToolbar, splitToolbar, toolbarDragHandlers, toolbarPinned } from "@/lib/toolbar-pin";
-import { ExtensionIcon } from "./ExtensionIcon";
-import { IconButton } from "./IconButton";
-import { Toggle } from "./Toggle";
+import { ExtensionIcon } from "@/components/ExtensionIcon";
+import { IconButton } from "@/components/IconButton";
+import { Toggle } from "@/components/Toggle";
+
 
 type ExtensionToolbarButtonProps = {
   extension: ExtensionInfo;

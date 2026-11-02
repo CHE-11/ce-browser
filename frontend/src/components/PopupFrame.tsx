@@ -32,7 +32,9 @@ export function PopupFrame({ id, children, className, fit = true, maxHeight = 64
     }
     let last = 0;
     const report = () => {
-      const height = Math.min(maxHeight, Math.ceil(element.getBoundingClientRect().height) + 2);
+      const box = element.getBoundingClientRect();
+      const measured = Math.max(element.scrollHeight, element.offsetHeight, Math.ceil(box.height));
+      const height = Math.min(maxHeight, measured + 2);
       if (Math.abs(height - last) >= 1) {
         last = height;
         lastResize.current = resizePopup(height, undefined, generation > 0 ? generation : undefined).catch(() => undefined);
