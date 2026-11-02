@@ -69,10 +69,10 @@ import { reorderToolbar, splitToolbar, toolbarPinned } from "../../../lib/toolba
 import { buildSuggestions, inlineCompletion, looksLikeUrl, omniboxHeight } from "../../../lib/omnibox";
 import { flattenBookmarks, type WindowTabsState } from "../../../lib/use-browser";
 import { focusRing } from "../../../lib/focus-ring";
-import { IconButton } from "../../IconButton";
-import { LoadBar } from "../../LoadBar";
-import { WindowControls } from "../../WindowControls";
-import { ToolbarEntry } from "../VerticalToolbar/VerticalToolbar";
+import { IconButton } from "../../../components/IconButton";
+import { LoadBar } from "../../../components/LoadBar";
+import { WindowControls } from "../../../components/WindowControls";
+import { ToolbarEntry } from "../../BrowserBody/VerticalToolbar/VerticalToolbar";
 
 type AddressBarProps = {
   snapshot: WindowTabsState;

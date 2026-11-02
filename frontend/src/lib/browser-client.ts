@@ -79,6 +79,11 @@ export function createTab(url?: string, background = false, index?: number) {
   return invoke<number>("create_tab", { url, background, index });
 }
 
+/** Opens `url` in a new browser window. */
+export function openInWindow(url: string) {
+  return invoke<void>("open_in_window", { url });
+}
+
 export function closeTab(id: number) {
   return invoke<void>("close_tab", { id });
 }

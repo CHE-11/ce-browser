@@ -4,17 +4,17 @@ import { StatusPopover } from "@/components/StatusPopover";
 import { Toast } from "@/components/Toast";
 import { PopupAppearanceContext, usePopupHostReady } from "@lib/popup-ready";
 import { useAppearanceState, useBookmarksState, useExtensions, useTabs } from "@lib/use-browser";
-import { AddressBarEllipsisMenu } from "@/components/TabsAddressAndBookmarks/Addressbar/AddressBarEllipsisMenu";
-import { ExtensionPinMenu } from "@/components/TabsAddressAndBookmarks/Addressbar/ExtensionPinMenu";
-import { BookmarkAdd } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarkAdd";
-import { BookmarkRename } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarkRename";
-import { BookmarkEditor } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarkEditor";
-import { BookmarkFolderMenu } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarkFolderMenu";
-import { BookmarksBarMenu, type BookmarkMenuTarget } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarksBarMenu";
-import { TabGroupFlyout } from "@/components/TabsAddressAndBookmarks/Tabs/TabGroupFlyout";
-import { TabGroupMenu } from "@/components/TabsAddressAndBookmarks/Tabs/TabGroupMenu";
-import { TabMenu } from "@/components/TabsAddressAndBookmarks/Tabs/TabMenu";
-import { WorkspaceMenu } from "@/components/WorkspaceMenu";
+import { AddressBarEllipsisMenu } from "@/features/BrowserHeader/Addressbar/AddressBarEllipsisMenu";
+import { ExtensionPinMenu } from "@/features/BrowserHeader/Addressbar/ExtensionPinMenu";
+import { BookmarkAdd } from "@/features/BrowserHeader/BookmarksBar/BookmarkAdd";
+import { BookmarkRename } from "@/features/BrowserHeader/BookmarksBar/BookmarkRename";
+import { BookmarkEditor } from "@/features/BrowserHeader/BookmarksBar/BookmarkEditor";
+import { BookmarkFolderMenu } from "@/features/BrowserHeader/BookmarksBar/BookmarkFolderMenu";
+import { BookmarksBarContextMenu, type BookmarkMenuTarget } from "@/features/BrowserHeader/BookmarksBar/BookmarksBarContextMenu";
+import { TabGroupFlyout } from "@/features/BrowserHeader/Tabs/TabGroupFlyout";
+import { TabGroupMenu } from "@/features/BrowserHeader/Tabs/TabGroupMenu";
+import { TabMenu } from "@/features/BrowserHeader/Tabs/TabMenu";
+import { WorkspaceMenu } from "@/features/BrowserHeader/Workspace/WorkspaceMenu";
 import { AdBlockerPopover } from "@features/BuiltInExtensions/ad-blocker/AdBlockerPopover";
 import { AssistantPopover } from "@features/BuiltInExtensions/assistant/Assistant";
 import { BoardImagesPopover } from "@features/BuiltInExtensions/boards/BoardImagesPopover";
@@ -31,9 +31,9 @@ import { SelectionTranslatePopover } from "@features/BuiltInExtensions/translate
 import { WaybackPopover } from "@features/BuiltInExtensions/wayback/Wayback";
 import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
 import { CommandPalette } from "@features/CommandPalette/CommandPalette";
-import { TabSearch } from "@features/TabSearch/TabSearch";
-import { TabSwitcher } from "@features/TabSwitcher/TabSwitcher";
-import { TabHoverCard } from "@features/TabHover/TabHoverCard";
+import { TabSearch } from "@/features/BrowserHeader/Tabs/TabSearch/TabSearch";
+import { TabSwitcher } from "@/features/BrowserHeader/Tabs/TabSwitcher/TabSwitcher";
+import { TabHoverCard } from "@/features/BrowserHeader/Tabs/TabHover/TabHoverCard";
 import { UnresponsivePrompt } from "@features/PageRecovery/UnresponsivePrompt";
 import { SiteInfoPanel } from "@features/SiteInfo/SiteInfoPanel";
 import { FindAllPopover } from "@features/FindAll/FindAllPopover";
@@ -93,7 +93,8 @@ function bookmarkMenuTarget(params: URLSearchParams): BookmarkMenuTarget | null 
     return null;
   }
   const kind = params.get("kind");
-  return { id, kind: kind === "folder" || kind === "separator" ? kind : "link" };
+  const url = params.get("url") ?? undefined;
+  return { id, kind: kind === "folder" || kind === "separator" ? kind : "link", url };
 }
 
 function PopupContent({ popup, params }: PopupPageProps) {
@@ -112,7 +113,7 @@ function PopupContent({ popup, params }: PopupPageProps) {
       );
     case "bookmarks-bar-menu":
       return (
-        <BookmarksBarMenu
+        <BookmarksBarContextMenu
           x={Number(params.get("x")) || 0}
           y={Number(params.get("y")) || 0}
           parentId={params.get("parent") || "bar"}

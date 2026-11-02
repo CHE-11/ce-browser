@@ -10,7 +10,7 @@ import { buildTabRows } from "../../../lib/tab-rows";
 import type { WindowTabsState } from "../../../lib/use-browser";
 import { zoomWheelStep } from "../../../lib/zoom";
 import { TabRowsView } from "./TabRowsView";
-import { WorkspaceSwitcher } from "../../WorkspaceSwitcher";
+import { WorkspaceSwitcher } from "../Workspace/WorkspaceSwitcher";
 
 type VerticalTabsProps = {
   snapshot: WindowTabsState;

@@ -10,7 +10,7 @@ import { faviconKey } from "@/lib/format";
 import { POPUP_SHAPE_ATTR, usePopupShape } from "@/lib/popup-shape";
 import { useBookmarksState, useTabs, findFolder, useSiteFavicons, useSettingsState } from "@/lib/use-browser";
 import { BookmarkNode } from "@type/browser";
-import { BookmarksBarMenuItems, type BookmarkMenuTarget } from "./BookmarksBarMenu";
+import { BookmarksBarContextMenuItems, type BookmarkMenuTarget } from "./BookmarksBarContextMenu";
 
 type BookmarkFolderMenuProps = {
   folderId: string;
@@ -85,7 +85,7 @@ function contextMenuReserve(target: BookmarkMenuTarget | null) {
   if (target.kind === "folder") {
     return 300;
   }
-  return 252;
+  return 340;
 }
 
 /** Beside `parent` on `preferred`, or the other side when that one has no room. */
@@ -243,7 +243,7 @@ export function BookmarkFolderMenu({ folderId, left, dragOpened = false }: Bookm
     event.stopPropagation();
     const x = event.clientX;
     const y = event.clientY;
-    const target = node ? { id: node.id, kind: targetKind(node) } : null;
+    const target = node ? { id: node.id, kind: targetKind(node), url: node.url ?? undefined } : null;
     setContext({ x, y, windowX: x, windowY: y, parentId, target });
     void windowPoint(x, y).then((point) => {
       setContext((current) => (current && current.x === x && current.y === y ? { ...current, windowX: point.x, windowY: point.y } : current));
@@ -279,7 +279,7 @@ export function BookmarkFolderMenu({ folderId, left, dragOpened = false }: Bookm
             top: Math.max(8, Math.min(context.y, window.innerHeight - contextMenuReserve(context.target))),
           }}
         >
-          <BookmarksBarMenuItems
+          <BookmarksBarContextMenuItems
             idPrefix="bookmark-folder-context"
             parentId={context.parentId}
             divider="horizontal"

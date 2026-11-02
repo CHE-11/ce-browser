@@ -108,9 +108,12 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
       const kind = node.separator ? "separator" : node.url ? "link" : "folder";
       params.set("target", node.id);
       params.set("kind", kind);
+      if (kind === "link" && node.url) {
+        params.set("url", node.url);
+      }
     }
     const kind = params.get("kind");
-    const height = !params.has("target") ? 148 : kind === "folder" ? 300 : kind === "separator" ? 196 : 252;
+    const height = !params.has("target") ? 148 : kind === "folder" ? 300 : kind === "separator" ? 196 : 340;
     void openPopup({
       kind: "bookmarks-bar-menu",
       params: params.toString(),

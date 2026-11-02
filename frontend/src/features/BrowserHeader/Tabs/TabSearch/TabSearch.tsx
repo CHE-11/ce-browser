@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Fuse from "fuse.js";
 import { Layers, Moon, RotateCcw, X } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
-import { TabAlertDot } from "@/components/TabsAddressAndBookmarks/Tabs/TabAlertDot";
+import { TabAlertDot } from "@/features/BrowserHeader/Tabs/TabAlertDot";
 import { activateTab, closePopup, closeTab, restoreClosed } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { hostOf } from "@/lib/format";

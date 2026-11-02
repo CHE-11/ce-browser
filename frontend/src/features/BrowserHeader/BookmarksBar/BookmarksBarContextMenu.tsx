@@ -1,12 +1,13 @@
 import { PopupMenu, PopupMenuItem, PopupMenuSeparator, PopupFrame } from "@/components/PopupFrame";
-import { openPopup, addBookmark, closePopup, deleteBookmark, openFolderAsGroup } from "@/lib/browser-client";
-import { FolderPlus, Group, PencilLine, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
+import { openPopup, addBookmark, closePopup, createTab, deleteBookmark, openFolderAsGroup, openInWindow } from "@/lib/browser-client";
+import { AppWindow, ExternalLink, FolderPlus, Group, PencilLine, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
 
 type DividerOrientation = "vertical" | "horizontal";
 
 export type BookmarkMenuTarget = {
   id: string;
   kind: "link" | "folder" | "separator";
+  url?: string;
 };
 
 const PROTECTED_FOLDERS = new Set(["bar", "other"]);
@@ -31,7 +32,7 @@ function deleteLabel(kind: BookmarkMenuTarget["kind"]) {
   return "Delete bookmark";
 }
 
-export function BookmarksBarMenuItems({ idPrefix, parentId, divider, x, y, target, onDone }: BookmarksBarMenuItemsProps) {
+export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, x, y, target, onDone }: BookmarksBarMenuItemsProps) {
   const openAdd = (mode: "link" | "folder") => {
     const params = new URLSearchParams({ mode, parent: parentId });
     void openPopup({
@@ -51,6 +52,7 @@ export function BookmarksBarMenuItems({ idPrefix, parentId, divider, x, y, targe
   const vertical = divider === "vertical";
   const canDelete = !!target && !PROTECTED_FOLDERS.has(target.id);
   const canRename = !!target && target.kind !== "separator" && !PROTECTED_FOLDERS.has(target.id);
+  const linkUrl = target?.kind === "link" ? target.url?.trim() : "";
 
   const remove = () => {
     if (!target || !canDelete) {
@@ -76,6 +78,23 @@ export function BookmarksBarMenuItems({ idPrefix, parentId, divider, x, y, targe
 
   return (
     <PopupMenu id={`${idPrefix}-items`} label={vertical ? "Bookmarks bar" : "Bookmark folder"}>
+      {linkUrl ? (
+        <>
+          <PopupMenuItem
+            id={`${idPrefix}-open-tab`}
+            icon={<ExternalLink />}
+            label="Open in new tab"
+            onClick={() => void createTab(linkUrl).finally(onDone)}
+          />
+          <PopupMenuItem
+            id={`${idPrefix}-open-window`}
+            icon={<AppWindow />}
+            label="Open in new window"
+            onClick={() => void openInWindow(linkUrl).finally(onDone)}
+          />
+          <PopupMenuSeparator id={`${idPrefix}-open-separator`} />
+        </>
+      ) : null}
       <PopupMenuItem id={`${idPrefix}-add`} icon={<Plus />} label="Add bookmark" onClick={() => openAdd("link")} />
       <PopupMenuItem
         id={`${idPrefix}-add-folder`}
@@ -133,10 +152,10 @@ type BookmarksBarMenuProps = {
   target?: BookmarkMenuTarget | null;
 };
 
-export function BookmarksBarMenu({ x, y, parentId, divider, target }: BookmarksBarMenuProps) {
+export function BookmarksBarContextMenu({ x, y, parentId, divider, target }: BookmarksBarMenuProps) {
   return (
     <PopupFrame id="bookmarks-bar-menu">
-      <BookmarksBarMenuItems
+      <BookmarksBarContextMenuItems
         idPrefix="bookmarks-bar-menu"
         parentId={parentId}
         divider={divider}

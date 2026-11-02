@@ -1,18 +1,12 @@
-import { FindBar } from "@/components/FindBar";
-import { PageFailure } from "@/components/PageFailure";
-import { SplitDivider } from "@/components/SplitDivider";
-import { SyncToast } from "@/components/SyncToast";
-import { AddressBar } from "@/components/TabsAddressAndBookmarks/Addressbar/AddressBar";
-import { BookmarksBar } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarksBar";
-import { TabStrip } from "@/components/TabsAddressAndBookmarks/Tabs/TabStrip";
-import { VerticalTabs } from "@/components/TabsAddressAndBookmarks/Tabs/VerticalTabs";
-import { VerticalToolbar } from "@/components/TabsAddressAndBookmarks/VerticalToolbar/VerticalToolbar";
+
 import { backdropSupport, onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
 import { leaveTab } from "@/lib/tab-hover";
 import { splitToolbar, toolbarPinned } from "@/lib/toolbar-pin";
 import { useTabs, useBookmarks, useDownloads, useHistory, useExtensions, useAppearanceFromSettings } from "@/lib/use-browser";
 import { useRef, useState, useEffect, useLayoutEffect } from "react";
 import type { PopupKind } from "@type/browser";
+import { BrowserBody } from "../BrowserBody/BrowserBody";
+import { BrowserHeader } from "../BrowserHeader/BrowserHeader";
 
 
 export function BrowserPage() {
@@ -148,60 +142,32 @@ export function BrowserPage() {
 
   return (
     <div id="browser" className="flex h-full flex-col bg-zinc-950 text-zinc-100">
-      <div id="browser-header" ref={headerRef} className={snapshot.fullscreen ? "hidden" : "flex flex-col"}>
-        {vertical ? null : <TabStrip snapshot={snapshot} />}
-        <AddressBar
-          snapshot={snapshot}
-          bookmarks={bookmarks}
-          downloads={downloads}
-          history={history}
-          extensions={extensions}
-          settings={settings}
-          windowControls={vertical}
-        />
-        {showBookmarksBar ? (
-          <BookmarksBar
-            tree={bookmarks}
-            activeId={snapshot.activeId}
-            textSize={settings?.bookmarksBarTextSize}
-            padding={settings?.bookmarksBarPadding}
-            folderIcons={settings?.bookmarksBarFolderIcons ?? true}
-          />
-        ) : null}
-        {findToken !== null && activeTab ? (
-          <FindBar tabId={activeTab.id} focusToken={findToken} onClose={() => setFindToken(null)} />
-        ) : null}
-        <SyncToast />
-      </div>
-      <div id="browser-body" className="flex min-h-0 flex-1">
-        {vertical && settings && !snapshot.fullscreen ? (
-          <VerticalTabs ref={sidebarRef} snapshot={snapshot} settings={settings} />
-        ) : null}
-        <div id="browser-page-area" className="relative flex min-w-0 flex-1 items-center justify-center bg-zinc-950">
-          {activeTab && !activeTab.loaded && !activeTab.failure ? (
-            <span id="browser-page-loading" className="text-sm text-zinc-500">
-              Loading {activeTab.title || activeTab.url}
-            </span>
-          ) : null}
-          {splitShown && split
-            ? [
-                { id: split.left, style: { left: 0, width: `calc(${split.ratio * 100}% - 3px)` } },
-                { id: split.right, style: { right: 0, width: `calc(${(1 - split.ratio) * 100}% - 3px)` } },
-              ].map(({ id, style }) => {
-                const tab = snapshot.tabs.find((item) => item.id === id);
-                return tab?.failure ? (
-                  <PageFailure key={id} tab={tab} failure={tab.failure} className="absolute inset-y-0" style={style} />
-                ) : null;
-              })
-            : activeTab?.failure
-              ? <PageFailure tab={activeTab} failure={activeTab.failure} className="absolute inset-0" />
-              : null}
-          {splitShown && split ? <SplitDivider split={split} activeId={snapshot.activeId} /> : null}
-        </div>
-        {showToolStrip ? (
-          <VerticalToolbar ref={toolbarRef} activeTab={activeTab} extensions={extensions} settings={settings} />
-        ) : null}
-      </div>
+      <BrowserHeader
+        headerRef={headerRef}
+        snapshot={snapshot}
+        vertical={vertical}
+        bookmarks={bookmarks}
+        downloads={downloads}
+        history={history}
+        extensions={extensions}
+        settings={settings}
+        showBookmarksBar={showBookmarksBar}
+        findToken={findToken}
+        activeTab={activeTab}
+        onCloseFind={() => setFindToken(null)}
+      />
+      <BrowserBody
+        snapshot={snapshot}
+        settings={settings}
+        vertical={vertical}
+        sidebarRef={sidebarRef}
+        toolbarRef={toolbarRef}
+        activeTab={activeTab}
+        split={split}
+        splitShown={splitShown}
+        showToolStrip={showToolStrip}
+        extensions={extensions}
+      />
     </div>
   );
 }

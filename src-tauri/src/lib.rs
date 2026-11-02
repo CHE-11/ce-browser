@@ -561,6 +561,11 @@ async fn detach_tab(app: AppHandle, id: u32) -> Result<(), String> {
     tabs::detach_tab(&app, id)
 }
 
+#[tauri::command]
+async fn open_in_window(app: AppHandle, url: String) -> Result<(), String> {
+    tabs::open_url_window(&app, &url)
+}
+
 // Built-in page tools. They wait on WebView2 on the main thread, so they run on the blocking pool.
 
 #[tauri::command]
@@ -1823,6 +1828,7 @@ pub fn run() {
             allow_certificate,
             move_tab,
             detach_tab,
+            open_in_window,
             pin_tab,
             unpin_tab,
             restore_pinned_tabs,

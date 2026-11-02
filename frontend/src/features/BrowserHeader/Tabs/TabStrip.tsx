@@ -11,7 +11,7 @@ import { zoomWheelStep } from "@/lib/zoom";
 import { IconButton } from "@/components/IconButton";
 import { TabRowsView } from "./TabRowsView";
 import { WindowControls } from "@/components/WindowControls";
-import { WorkspaceSwitcher } from "@/components/WorkspaceSwitcher";
+import { WorkspaceSwitcher } from "@/features/BrowserHeader/Workspace/WorkspaceSwitcher";
 
 type TabStripProps = {
   snapshot: WindowTabsState;

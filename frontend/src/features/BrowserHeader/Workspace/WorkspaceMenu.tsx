@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Check, Pencil, Plus, Trash2 } from "lucide-react";
-import type { TabGroupColor, Workspace } from "../../../types/browser";
-import { closePopup, createWorkspace, deleteWorkspace, renameWorkspace, switchWorkspace } from "../lib/browser-client";
-import { cn } from "../lib/cn";
-import { GROUP_COLORS, groupColorClasses } from "../lib/tab-rows";
-import { useTabs } from "../lib/use-browser";
-import { Button } from "./Button";
-import { IconButton } from "./IconButton";
-import { PopupFrame } from "./PopupFrame";
+import type { TabGroupColor, Workspace } from "../../../../../types/browser";
+import { closePopup, createWorkspace, deleteWorkspace, renameWorkspace, switchWorkspace } from "../../../lib/browser-client";
+import { cn } from "../../../lib/cn";
+import { GROUP_COLORS, groupColorClasses } from "../../../lib/tab-rows";
+import { useTabs } from "../../../lib/use-browser";
+import { Button } from "../../../components/Button";
+import { IconButton } from "../../../components/IconButton";
+import { PopupFrame } from "../../../components/PopupFrame";
 
 const inputClass =
   "h-8 min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-sky-500";

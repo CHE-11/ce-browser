@@ -1655,6 +1655,18 @@ pub fn open_site_window(app: &AppHandle, title: &str, url: &str) -> Result<Strin
     Ok(label)
 }
 
+/// Opens `url` in a new browser window, offset from the window in front.
+pub fn open_url_window(app: &AppHandle, url: &str) -> Result<(), String> {
+    let source = focused_window(app);
+    let label = open_site_window(app, "ce-browser", url)?;
+    if let (Some(source_window), Some(created)) = (app.get_window(&source), app.get_window(&label))
+        && let Ok(position) = source_window.outer_position()
+    {
+        let _ = created.set_position(PhysicalPosition::new(position.x + 48, position.y + 48));
+    }
+    Ok(())
+}
+
 pub fn show_main(app: &AppHandle) {
     if let Some(window) = app.get_window(WINDOW) {
         let _ = window.unminimize();
