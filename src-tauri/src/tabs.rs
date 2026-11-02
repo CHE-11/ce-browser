@@ -4209,6 +4209,7 @@ fn show_popup(app: &AppHandle, label: &str, generation: u64) {
         return;
     };
     round_open_popup(app, &webview);
+    webview2::raise_popup(&webview);
     let _ = webview.set_position(LogicalPosition::new(x, y));
     if focus {
         let _ = webview.set_focus();

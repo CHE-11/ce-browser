@@ -13,7 +13,11 @@ use windows::Win32::System::Com::IStream;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
 };
-use windows::Win32::UI::WindowsAndMessaging::{EnumChildWindows, GetClientRect};
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumChildWindows, GW_CHILD, GW_HWNDNEXT, GWL_STYLE, GetClientRect, GetParent, GetWindow,
+    GetWindowLongPtrW, HWND_TOP, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_CLIPSIBLINGS,
+};
 use windows::core::{BOOL, HSTRING, Interface, PWSTR};
 
 use crate::shortcuts::{self, Target};
@@ -349,6 +353,63 @@ pub fn environment_of(webview: &Webview) -> Option<ICoreWebView2Environment> {
         return None;
     }
     rx.recv().ok().map(MainThread::into_inner)
+}
+
+/// Puts the popup above page views. The host is created with the window, and later page views
+/// would otherwise paint over it. Wry's container windows lack `WS_CLIPSIBLINGS`, so without it
+/// a lower sibling still paints across a higher one.
+pub fn raise_popup(webview: &Webview) {
+    let _ = webview.with_webview(|platform| {
+        let mut hwnd = HWND(std::ptr::null_mut());
+        if unsafe {
+            platform
+                .controller()
+                .ParentWindow(std::ptr::addr_of_mut!(hwnd))
+        }
+        .is_err()
+            || hwnd.0.is_null()
+        {
+            return;
+        }
+        if let Ok(parent) = unsafe { GetParent(hwnd) } {
+            let mut sibling = unsafe { GetWindow(parent, GW_CHILD) }.ok();
+            while let Some(child) = sibling {
+                clip_siblings(child);
+                sibling = unsafe { GetWindow(child, GW_HWNDNEXT) }.ok();
+            }
+        }
+        let _ = unsafe {
+            SetWindowPos(
+                hwnd,
+                Some(HWND_TOP),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            )
+        };
+    });
+}
+
+fn clip_siblings(hwnd: HWND) {
+    let style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) };
+    let flag = WS_CLIPSIBLINGS.0 as isize;
+    if style & flag != 0 {
+        return;
+    }
+    unsafe {
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style | flag);
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
+    }
 }
 
 /// Clips the popup's own window to rounded rectangles. `shape` is in physical pixels of the
