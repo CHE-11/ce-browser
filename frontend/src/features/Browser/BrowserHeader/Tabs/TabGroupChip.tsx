@@ -1,10 +1,10 @@
 import { useEffect, useRef, type MouseEvent } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { TabGroup, TabInfo } from "../../../../../types/browser";
-import { closePopup, openPopup, updateGroup, windowPoint } from "../../../lib/browser-client";
-import { cn } from "../../../lib/cn";
-import { focusRing } from "../../../lib/focus-ring";
-import { groupColorClasses, groupLabel } from "../../../lib/tab-rows";
+import type { TabGroup, TabInfo } from "../../../../../../types/browser";
+import { closePopup, openPopup, updateGroup, windowPoint } from "../../../../lib/browser-client";
+import { cn } from "../../../../lib/cn";
+import { focusRing } from "../../../../lib/focus-ring";
+import { groupColorClasses, groupLabel } from "../../../../lib/tab-rows";
 import { TabAlertDot } from "./TabAlertDot";
 
 type TabGroupChipProps = {

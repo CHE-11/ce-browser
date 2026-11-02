@@ -1,9 +1,9 @@
 import { ChevronDown } from "lucide-react";
-import type { Workspace } from "../../../../../types/browser";
-import { openPopupBelow } from "../../../lib/browser-client";
-import { cn } from "../../../lib/cn";
-import { focusRing } from "../../../lib/focus-ring";
-import { groupColorClasses } from "../../../lib/tab-rows";
+import type { Workspace } from "../../../../../../types/browser";
+import { openPopupBelow } from "../../../../lib/browser-client";
+import { cn } from "../../../../lib/cn";
+import { focusRing } from "../../../../lib/focus-ring";
+import { groupColorClasses } from "../../../../lib/tab-rows";
 
 type WorkspaceSwitcherProps = {
   workspaces: Workspace[];

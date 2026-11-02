@@ -11,13 +11,13 @@ import {
   setGroupContainer,
   ungroup,
   updateGroup,
-} from "../../../lib/browser-client";
-import { cn } from "../../../lib/cn";
-import { focusRing, focusRow } from "../../../lib/focus-ring";
-import { GROUP_COLORS, groupColorClasses } from "../../../lib/tab-rows";
-import { useTabs } from "../../../lib/use-browser";
+} from "../../../../lib/browser-client";
+import { cn } from "../../../../lib/cn";
+import { focusRing, focusRow } from "../../../../lib/focus-ring";
+import { GROUP_COLORS, groupColorClasses } from "../../../../lib/tab-rows";
+import { useTabs } from "../../../../lib/use-browser";
 import type { Container } from "@type/browser";
-import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "../../../components/PopupFrame";
+import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "../../../../components/PopupFrame";
 
 type TabGroupMenuProps = {
   groupId: number;

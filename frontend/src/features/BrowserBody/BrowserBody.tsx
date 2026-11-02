@@ -3,8 +3,8 @@ import type { BrowserSettings, ExtensionInfo, SplitView, TabInfo } from "@type/b
 import type { WindowTabsState } from "@/lib/use-browser";
 import { PageFailure } from "@/components/PageFailure";
 import { SplitDivider } from "@/components/SplitDivider";
-import { VerticalToolbar } from "@/features/BrowserBody/VerticalToolbar/VerticalToolbar";
-import { VerticalTabs } from "../BrowserHeader/Tabs/VerticalTabs/VerticalTabs";
+import { VerticalTabs } from "../Browser/BrowserHeader/Tabs/VerticalTabs";
+import { VerticalToolbar } from "../Browser/BrowserBody/VerticalToolbar/VerticalToolbar";
 
 type BrowserBodyProps = {
   snapshot: WindowTabsState;

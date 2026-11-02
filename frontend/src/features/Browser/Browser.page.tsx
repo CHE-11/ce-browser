@@ -5,8 +5,8 @@ import { splitToolbar, toolbarPinned } from "@/lib/toolbar-pin";
 import { useTabs, useBookmarks, useDownloads, useHistory, useExtensions, useAppearanceFromSettings } from "@/lib/use-browser";
 import { useRef, useState, useEffect, useLayoutEffect } from "react";
 import type { PopupKind } from "@type/browser";
-import { BrowserBody } from "../BrowserBody/BrowserBody";
-import { BrowserHeader } from "../BrowserHeader/BrowserHeader";
+import { BrowserBody } from "./BrowserBody/BrowserBody";
+import { BrowserHeader } from "./BrowserHeader/BrowserHeader";
 
 
 export function BrowserPage() {

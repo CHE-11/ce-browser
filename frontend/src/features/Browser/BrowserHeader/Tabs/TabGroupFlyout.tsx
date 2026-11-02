@@ -1,11 +1,11 @@
 import { Moon, Volume2, VolumeX } from "lucide-react";
-import { activateTab, closePopup } from "../../../lib/browser-client";
-import { cn } from "../../../lib/cn";
-import { tabProblemTitle, useHeavyTabs } from "../../../lib/tab-alert";
-import { groupColorClasses, groupLabel } from "../../../lib/tab-rows";
-import { useTabs } from "../../../lib/use-browser";
-import { FavIcon } from "../../../components/FavIcon";
-import { PopupFrame } from "../../../components/PopupFrame";
+import { activateTab, closePopup } from "../../../../lib/browser-client";
+import { cn } from "../../../../lib/cn";
+import { tabProblemTitle, useHeavyTabs } from "../../../../lib/tab-alert";
+import { groupColorClasses, groupLabel } from "../../../../lib/tab-rows";
+import { useTabs } from "../../../../lib/use-browser";
+import { FavIcon } from "../../../../components/FavIcon";
+import { PopupFrame } from "../../../../components/PopupFrame";
 import { TabAlertDot } from "./TabAlertDot";
 
 type TabGroupFlyoutProps = {

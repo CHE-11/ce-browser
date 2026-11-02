@@ -1,16 +1,17 @@
 import { forwardRef, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
-import type { BrowserSettings } from "../../../../../types/browser";
-import { createEphemeralTab, createTab, saveSettings, zoomTab } from "../../../lib/browser-client";
-import { cn } from "../../../lib/cn";
-import { focusRing } from "../../../lib/focus-ring";
-import { useTabDrag } from "../../../lib/tab-drag";
-import { useTabMotion } from "../../../lib/tab-motion";
-import { buildTabRows } from "../../../lib/tab-rows";
-import type { WindowTabsState } from "../../../lib/use-browser";
-import { zoomWheelStep } from "../../../lib/zoom";
-import { TabRowsView } from "./TabRowsView";
-import { WorkspaceSwitcher } from "../Workspace/WorkspaceSwitcher";
+import type { BrowserSettings } from "../../../../../../types/browser";
+import { createEphemeralTab, createTab, saveSettings, zoomTab } from "../../../../lib/browser-client";
+import { cn } from "../../../../lib/cn";
+import { focusRing } from "../../../../lib/focus-ring";
+import { useTabDrag } from "../../../../lib/tab-drag";
+import { useTabMotion } from "../../../../lib/tab-motion";
+import { buildTabRows } from "../../../../lib/tab-rows";
+import type { WindowTabsState } from "../../../../lib/use-browser";
+import { zoomWheelStep } from "../../../../lib/zoom";
+import { TabRowsView } from "../../BrowserHeader/Tabs/TabRowsView";
+import { WorkspaceSwitcher } from "../../BrowserHeader/Workspace/WorkspaceSwitcher";
+
 
 type VerticalTabsProps = {
   snapshot: WindowTabsState;
