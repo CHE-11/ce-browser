@@ -15,9 +15,28 @@ const STATS_DELAY: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AdblockKind {
+    pub kind: String,
+    pub count: u32,
+}
+
+/// A host with requests blocked on the current page.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdblockHost {
+    pub host: String,
+    pub count: u32,
+    /// Blocklist domain that matched. Same as `host` when the host itself is listed.
+    pub rule: String,
+    pub kinds: Vec<AdblockKind>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AdblockStats {
     pub tab_id: u32,
     pub blocked: u32,
+    pub hosts: Vec<AdblockHost>,
 }
 
 #[derive(Default)]
@@ -26,12 +45,19 @@ struct Config {
     allowed: HashSet<String>,
 }
 
+struct HostHit {
+    count: u32,
+    rule: String,
+    kinds: HashMap<&'static str, u32>,
+}
+
 #[derive(Default)]
 struct TabState {
     page_host: Option<String>,
     blocked: u32,
     /// A stats event is already scheduled for this tab.
     pending: bool,
+    hosts: HashMap<String, HostHit>,
 }
 
 fn blocklist() -> &'static HashSet<String> {
@@ -103,9 +129,14 @@ fn host_and_parents(host: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-fn host_blocked(host: &str) -> bool {
+/// The listed domain that covers `host`, which may be a parent of it.
+fn matched_rule(host: &str) -> Option<&str> {
     let list = blocklist();
-    host_and_parents(host).any(|candidate| list.contains(candidate))
+    host_and_parents(host).find(|candidate| list.contains(*candidate))
+}
+
+fn host_blocked(host: &str) -> bool {
+    matched_rule(host).is_some()
 }
 
 /// Registrable domain without a public suffix list: the last two labels, or three under
@@ -156,22 +187,18 @@ pub fn active_for(page_url: &str) -> bool {
 
 /// A main-frame navigation in tab `id` started. Resets the tab's count.
 pub fn page_started(app: &AppHandle, id: u32, url: &str) {
-    {
+    let stats = {
         let mut tabs = tabs().lock().expect("adblock tabs lock");
         let tab = tabs.entry(id).or_default();
         tab.page_host = http_host(url);
-        if tab.blocked == 0 {
-            return;
-        }
+        let changed = tab.blocked != 0 || !tab.hosts.is_empty();
         tab.blocked = 0;
+        tab.hosts.clear();
+        changed.then(|| snapshot(id, tab))
+    };
+    if let Some(stats) = stats {
+        let _ = app.emit("adblock-stats", stats);
     }
-    let _ = app.emit(
-        "adblock-stats",
-        AdblockStats {
-            tab_id: id,
-            blocked: 0,
-        },
-    );
 }
 
 pub fn forget(id: u32) {
@@ -179,26 +206,74 @@ pub fn forget(id: u32) {
 }
 
 pub fn stats(id: u32) -> AdblockStats {
-    let blocked = tabs()
+    tabs()
         .lock()
         .expect("adblock tabs lock")
         .get(&id)
-        .map_or(0, |tab| tab.blocked);
+        .map(|tab| snapshot(id, tab))
+        .unwrap_or(AdblockStats {
+            tab_id: id,
+            blocked: 0,
+            hosts: Vec::new(),
+        })
+}
+
+fn snapshot(id: u32, tab: &TabState) -> AdblockStats {
+    let mut hosts: Vec<AdblockHost> = tab
+        .hosts
+        .iter()
+        .map(|(host, hit)| {
+            let mut kinds: Vec<AdblockKind> = hit
+                .kinds
+                .iter()
+                .map(|(kind, count)| AdblockKind {
+                    kind: (*kind).to_string(),
+                    count: *count,
+                })
+                .collect();
+            kinds.sort_by(|left, right| {
+                right
+                    .count
+                    .cmp(&left.count)
+                    .then_with(|| left.kind.cmp(&right.kind))
+            });
+            AdblockHost {
+                host: host.clone(),
+                count: hit.count,
+                rule: hit.rule.clone(),
+                kinds,
+            }
+        })
+        .collect();
+    hosts.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then_with(|| left.host.cmp(&right.host))
+    });
     AdblockStats {
         tab_id: id,
-        blocked,
+        blocked: tab.blocked,
+        hosts,
     }
 }
 
 /// Decides whether a request from tab `id` is dropped, and counts it when it is.
 /// The tab's own page is never blocked, so a link to a listed host still opens.
-pub fn should_block(app: &AppHandle, id: u32, request_url: &str, is_document: bool) -> bool {
+/// `kind` is a short request type such as `script` or `image`.
+pub fn should_block(
+    app: &AppHandle,
+    id: u32,
+    request_url: &str,
+    is_document: bool,
+    kind: &'static str,
+) -> bool {
     let Some(request_host) = http_host(request_url) else {
         return false;
     };
-    if !host_blocked(&request_host) {
+    let Some(rule) = matched_rule(&request_host) else {
         return false;
-    }
+    };
     let page_host = tabs()
         .lock()
         .expect("adblock tabs lock")
@@ -217,15 +292,26 @@ pub fn should_block(app: &AppHandle, id: u32, request_url: &str, is_document: bo
             return false;
         }
     }
-    record_block(app, id);
+    record_block(app, id, &request_host, rule, kind);
     true
 }
 
-fn record_block(app: &AppHandle, id: u32) {
+fn record_block(app: &AppHandle, id: u32, host: &str, rule: &str, kind: &'static str) {
     let schedule = {
         let mut tabs = tabs().lock().expect("adblock tabs lock");
         let tab = tabs.entry(id).or_default();
         tab.blocked = tab.blocked.saturating_add(1);
+        let hit = tab
+            .hosts
+            .entry(host.to_string())
+            .or_insert_with(|| HostHit {
+                count: 0,
+                rule: rule.to_string(),
+                kinds: HashMap::new(),
+            });
+        hit.count = hit.count.saturating_add(1);
+        let kind_count = hit.kinds.entry(kind).or_insert(0);
+        *kind_count = kind_count.saturating_add(1);
         !std::mem::replace(&mut tab.pending, true)
     };
     if !schedule {
@@ -234,21 +320,15 @@ fn record_block(app: &AppHandle, id: u32) {
     let app = app.clone();
     thread::spawn(move || {
         thread::sleep(STATS_DELAY);
-        let blocked = {
+        let stats = {
             let mut tabs = tabs().lock().expect("adblock tabs lock");
             let Some(tab) = tabs.get_mut(&id) else {
                 return;
             };
             tab.pending = false;
-            tab.blocked
+            snapshot(id, tab)
         };
-        let _ = app.emit(
-            "adblock-stats",
-            AdblockStats {
-                tab_id: id,
-                blocked,
-            },
-        );
+        let _ = app.emit("adblock-stats", stats);
     });
 }
 
@@ -265,6 +345,15 @@ pub fn cosmetic_script() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_subdomain_reports_the_listed_parent() {
+        assert_eq!(
+            matched_rule("securepubads.g.doubleclick.net"),
+            Some("doubleclick.net")
+        );
+        assert_eq!(matched_rule("example.com"), None);
+    }
 
     #[test]
     fn listed_hosts_and_their_subdomains_are_blocked() {

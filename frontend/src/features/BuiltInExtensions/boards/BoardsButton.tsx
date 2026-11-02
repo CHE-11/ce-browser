@@ -1,17 +1,11 @@
 import { useRef } from "react";
 import { Check, LayoutGrid, LoaderCircle } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
-import { openPopupBelow, pinElement, pinLink, pinPage, pinRegion } from "@/lib/browser-client";
+import { openPopup, pinElement, pinLink, pinPage, pinRegion } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import type { PageToolRequest, Pin, TabInfo } from "@type/browser";
 import { tabParams } from "../shared";
 import { errorText, usePageToolRequests, useToolStatus } from "../use-page-tool";
-
-const POPOVER_WIDTH = 340;
-/** Placeholder only. The popover stays hidden until it reports its real height. */
-const POPOVER_HEIGHT = 560;
-const IMAGES_WIDTH = 440;
-const IMAGES_HEIGHT = 480;
 
 type BoardsRequest = Extract<PageToolRequest, { tool: "boards" }>;
 
@@ -22,12 +16,7 @@ export function BoardsButton({ activeTab }: { activeTab: TabInfo | undefined }) 
   const showPopover = (kind: "boards" | "board-images", params: URLSearchParams) => {
     const anchor = buttonRef.current;
     if (anchor) {
-      void openPopupBelow(anchor, {
-        kind,
-        params: params.toString(),
-        width: kind === "boards" ? POPOVER_WIDTH : IMAGES_WIDTH,
-        height: kind === "boards" ? POPOVER_HEIGHT : IMAGES_HEIGHT,
-      });
+      void openPopup(kind, anchor, { params: params.toString() });
     }
   };
 

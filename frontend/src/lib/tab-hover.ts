@@ -5,8 +5,6 @@ const FIRST_DELAY_MS = 550;
 const NEXT_DELAY_MS = 80;
 const CLOSE_DELAY_MS = 150;
 const WARM_MS = 600;
-const CARD_WIDTH = 280;
-const CARD_HEIGHT = 240;
 
 let openTimer: number | null = null;
 let closeTimer: number | null = null;
@@ -56,16 +54,11 @@ export function hoverTab(tabId: number, element: HTMLElement, vertical: boolean)
     if (popupKind !== null && popupKind !== "tab-hover") {
       return;
     }
-    const rect = element.getBoundingClientRect();
     shownFor = tabId;
-    void openPopup({
-      kind: "tab-hover",
+    void openPopup("tab-hover", element, {
       params: `id=${tabId}`,
+      placement: vertical ? "right-start" : "bottom-start",
       focus: false,
-      x: vertical ? rect.right + 6 : rect.left,
-      y: vertical ? rect.top : rect.bottom + 4,
-      width: CARD_WIDTH,
-      height: CARD_HEIGHT,
     }).catch(() => {
       shownFor = null;
     });

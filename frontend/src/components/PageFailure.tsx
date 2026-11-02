@@ -1,7 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { Archive, ArrowLeft, Bug, Clock, Globe, RotateCw, Search, ShieldAlert, Unplug, WifiOff } from "lucide-react";
+import { ArrowLeft, Bug, Clock, Globe, RotateCw, Search, ShieldAlert, Unplug, WifiOff } from "lucide-react";
 import type { TabFailure, TabInfo } from "@type/browser";
-import { allowCertificate, goBack, navigate, reload, waybackUrl } from "../lib/browser-client";
+import { allowCertificate, goBack, navigate, reload } from "../lib/browser-client";
 import { cn } from "../lib/cn";
 import { hostOf } from "../lib/format";
 import { Button } from "./Button";
@@ -165,14 +165,6 @@ export function PageFailure({ tab, failure, className, style }: PageFailureProps
                   >
                     <Search id={`page-failure-${tab.id}-search-icon`} className="size-4" aria-hidden />
                     Search instead
-                  </Button>
-                  <Button
-                    id={`page-failure-${tab.id}-cached`}
-                    disabled={busy}
-                    onClick={() => run(async () => navigate(tab.id, await waybackUrl(false, failure.url)))}
-                  >
-                    <Archive id={`page-failure-${tab.id}-cached-icon`} className="size-4" aria-hidden />
-                    Open cached copy
                   </Button>
                 </>
               ) : null}

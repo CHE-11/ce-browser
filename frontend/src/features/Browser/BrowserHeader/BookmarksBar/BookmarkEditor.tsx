@@ -108,7 +108,7 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
   };
 
   return (
-    <PopupFrame id="bookmark-editor" ready={loaded && (bookmark !== null || error !== null)}>
+    <PopupFrame id="bookmark-editor" width={340} ready={loaded && (bookmark !== null || error !== null)}>
       <form
         id="bookmark-editor-form"
         className="flex flex-col gap-3 p-4"

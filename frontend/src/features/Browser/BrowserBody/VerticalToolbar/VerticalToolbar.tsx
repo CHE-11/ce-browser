@@ -3,7 +3,7 @@ import { PanelTop } from "lucide-react";
 import type { BrowserSettings, ExtensionInfo, TabInfo } from "@type/browser";
 import { ToolbarIcon } from "@features/BuiltInExtensions";
 import { builtinTool } from "@features/BuiltInExtensions/builtin";
-import { openPopupBelow, saveSettings } from "@/lib/browser-client";
+import { openPopup, saveSettings } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { openToolbarPinMenu, reorderToolbarAt, splitToolbar, toolbarDragHandlers, toolbarPinned } from "@/lib/toolbar-pin";
 import { ExtensionIcon } from "@/components/ExtensionIcon";
@@ -24,12 +24,7 @@ export function ExtensionToolbarButton({ extension, idPrefix }: ExtensionToolbar
       label={extension.name}
       disabled={!extension.popup}
       onClick={(event) =>
-        void openPopupBelow(event.currentTarget, {
-          kind: "extension",
-          params: `id=${extension.id}`,
-          width: 380,
-          height: 600,
-        })
+        void openPopup("extension", event.currentTarget, { params: `id=${extension.id}` })
       }
     >
       <ExtensionIcon

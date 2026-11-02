@@ -3,6 +3,7 @@ import { ShieldCheck } from "lucide-react";
 
 import { OptionRow, PopoverHeader } from "../PopoverParts";
 import { readPopoverTab } from "../shared";
+import { AdBlockerHosts } from "./AdBlockerHosts";
 import { siteKey, sitePaused, useAdblockStatsState } from "./use-adblock-stats";
 import { PopupFrame } from "@/components/PopupFrame";
 import { saveSettings, reload } from "@/lib/browser-client";
@@ -27,7 +28,7 @@ export function AdBlockerPopover({ params }: AdBlockerPopoverProps) {
   const tab = readPopoverTab(params);
   const host = params.get("host") ?? "";
   const { settings, loaded: settingsLoaded } = useSettingsState();
-  const { blocked, loaded: statsLoaded } = useAdblockStatsState(tab.id);
+  const { blocked, hosts, loaded: statsLoaded } = useAdblockStatsState(tab.id);
   const [saving, setSaving] = useState(false);
 
   const adblock = settings?.adblock ?? { enabled: true, allowedSites: [] };
@@ -50,7 +51,7 @@ export function AdBlockerPopover({ params }: AdBlockerPopoverProps) {
   };
 
   return (
-    <PopupFrame id="ad-blocker-popover" maxHeight={420} ready={settingsLoaded && statsLoaded}>
+    <PopupFrame id="ad-blocker-popover" width={360} maxHeight={560} ready={settingsLoaded && statsLoaded}>
       <PopoverHeader
         id="ad-blocker-header"
         icon={<ShieldCheck aria-hidden />}
@@ -73,6 +74,7 @@ export function AdBlockerPopover({ params }: AdBlockerPopoverProps) {
                 : `${blocked === 1 ? "Ad or tracker" : "Ads and trackers"} blocked on this page`}
           </p>
         </div>
+        {active ? <AdBlockerHosts hosts={hosts} /> : null}
         <OptionRow
           id="ad-blocker-enabled"
           label="Block ads and trackers"

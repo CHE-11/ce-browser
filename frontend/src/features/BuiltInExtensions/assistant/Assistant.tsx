@@ -16,7 +16,6 @@ export function AssistantButton({ activeTab }: { activeTab: TabInfo | undefined 
       kind="assistant"
       icon={<Sparkles id="address-assistant-icon" aria-hidden />}
       activeTab={activeTab}
-      height={460}
     />
   );
 }
@@ -38,7 +37,7 @@ export function AssistantPopover({ params }: { params: URLSearchParams }) {
   };
 
   return (
-    <PopupFrame id="assistant-popover" maxHeight={480}>
+    <PopupFrame id="assistant-popover" width={340} maxHeight={480}>
       <PopoverHeader id="assistant-header" icon={<Sparkles aria-hidden />} title="Assistant" subtitle={tab.title || tab.url} />
       <div id="assistant-body" className="flex flex-col gap-2 px-3 pb-3">
         <Button id="assistant-summarize" variant="primary" disabled={busy} onClick={() => ask("")}>

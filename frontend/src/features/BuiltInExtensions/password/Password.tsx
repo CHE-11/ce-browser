@@ -28,7 +28,6 @@ export function PasswordButton({ activeTab }: { activeTab: TabInfo | undefined }
       icon={<KeyRound id="address-password-icon" aria-hidden />}
       activeTab={activeTab}
       needsPage={false}
-      height={480}
     />
   );
 }
@@ -87,7 +86,7 @@ export function PasswordPopover() {
   };
 
   return (
-    <PopupFrame id="password-popover" maxHeight={520}>
+    <PopupFrame id="password-popover" width={320} maxHeight={520}>
       <PopoverHeader id="password-header" icon={<KeyRound aria-hidden />} title="Password" subtitle="Generated on this computer" />
       <div id="password-body" className="flex flex-col gap-2 px-3 pb-3">
         <label id="password-length-label" className="flex items-center gap-2 text-xs text-zinc-400">

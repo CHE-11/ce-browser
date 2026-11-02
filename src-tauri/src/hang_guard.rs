@@ -47,6 +47,11 @@ pub fn init(app: &AppHandle) {
     std::thread::spawn(move || watch(&app));
 }
 
+/// True on the thread that runs the event loop.
+pub fn on_main_thread() -> bool {
+    MAIN_THREAD.load(Ordering::SeqCst) == unsafe { GetCurrentThreadId() }
+}
+
 /// The watchdog ended a page process a moment ago, so a crash page can say why.
 pub fn ended_recently() -> bool {
     ENDED_AT

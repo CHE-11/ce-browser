@@ -6,11 +6,11 @@ import { useSettingsState, useExtensions } from "@/lib/use-browser";
 import { PinOff } from "lucide-react";
 
 
-type ExtensionPinMenuProps = {
+type ExtensionPinContextMenuProps = {
   extensionId: string;
 };
 
-export function ExtensionPinMenu({ extensionId }: ExtensionPinMenuProps) {
+export function ExtensionPinContextMenu({ extensionId }: ExtensionPinContextMenuProps) {
   const { settings, loaded: settingsLoaded } = useSettingsState();
   const { extensions, loaded: extensionsLoaded } = useExtensions();
   const name =
@@ -26,7 +26,7 @@ export function ExtensionPinMenu({ extensionId }: ExtensionPinMenuProps) {
   };
 
   return (
-    <PopupFrame id="extension-pin-menu" ready={settingsLoaded && extensionsLoaded}>
+    <PopupFrame id="extension-pin-menu" width={220} ready={settingsLoaded && extensionsLoaded}>
       <PopupMenu id="extension-pin-menu-items" label={name}>
         <PopupMenuItem
           id="extension-pin-menu-unpin"

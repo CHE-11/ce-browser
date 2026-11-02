@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CaseSensitive, ChevronDown, ChevronUp, Layers, WholeWord, X } from "lucide-react";
 import type { FindResult } from "@type/browser";
-import { clearFind, findInPage, openPopupBelow } from "../lib/browser-client";
+import { clearFind, findInPage, openPopup } from "../lib/browser-client";
 import { cn } from "../lib/cn";
 import { IconButton } from "./IconButton";
 
@@ -124,7 +124,7 @@ export function FindBar({ tabId, focusToken, onClose }: FindBarProps) {
         disabled={!query}
         onClick={(event) => {
           const params = new URLSearchParams({ query, case: caseSensitive ? "1" : "0", word: wholeWord ? "1" : "0" });
-          void openPopupBelow(event.currentTarget, { kind: "find-all", params: params.toString(), width: 380, height: 420 });
+          void openPopup("find-all", event.currentTarget, { params: params.toString() });
         }}
       >
         <Layers id="find-bar-all-tabs-icon" aria-hidden />

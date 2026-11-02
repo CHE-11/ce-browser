@@ -16,7 +16,6 @@ export function PriceButton({ activeTab }: { activeTab: TabInfo | undefined }) {
       kind="price"
       icon={<Tags id="address-price-icon" aria-hidden />}
       activeTab={activeTab}
-      height={420}
     />
   );
 }
@@ -33,7 +32,7 @@ export function PricePopover({ params }: { params: URLSearchParams }) {
   useEffect(load, []);
 
   return (
-    <PopupFrame id="price-popover" maxHeight={460}>
+    <PopupFrame id="price-popover" width={320} maxHeight={460}>
       <PopoverHeader id="price-header" icon={<Tags aria-hidden />} title="Prices" subtitle={tab.title || tab.url} />
       <div id="price-body" className="flex flex-col gap-2 px-3 pb-3">
         <div id="price-actions" className="flex gap-2">

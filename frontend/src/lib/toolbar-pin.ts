@@ -3,8 +3,8 @@ import type { BrowserSettings } from "../../../types/browser";
 import { BUILTIN_TOOLS } from "../features/BuiltInExtensions/builtin";
 import { openPopup, saveSettings } from "./browser-client";
 
-/** Built-in tools, in the order they had before a custom order was saved. */
-export const DEFAULT_TOOLBAR = BUILTIN_TOOLS.map((tool) => tool.id);
+/** Built-in tools, in the order they had before a custom order was saved. Address-bar controls are placed directly. */
+export const DEFAULT_TOOLBAR = BUILTIN_TOOLS.filter((tool) => !tool.address).map((tool) => tool.id);
 
 /** Saved ids that are still pinned, then any pinned id the saved list does not mention. */
 export function toolbarOrder(saved: string[] | undefined, available: string[]) {
@@ -130,12 +130,5 @@ export function saveToolbarPin(settings: BrowserSettings, id: string, pinned: bo
 /** Right-click menu for an icon that is currently on a toolbar. */
 export function openToolbarPinMenu(event: MouseEvent, id: string) {
   event.preventDefault();
-  void openPopup({
-    kind: "extension-pin",
-    params: `id=${encodeURIComponent(id)}`,
-    x: event.clientX,
-    y: event.clientY,
-    width: 220,
-    height: 64,
-  });
+  void openPopup("extension-pin", { x: event.clientX, y: event.clientY }, { params: `id=${encodeURIComponent(id)}` });
 }

@@ -45,7 +45,7 @@ export function MediaGrid({ tabId }: MediaGridProps) {
   };
 
   return (
-    <PopupFrame id="media-grid" maxHeight={520}>
+    <PopupFrame id="media-grid" width={420} maxHeight={520}>
       <div id="media-grid-header" className="flex items-center gap-2 px-4 pb-2 pt-3">
         <h2 id="media-grid-title" className="flex-1 text-sm font-semibold">
           Media on this page

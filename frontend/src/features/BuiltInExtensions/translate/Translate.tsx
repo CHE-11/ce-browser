@@ -50,7 +50,7 @@ export function TranslatePopover({ params }: { params: URLSearchParams }) {
   };
 
   return (
-    <PopupFrame id="translate-popover" maxHeight={480}>
+    <PopupFrame id="translate-popover" width={320} maxHeight={480}>
       <PopoverHeader id="translate-header" icon={<Languages aria-hidden />} title="Translate" subtitle={tab.title || tab.url} />
       <div id="translate-body" className="flex flex-col gap-2 px-3 pb-3">
         <LanguageCombobox id="translate-language" value={language} onChange={setLanguage} />

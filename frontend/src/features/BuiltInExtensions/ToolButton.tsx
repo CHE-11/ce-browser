@@ -1,6 +1,6 @@
 import { useRef, type ReactNode } from "react";
 import { IconButton } from "@/components/IconButton";
-import { openPopupBelow, restoreTranslation, translationActive } from "@/lib/browser-client";
+import { openPopup, restoreTranslation, translationActive } from "@/lib/browser-client";
 import type { PopupKind, TabInfo } from "@type/browser";
 import { capturable, tabParams } from "./shared";
 
@@ -10,15 +10,21 @@ type ToolButtonProps = {
   kind: PopupKind;
   icon: ReactNode;
   activeTab: TabInfo | undefined;
-  width?: number;
-  height?: number;
   /** When the page is already translated, a click reloads it. */
   restore?: boolean;
   /** Password does not need a website open. */
   needsPage?: boolean;
+  /** Count drawn on the top-right of the icon. Hidden at zero. */
+  badge?: number;
+  /** Control drawn on the top-left of the icon, above the button. */
+  corner?: ReactNode;
 };
 
-export function ToolButton({ id, label, kind, icon, activeTab, width = 320, height = 360, restore, needsPage = true }: ToolButtonProps) {
+function badgeText(count: number) {
+  return count > 99 ? "99+" : String(count);
+}
+
+export function ToolButton({ id, label, kind, icon, activeTab, restore, needsPage = true, badge = 0, corner }: ToolButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   const open = () => {
@@ -28,12 +34,7 @@ export function ToolButton({ id, label, kind, icon, activeTab, width = 320, heig
     }
     const tab = activeTab;
     const show = () => {
-      void openPopupBelow(anchor, {
-        kind,
-        params: tab ? tabParams(tab) : "",
-        width,
-        height,
-      });
+      void openPopup(kind, anchor, { params: tab ? tabParams(tab) : "" });
     };
     if (restore && tab) {
       void translationActive(tab.id).then((active) => {
@@ -49,8 +50,24 @@ export function ToolButton({ id, label, kind, icon, activeTab, width = 320, heig
   };
 
   return (
-    <IconButton id={`address-${id}`} ref={buttonRef} label={label} disabled={needsPage && !capturable(activeTab?.url)} onClick={open}>
-      {icon}
-    </IconButton>
+    <span id={`address-${id}-slot`} className="relative inline-flex">
+      {corner ? (
+        <span id={`address-${id}-corner`} className="absolute top-0 left-0 z-10 -translate-x-1/4 -translate-y-1/4">
+          {corner}
+        </span>
+      ) : null}
+      <IconButton id={`address-${id}`} ref={buttonRef} label={label} disabled={needsPage && !capturable(activeTab?.url)} className="relative" onClick={open}>
+        {icon}
+        {badge > 0 ? (
+          <span
+            id={`address-${id}-badge`}
+            className="pointer-events-none absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-sky-600 px-1 text-center text-[9px] font-semibold leading-4 text-white"
+            aria-hidden
+          >
+            {badgeText(badge)}
+          </span>
+        ) : null}
+      </IconButton>
+    </span>
   );
 }

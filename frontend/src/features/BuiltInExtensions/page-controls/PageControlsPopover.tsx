@@ -6,22 +6,19 @@ import { readPopoverTab } from "../shared";
 import { controlFor, siteKey } from "./site";
 import { PopupFrame } from "@/components/PopupFrame";
 import { cn } from "@/lib/cn";
-import { focusRing, focusRow } from "@/lib/focus-ring";
+import { focusRow } from "@/lib/focus-ring";
 import {
   closePopup,
   createTab,
-  openPopupBelow,
+  openPopup,
   openReader,
   reload,
   saveSettings,
-  setDevice,
   setTabRefresh,
   startInspector,
   startZapper,
   updateSiteControl,
-  zoomTab,
 } from "@/lib/browser-client";
-import { Button } from "@/components/Button";
 import { usePageRules, useSettings, useTabs } from "@/lib/use-browser";
 import type { ReferrerMode, SitePatch } from "@type/browser";
 
@@ -51,8 +48,6 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
   const settings = useSettings();
   const snapshot = useTabs();
   const live = snapshot.tabs.find((item) => item.id === tab.id);
-  const windowLabel = live?.window || "main";
-  const device = snapshot.windows.find((item) => item.label === windowLabel)?.device ?? "";
   const site = controlFor(rules, host);
   const [agent, setAgent] = useState(site.userAgent);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +69,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
   };
 
   return (
-    <PopupFrame id="page-controls-popover" maxHeight={640} ready={rules !== null && snapshot.loaded}>
+    <PopupFrame id="page-controls-popover" width={340} maxHeight={2000} ready={rules !== null && snapshot.loaded}>
       <PopoverHeader id="page-controls-header" icon={<SlidersHorizontal aria-hidden />} title="Page controls" subtitle={host} />
       <div id="page-controls-body" className="flex flex-col gap-1 px-2 pb-3">
         <OptionRow
@@ -204,22 +199,6 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
             </option>
           </select>
         </label>
-        <div id="page-controls-zoom" className="flex items-center gap-3 px-2.5 py-1.5 text-sm">
-          <span id="page-controls-zoom-label" className="min-w-0 flex-1">
-            Zoom on this site
-            <span id="page-controls-zoom-hint" className="block text-[11px] text-zinc-500">
-              {site.zoom ? "Remembered from Ctrl +/-" : "Follows the default page zoom"}
-            </span>
-          </span>
-          <span id="page-controls-zoom-value" className="tabular-nums text-zinc-300">
-            {site.zoom ? `${site.zoom}%` : `${Math.round((live?.zoom ?? 1) * 100)}%`}
-          </span>
-          {site.zoom ? (
-            <Button id="page-controls-zoom-reset" size="xs" variant="outline" onClick={() => void zoomTab(tab.id, "reset")}>
-              Reset
-            </Button>
-          ) : null}
-        </div>
         <OptionRow
           id="page-controls-https"
           label="Allow http on this site"
@@ -282,27 +261,6 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
           disabled={(live?.refreshSecs ?? 0) === 0}
           onChange={(watch) => void setTabRefresh(tab.id, live?.refreshSecs ?? 0, watch)}
         />
-        <div id="page-controls-device" className="flex gap-1 px-1 py-1">
-          {(
-            [
-              ["", "Off"],
-              ["phone", "Phone"],
-              ["tablet", "Tablet"],
-              ["laptop", "Laptop"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              id={`page-controls-device-${value || "off"}`}
-              key={value || "off"}
-              type="button"
-              aria-pressed={device === value}
-              className={cn("h-7 flex-1 rounded-md text-xs", focusRing, device === value ? "bg-sky-600 text-white" : "bg-zinc-800 text-zinc-300")}
-              onClick={() => void setDevice(windowLabel, value)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
         <div id="page-controls-actions" className="flex flex-col gap-1 px-1 pt-1">
           <button
             id="page-controls-reader"
@@ -340,12 +298,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
             type="button"
             className={actionClass}
             onClick={(event) =>
-              void openPopupBelow(event.currentTarget, {
-                kind: "network",
-                params: `id=${tab.id}`,
-                width: 440,
-                height: 480,
-              })
+              void openPopup("network", event.currentTarget, { params: `id=${tab.id}` })
             }
           >
             Network log

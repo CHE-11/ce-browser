@@ -15,23 +15,45 @@ pub struct MediaElement {
     pub tab_id: u32,
     pub index: u32,
     pub kind: String,
+    /// Media address. Often a blob URL, so the hub prefers the tab title.
     pub label: String,
+    /// Title or accessible name on the element itself.
+    pub title: String,
+    /// Poster image address, when the page set one that is not inline data.
+    pub poster: String,
     pub current: f64,
     pub duration: f64,
     pub paused: bool,
     pub muted: bool,
+    /// 0 to 1.
+    pub volume: f64,
+    pub playback_rate: f64,
+    pub width: u32,
+    pub height: u32,
+    pub ended: bool,
+    pub tab_title: String,
+    pub tab_url: String,
+    pub favicon: Option<String>,
+    pub site: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 struct RawElement {
     index: u32,
     kind: String,
     label: String,
+    title: String,
+    poster: String,
     current: f64,
     duration: f64,
     paused: bool,
     muted: bool,
+    volume: f64,
+    playback_rate: f64,
+    width: u32,
+    height: u32,
+    ended: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,18 +66,95 @@ pub struct PageMedia {
 }
 
 const LIST_SCRIPT: &str = r#"(function () {
-  return Array.from(document.querySelectorAll("video, audio")).map(function (el, index) {
-    var label = el.currentSrc || el.src || el.tagName;
-    return {
+  function clean(value) {
+    return String(value || "").replace(/\s+/g, " ").trim().slice(0, 180);
+  }
+  function area(el) {
+    var rect = el.getBoundingClientRect();
+    return Math.max(0, rect.width) * Math.max(0, rect.height);
+  }
+  // YouTube leaves a second video in the page for the hover preview and for preloading.
+  function concealed(el) {
+    if (el.tagName === "AUDIO") return false;
+    var style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return true;
+    var rect = el.getBoundingClientRect();
+    if (rect.width < 24 || rect.height < 24) return true;
+    if (el.closest("ytd-video-preview, ytd-thumbnail, ytd-reel-item-renderer, ytd-compact-video-renderer, .ytp-videowall-still, .ytp-ce-element, .ytp-inline-preview-player")) return true;
+    return false;
+  }
+  var nodes = Array.from(document.querySelectorAll("video, audio"));
+  var keep = nodes.map(function (el) {
+    var src = el.currentSrc || el.src || "";
+    if (!src && !(el.duration > 0) && el.paused) return false;
+    return !concealed(el);
+  });
+  var groups = [];
+  nodes.forEach(function (el, index) {
+    if (!keep[index] || el.tagName !== "VIDEO") return;
+    var root = el.closest(".html5-video-player, ytd-player") || null;
+    if (!root) return;
+    var group = null;
+    for (var i = 0; i < groups.length; i++) {
+      if (groups[i].root === root) group = groups[i];
+    }
+    if (!group) {
+      group = { root: root, indexes: [] };
+      groups.push(group);
+    }
+    group.indexes.push(index);
+  });
+  groups.forEach(function (group) {
+    if (group.indexes.length < 2) return;
+    var best = group.indexes[0];
+    group.indexes.forEach(function (index) {
+      var el = nodes[index];
+      var chosen = nodes[best];
+      var larger = area(el) - area(chosen);
+      if (larger > 1) best = index;
+      else if (Math.abs(larger) <= 1 && chosen.muted && !el.muted) best = index;
+      else if (Math.abs(larger) <= 1 && chosen.muted === el.muted && el.classList.contains("html5-main-video") && !chosen.classList.contains("html5-main-video")) best = index;
+    });
+    group.indexes.forEach(function (index) {
+      if (index !== best) keep[index] = false;
+    });
+  });
+  var largest = 0;
+  nodes.forEach(function (el, index) {
+    if (keep[index] && el.tagName === "VIDEO") largest = Math.max(largest, area(el));
+  });
+  if (largest > 0) {
+    nodes.forEach(function (el, index) {
+      if (!keep[index] || el.tagName !== "VIDEO" || !el.muted) return;
+      if (area(el) < largest * 0.5) keep[index] = false;
+    });
+  }
+  var rows = [];
+  nodes.forEach(function (el, index) {
+    if (!keep[index]) return;
+    var src = el.currentSrc || el.src || "";
+    var poster = "";
+    if (el.poster && String(el.poster).indexOf("data:") !== 0 && String(el.poster).length < 400) {
+      poster = String(el.poster);
+    }
+    rows.push({
       index: index,
       kind: el.tagName.toLowerCase(),
-      label: String(label).slice(0, 180),
+      label: String(src).slice(0, 180),
+      title: clean(el.getAttribute("title") || el.getAttribute("aria-label")),
+      poster: poster,
       current: Number.isFinite(el.currentTime) ? el.currentTime : 0,
       duration: Number.isFinite(el.duration) ? el.duration : 0,
-      paused: el.paused,
-      muted: el.muted
-    };
+      paused: !!el.paused,
+      muted: !!el.muted,
+      volume: Number.isFinite(el.volume) ? el.volume : 1,
+      playbackRate: Number.isFinite(el.playbackRate) ? el.playbackRate : 1,
+      width: el.videoWidth || 0,
+      height: el.videoHeight || 0,
+      ended: !!el.ended
+    });
   });
+  return rows;
 })()"#;
 
 const SOURCES_SCRIPT: &str = r#"(function () {
@@ -102,18 +201,24 @@ const PAGE_SCRIPT: &str = r#"(async function () {
   return { title: document.title || "", html: root.outerHTML, css: css.slice(0, 500000) };
 })()"#;
 
-pub fn list_playing(app: &AppHandle) -> Vec<MediaElement> {
-    let tabs = tabs::snapshot(app)
+fn media_tabs(app: &AppHandle) -> Vec<u32> {
+    tabs::snapshot(app)
         .tabs
         .into_iter()
         .filter(|tab| {
             tab.loaded && (tab.url.starts_with("http://") || tab.url.starts_with("https://"))
         })
         .map(|tab| tab.id)
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+pub fn list_playing(app: &AppHandle) -> Vec<MediaElement> {
     let mut found = Vec::new();
-    for id in tabs {
-        let Some(webview) = tabs::page_view(app, id) else {
+    for tab in tabs::snapshot(app).tabs {
+        if !tab.loaded || !(tab.url.starts_with("http://") || tab.url.starts_with("https://")) {
+            continue;
+        }
+        let Some(webview) = tabs::page_view(app, tab.id) else {
             continue;
         };
         let Ok(value) = webview2::evaluate(&webview, LIST_SCRIPT, Duration::from_secs(3), FAILURE)
@@ -123,23 +228,50 @@ pub fn list_playing(app: &AppHandle) -> Vec<MediaElement> {
         let Ok(items) = serde_json::from_value::<Vec<RawElement>>(value) else {
             continue;
         };
-        if items.is_empty() {
-            continue;
-        }
         for item in items {
             found.push(MediaElement {
-                tab_id: id,
+                tab_id: tab.id,
                 index: item.index,
                 kind: item.kind,
                 label: item.label,
+                title: item.title,
+                poster: item.poster,
                 current: item.current,
                 duration: item.duration,
                 paused: item.paused,
                 muted: item.muted,
+                volume: item.volume,
+                playback_rate: item.playback_rate,
+                width: item.width,
+                height: item.height,
+                ended: item.ended,
+                tab_title: tab.title.clone(),
+                tab_url: tab.url.clone(),
+                favicon: tab.favicon.clone(),
+                site: tab.site.clone(),
             });
         }
     }
     found
+}
+
+/// Mutes or unmutes every audio and video element in open pages.
+pub fn set_all_muted(app: &AppHandle, muted: bool) -> Result<(), String> {
+    let flag = if muted { "true" } else { "false" };
+    let script = format!(
+        r#"(function () {{
+          var nodes = document.querySelectorAll("video, audio");
+          for (var i = 0; i < nodes.length; i++) nodes[i].muted = {flag};
+          return nodes.length;
+        }})()"#
+    );
+    for id in media_tabs(app) {
+        let Some(webview) = tabs::page_view(app, id) else {
+            continue;
+        };
+        let _ = webview2::evaluate(&webview, &script, Duration::from_secs(3), FAILURE);
+    }
+    Ok(())
 }
 
 pub fn control(
@@ -158,6 +290,8 @@ pub fn control(
           if ({action:?} === "play") el.play();
           else if ({action:?} === "pause") el.pause();
           else if ({action:?} === "seek") el.currentTime = {time};
+          else if ({action:?} === "mute") el.muted = true;
+          else if ({action:?} === "unmute") el.muted = false;
           return true;
         }})()"#
     );

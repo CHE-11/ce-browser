@@ -1065,7 +1065,9 @@ const ELEMENT_SCRIPT: &str = r##"(function () {
       hint.remove();
       root.style.cursor = previousCursor;
       requestAnimationFrame(function () {
-        requestAnimationFrame(function () { resolve(value); });
+        requestAnimationFrame(function () {
+          setTimeout(function () { resolve(value); }, 40);
+        });
       });
     }
     document.addEventListener("mousemove", onMove, true);

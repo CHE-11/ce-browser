@@ -74,7 +74,7 @@ export function WorkspaceMenu() {
   };
 
   return (
-    <PopupFrame id="workspace-menu" ready={snapshot.loaded}>
+    <PopupFrame id="workspace-menu" width={300} ready={snapshot.loaded}>
       <div id="workspace-menu-body" className="flex flex-col gap-0.5 p-1.5">
         <div id="workspace-menu-title" className="px-2 pb-1 pt-1 text-xs font-medium text-zinc-400">
           Workspaces

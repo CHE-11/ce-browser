@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Plus } from "lucide-react";
-import { createEphemeralTab, createTab, openPopupBelow, zoomTab } from "@/lib/browser-client";
+import { createEphemeralTab, createTab, openPopup, zoomTab } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { useTabDrag } from "@/lib/tab-drag";
@@ -145,7 +145,7 @@ export function TabStrip({ snapshot }: TabStripProps) {
             aria-haspopup="listbox"
             className="size-7 rounded-md"
             onClick={(event) =>
-              void openPopupBelow(event.currentTarget, { kind: "tab-search", params: "scope=workspace", width: 420, height: 460 })
+              void openPopup("tab-search", event.currentTarget, { params: "scope=workspace" })
             }
           >
             <ChevronDown id="tab-strip-overflow-icon" aria-hidden />

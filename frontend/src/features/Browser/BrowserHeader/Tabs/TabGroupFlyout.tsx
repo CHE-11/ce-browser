@@ -21,7 +21,7 @@ export function TabGroupFlyout({ groupId }: TabGroupFlyoutProps) {
 
   return (
     <div id="tab-group-flyout-hover" className="h-full" onMouseLeave={() => void closePopup()}>
-      <PopupFrame id="tab-group-flyout" ready={snapshot.loaded}>
+      <PopupFrame id="tab-group-flyout" width={280} maxHeight={420} ready={snapshot.loaded}>
         {group ? (
           <div id="tab-group-flyout-body" className="flex flex-col gap-0.5 p-1.5">
             <div id="tab-group-flyout-title" className="flex items-center gap-2 px-2 pb-1 pt-0.5 text-xs font-medium text-zinc-400">

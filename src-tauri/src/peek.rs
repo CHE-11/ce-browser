@@ -273,7 +273,6 @@ pub fn open(app: &AppHandle, window_label: &str, url: Url) -> Result<(), String>
             f64::from(card_size.width),
             f64::from(card_size.height),
             (10.0 * scale).round(),
-            Vec::new(),
             false,
         );
     }
@@ -375,7 +374,6 @@ pub fn relayout(app: &AppHandle, window: &str) {
                     f64::from(card_size.width),
                     f64::from(card_size.height),
                     (10.0 * scale).round(),
-                    Vec::new(),
                     false,
                 );
             }

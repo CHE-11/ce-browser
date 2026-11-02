@@ -3,7 +3,6 @@ import type { HistoryItem, OmniboxSuggestion, TabInfo, Workspace } from "../../.
 
 const MAX_SUGGESTIONS = 8;
 export const OMNIBOX_ROW_HEIGHT = 36;
-export const OMNIBOX_PADDING = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 type Candidate = {
@@ -180,8 +179,4 @@ export function inlineCompletion(typed: string, history: HistoryItem[], bookmark
   }
   const found = best as { completion: string; score: number } | null;
   return found ? text + found.completion.slice(text.length) : null;
-}
-
-export function omniboxHeight(count: number) {
-  return count * OMNIBOX_ROW_HEIGHT + OMNIBOX_PADDING;
 }

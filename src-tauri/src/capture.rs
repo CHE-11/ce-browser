@@ -1,4 +1,6 @@
-//! Page to PNG: captures a tab's whole document, or what is on screen, as one image.
+//! Page to PNG. What is on screen is the webview's own surface. A taller or wider area is
+//! scrolled through that surface and stitched. A clip past the widget comes back blank or
+//! cropped on WebView2, including on a scaled display.
 
 use std::io::Cursor;
 use std::path::Path;
@@ -14,13 +16,12 @@ use tauri::{AppHandle, Emitter, Manager, Webview};
 use crate::{tabs, webview2};
 
 const FAILURE: &str = "Couldn't capture this page.";
-/// Chromium cannot render one screenshot taller than its largest texture, so tall pages are
-/// captured in strips of at most this many device pixels and stitched.
-const SLICE_PIXELS: f64 = 8000.0;
 /// Longer pages are cut off here. Past this the image is too large for most viewers.
 const MAX_CSS_HEIGHT: f64 = 60000.0;
 /// Pixel budget for the stitched image. Bigger pages are captured at a lower scale.
 const MAX_PIXELS: f64 = 120_000_000.0;
+/// How many viewport shots one capture may take. Stops a scroll that never moves forward.
+const MAX_SHOTS: usize = 400;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -44,11 +45,15 @@ const LOAD_LAZY_SCRIPT: &str = r#"(async () => {
   const startY = window.scrollY;
   const step = Math.max(200, Math.floor(window.innerHeight * 0.85));
   const deadline = Date.now() + 15000;
+  const jump = (top) => {
+    try { window.scrollTo({ left: 0, top, behavior: "instant" }); }
+    catch (error) { window.scrollTo(0, top); }
+  };
   for (let y = 0; y < root.scrollHeight && y < 60000 && Date.now() < deadline; y += step) {
-    window.scrollTo(0, y);
+    jump(y);
     await sleep(120);
   }
-  window.scrollTo(0, root.scrollHeight);
+  jump(root.scrollHeight);
   await sleep(250);
   const pending = Array.from(document.images).filter((image) => !image.complete);
   await Promise.race([
@@ -58,7 +63,8 @@ const LOAD_LAZY_SCRIPT: &str = r#"(async () => {
     }))),
     sleep(3000),
   ]);
-  window.scrollTo(startX, startY);
+  try { window.scrollTo({ left: startX, top: startY, behavior: "instant" }); }
+  catch (error) { window.scrollTo(startX, startY); }
   await sleep(200);
   return true;
 })()"#;
@@ -126,87 +132,278 @@ fn capture(app: &AppHandle, id: u32, full_page: bool, load_lazy: bool) -> Result
         // Lazy loading is a nicety. A page that blocks the script is still captured.
         let _ = webview2::evaluate(&webview, LOAD_LAZY_SCRIPT, Duration::from_secs(30), FAILURE);
     }
-    let ratio = webview2::evaluate(
-        &webview,
-        "window.devicePixelRatio",
-        Duration::from_secs(5),
-        FAILURE,
-    )?
-    .as_f64()
-    .filter(|ratio| *ratio > 0.0)
-    .unwrap_or(1.0);
-    let metrics = cdp(&webview, "Page.getLayoutMetrics", "{}")?;
-    let number = |pointer: &str| metrics.pointer(pointer).and_then(|value| value.as_f64());
-    let view_width = number("/cssLayoutViewport/clientWidth")
-        .unwrap_or(1280.0)
-        .max(1.0);
-    let view_height = number("/cssLayoutViewport/clientHeight")
-        .unwrap_or(800.0)
-        .max(1.0);
-
     if !full_page {
-        let x = number("/cssVisualViewport/pageX").unwrap_or(0.0);
-        let y = number("/cssVisualViewport/pageY").unwrap_or(0.0);
-        let image = shot(&webview, x, y, view_width, view_height, 1.0, false)?;
         return Ok(Capture {
-            image,
+            image: viewport_image(&webview)?,
             truncated: false,
         });
     }
-
-    let content_width = number("/cssContentSize/width").unwrap_or(view_width);
-    let content_height = number("/cssContentSize/height").unwrap_or(view_height);
-    let width = content_width.max(view_width).min(view_width * 4.0).ceil();
-    let truncated = content_height > MAX_CSS_HEIGHT;
-    let height = content_height.min(MAX_CSS_HEIGHT).max(1.0).ceil();
-
-    let pixels = width * height * ratio * ratio;
-    let scale = if pixels > MAX_PIXELS {
-        (MAX_PIXELS / pixels).sqrt()
-    } else {
-        1.0
-    };
-    let device = ratio * scale;
-    let slice_css = (SLICE_PIXELS / device).floor().max(256.0);
-
-    let mut slices = Vec::new();
-    let mut top = 0.0;
-    while top < height {
-        let slice_height = slice_css.min(height - top);
-        slices.push(shot(&webview, 0.0, top, width, slice_height, scale, true)?);
-        top += slice_height;
-    }
+    let page = page_box(&webview)?;
+    let width = page.page_width.max(page.width).min(page.width * 4.0);
+    let truncated = page.page_height > MAX_CSS_HEIGHT;
+    let height = page.page_height.min(MAX_CSS_HEIGHT).max(page.height);
+    let (image, short) = capture_area(&webview, &page, 0.0, 0.0, width, height, true)?;
     Ok(Capture {
-        image: stitch(slices)?,
-        truncated,
+        image,
+        truncated: truncated || short,
     })
 }
 
-fn cdp(webview: &Webview, method: &str, params: &str) -> Result<serde_json::Value, String> {
-    webview2::call_cdp_json(webview, method, params, Duration::from_secs(30), FAILURE)
+struct PageBox {
+    scroll_x: f64,
+    scroll_y: f64,
+    width: f64,
+    height: f64,
+    page_width: f64,
+    page_height: f64,
 }
 
-fn shot(
-    webview: &Webview,
+struct View {
+    scroll_x: f64,
+    scroll_y: f64,
+    width: f64,
+    height: f64,
+}
+
+impl PageBox {
+    fn view(&self) -> View {
+        View {
+            scroll_x: self.scroll_x,
+            scroll_y: self.scroll_y,
+            width: self.width,
+            height: self.height,
+        }
+    }
+}
+
+struct PxCrop {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    doc_right: f64,
+    doc_bottom: f64,
+}
+
+/// Where a document rectangle sits inside a viewport screenshot. None when it misses the view.
+fn crop_pixels(
+    image_width: u32,
+    image_height: u32,
+    view: &View,
     x: f64,
     y: f64,
     width: f64,
     height: f64,
-    scale: f64,
-    beyond_viewport: bool,
-) -> Result<RgbaImage, String> {
-    let params = serde_json::json!({
-        "format": "png",
-        "fromSurface": true,
-        "captureBeyondViewport": beyond_viewport,
-        "clip": { "x": x, "y": y, "width": width, "height": height, "scale": scale },
+) -> Option<PxCrop> {
+    if image_width == 0
+        || image_height == 0
+        || view.width < 1.0
+        || view.height < 1.0
+        || width < 0.5
+        || height < 0.5
+    {
+        return None;
+    }
+    let left = x.max(view.scroll_x);
+    let top = y.max(view.scroll_y);
+    let right = (x + width).min(view.scroll_x + view.width);
+    let bottom = (y + height).min(view.scroll_y + view.height);
+    let css_width = right - left;
+    let css_height = bottom - top;
+    if css_width < 0.5 || css_height < 0.5 {
+        return None;
+    }
+    let scale_x = f64::from(image_width) / view.width;
+    let scale_y = f64::from(image_height) / view.height;
+    let px = ((left - view.scroll_x) * scale_x).round().max(0.0) as u32;
+    let py = ((top - view.scroll_y) * scale_y).round().max(0.0) as u32;
+    if px >= image_width || py >= image_height {
+        return None;
+    }
+    let pw = (css_width * scale_x)
+        .round()
+        .max(1.0)
+        .min(f64::from(image_width - px)) as u32;
+    let ph = (css_height * scale_y)
+        .round()
+        .max(1.0)
+        .min(f64::from(image_height - py)) as u32;
+    Some(PxCrop {
+        x: px,
+        y: py,
+        width: pw,
+        height: ph,
+        doc_right: right,
+        doc_bottom: bottom,
     })
-    .to_string();
+}
+
+fn fit_scale(pixels: f64) -> f64 {
+    if pixels <= MAX_PIXELS || pixels <= 0.0 {
+        1.0
+    } else {
+        (MAX_PIXELS / pixels).sqrt()
+    }
+}
+
+fn field(value: &serde_json::Value, key: &str) -> f64 {
+    value
+        .get(key)
+        .and_then(|item| item.as_f64())
+        .filter(|item| item.is_finite())
+        .unwrap_or(0.0)
+}
+
+fn js_num(value: f64) -> String {
+    let value = if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    };
+    format!("{value:.2}")
+}
+
+const PAGE_BOX_SCRIPT: &str = r#"(function () {
+  var root = document.scrollingElement || document.documentElement;
+  var body = document.body;
+  return {
+    scrollX: window.scrollX || 0,
+    scrollY: window.scrollY || 0,
+    width: window.innerWidth || 1,
+    height: window.innerHeight || 1,
+    pageWidth: Math.max(root.scrollWidth || 0, body ? body.scrollWidth : 0, window.innerWidth || 1),
+    pageHeight: Math.max(root.scrollHeight || 0, body ? body.scrollHeight : 0, window.innerHeight || 1)
+  };
+})()"#;
+
+const SCROLL_SCRIPT: &str = r#"(function () {
+  var root = document.documentElement;
+  if (!root.hasAttribute("data-ce-scroll-behavior")) {
+    root.setAttribute("data-ce-scroll-behavior", root.style.scrollBehavior || "");
+    root.style.scrollBehavior = "auto";
+  }
+  try { window.scrollTo({ left: LEFT, top: TOP, behavior: "instant" }); }
+  catch (error) { window.scrollTo(LEFT, TOP); }
+  return new Promise(function (resolve) {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        setTimeout(function () {
+          resolve({
+            scrollX: window.scrollX || 0,
+            scrollY: window.scrollY || 0,
+            width: window.innerWidth || 1,
+            height: window.innerHeight || 1
+          });
+        }, 40);
+      });
+    });
+  });
+})()"#;
+
+/// Headers and corner widgets repeat in every slice. A fixed shell the size of the page stays.
+const HIDE_PINNED_SCRIPT: &str = r#"(function () {
+  var viewW = window.innerWidth || 1;
+  var viewH = window.innerHeight || 1;
+  var all = document.body ? document.body.querySelectorAll("*") : [];
+  for (var index = 0; index < all.length; index++) {
+    var el = all[index];
+    if (el.hasAttribute("data-ce-capture-hide")) continue;
+    var pos = getComputedStyle(el).position;
+    if (pos !== "fixed" && pos !== "sticky") continue;
+    var rect = el.getBoundingClientRect();
+    if (rect.width >= viewW * 0.8 && rect.height >= viewH * 0.8) continue;
+    if (rect.width < 1 || rect.height < 1) continue;
+    el.setAttribute("data-ce-capture-hide", el.style.visibility || "");
+    el.style.visibility = "hidden";
+  }
+  return true;
+})()"#;
+
+const RESTORE_SCRIPT: &str = r#"(function () {
+  try { window.scrollTo({ left: LEFT, top: TOP, behavior: "instant" }); }
+  catch (error) { window.scrollTo(LEFT, TOP); }
+  var root = document.documentElement;
+  if (root.hasAttribute("data-ce-scroll-behavior")) {
+    root.style.scrollBehavior = root.getAttribute("data-ce-scroll-behavior");
+    root.removeAttribute("data-ce-scroll-behavior");
+  }
+  var hidden = document.querySelectorAll("[data-ce-capture-hide]");
+  for (var index = 0; index < hidden.length; index++) {
+    var el = hidden[index];
+    el.style.visibility = el.getAttribute("data-ce-capture-hide");
+    el.removeAttribute("data-ce-capture-hide");
+  }
+  return true;
+})()"#;
+
+fn page_box(webview: &Webview) -> Result<PageBox, String> {
+    let value = webview2::evaluate(webview, PAGE_BOX_SCRIPT, Duration::from_secs(5), FAILURE)?;
+    let width = field(&value, "width").max(1.0);
+    let height = field(&value, "height").max(1.0);
+    Ok(PageBox {
+        scroll_x: field(&value, "scrollX").max(0.0),
+        scroll_y: field(&value, "scrollY").max(0.0),
+        width,
+        height,
+        page_width: field(&value, "pageWidth").max(width),
+        page_height: field(&value, "pageHeight").max(height),
+    })
+}
+
+fn view_from(value: &serde_json::Value) -> View {
+    View {
+        scroll_x: field(value, "scrollX").max(0.0),
+        scroll_y: field(value, "scrollY").max(0.0),
+        width: field(value, "width").max(1.0),
+        height: field(value, "height").max(1.0),
+    }
+}
+
+fn scroll_view(webview: &Webview, x: f64, y: f64) -> Result<View, String> {
+    let script = SCROLL_SCRIPT
+        .replace("LEFT", &js_num(x))
+        .replace("TOP", &js_num(y));
+    let value = webview2::evaluate(webview, &script, Duration::from_secs(5), FAILURE)?;
+    Ok(view_from(&value))
+}
+
+/// Puts the page back where it was, including pinned bars hidden while stitching.
+struct ScrollRestore<'a> {
+    webview: &'a Webview,
+    x: f64,
+    y: f64,
+}
+
+impl Drop for ScrollRestore<'_> {
+    fn drop(&mut self) {
+        let script = RESTORE_SCRIPT
+            .replace("LEFT", &js_num(self.x))
+            .replace("TOP", &js_num(self.y));
+        let _ = webview2::evaluate(self.webview, &script, Duration::from_secs(2), FAILURE);
+    }
+}
+
+fn contains_rect(page: &PageBox, x: f64, y: f64, width: f64, height: f64) -> bool {
+    x >= page.scroll_x - 1.0
+        && y >= page.scroll_y - 1.0
+        && x + width <= page.scroll_x + page.width + 1.0
+        && y + height <= page.scroll_y + page.height + 1.0
+}
+
+fn covers_view(page: &PageBox, x: f64, y: f64, width: f64, height: f64) -> bool {
+    x <= page.scroll_x + 1.0
+        && y <= page.scroll_y + 1.0
+        && x + width >= page.scroll_x + page.width - 1.0
+        && y + height >= page.scroll_y + page.height - 1.0
+}
+
+/// The webview surface, with no clip. This is the picture the window is already drawing.
+fn viewport_image(webview: &Webview) -> Result<RgbaImage, String> {
     let response = webview2::call_cdp_json(
         webview,
         "Page.captureScreenshot",
-        &params,
-        Duration::from_secs(60),
+        r#"{"format":"png","fromSurface":true}"#,
+        Duration::from_secs(30),
         FAILURE,
     )?;
     let data = response
@@ -219,6 +416,136 @@ fn shot(
     let image = image::load_from_memory_with_format(&bytes, ImageFormat::Png)
         .map_err(|error| format!("{FAILURE} {error}"))?;
     Ok(image.to_rgba8())
+}
+
+fn crop_rgba(image: &RgbaImage, x: u32, y: u32, width: u32, height: u32) -> RgbaImage {
+    let x = x.min(image.width().saturating_sub(1));
+    let y = y.min(image.height().saturating_sub(1));
+    let width = width.max(1).min(image.width() - x);
+    let height = height.max(1).min(image.height() - y);
+    image::imageops::crop_imm(image, x, y, width, height).to_image()
+}
+
+fn scale_image(image: RgbaImage, scale: f64) -> RgbaImage {
+    if scale >= 0.999 {
+        return image;
+    }
+    let width = (f64::from(image.width()) * scale).round().max(1.0) as u32;
+    let height = (f64::from(image.height()) * scale).round().max(1.0) as u32;
+    if width == image.width() && height == image.height() {
+        image
+    } else {
+        image::imageops::resize(&image, width, height, image::imageops::FilterType::Triangle)
+    }
+}
+
+/// Document rectangle `(x, y, width, height)` in CSS pixels. `hide_after_first` drops fixed and
+/// sticky bars after the first tile so a long page does not repeat its header. The bool is set
+/// when the walk stopped before the bottom of the rectangle.
+fn capture_area(
+    webview: &Webview,
+    page: &PageBox,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    hide_after_first: bool,
+) -> Result<(RgbaImage, bool), String> {
+    let width = width.max(1.0);
+    let height = height.max(1.0);
+    if contains_rect(page, x, y, width, height) {
+        let image = viewport_image(webview)?;
+        if covers_view(page, x, y, width, height) {
+            return Ok((image, false));
+        }
+        let crop = crop_pixels(
+            image.width(),
+            image.height(),
+            &page.view(),
+            x,
+            y,
+            width,
+            height,
+        )
+        .ok_or_else(|| format!("{FAILURE} That section is off the page."))?;
+        return Ok((
+            crop_rgba(&image, crop.x, crop.y, crop.width, crop.height),
+            false,
+        ));
+    }
+
+    let _restore = ScrollRestore {
+        webview,
+        x: page.scroll_x,
+        y: page.scroll_y,
+    };
+    let target_right = x + width;
+    let target_bottom = y + height;
+    let mut rows = Vec::new();
+    let mut y_cursor = y;
+    let mut hidden = false;
+    let mut scale = 1.0;
+    let mut known_scale = false;
+    let mut shots = 0usize;
+    while y_cursor < target_bottom - 0.5 && shots < MAX_SHOTS {
+        let mut tiles = Vec::new();
+        let mut x_cursor = x;
+        let mut row_bottom = y_cursor;
+        while x_cursor < target_right - 0.5 && tiles.len() < 4 && shots < MAX_SHOTS {
+            shots += 1;
+            let mut view = scroll_view(webview, x_cursor, y_cursor)?;
+            if !(rows.is_empty() && tiles.is_empty()) && hide_after_first && !hidden {
+                let _ = webview2::evaluate(
+                    webview,
+                    HIDE_PINNED_SCRIPT,
+                    Duration::from_secs(5),
+                    FAILURE,
+                );
+                hidden = true;
+                view = scroll_view(webview, x_cursor, y_cursor)?;
+            }
+            let image = viewport_image(webview)?;
+            let Some(crop) = crop_pixels(
+                image.width(),
+                image.height(),
+                &view,
+                x_cursor,
+                y_cursor,
+                target_right - x_cursor,
+                target_bottom - y_cursor,
+            ) else {
+                break;
+            };
+            // The page would not scroll any further, so this shot repeats the last one.
+            if crop.doc_right <= x_cursor + 0.5 {
+                break;
+            }
+            if !known_scale {
+                let ratio = f64::from(image.width()) / view.width.max(1.0);
+                scale = fit_scale(width * height * ratio * ratio);
+                known_scale = true;
+            }
+            if row_bottom <= y_cursor + 0.5 {
+                row_bottom = crop.doc_bottom;
+            }
+            let next_x = crop.doc_right;
+            tiles.push(scale_image(
+                crop_rgba(&image, crop.x, crop.y, crop.width, crop.height),
+                scale,
+            ));
+            if next_x <= x_cursor + 0.5 {
+                break;
+            }
+            x_cursor = next_x;
+        }
+        if tiles.is_empty() || row_bottom <= y_cursor + 0.5 {
+            break;
+        }
+        rows.push(stitch_row(tiles)?);
+        y_cursor = row_bottom;
+    }
+    let short = y_cursor < target_bottom - 1.0;
+    Ok((stitch(rows)?, short))
 }
 
 /// Keeps a dragged rectangle inside the page. Width and height stay at least 1 pixel.
@@ -315,17 +642,9 @@ fn clip_shot(
     width: f64,
     height: f64,
 ) -> Result<(RgbaImage, (f64, f64, f64, f64)), String> {
-    let metrics = cdp(webview, "Page.getLayoutMetrics", "{}")?;
-    let page_width = metrics
-        .pointer("/cssContentSize/width")
-        .and_then(|item| item.as_f64())
-        .unwrap_or(width);
-    let page_height = metrics
-        .pointer("/cssContentSize/height")
-        .and_then(|item| item.as_f64())
-        .unwrap_or(height);
-    let rect = clip_inside(page_width, page_height, x, y, width, height);
-    let image = shot(webview, rect.0, rect.1, rect.2, rect.3, 1.0, true)?;
+    let page = page_box(webview)?;
+    let rect = clip_inside(page.page_width, page.page_height, x, y, width, height);
+    let (image, _) = capture_area(webview, &page, rect.0, rect.1, rect.2, rect.3, false)?;
     Ok((image, rect))
 }
 
@@ -381,7 +700,11 @@ const REGION_SCRIPT: &str = r#"(function () {
       overlay.remove();
       box.remove();
       document.removeEventListener("keydown", onKey, true);
-      resolve(value);
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          setTimeout(function () { resolve(value); }, 40);
+        });
+      });
     }
     function onKey(event) {
       if (event.key === "Escape") cleanup(null);
@@ -542,22 +865,25 @@ fn region_frame(app: &AppHandle, id: u32) -> Result<RgbaImage, String> {
         return visible_frame(app, id);
     };
     let webview = tabs::page_view(app, id).ok_or("This page is not loaded yet.")?;
-    shot(&webview, x, y, width, height, 1.0, true)
+    let page = page_box(&webview)?;
+    let image = viewport_image(&webview)?;
+    let Some(crop) = crop_pixels(
+        image.width(),
+        image.height(),
+        &page.view(),
+        x,
+        y,
+        width,
+        height,
+    ) else {
+        return Ok(image);
+    };
+    Ok(crop_rgba(&image, crop.x, crop.y, crop.width, crop.height))
 }
 
 fn visible_frame(app: &AppHandle, id: u32) -> Result<RgbaImage, String> {
     let webview = tabs::page_view(app, id).ok_or("This page is not loaded yet.")?;
-    let metrics = cdp(&webview, "Page.getLayoutMetrics", "{}")?;
-    let number = |pointer: &str| metrics.pointer(pointer).and_then(|value| value.as_f64());
-    let width = number("/cssLayoutViewport/clientWidth")
-        .unwrap_or(1280.0)
-        .max(1.0);
-    let height = number("/cssLayoutViewport/clientHeight")
-        .unwrap_or(800.0)
-        .max(1.0);
-    let x = number("/cssVisualViewport/pageX").unwrap_or(0.0);
-    let y = number("/cssVisualViewport/pageY").unwrap_or(0.0);
-    shot(&webview, x, y, width, height, 1.0, false)
+    viewport_image(&webview)
 }
 
 fn fit_long_side(image: RgbaImage, max_side: u32) -> RgbaImage {
@@ -660,8 +986,26 @@ fn window_image(hwnd: isize) -> Result<RgbaImage, String> {
     }
 }
 
+fn stitch_row(tiles: Vec<RgbaImage>) -> Result<RgbaImage, String> {
+    let height = tiles.iter().map(RgbaImage::height).min().unwrap_or(0);
+    let width: u32 = tiles.iter().map(RgbaImage::width).sum();
+    if width == 0 || height == 0 {
+        return Err(format!("{FAILURE} The page is empty."));
+    }
+    if tiles.len() == 1 {
+        return Ok(tiles.into_iter().next().unwrap_or_default());
+    }
+    let mut canvas = RgbaImage::from_pixel(width, height, image::Rgba([255, 255, 255, 255]));
+    let mut left = 0i64;
+    for tile in &tiles {
+        image::imageops::replace(&mut canvas, tile, left, 0);
+        left += i64::from(tile.width());
+    }
+    Ok(canvas)
+}
+
 fn stitch(slices: Vec<RgbaImage>) -> Result<RgbaImage, String> {
-    let width = slices.iter().map(RgbaImage::width).max().unwrap_or(0);
+    let width = slices.iter().map(RgbaImage::width).min().unwrap_or(0);
     let height: u32 = slices.iter().map(RgbaImage::height).sum();
     if width == 0 || height == 0 {
         return Err(format!("{FAILURE} The page is empty."));
@@ -760,7 +1104,7 @@ mod clipboard {
 
 #[cfg(test)]
 mod tests {
-    use super::{clip_inside, gif_delay_cs, limit_long_side};
+    use super::{View, clip_inside, crop_pixels, fit_scale, gif_delay_cs, limit_long_side};
 
     #[test]
     fn a_region_stays_inside_the_page() {
@@ -775,5 +1119,40 @@ mod tests {
     fn eight_frames_a_second_is_twelve_centiseconds() {
         assert_eq!(gif_delay_cs(8), 12);
         assert_eq!(limit_long_side(2000, 1000, 1280), (1280, 640));
+    }
+
+    #[test]
+    fn a_css_rect_maps_onto_the_screenshot() {
+        let view = View {
+            scroll_x: 0.0,
+            scroll_y: 0.0,
+            width: 100.0,
+            height: 50.0,
+        };
+        let crop = crop_pixels(200, 100, &view, 10.0, 5.0, 20.0, 10.0).expect("crop");
+        assert_eq!((crop.x, crop.y, crop.width, crop.height), (20, 10, 40, 20));
+        assert_eq!(crop.doc_right, 30.0);
+        assert_eq!(crop.doc_bottom, 15.0);
+    }
+
+    #[test]
+    fn a_rect_below_the_fold_crops_the_visible_part() {
+        let view = View {
+            scroll_x: 0.0,
+            scroll_y: 100.0,
+            width: 80.0,
+            height: 50.0,
+        };
+        let crop = crop_pixels(80, 50, &view, 0.0, 120.0, 80.0, 100.0).expect("crop");
+        assert_eq!((crop.y, crop.height), (20, 30));
+        assert_eq!(crop.doc_bottom, 150.0);
+        assert!(crop_pixels(80, 50, &view, 0.0, 10.0, 40.0, 10.0).is_none());
+    }
+
+    #[test]
+    fn a_page_over_the_pixel_budget_is_scaled_down() {
+        assert_eq!(fit_scale(super::MAX_PIXELS), 1.0);
+        let scale = fit_scale(super::MAX_PIXELS * 4.0);
+        assert!((scale - 0.5).abs() < 0.0001);
     }
 }

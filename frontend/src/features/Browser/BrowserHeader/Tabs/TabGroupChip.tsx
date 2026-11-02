@@ -1,7 +1,7 @@
 import { useEffect, useRef, type MouseEvent } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { TabGroup, TabInfo } from "../../../../../../types/browser";
-import { closePopup, openPopup, updateGroup, windowPoint } from "../../../../lib/browser-client";
+import { closePopup, openPopup, updateGroup } from "../../../../lib/browser-client";
 import { cn } from "../../../../lib/cn";
 import { focusRing } from "../../../../lib/focus-ring";
 import { groupColorClasses, groupLabel } from "../../../../lib/tab-rows";
@@ -37,32 +37,18 @@ export function TabGroupChip({ group, tabs, orientation, compact, alert }: TabGr
   useEffect(() => clearHover, []);
 
   const openFlyout = (element: HTMLElement) => {
-    const rect = element.getBoundingClientRect();
     flyoutOpen.current = true;
-    void openPopup({
-      kind: "tab-group",
+    void openPopup("tab-group", element, {
       params: `id=${group.id}`,
+      placement: vertical ? "right-start" : "bottom-start",
       focus: false,
-      x: vertical ? rect.right + 4 : rect.left,
-      y: vertical ? rect.top : rect.bottom + 2,
-      width: 280,
-      height: Math.min(48 + tabs.length * 36, 420),
     });
   };
 
   const openMenu = (event: MouseEvent) => {
     event.preventDefault();
     clearHover();
-    void windowPoint(event.clientX, event.clientY).then((point) =>
-      openPopup({
-        kind: "tab-group-menu",
-        params: `id=${group.id}`,
-        x: point.x,
-        y: point.y,
-        width: 280,
-        height: 300,
-      }),
-    );
+    void openPopup("tab-group-menu", { x: event.clientX, y: event.clientY }, { params: `id=${group.id}` });
   };
 
   return (

@@ -3,7 +3,7 @@ import { SlidersHorizontal } from "lucide-react";
 
 import { controlFor, siteActive, siteKey } from "./site";
 import { IconButton } from "@/components/IconButton";
-import { openPopupBelow } from "@/lib/browser-client";
+import { openPopup } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { usePageRules } from "@/lib/use-browser";
 import type { TabInfo } from "@type/browser";
@@ -11,9 +11,6 @@ import type { TabInfo } from "@type/browser";
 type PageControlsButtonProps = {
   activeTab: TabInfo | undefined;
 };
-
-const POPOVER_WIDTH = 340;
-const POPOVER_HEIGHT = 560;
 
 export function PageControlsButton({ activeTab }: PageControlsButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -33,12 +30,7 @@ export function PageControlsButton({ activeTab }: PageControlsButtonProps) {
       url: activeTab.url,
       host,
     });
-    void openPopupBelow(anchor, {
-      kind: "page-controls",
-      params: params.toString(),
-      width: POPOVER_WIDTH,
-      height: POPOVER_HEIGHT,
-    });
+    void openPopup("page-controls", anchor, { params: params.toString() });
   };
 
   return (

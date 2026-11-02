@@ -70,44 +70,27 @@ export function BrowserPage() {
   }, [hoverPreview]);
 
   useEffect(() => {
-    const centered = (kind: PopupKind, width: number, height: number, params = "") =>
-      void openPopup({
-        kind,
-        params,
-        focus: true,
-        x: Math.max(8, (window.innerWidth - width) / 2),
-        y: 52,
-        width,
-        height: Math.min(height, window.innerHeight - 60),
-      });
+    /** Centred across the window, `top` px down. */
+    const centered = (kind: PopupKind, top: number, params = "") =>
+      void openPopup(kind, { x: 0, y: 0, width: window.innerWidth, height: top - 4 }, { params, placement: "bottom-center" });
     const unlisten = onBrowserCommand((command) => {
       switch (command) {
         case "find":
           setFindToken((token) => (token ?? 0) + 1);
           break;
         case "palette":
-          centered("command-palette", 560, 420);
+          centered("command-palette", 52);
           break;
         case "tab-search":
-          centered("tab-search", 520, 480);
+          centered("tab-search", 52);
           break;
         case "shortcut-sheet":
-          centered("shortcut-sheet", Math.min(760, window.innerWidth - 32), 560);
+          centered("shortcut-sheet", 52);
           break;
         case "tab-switcher":
-        case "tab-switcher-back": {
-          const width = Math.min(760, window.innerWidth - 32);
-          void openPopup({
-            kind: "tab-switcher",
-            params: `step=${command === "tab-switcher" ? 1 : -1}`,
-            focus: true,
-            x: Math.max(8, (window.innerWidth - width) / 2),
-            y: Math.max(52, window.innerHeight / 2 - 220),
-            width,
-            height: 440,
-          });
+        case "tab-switcher-back":
+          centered("tab-switcher", Math.max(52, window.innerHeight / 2 - 220), `step=${command === "tab-switcher" ? 1 : -1}`);
           break;
-        }
       }
     });
     return () => {

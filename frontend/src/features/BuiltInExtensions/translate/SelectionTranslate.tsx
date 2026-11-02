@@ -36,7 +36,7 @@ export function SelectionTranslatePopover({ params }: { params: URLSearchParams 
   }, [text]);
 
   return (
-    <PopupFrame id="selection-translate" maxHeight={420}>
+    <PopupFrame id="selection-translate" width={360} maxHeight={420}>
       <PopoverHeader id="selection-translate-header" icon={<Languages aria-hidden />} title="Translation" subtitle={language ? `Into ${language}` : "Selected text"} />
       <div id="selection-translate-body" className="flex flex-col gap-2 px-3 pb-3">
         <p id="selection-translate-source" className="line-clamp-3 text-xs text-zinc-500">

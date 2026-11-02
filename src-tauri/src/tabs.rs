@@ -9,23 +9,16 @@ use tauri::webview::{
 use tauri::window::WindowBuilder;
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, PhysicalPosition, PhysicalSize,
-    Position, Rect, Size, Webview, WebviewBuilder, WebviewUrl, Wry,
+    Webview, WebviewBuilder, WebviewUrl, Wry,
 };
 use url::Url;
 
-use crate::{extensions, history, paths, session, settings, webview2};
+use crate::{history, paths, session, settings, webview2};
 
 pub const WINDOW: &str = "main";
 pub const UI: &str = "ui";
 const MAX_CLOSED: usize = 25;
 const DEFAULT_UI_HEIGHT: f64 = 84.0;
-const POPUP_TOGGLE_WINDOW: Duration = Duration::from_millis(400);
-/// Swapping one menu for the next on the same host can make WebView2 report a focus loss.
-/// That report is the move, so it must not close the popup that just opened.
-const POPUP_SWAP_BLUR: Duration = Duration::from_millis(300);
-/// Chrome's limit for a toolbar popup. A larger document scrolls inside the popup.
-const EXTENSION_POPUP_MAX_WIDTH: f64 = 800.0;
-const EXTENSION_POPUP_MAX_HEIGHT: f64 = 600.0;
 /// Extension popouts (`chrome.windows.create`) often arrive with no size. A tab then
 /// shows the popup layout in the corner of the page. This is a typical popout.
 const EXTENSION_POPOUT_WIDTH: f64 = 400.0;
@@ -252,56 +245,6 @@ pub fn group_color_owned(raw: &str) -> String {
     group_color(raw)
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PopupChange {
-    pub kind: Option<String>,
-    pub params: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PopupRequest {
-    pub kind: String,
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-    #[serde(default)]
-    pub params: String,
-    #[serde(default = "default_true")]
-    pub focus: bool,
-    /// Button the popup hangs from, in logical px. Used when `edge` is `below` or `left`.
-    #[serde(default)]
-    pub anchor_x: f64,
-    #[serde(default)]
-    pub anchor_y: f64,
-    #[serde(default)]
-    pub anchor_width: f64,
-    #[serde(default)]
-    pub anchor_height: f64,
-    /// `below` hangs under the button, `left` sits beside it. Empty means `x`/`y` is the top-left.
-    #[serde(default)]
-    pub edge: String,
-    /// `start` or `end` for a `below` popup. Empty means right edges align.
-    #[serde(default)]
-    pub align: String,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-/// Logical px inside the popup.
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PopupRect {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-}
-
 struct Tab {
     info: TabInfo,
     /// Loaded when the page view is created: restored tabs wait until they are selected.
@@ -353,7 +296,6 @@ struct WindowChrome {
     /// Height of the status bar. Zero when it is hidden.
     ui_bottom: f64,
     fullscreen: bool,
-    popup: Popup,
     /// Toast view drawn over the bottom of the pages. Menus open and close without touching it.
     toast: Option<String>,
     /// Page views on screen and where each one sits.
@@ -381,7 +323,6 @@ impl WindowChrome {
             ui_right: 0.0,
             ui_bottom: 0.0,
             fullscreen: false,
-            popup: Popup::default(),
             toast: None,
             shown: Vec::new(),
             split: None,
@@ -391,57 +332,6 @@ impl WindowChrome {
             bookmarks: None,
             discarding: false,
         }
-    }
-}
-
-#[derive(Default)]
-struct Popup {
-    /// Host on screen, when a popup is open. Closed hosts stay parked off screen.
-    label: Option<String>,
-    /// Long-lived React host. Menus swap its hash instead of building a new webview.
-    host_label: Option<String>,
-    host_ready: bool,
-    /// Long-lived blank host for `chrome-extension://` toolbar popups.
-    ext_label: Option<String>,
-    ext_ready: bool,
-    /// Url the extension host was asked to show.
-    ext_url: Option<String>,
-    kind: Option<String>,
-    params: Option<String>,
-    focus: bool,
-    /// Button or point the popup hangs from. Sliding it on screen does not change this.
-    anchor_x: f64,
-    anchor_y: f64,
-    anchor_w: f64,
-    anchor_h: f64,
-    /// `below`, `left`, or empty when `anchor_x`/`anchor_y` is already the top-left.
-    edge: String,
-    align: String,
-    /// Size last placed on screen.
-    width: f64,
-    height: f64,
-    /// Open that arrived before its host had finished booting.
-    pending: Option<PopupRequest>,
-    /// Parts of the popup that are drawn. Empty means all of it.
-    shape: Vec<PopupRect>,
-    closed_key: Option<String>,
-    closed_at: Option<Instant>,
-    /// Focus-loss events before this instant come from moving the host, not from the user.
-    ignore_blur_until: Option<Instant>,
-}
-
-impl Popup {
-    fn key(&self) -> Option<String> {
-        Some(format!(
-            "{}?{}",
-            self.kind.as_deref()?,
-            self.params.as_deref().unwrap_or_default()
-        ))
-    }
-
-    /// The host is on screen showing a menu.
-    fn open(&self) -> bool {
-        self.label.is_some() && self.kind.is_some()
     }
 }
 
@@ -862,12 +752,22 @@ pub fn is_browser_label(label: &str) -> bool {
     label == WINDOW || label.starts_with("main-")
 }
 
-/// The browser window the user is typing in, or the first window.
+/// The browser window the user is typing in, or the first window. A focused popup counts as
+/// the window it belongs to.
+///
+/// `AppHandle::get_focused_window` holds Tauri's window lock while it asks the main thread
+/// about each window, which deadlocks against a main thread looking up a window.
 pub fn focused_window(app: &AppHandle) -> String {
-    if let Some(window) = app.get_focused_window() {
-        let label = window.label().to_string();
-        if is_browser_label(&label) {
-            return label;
+    let foreground = webview2::foreground_root_owner();
+    if foreground != 0 {
+        for label in browser_labels(app) {
+            let hwnd = app
+                .get_window(&label)
+                .and_then(|window| window.hwnd().ok())
+                .map_or(0, |hwnd| hwnd.0 as isize);
+            if hwnd == foreground {
+                return label;
+            }
         }
     }
     WINDOW.to_string()
@@ -1209,7 +1109,7 @@ fn ensure_webview(app: &AppHandle, id: u32) -> Result<(), String> {
         return Ok(());
     };
     if let Some(window) = with_state(app, |state| state.tab_window(id)) {
-        close_window_popup(app, &window);
+        crate::popup::close_all(app, &window, true);
     }
     if let Err(error) = build_page_view(app, id, &label, url.clone()) {
         with_state(app, |state| {
@@ -1745,7 +1645,7 @@ pub fn create_browser_window(app: &AppHandle, label: &str) -> Result<(), String>
     if backdrop {
         crate::backdrop::apply_all(app);
     }
-    ensure_popup_hosts(app, label);
+    crate::popup::ensure_pool(app, label);
     let _ = window.set_focus();
     Ok(())
 }
@@ -1839,7 +1739,7 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
     }
     let source_empty = with_state(app, |state| state.indexes_in(&source).is_empty());
     if source_empty {
-        close_window_popup(app, &source);
+        crate::popup::forget(app, &source);
         with_state(app, |state| {
             state.windows.retain(|window| window.label != source);
         });
@@ -1896,7 +1796,7 @@ pub fn discard_window(app: &AppHandle, label: &str) {
             .collect::<Vec<_>>()
     });
     let _ = close_many(app, &ids, "batch", None);
-    close_window_popup(app, label);
+    crate::popup::forget(app, label);
     crate::undo::close_window(app, label);
     with_state(app, |state| {
         state.windows.retain(|window| window.label != label);
@@ -2121,8 +2021,9 @@ pub fn set_failure(app: &AppHandle, id: u32, kind: &str, code: &str, detail: Str
     });
     if let Some(window) = window {
         crate::thumbnails::forget(id);
-        if kind == "crashed" && popup_kind(app, &window).as_deref() == Some("unresponsive") {
-            close_window_popup(app, &window);
+        if kind == "crashed" && crate::popup::kind(app, &window).as_deref() == Some("unresponsive")
+        {
+            crate::popup::close_all(app, &window, true);
         }
         place_pages(app, &window, true);
         emit_tabs(app);
@@ -2148,32 +2049,35 @@ pub fn show_unresponsive(app: &AppHandle, id: u32) -> Result<(), String> {
     let Some(window) = window else {
         return Ok(());
     };
-    if popup_kind(app, &window).as_deref() == Some("unresponsive") {
+    if crate::popup::kind(app, &window).as_deref() == Some("unresponsive") {
         return Ok(());
     }
     let handle = app
         .get_window(&window)
         .ok_or("The browser window is missing.")?;
+    let ui = with_state(app, |state| {
+        state.chrome(&window).map(|chrome| chrome.ui.clone())
+    })
+    .and_then(|label| app.get_webview(&label))
+    .ok_or("The browser window is missing.")?;
     let size = handle.inner_size().map_err(|error| error.to_string())?;
     let scale = handle.scale_factor().unwrap_or(1.0);
-    let width = 400.0;
-    open_popup(
+    crate::popup::open(
         app,
-        &window,
-        PopupRequest {
+        &ui,
+        crate::popup::PopupRequest {
             kind: "unresponsive".into(),
-            x: (size.width as f64 / scale - width) / 2.0,
-            y: 120.0,
-            width,
-            height: 180.0,
             params: format!("id={id}"),
+            anchor: crate::popup::PopupRect {
+                x: 0.0,
+                y: 0.0,
+                width: f64::from(size.width) / scale,
+                height: 116.0,
+            },
+            placement: "bottom-center".into(),
             focus: true,
-            anchor_x: 0.0,
-            anchor_y: 0.0,
-            anchor_width: 0.0,
-            anchor_height: 0.0,
-            edge: String::new(),
-            align: String::new(),
+            child: false,
+            min_width: 0.0,
         },
     )
     .map(|_| ())
@@ -2592,6 +2496,13 @@ fn retire_webview(app: &AppHandle, label: Option<String>) {
     };
     let _ = webview.set_position(parked_position());
     let _ = webview.close();
+}
+
+/// Puts the keyboard back on `window`'s page after a popup that had it closed.
+pub fn refocus_window(app: &AppHandle, window: &str) {
+    if app.try_state::<Tabs>().is_some() {
+        focus_active(app, window);
+    }
 }
 
 fn focus_active(app: &AppHandle, window: &str) {
@@ -3232,6 +3143,14 @@ fn show_bookmarks_folder(app: &AppHandle, id: u32, folder: Option<&str>) {
     let _ = webview.navigate(url);
 }
 
+/// Swaps a painted React page to `hash` without a reload or a history entry.
+fn hash_script(hash: &str) -> String {
+    let hash = serde_json::to_string(hash).unwrap_or_else(|_| "\"#/\"".to_string());
+    format!(
+        "history.replaceState(null,\"\",{hash});window.dispatchEvent(new HashChangeEvent(\"hashchange\"));"
+    )
+}
+
 /// Parks the resident bookmarks page without destroying its webview.
 fn shelf_bookmarks(app: &AppHandle, id: u32) -> Result<(), String> {
     let already = with_state(app, |state| {
@@ -3584,13 +3503,8 @@ fn load_pinned_later(app: &AppHandle) {
 fn wait_for_quiet(app: &AppHandle) {
     let started = Instant::now();
     loop {
-        let (popup, loading) = with_state(app, |state| {
-            let popup = state
-                .windows
-                .iter()
-                .any(|chrome| chrome.popup.label.is_some());
-            (popup, state.page_loading())
-        });
+        let popup = crate::popup::any_open(app);
+        let loading = with_state(app, |state| state.page_loading());
         if !popup && (!loading || started.elapsed() >= PIN_LOAD_WAIT) {
             return;
         }
@@ -3750,19 +3664,6 @@ pub fn cycle_recent(app: &AppHandle, step: isize) -> Result<(), String> {
     activate(app, target)
 }
 
-/// Kind of the popup open in `window`, if any.
-pub fn popup_kind(app: &AppHandle, window: &str) -> Option<String> {
-    with_state(app, |state| state.chrome(window)?.popup.kind.clone())
-}
-
-/// Sends an event to the popup open in `window`.
-pub fn emit_to_popup<S: Serialize + Clone>(app: &AppHandle, window: &str, event: &str, payload: S) {
-    let label = with_state(app, |state| state.chrome(window)?.popup.label.clone());
-    if let Some(label) = label {
-        let _ = app.emit_to(label.as_str(), event, payload);
-    }
-}
-
 /// `None` selects the last tab (Ctrl+9).
 pub fn select_index(app: &AppHandle, index: Option<usize>) -> Result<(), String> {
     let window = focused_window(app);
@@ -3903,7 +3804,7 @@ pub fn apply_ui_zoom(app: &AppHandle, previous_percent: u32, next_percent: u32) 
     let ratio = next / previous;
     if app.try_state::<Tabs>().is_some() {
         apply_extension_tab_zoom(app, next);
-        apply_extension_popup_zoom(app, next, ratio);
+        crate::popup::apply_ui_zoom(app, next);
     }
     apply_extension_popout_zoom(app, next, ratio);
 }
@@ -3929,41 +3830,6 @@ fn apply_extension_tab_zoom(app: &AppHandle, zoom: f64) {
         }
     }
     emit_tabs(app);
-}
-
-fn apply_extension_popup_zoom(app: &AppHandle, zoom: f64, ratio: f64) {
-    let hosts = with_state(app, |state| {
-        state
-            .windows
-            .iter()
-            .filter_map(|chrome| {
-                let label = chrome.popup.ext_label.clone()?;
-                let showing = chrome.popup.kind.as_deref() == Some("extension")
-                    && chrome.popup.label.as_deref() == Some(label.as_str());
-                Some((chrome.label.clone(), label, showing))
-            })
-            .collect::<Vec<_>>()
-    });
-    for (window_label, label, showing) in hosts {
-        let Some(webview) = app.get_webview(&label) else {
-            continue;
-        };
-        if !showing {
-            let _ = webview.set_zoom(zoom);
-            continue;
-        }
-        let sized = with_state(app, |state| {
-            let popup = &mut state.chrome_mut(&window_label)?.popup;
-            popup.width *= ratio;
-            popup.height *= ratio;
-            Some(())
-        });
-        if sized.is_none() {
-            let _ = webview.set_zoom(zoom);
-            continue;
-        }
-        let _ = show_placed(app, &window_label, Some(zoom));
-    }
 }
 
 fn apply_extension_popout_zoom(app: &AppHandle, zoom: f64, ratio: f64) {
@@ -4146,7 +4012,7 @@ pub fn layout(app: &AppHandle, window_label: &str) {
     }
     place_pages(app, window_label, true);
     crate::peek::relayout(app, window_label);
-    close_window_popup(app, window_label);
+    crate::popup::close_all(app, window_label, false);
     place_toast(app, window_label);
 }
 
@@ -4188,759 +4054,13 @@ pub fn apply_page_background(app: &AppHandle) {
     }
 }
 
-fn popup_host_labels(window: &str) -> (String, String) {
-    (
-        format!("popup-host-{window}"),
-        format!("popup-ext-{window}"),
-    )
-}
-
-fn popup_hash(kind: &str, params: &str) -> String {
-    if params.is_empty() {
-        format!("#/popup/{kind}")
-    } else {
-        format!("#/popup/{kind}?{params}")
-    }
-}
-
-/// Swaps the React host to `hash` without a reload or a history entry.
-fn hash_script(hash: &str) -> String {
-    let hash = serde_json::to_string(hash).unwrap_or_else(|_| "\"#/popup/ready\"".to_string());
-    format!(
-        "history.replaceState(null,\"\",{hash});window.dispatchEvent(new HashChangeEvent(\"hashchange\"));"
-    )
-}
-
-fn same_document(current: &str, expected: &str) -> bool {
-    match (Url::parse(current), Url::parse(expected)) {
-        (Ok(current), Ok(expected)) => {
-            current.scheme() == expected.scheme()
-                && current.host_str() == expected.host_str()
-                && current.path().trim_end_matches('/') == expected.path().trim_end_matches('/')
-                && current.query() == expected.query()
-        }
-        _ => current.trim_end_matches('/') == expected.trim_end_matches('/'),
-    }
-}
-
-fn emit_popup(app: &AppHandle, kind: Option<String>, params: Option<String>) {
-    let _ = app.emit("popup-changed", PopupChange { kind, params });
-}
-
-fn blank_extension_host(webview: &Webview) {
-    let current = webview.url().ok();
-    if current
-        .as_ref()
-        .is_some_and(|url| url.as_str().starts_with("about:blank"))
-    {
-        return;
-    }
-    if let Ok(blank) = Url::parse("about:blank") {
-        let _ = webview.navigate(blank);
-    }
-}
-
-/// Builds the two parked hosts for `window` if they are not there yet.
-fn ensure_popup_hosts(app: &AppHandle, window_label: &str) {
-    let (host_label, ext_label) = popup_host_labels(window_label);
-    let (make_host, make_ext) = with_state(app, |state| {
-        let Some(popup) = state
-            .chrome_mut(window_label)
-            .map(|chrome| &mut chrome.popup)
-        else {
-            return (false, false);
-        };
-        let make_host = popup.host_label.is_none();
-        let make_ext = popup.ext_label.is_none();
-        if make_host {
-            popup.host_label = Some(host_label.clone());
-        }
-        if make_ext {
-            popup.ext_label = Some(ext_label.clone());
-        }
-        (make_host, make_ext)
-    });
-    if make_host && let Err(error) = create_app_popup_host(app, window_label, &host_label) {
-        eprintln!("Popup host for {window_label}: {error}");
-        with_state(app, |state| {
-            if let Some(popup) = state
-                .chrome_mut(window_label)
-                .map(|chrome| &mut chrome.popup)
-                && popup.host_label.as_deref() == Some(host_label.as_str())
-            {
-                popup.host_label = None;
-            }
-        });
-    }
-    if !make_ext {
-        return;
-    }
-    match create_extension_popup_host(app, window_label, &ext_label) {
-        Ok(()) => {
-            with_state(app, |state| {
-                if let Some(popup) = state
-                    .chrome_mut(window_label)
-                    .map(|chrome| &mut chrome.popup)
-                {
-                    popup.ext_ready = true;
-                }
-            });
-        }
-        Err(error) => {
-            eprintln!("Extension popup host for {window_label}: {error}");
-            with_state(app, |state| {
-                if let Some(popup) = state
-                    .chrome_mut(window_label)
-                    .map(|chrome| &mut chrome.popup)
-                    && popup.ext_label.as_deref() == Some(ext_label.as_str())
-                {
-                    popup.ext_label = None;
-                    popup.ext_ready = false;
-                }
-            });
-        }
-    }
-}
-
-fn create_app_popup_host(app: &AppHandle, window_label: &str, label: &str) -> Result<(), String> {
-    let window = app
-        .get_window(window_label)
-        .ok_or("The browser window is missing.")?;
-    let url = paths::internal_url(app, "popup/ready");
-    let surface = popup_surface_color(app);
-    let popup_app = app.clone();
-    let popup_window = window_label.to_string();
-    let builder = base_builder(app, label, WebviewUrl::External(url))
-        .disable_drag_drop_handler()
-        .background_color(surface)
-        .focused(false)
-        .initialization_script(popup_paint_script(surface))
-        .on_new_window(move |url, features| {
-            let response = new_window(&popup_app, None, url, features);
-            // Close after this handler returns. WebView2 still has to adopt the new
-            // window, and navigating the opener first cancels that request.
-            defer_close_popup(&popup_app, &popup_window);
-            response
-        });
-    let webview = window
-        .add_child(builder, parked_position(), LogicalSize::new(120.0, 60.0))
-        .map_err(|error| error.to_string())?;
-    webview2::attach_popup_hooks(app, &webview, label);
-    webview2::attach_popup_blur(app, &webview, label);
-    Ok(())
-}
-
-fn create_extension_popup_host(
-    app: &AppHandle,
-    window_label: &str,
-    label: &str,
-) -> Result<(), String> {
-    let window = app
-        .get_window(window_label)
-        .ok_or("The browser window is missing.")?;
-    let url = Url::parse("about:blank").map_err(|error| error.to_string())?;
-    let surface = popup_surface_color(app);
-    let load_app = app.clone();
-    let load_window = window_label.to_string();
-    let popup_app = app.clone();
-    let popup_window = window_label.to_string();
-    let builder = base_builder(app, label, WebviewUrl::External(url))
-        .disable_drag_drop_handler()
-        .background_color(surface)
-        .focused(false)
-        .on_page_load(move |_, payload| {
-            if !matches!(payload.event(), PageLoadEvent::Finished) {
-                return;
-            }
-            let loaded = payload.url().as_str();
-            if loaded.starts_with("about:blank") {
-                return;
-            }
-            let found = with_state(&load_app, |state| {
-                let popup = &state.chrome(&load_window)?.popup;
-                if popup.kind.as_deref() != Some("extension") || !popup.open() {
-                    return None;
-                }
-                let expected = popup.ext_url.as_deref()?;
-                if !same_document(loaded, expected) {
-                    return None;
-                }
-                popup.ext_label.clone()
-            });
-            if let Some(label) = found {
-                if let Some(webview) = load_app.get_webview(&label) {
-                    let _ = webview.set_zoom(settings::get(&load_app).ui_zoom_factor());
-                }
-                measure_extension_popup(&load_app, &load_window, &label);
-            }
-        })
-        .on_new_window(move |url, features| {
-            let response = new_window(&popup_app, None, url, features);
-            defer_close_popup(&popup_app, &popup_window);
-            response
-        });
-    let webview = window
-        .add_child(builder, parked_position(), LogicalSize::new(120.0, 60.0))
-        .map_err(|error| error.to_string())?;
-    let _ = webview.set_zoom(settings::get(app).ui_zoom_factor());
-    webview2::attach_popup_hooks(app, &webview, label);
-    webview2::attach_popup_blur(app, &webview, label);
-    Ok(())
-}
-
-/// Parks the toolbar popup once WebView2 has finished adopting the window it asked for.
-fn defer_close_popup(app: &AppHandle, window_label: &str) {
-    let app = app.clone();
-    let window_label = window_label.to_string();
-    let _ = app
-        .clone()
-        .run_on_main_thread(move || close_window_popup(&app, &window_label));
-}
-
-fn host_is_ready(popup: &Popup, extension: bool) -> bool {
-    if extension {
-        popup.ext_label.is_some() && popup.ext_ready
-    } else {
-        popup.host_label.is_some() && popup.host_ready
-    }
-}
-
-/// Parks the open popup. `reset_document` sends the host back to its empty page.
-/// Returns whether that popup had taken focus.
-fn retire_popup(app: &AppHandle, window_label: &str, reset_document: bool) -> bool {
-    let retired = with_state(app, |state| {
-        let popup = &mut state.chrome_mut(window_label)?.popup;
-        let label = popup.label.take()?;
-        let focused = popup.focus;
-        let app_host = popup.host_label.as_deref() == Some(label.as_str());
-        popup.closed_key = if focused { popup.key() } else { None };
-        popup.closed_at = Some(Instant::now());
-        popup.kind = None;
-        popup.params = None;
-        popup.shape.clear();
-        popup.ext_url = None;
-        let width = popup.width.max(120.0);
-        let height = popup.height.max(40.0);
-        Some((label, focused, app_host, width, height))
-    });
-    let Some((label, focused, app_host, width, height)) = retired else {
-        return false;
-    };
-    if let Some(webview) = app.get_webview(&label) {
-        let parked = parked_position();
-        let _ = apply_popup_bounds(&webview, parked.x, parked.y, width, height);
-        if reset_document {
-            if app_host {
-                let _ = webview.eval(hash_script("#/popup/ready"));
-            } else {
-                blank_extension_host(&webview);
-            }
-        }
-    }
-    emit_popup(app, None, None);
-    focused
-}
-
-fn clear_pending(app: &AppHandle, window_label: &str) {
-    with_state(app, |state| {
-        if let Some(popup) = state
-            .chrome_mut(window_label)
-            .map(|chrome| &mut chrome.popup)
-        {
-            popup.pending = None;
-        }
-    });
-}
-
-/// The React host has applied the saved theme and can show a menu.
-pub fn popup_host_ready(app: &AppHandle, window_label: &str) {
-    let pending = with_state(app, |state| {
-        let Some(popup) = state
-            .chrome_mut(window_label)
-            .map(|chrome| &mut chrome.popup)
-        else {
-            return None;
-        };
-        popup.host_ready = true;
-        if popup
-            .pending
-            .as_ref()
-            .is_some_and(|request| request.kind != "extension")
-        {
-            return popup.pending.take();
-        }
-        None
-    });
-    if let Some(request) = pending {
-        let _ = open_popup(app, window_label, request);
-    }
-}
-
-/// Returns false when the request closed an already open popup of the same kind instead.
-pub fn open_popup(
-    app: &AppHandle,
-    window_label: &str,
-    request: PopupRequest,
-) -> Result<bool, String> {
-    let key = format!("{}?{}", request.kind, request.params);
-    let toggled = request.focus
-        && with_state(app, |state| {
-            let Some(popup) = state.chrome(window_label).map(|chrome| &chrome.popup) else {
-                return false;
-            };
-            let open_same = popup.open() && popup.key().as_deref() == Some(key.as_str());
-            let just_closed = popup.closed_key.as_deref() == Some(key.as_str())
-                && popup
-                    .closed_at
-                    .is_some_and(|at| at.elapsed() < POPUP_TOGGLE_WINDOW);
-            open_same || just_closed
-        });
-    if toggled {
-        close_window_popup(app, window_label);
-        with_state(app, |state| {
-            if let Some(popup) = state
-                .chrome_mut(window_label)
-                .map(|chrome| &mut chrome.popup)
-            {
-                popup.closed_at = None;
-            }
-        });
-        return Ok(false);
-    }
-
-    let extension = request.kind == "extension";
-    let extension_url = if extension {
-        Some(extensions::popup_url(app, &request.params)?)
-    } else {
-        None
-    };
-    ensure_popup_hosts(app, window_label);
-    let ready = with_state(app, |state| {
-        state
-            .chrome(window_label)
-            .is_some_and(|chrome| host_is_ready(&chrome.popup, extension))
-    });
-    if !ready {
-        let focused = retire_popup(app, window_label, true);
-        with_state(app, |state| {
-            if let Some(popup) = state
-                .chrome_mut(window_label)
-                .map(|chrome| &mut chrome.popup)
-            {
-                popup.pending = Some(request);
-            }
-        });
-        if focused {
-            focus_active(app, window_label);
-        }
-        return Ok(true);
-    }
-
-    let same_host = with_state(app, |state| {
-        let Some(popup) = state.chrome(window_label).map(|chrome| &chrome.popup) else {
-            return false;
-        };
-        let Some(label) = popup.label.as_deref() else {
-            return false;
-        };
-        if extension {
-            popup.ext_label.as_deref() == Some(label)
-        } else {
-            popup.host_label.as_deref() == Some(label)
-        }
-    });
-    if same_host {
-        // Parking the host off-screen to swap its page makes the controller lose focus,
-        // and that closes the popup this call is opening. Leave it up and ignore that blur.
-        with_state(app, |state| {
-            if let Some(popup) = state
-                .chrome_mut(window_label)
-                .map(|chrome| &mut chrome.popup)
-            {
-                popup.ignore_blur_until = Some(Instant::now() + POPUP_SWAP_BLUR);
-            }
-        });
-    } else {
-        retire_popup(app, window_label, true);
-    }
-    present_popup(app, window_label, &request, extension_url.as_ref())?;
-    Ok(true)
-}
-
-fn store_anchor(popup: &mut Popup, request: &PopupRequest) {
-    if request.edge == "left" || request.edge == "below" {
-        popup.anchor_x = request.anchor_x;
-        popup.anchor_y = request.anchor_y;
-        popup.anchor_w = request.anchor_width;
-        popup.anchor_h = request.anchor_height;
-        popup.edge = request.edge.clone();
-        popup.align = if request.align.is_empty() {
-            "end".to_string()
-        } else {
-            request.align.clone()
-        };
-    } else {
-        popup.anchor_x = request.x;
-        popup.anchor_y = request.y;
-        popup.anchor_w = 0.0;
-        popup.anchor_h = 0.0;
-        popup.edge.clear();
-        popup.align.clear();
-    }
-    popup.width = request.width;
-    popup.height = request.height;
-}
-
-fn present_popup(
-    app: &AppHandle,
-    window_label: &str,
-    request: &PopupRequest,
-    extension_url: Option<&Url>,
-) -> Result<(), String> {
-    let extension = request.kind == "extension";
-    let placed = with_state(app, |state| {
-        let popup = &mut state.chrome_mut(window_label)?.popup;
-        let label = if extension {
-            popup.ext_label.clone()
-        } else {
-            popup.host_label.clone()
-        }?;
-        popup.label = Some(label.clone());
-        popup.kind = Some(request.kind.clone());
-        popup.params = Some(request.params.clone());
-        popup.focus = request.focus;
-        store_anchor(popup, request);
-        popup.shape.clear();
-        popup.pending = None;
-        popup.ext_url = extension_url.map(|url| url.as_str().to_string());
-        Some((label, request.focus))
-    })
-    .ok_or("The browser window is missing.")?;
-    let (label, focus) = placed;
-    let Some(webview) = app.get_webview(&label) else {
-        retire_popup(app, window_label, true);
-        return Err("The popup host is missing.".into());
-    };
-    if let Err(error) = show_placed(app, window_label, None) {
-        retire_popup(app, window_label, true);
-        return Err(error);
-    }
-    let navigated = if let Some(url) = extension_url {
-        let current = webview.url().ok();
-        let result = if current
-            .as_ref()
-            .is_some_and(|current| same_document(current.as_str(), url.as_str()))
-        {
-            webview.reload()
-        } else {
-            webview.navigate(url.clone())
-        };
-        result.map_err(|error| error.to_string())
-    } else {
-        let hash = popup_hash(&request.kind, &request.params);
-        webview
-            .eval(hash_script(&hash))
-            .map_err(|error| error.to_string())
-    };
-    if let Err(error) = navigated {
-        retire_popup(app, window_label, true);
-        return Err(error);
-    }
-    if focus {
-        let _ = webview.set_focus();
-    }
-    emit_popup(
-        app,
-        Some(request.kind.clone()),
-        Some(request.params.clone()),
-    );
-    Ok(())
-}
-
-pub fn close_window_popup(app: &AppHandle, window_label: &str) {
-    let focused = retire_popup(app, window_label, true);
-    clear_pending(app, window_label);
-    if focused {
-        focus_active(app, window_label);
-    }
-}
-
-/// Closes a focused popup that lost focus. A parked host and a drag-opened menu stay up.
-/// A loss reported while one menu is replacing another is the move, so it is ignored.
-pub fn popup_lost_focus(app: &AppHandle, label: &str) {
-    let now = Instant::now();
-    let window = with_state(app, |state| {
-        state
-            .windows
-            .iter()
-            .find(|window| {
-                let popup = &window.popup;
-                if popup.ignore_blur_until.is_some_and(|until| until > now) {
-                    return false;
-                }
-                popup.label.as_deref() == Some(label) && popup.focus && popup.kind.is_some()
-            })
-            .map(|window| window.label.clone())
-    });
-    if let Some(window) = window {
-        retire_popup(app, &window, true);
-        clear_pending(app, &window);
-    }
-}
-
-/// Moves the open popup to the size its page reported. The button it opened from stays put.
-pub fn fit_popup(
-    app: &AppHandle,
-    window_label: &str,
-    width: Option<f64>,
-    height: f64,
-    zoom: Option<f64>,
-) -> Result<(), String> {
-    let updated = with_state(app, |state| {
-        let popup = &mut state.chrome_mut(window_label)?.popup;
-        if !popup.open() {
-            return None;
-        }
-        if let Some(width) = width {
-            popup.width = width;
-        }
-        popup.height = height;
-        Some(())
-    });
-    if updated.is_none() {
-        return Err("No popup is open.".into());
-    }
-    show_placed(app, window_label, zoom)
-}
-
-/// Draws only `shape` of the popup. The rest shows, and passes clicks to, the window below.
-pub fn set_popup_shape(
-    app: &AppHandle,
-    window_label: &str,
-    shape: Vec<PopupRect>,
-) -> Result<(), String> {
-    let label = with_state(app, |state| {
-        let popup = &mut state.chrome_mut(window_label)?.popup;
-        if !popup.open() {
-            return Some(None);
-        }
-        // Only the folder menu is clipped to its panels. A shape reported while that menu
-        // is being replaced would hide the popup that replaced it.
-        if popup.kind.as_deref() != Some("bookmark-folder") {
-            return Some(None);
-        }
-        popup.shape = shape;
-        Some(popup.label.clone())
-    })
-    .ok_or("The browser window is missing.")?;
-    let Some(label) = label else {
-        return Ok(());
-    };
-    let webview = app.get_webview(&label).ok_or("No popup is open.")?;
-    round_open_popup(app, &webview);
-    Ok(())
-}
-
-/// Puts the open popup on screen from its anchor and size.
-fn show_placed(app: &AppHandle, window_label: &str, zoom: Option<f64>) -> Result<(), String> {
-    let window = app
-        .get_window(window_label)
-        .ok_or("The browser window is missing.")?;
-    let (window_w, window_h) = logical_window_size(&window)?;
-    let placed = with_state(app, |state| {
-        let popup = &mut state.chrome_mut(window_label)?.popup;
-        let label = popup.label.clone()?;
-        let (x, y, width, height) = place_popup(
-            window_w,
-            window_h,
-            popup.anchor_x,
-            popup.anchor_y,
-            popup.anchor_w,
-            popup.anchor_h,
-            &popup.edge,
-            &popup.align,
-            popup.width,
-            popup.height,
-        );
-        popup.width = width;
-        popup.height = height;
-        Some((label, x, y, width, height))
-    })
-    .ok_or("No popup is open.")?;
-    let (label, x, y, width, height) = placed;
-    let webview = app.get_webview(&label).ok_or("No popup is open.")?;
-    if let Some(zoom) = zoom {
-        webview2::set_bounds_and_zoom(&webview, x, y, width, height, zoom)?;
-    } else {
-        apply_popup_bounds(&webview, x, y, width, height)?;
-    }
-    round_open_popup(app, &webview);
-    webview2::raise_popup(&webview);
-    Ok(())
-}
-
-fn round_open_popup(app: &AppHandle, webview: &Webview) {
-    let owner = with_state(app, |state| {
-        state.windows.iter().find_map(|window| {
-            let popup_label = window.popup.label.as_deref()?;
-            (webview.label() == popup_label).then(|| {
-                (
-                    window.label.clone(),
-                    window.popup.kind.as_deref() == Some("extension"),
-                    window.popup.width,
-                    window.popup.height,
-                    window.popup.shape.clone(),
-                )
-            })
-        })
-    });
-    let Some((window_label, extension, width, height, shape)) = owner else {
-        return;
-    };
-    if extension || width < 8.0 || height < 8.0 {
-        return;
-    }
-    let Some(window) = app.get_window(&window_label) else {
-        return;
-    };
-    let Ok(main) = window.hwnd() else {
-        return;
-    };
-    let shape = shape
-        .iter()
-        .map(|rect| webview2::PopupClipRect {
-            x: rect.x,
-            y: rect.y,
-            width: rect.width,
-            height: rect.height,
-        })
-        .collect();
-    webview2::round_popup(webview, main.0 as isize, width, height, 12.0, shape, true);
-}
-
-/// Sets the popup's position and size together. `set_size` and `set_position` each read the
-/// HWND back and write the whole rectangle, and that read is still the previous size.
-fn apply_popup_bounds(
-    webview: &Webview,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-) -> Result<(), String> {
-    webview
-        .set_bounds(Rect {
-            position: Position::Logical(LogicalPosition::new(x, y)),
-            size: Size::Logical(LogicalSize::new(width.max(1.0), height.max(1.0))),
-        })
-        .map_err(|error| error.to_string())
-}
-
-fn logical_window_size(window: &tauri::Window) -> Result<(f64, f64), String> {
-    let size = window.inner_size().map_err(|error| error.to_string())?;
-    let scale = window.scale_factor().unwrap_or(1.0);
-    Ok((size.width as f64 / scale, size.height as f64 / scale))
-}
-
-/// Hangs `width` by `height` from the anchor and slides it inside the window.
-/// A panel that would pass the bottom moves up, and shrinks only when the window
-/// still cannot hold it.
-fn place_popup(
-    window_w: f64,
-    window_h: f64,
-    anchor_x: f64,
-    anchor_y: f64,
-    anchor_w: f64,
-    anchor_h: f64,
-    edge: &str,
-    align: &str,
-    width: f64,
-    height: f64,
-) -> (f64, f64, f64, f64) {
-    let width = width.clamp(120.0, (window_w - 8.0).max(120.0));
-    let mut height = height.clamp(40.0, (window_h - 12.0).max(40.0));
-    let (mut x, mut y) = match edge {
-        "left" => (anchor_x - width - 4.0, anchor_y),
-        "below" => {
-            let x = if align == "start" {
-                anchor_x
-            } else {
-                anchor_x + anchor_w - width
-            };
-            (x, anchor_y + anchor_h + 4.0)
-        }
-        _ => (anchor_x, anchor_y),
-    };
-    let bottom = window_h - 8.0;
-    // A button can sit low on the window, so the panel slides up to stay beside it.
-    // A caller that already picked the top-left keeps that top and scrolls instead.
-    if edge == "left" || edge == "below" {
-        if y + height > bottom {
-            y = (bottom - height).max(4.0);
-        }
-        if y + height > bottom {
-            height = (bottom - y).max(40.0);
-        }
-        if y < 4.0 {
-            y = 4.0;
-        }
-    } else {
-        if y < 4.0 {
-            y = 4.0;
-        }
-        if y + height > bottom {
-            height = (bottom - y).max(40.0);
-        }
-    }
-    let right = window_w - 4.0;
-    if x + width > right {
-        x = (right - width).max(4.0);
-    }
-    if x < 4.0 {
-        x = 4.0;
-    }
-    (x, y, width, height)
-}
-
-/// Sizes an extension toolbar popup to its document. The placeholder is already on screen.
-fn measure_extension_popup(app: &AppHandle, window_label: &str, label: &str) {
-    let Some(webview) = app.get_webview(label) else {
-        return;
-    };
-    let app = app.clone();
-    let window_label = window_label.to_string();
-    let label = label.to_string();
-    webview2::measure_document(&webview, move |width, height| {
-        let app = app.clone();
-        let _ = app.clone().run_on_main_thread(move || {
-            apply_extension_size(&app, &window_label, &label, width, height);
-        });
-    });
-}
-
-fn apply_extension_size(app: &AppHandle, window_label: &str, label: &str, width: f64, height: f64) {
-    let factor = settings::get(app).ui_zoom_factor();
-    let width = width.clamp(120.0, EXTENSION_POPUP_MAX_WIDTH) * factor;
-    let height = height.clamp(40.0, EXTENSION_POPUP_MAX_HEIGHT) * factor;
-    let ready = with_state(app, |state| {
-        let popup = &state.chrome(window_label)?.popup;
-        (popup.kind.as_deref() == Some("extension")
-            && popup.open()
-            && popup.label.as_deref() == Some(label))
-        .then_some(())
-    });
-    if ready.is_none() {
-        return;
-    }
-    let _ = fit_popup(app, window_label, Some(width), height, Some(factor));
-}
-
-fn popup_surface_color(app: &AppHandle) -> Color {
+pub(crate) fn popup_surface_color(app: &AppHandle) -> Color {
     let (r, g, b) = settings::popup_surface(app);
     Color(r, g, b, 255)
 }
 
 /// Paints the document the same color as the webview before React mounts.
-fn popup_paint_script(color: Color) -> String {
+pub(crate) fn popup_paint_script(color: Color) -> String {
     format!(
         r##"(function () {{
   if (location.hash.indexOf("#/popup/") !== 0) return;
@@ -5044,7 +4164,6 @@ pub fn show_toast(app: &AppHandle, window_label: &str, params: &str) -> Result<(
                     size.width,
                     size.height,
                     10.0,
-                    Vec::new(),
                     true,
                 );
             }
@@ -6782,37 +5901,5 @@ mod tests {
         assert_eq!(entry.tabs[0].url, "https://a.example");
         assert!(entry.group.is_none());
         assert_eq!(entry.tabs[0].workspace, "");
-    }
-
-    #[test]
-    fn a_placed_point_keeps_its_top_and_scrolls() {
-        let (x, y, width, height) =
-            place_popup(800.0, 500.0, 400.0, 400.0, 0.0, 0.0, "", "", 340.0, 200.0);
-        assert_eq!((x, y, width, height), (400.0, 400.0, 340.0, 92.0));
-    }
-
-    #[test]
-    fn a_popup_shrinks_only_when_the_window_cannot_hold_it() {
-        let (_, y, _, height) = place_popup(
-            800.0, 100.0, 10.0, 4.0, 0.0, 0.0, "below", "start", 200.0, 400.0,
-        );
-        assert_eq!(y, 4.0);
-        assert_eq!(height, 88.0);
-    }
-
-    #[test]
-    fn a_side_popup_stays_beside_its_button() {
-        let (x, y, width, height) = place_popup(
-            800.0, 500.0, 760.0, 400.0, 32.0, 32.0, "left", "", 320.0, 200.0,
-        );
-        assert_eq!((x, y, width, height), (436.0, 292.0, 320.0, 200.0));
-    }
-
-    #[test]
-    fn a_menu_hangs_from_the_right_edge_of_its_button() {
-        let (x, y, _, height) = place_popup(
-            800.0, 600.0, 700.0, 40.0, 32.0, 32.0, "below", "end", 280.0, 200.0,
-        );
-        assert_eq!((x, y, height), (452.0, 76.0, 200.0));
     }
 }

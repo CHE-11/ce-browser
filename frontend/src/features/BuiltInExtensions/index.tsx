@@ -7,12 +7,11 @@ import { ClearCacheButton } from "./clear-cache/ClearCacheButton";
 import { PageCaptureButton } from "./page-capture/PageCaptureButton";
 import { PasswordButton } from "./password/Password";
 import { PriceButton } from "./price/Price";
-import { MediaHubButton } from "../Media/MediaHubButton";
+import { MediaHubButton } from "./media/MediaHubButton";
 import { PrintPdfButton } from "./print-pdf/PrintPdfButton";
 import { ReadingButton } from "./reading/Reading";
 import { ShoppingButton } from "./shopping/Shopping";
 import { TranslateButton } from "./translate/Translate";
-import { WaybackButton } from "./wayback/Wayback";
 import { WhatRunsButton } from "./what-runs/WhatRunsButton";
 
 /** One pinned built-in tool. Unknown ids render nothing. */
@@ -42,8 +41,6 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <PriceButton activeTab={activeTab} />;
     case "shopping":
       return <ShoppingButton activeTab={activeTab} />;
-    case "wayback":
-      return <WaybackButton activeTab={activeTab} />;
     case "reading":
       return <ReadingButton activeTab={activeTab} />;
     case "assistant":

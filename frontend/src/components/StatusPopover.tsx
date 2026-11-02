@@ -44,7 +44,7 @@ export function StatusPopover() {
   const host = page?.siteHost || "";
 
   return (
-    <PopupFrame id="status-popover">
+    <PopupFrame id="status-popover" width={300}>
       <div id="status-popover-accent" className="h-1 shrink-0" style={{ backgroundColor: accent ?? "rgb(63 63 70)" }} />
       <header id="status-popover-header" className="flex items-center gap-3 px-4 pb-3 pt-3">
         <span id="status-popover-mark" className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/15 text-sky-300">

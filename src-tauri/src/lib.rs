@@ -26,6 +26,7 @@ mod page_menu;
 mod page_rules;
 mod paths;
 mod peek;
+mod popup;
 mod print;
 mod privacy;
 mod profile_archive;
@@ -54,7 +55,7 @@ mod what_runs;
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager, Window, WindowEvent};
+use tauri::{AppHandle, Manager, Webview, Window, WindowEvent};
 
 use adblock::AdblockStats;
 use bookmarks::{BookmarkNode, BookmarkTree};
@@ -62,12 +63,18 @@ use capture::PageCaptureResult;
 use downloads::DownloadItem;
 use extensions::ExtensionInfo;
 use history::HistoryItem;
+use popup::{PopupRequest, PopupShow};
 use print::{ExtractedPage, PdfOptions};
 use profiles::{ProfileIconChoice, ProfileInfo};
 use settings::BrowserSettings;
 use sync::SyncStatus;
-use tabs::{PopupRequest, TabsSnapshot};
+use tabs::TabsSnapshot;
 use what_runs::PageTechnologies;
+
+/// The browser window a command came from. A popup's command acts on the window it belongs to.
+fn browser_window(window: &Window) -> String {
+    popup::owner_of(window.label())
+}
 
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
@@ -94,7 +101,7 @@ async fn create_tab(
 ) -> Result<u32, String> {
     tabs::create_tab_on(
         &app,
-        window.label(),
+        &browser_window(&window),
         url,
         background.unwrap_or(false),
         index,
@@ -216,7 +223,7 @@ async fn unpin_tab(app: AppHandle, id: u32) {
 
 #[tauri::command]
 async fn restore_pinned_tabs(app: AppHandle, window: Window) -> Result<(), String> {
-    tabs::restore_saved_pins(&app, window.label())
+    tabs::restore_saved_pins(&app, &browser_window(&window))
 }
 
 #[tauri::command]
@@ -257,7 +264,7 @@ async fn undo_action(app: AppHandle, id: u32) -> Result<(), String> {
 
 #[tauri::command]
 async fn dismiss_toast(app: AppHandle, window: Window, id: u32) {
-    undo::dismiss(&app, window.label(), id);
+    undo::dismiss(&app, &browser_window(&window), id);
 }
 
 #[tauri::command]
@@ -269,7 +276,7 @@ async fn set_ui_insets(
     right: f64,
     bottom: f64,
 ) {
-    tabs::set_ui_insets(&app, window.label(), top, left, right, bottom);
+    tabs::set_ui_insets(&app, &browser_window(&window), top, left, right, bottom);
 }
 
 #[tauri::command]
@@ -306,22 +313,22 @@ async fn split_with(app: AppHandle, id: u32) -> Result<(), String> {
 
 #[tauri::command]
 async fn open_in_split(app: AppHandle, window: Window, url: String) -> Result<u32, String> {
-    tabs::open_in_split(&app, window.label(), &url)
+    tabs::open_in_split(&app, &browser_window(&window), &url)
 }
 
 #[tauri::command]
 async fn swap_split(app: AppHandle, window: Window) -> Result<(), String> {
-    tabs::swap_split(&app, window.label())
+    tabs::swap_split(&app, &browser_window(&window))
 }
 
 #[tauri::command]
 async fn exit_split(app: AppHandle, window: Window) -> Result<(), String> {
-    tabs::exit_split(&app, window.label())
+    tabs::exit_split(&app, &browser_window(&window))
 }
 
 #[tauri::command]
 async fn set_split_ratio(app: AppHandle, window: Window, ratio: f64) {
-    tabs::set_split_ratio(&app, window.label(), ratio);
+    tabs::set_split_ratio(&app, &browser_window(&window), ratio);
 }
 
 // Tab groups
@@ -376,12 +383,12 @@ async fn save_group_to_bookmarks(app: AppHandle, id: u32) -> Result<BookmarkNode
 #[tauri::command]
 async fn open_folder_as_group(app: AppHandle, window: Window, id: String) -> Result<u32, String> {
     let (title, links) = bookmarks::folder_links(&app, &id)?;
-    tabs::open_as_group(&app, window.label(), &title, &links)
+    tabs::open_as_group(&app, &browser_window(&window), &title, &links)
 }
 
 #[tauri::command]
 async fn group_by_site(app: AppHandle, window: Window) -> Result<usize, String> {
-    tabs::group_by_site(&app, window.label())
+    tabs::group_by_site(&app, &browser_window(&window))
 }
 
 /// Ctrl is down right now. The tab switcher closes when it is released.
@@ -427,7 +434,7 @@ async fn delete_workspace(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 async fn switch_workspace(app: AppHandle, window: Window, id: String) -> Result<(), String> {
     workspaces_on(&app)?;
-    tabs::switch_workspace(&app, window.label(), &id)
+    tabs::switch_workspace(&app, &browser_window(&window), &id)
 }
 
 #[tauri::command]
@@ -444,22 +451,22 @@ async fn move_tabs_to_workspace(
 
 #[tauri::command]
 fn peek_state(app: AppHandle, window: Window) -> Option<peek::PeekInfo> {
-    peek::info(&app, window.label())
+    peek::info(&app, &browser_window(&window))
 }
 
 #[tauri::command]
 async fn close_peek(app: AppHandle, window: Window) {
-    peek::close(&app, window.label());
+    peek::close(&app, &browser_window(&window));
 }
 
 #[tauri::command]
 async fn peek_to_tab(app: AppHandle, window: Window) -> Result<u32, String> {
-    peek::to_tab(&app, window.label())
+    peek::to_tab(&app, &browser_window(&window))
 }
 
 #[tauri::command]
 async fn peek_to_split(app: AppHandle, window: Window) -> Result<u32, String> {
-    peek::to_split(&app, window.label())
+    peek::to_split(&app, &browser_window(&window))
 }
 
 #[tauri::command]
@@ -509,7 +516,7 @@ async fn find_in_tabs(
     case_sensitive: bool,
     whole_word: bool,
 ) -> Result<Vec<find::FindTabResult>, String> {
-    let label = window.label().to_string();
+    let label = browser_window(&window);
     blocking(move || {
         Ok(find::find_in_tabs(
             &app,
@@ -528,32 +535,42 @@ async fn open_devtools(app: AppHandle, id: u32) {
 }
 
 #[tauri::command]
-async fn open_popup(app: AppHandle, window: Window, request: PopupRequest) -> Result<bool, String> {
-    tabs::open_popup(&app, window.label(), request)
-}
-
-#[tauri::command]
-async fn close_popup(app: AppHandle, window: Window) {
-    tabs::close_window_popup(&app, window.label());
-}
-
-#[tauri::command]
-async fn fit_popup(app: AppHandle, window: Window, height: f64) -> Result<(), String> {
-    tabs::fit_popup(&app, window.label(), None, height, None)
-}
-
-#[tauri::command]
-async fn set_popup_shape(
+async fn open_popup(
     app: AppHandle,
-    window: Window,
-    shape: Vec<tabs::PopupRect>,
-) -> Result<(), String> {
-    tabs::set_popup_shape(&app, window.label(), shape)
+    webview: Webview,
+    request: PopupRequest,
+) -> Result<bool, String> {
+    popup::open(&app, &webview, request)
+}
+
+/// `scope` is `this` for the popup that asked and those opened from it, `above` for only
+/// those opened from it, and anything else for every popup of the window.
+#[tauri::command]
+async fn close_popup(app: AppHandle, webview: Webview, scope: Option<String>) {
+    let label = webview.label();
+    match scope.as_deref() {
+        Some("this") if popup::is_popup_label(label) => popup::close_level(&app, label),
+        Some("above") if popup::is_popup_label(label) => popup::close_above(&app, label),
+        Some("above") => {}
+        _ => popup::close_all(&app, label, true),
+    }
 }
 
 #[tauri::command]
-async fn popup_host_ready(app: AppHandle, window: Window) {
-    tabs::popup_host_ready(&app, window.label());
+async fn popup_measured(
+    app: AppHandle,
+    webview: Webview,
+    token: u64,
+    width: f64,
+    height: f64,
+    ready: bool,
+) {
+    popup::measured(&app, webview.label(), token, width, height, ready);
+}
+
+#[tauri::command]
+async fn popup_current(app: AppHandle, webview: Webview) -> Option<PopupShow> {
+    popup::current(&app, webview.label())
 }
 
 #[tauri::command]
@@ -641,6 +658,11 @@ async fn stop_recording() -> Result<(), String> {
 #[tauri::command]
 async fn list_media(app: AppHandle) -> Result<Vec<media::MediaElement>, String> {
     blocking(move || Ok(media::list_playing(&app))).await
+}
+
+#[tauri::command]
+async fn set_all_media_muted(app: AppHandle, muted: bool) -> Result<(), String> {
+    blocking(move || media::set_all_muted(&app, muted)).await
 }
 
 #[tauri::command]
@@ -806,7 +828,7 @@ async fn delete_bookmarks(app: AppHandle, window: Window, ids: Vec<String>) -> R
     if let Some(message) = message {
         undo::offer(
             &app,
-            window.label(),
+            &browser_window(&window),
             &message,
             undo::UndoAction::Bookmarks(removed),
         );
@@ -914,7 +936,7 @@ async fn remove_history(app: AppHandle, window: Window, id: u32) {
     if let Some(item) = history::take(&app, id) {
         undo::offer(
             &app,
-            window.label(),
+            &browser_window(&window),
             "Removed from history",
             undo::UndoAction::History {
                 items: vec![item],
@@ -937,7 +959,7 @@ async fn clear_history(app: AppHandle, window: Window) {
     );
     undo::offer(
         &app,
-        window.label(),
+        &browser_window(&window),
         &message,
         undo::UndoAction::History {
             items,
@@ -1050,7 +1072,7 @@ async fn set_group_container(
 
 #[tauri::command]
 async fn create_ephemeral_tab(app: AppHandle, window: Window) -> Result<u32, String> {
-    tabs::create_ephemeral_tab(&app, window.label())
+    tabs::create_ephemeral_tab(&app, &browser_window(&window))
 }
 
 #[tauri::command]
@@ -1211,12 +1233,7 @@ fn copy_text(text: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn show_notice(app: AppHandle, window: Window, message: String) {
-    undo::notice(&app, window.label(), &message);
-}
-
-#[tauri::command]
-fn wayback_url(save: bool, url: String) -> Result<String, String> {
-    tools::wayback_url(save, &url)
+    undo::notice(&app, &browser_window(&window), &message);
 }
 
 #[tauri::command]
@@ -1746,6 +1763,7 @@ pub fn run() {
             extensions::init(&handle);
             tabs::init(&handle);
             peek::init(&handle);
+            popup::init(&handle);
             session::init(&handle);
             status::init(&handle);
             tab_sleep::init(&handle);
@@ -1777,10 +1795,19 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             let label = window.label().to_string();
+            if popup::is_popup_label(&label) {
+                if matches!(event, WindowEvent::ScaleFactorChanged { .. }) {
+                    popup::rescaled(window.app_handle(), &label);
+                }
+                return;
+            }
             if !tabs::is_browser_label(&label) {
                 return;
             }
             match event {
+                WindowEvent::Moved(_) => {
+                    popup::close_all(window.app_handle(), &label, false);
+                }
                 WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                     let app = window.app_handle().clone();
                     let label = label.clone();
@@ -1890,9 +1917,8 @@ pub fn run() {
             open_devtools,
             open_popup,
             close_popup,
-            fit_popup,
-            set_popup_shape,
-            popup_host_ready,
+            popup_measured,
+            popup_current,
             capture_page_png,
             copy_page_png,
             capture_region,
@@ -1903,6 +1929,7 @@ pub fn run() {
             start_recording,
             stop_recording,
             list_media,
+            set_all_media_muted,
             control_media,
             page_media,
             download_page_media,
@@ -1981,7 +2008,6 @@ pub fn run() {
             generate_password,
             copy_text,
             show_notice,
-            wayback_url,
             reading_stats,
             list_prices,
             track_price,

@@ -50,9 +50,7 @@ import {
   onOmniboxRemove,
   onPopupChanged,
   openPopup,
-  openPopupBelow,
   reload,
-  fitPopup,
   restorePinnedTabs,
   saveSettings,
   showNotice,
@@ -66,12 +64,13 @@ import { storeListing } from "../../../../lib/extension-store";
 import { accentTint } from "../../../../lib/accent";
 import { cn } from "../../../../lib/cn";
 import { reorderToolbar, splitToolbar, toolbarPinned } from "../../../../lib/toolbar-pin";
-import { buildSuggestions, inlineCompletion, looksLikeUrl, omniboxHeight } from "../../../../lib/omnibox";
+import { buildSuggestions, inlineCompletion, looksLikeUrl } from "../../../../lib/omnibox";
 import { flattenBookmarks, type WindowTabsState } from "../../../../lib/use-browser";
 import { focusRing } from "../../../../lib/focus-ring";
 import { IconButton } from "../../../../components/IconButton";
 import { LoadBar } from "../../../../components/LoadBar";
 import { WindowControls } from "../../../../components/WindowControls";
+import { MediaHubButton } from "../../../BuiltInExtensions/media/MediaHubButton";
 import { ToolbarEntry } from "../../BrowserBody/VerticalToolbar/VerticalToolbar";
 
 type AddressBarProps = {
@@ -361,21 +360,15 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     if (!field || state.suggestions.length === 0) {
       return;
     }
-    const height = omniboxHeight(state.suggestions.length);
     if (popupOpenRef.current) {
-      void fitPopup(height);
       void sendOmniboxState(state);
       return;
     }
-    const rect = field.getBoundingClientRect();
     popupOpenRef.current = true;
-    void openPopup({
-      kind: "omnibox",
+    void openPopup("omnibox", field, {
+      placement: "bottom-start",
       focus: false,
-      x: rect.left,
-      y: rect.bottom + 2,
-      width: rect.width,
-      height,
+      minWidth: field.getBoundingClientRect().width,
     });
   }, []);
 
@@ -470,7 +463,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         } else if (command === "downloads") {
           const anchor = downloadsRef.current ?? menuRef.current;
           if (anchor) {
-            void openPopupBelow(anchor, { kind: "downloads", width: 380, height: 440 });
+            void openPopup("downloads", anchor);
           }
         }
       }),
@@ -492,7 +485,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       return;
     }
     const params = new URLSearchParams({ url: tab.url, title: tab.title || tab.url });
-    void openPopupBelow(anchor, { kind: "bookmark-edit", params: params.toString(), width: 340, height: 236 });
+    void openPopup("bookmark-edit", anchor, { params: params.toString() });
   }
 
   const onChange = (value: string, inserted: boolean) => {
@@ -735,8 +728,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
             )}
             onClick={(event) => {
               const anchor = fieldRef.current ?? event.currentTarget;
-              const rect = anchor.getBoundingClientRect();
-              void openPopup({ kind: "site-info", params: `id=${activeTab.id}`, x: rect.left, y: rect.bottom + 4, width: 360, height: 480 });
+              void openPopup("site-info", anchor, { params: `id=${activeTab.id}`, placement: "bottom-start" });
             }}
           >
             {secure || activeTab.url.startsWith("ce://") ? (
@@ -905,7 +897,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         label="Downloads (Ctrl+J)"
         className={cn("relative", downloadFlash && "animate-pulse bg-sky-500/25 text-sky-300")}
         onClick={(event) =>
-          void openPopupBelow(event.currentTarget, { kind: "downloads", width: 380, height: 440 })
+          void openPopup("downloads", event.currentTarget)
         }
       >
         <Download id="address-downloads-icon" aria-hidden />
@@ -930,6 +922,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       <IconButton id="address-history" label="History" onClick={() => void createTab("ce://history")}>
         <History id="address-history-icon" aria-hidden />
       </IconButton>
+      {toolbarPinned(settings, "media-hub") ? <MediaHubButton /> : null}
       <IconButton
         id="address-split"
         label={inSplit ? "Exit split view" : "Split view with the next tab"}
@@ -950,7 +943,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       <IconButton
         id="address-status"
         label="Browser status"
-        onClick={(event) => void openPopupBelow(event.currentTarget, { kind: "status", width: 300, height: 420 })}
+        onClick={(event) => void openPopup("status", event.currentTarget)}
       >
         <Activity id="address-status-icon" aria-hidden />
       </IconButton>
@@ -962,7 +955,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         id="address-menu"
         ref={menuRef}
         label="Menu"
-        onClick={(event) => void openPopupBelow(event.currentTarget, { kind: "app-menu", width: 280, height: 460 })}
+        onClick={(event) => void openPopup("app-menu", event.currentTarget)}
       >
         <EllipsisVertical id="address-menu-icon" aria-hidden />
       </IconButton>

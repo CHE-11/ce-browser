@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
@@ -5,24 +6,26 @@ use tauri::webview::PlatformWebview;
 use tauri::{AppHandle, Webview};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::*;
-use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CombineRgn, CreateRoundRectRgn, DeleteObject, HGDIOBJ, HRGN, RGN_OR, SetWindowRgn,
+    ClientToScreen, CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn,
 };
 use windows::Win32::System::Com::IStream;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
 };
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, GW_CHILD, GW_HWNDNEXT, GWL_STYLE, GetClientRect, GetParent, GetWindow,
-    GetWindowLongPtrW, HWND_TOP, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_CLIPSIBLINGS,
+    EnumChildWindows, GA_ROOTOWNER, GWL_EXSTYLE, GetAncestor, GetClientRect, GetForegroundWindow,
+    GetWindowLongPtrW, GetWindowRect, HWND_TOP, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW,
+    SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, WM_NCACTIVATE,
+    WS_EX_NOACTIVATE,
 };
 use windows::core::{BOOL, HSTRING, Interface, PWSTR};
 
 use crate::shortcuts::{self, Target};
-use crate::{downloads, tabs};
+use crate::{downloads, popup, tabs};
 
 /// Moves a COM pointer into a closure that `run_on_main_thread` or `with_webview` will run
 /// on the thread that created it. Never touch the inner value on another thread.
@@ -356,84 +359,206 @@ pub fn environment_of(webview: &Webview) -> Option<ICoreWebView2Environment> {
     rx.recv().ok().map(MainThread::into_inner)
 }
 
-/// Puts the popup above page views. The host is created with the window, and later page views
-/// would otherwise paint over it. Wry's container windows lack `WS_CLIPSIBLINGS`, so without it
-/// a lower sibling still paints across a higher one.
-pub fn raise_popup(webview: &Webview) {
-    let _ = webview.with_webview(|platform| {
-        let mut hwnd = HWND(std::ptr::null_mut());
-        if unsafe {
-            platform
-                .controller()
-                .ParentWindow(std::ptr::addr_of_mut!(hwnd))
-        }
-        .is_err()
-            || hwnd.0.is_null()
-        {
-            return;
-        }
-        if let Ok(parent) = unsafe { GetParent(hwnd) } {
-            let mut sibling = unsafe { GetWindow(parent, GW_CHILD) }.ok();
-            while let Some(child) = sibling {
-                clip_siblings(child);
-                sibling = unsafe { GetWindow(child, GW_HWNDNEXT) }.ok();
-            }
-        }
-        let _ = unsafe {
-            SetWindowPos(
-                hwnd,
-                Some(HWND_TOP),
-                0,
-                0,
-                0,
-                0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-            )
-        };
-    });
+/// True while a popup is being activated, so its owner keeps drawing itself as active.
+static POPUP_ACTIVATING: AtomicBool = AtomicBool::new(false);
+const OWNER_SUBCLASS_ID: usize = 0xCE_0901;
+
+/// Keeps a browser window painted active (title, border, Mica) while one of its own popups
+/// takes focus. Call on the main thread, once per window.
+pub fn keep_owner_active(owner: isize) {
+    if owner == 0 {
+        return;
+    }
+    let _ = unsafe {
+        SetWindowSubclass(
+            HWND(owner as *mut std::ffi::c_void),
+            Some(owner_proc),
+            OWNER_SUBCLASS_ID,
+            0,
+        )
+    };
 }
 
-fn clip_siblings(hwnd: HWND) {
-    let style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) };
-    let flag = WS_CLIPSIBLINGS.0 as isize;
-    if style & flag != 0 {
+unsafe extern "system" fn owner_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    _data: usize,
+) -> LRESULT {
+    if message == WM_NCACTIVATE && wparam.0 == 0 && POPUP_ACTIVATING.load(Ordering::Acquire) {
+        return unsafe { DefSubclassProc(hwnd, message, WPARAM(1), lparam) };
+    }
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+}
+
+/// Gives a popup window the keyboard. Main thread only.
+pub fn activate_popup(popup: isize) {
+    if popup == 0 {
+        return;
+    }
+    POPUP_ACTIVATING.store(true, Ordering::Release);
+    let _ = unsafe { SetForegroundWindow(HWND(popup as *mut std::ffi::c_void)) };
+    POPUP_ACTIVATING.store(false, Ordering::Release);
+}
+
+/// Focus left a popup for another program. Its owner was kept looking active, so it now
+/// draws itself inactive. Main thread only.
+pub fn release_owner(owner: isize) {
+    if owner == 0 || foreground_window() == owner {
         return;
     }
     unsafe {
-        SetWindowLongPtrW(hwnd, GWL_STYLE, style | flag);
-        let _ = SetWindowPos(
-            hwnd,
-            None,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        SendMessageW(
+            HWND(owner as *mut std::ffi::c_void),
+            WM_NCACTIVATE,
+            Some(WPARAM(0)),
+            Some(LPARAM(0)),
         );
     }
 }
 
-/// One rectangle of a popup, in CSS pixels of the popup document.
-pub struct PopupClipRect {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
+pub fn foreground_window() -> isize {
+    unsafe { GetForegroundWindow() }.0 as isize
 }
 
-/// Clips the popup to rounded rectangles. `width` and `height` are the size just requested.
-/// The HWND may still be the previous size, because its move is posted and not applied yet,
-/// so the region is built from this size rather than from `GetClientRect`. When `logical` is
-/// set, the size, radius and `shape` are CSS pixels and are scaled by the popup window's DPI.
-/// Otherwise they are already physical pixels. `shape` empty means the whole popup. Outside
-/// the shape the window below shows and takes the mouse. The main window is left alone.
+/// The top-level window that owns the foreground window, so a focused popup gives its
+/// browser window. 0 when nothing has focus.
+pub fn foreground_root_owner() -> isize {
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground.0.is_null() {
+        return 0;
+    }
+    unsafe { GetAncestor(foreground, GA_ROOTOWNER) }.0 as isize
+}
+
+/// Window rect for a client area at `x`, `y` sized `width` by `height`. A borderless window
+/// with a shadow keeps an invisible frame, so its window rect is larger than its client area.
+unsafe fn frame_around_client(
+    hwnd: HWND,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> (i32, i32, i32, i32) {
+    let mut window = RECT::default();
+    let mut client = RECT::default();
+    let mut origin = POINT::default();
+    let measured = unsafe {
+        GetWindowRect(hwnd, &mut window).is_ok()
+            && GetClientRect(hwnd, &mut client).is_ok()
+            && ClientToScreen(hwnd, &mut origin).as_bool()
+    };
+    if !measured {
+        return (x, y, width, height);
+    }
+    let left = origin.x - window.left;
+    let top = origin.y - window.top;
+    let extra_width = (window.right - window.left) - (client.right - client.left);
+    let extra_height = (window.bottom - window.top) - (client.bottom - client.top);
+    (
+        x - left,
+        y - top,
+        width + extra_width,
+        height + extra_height,
+    )
+}
+
+/// Moves and sizes a popup window's client area in one step, above its siblings. Physical
+/// px. A `no_activate` popup never takes focus, even when it is clicked. Main thread only.
+pub fn place_popup_window(
+    popup: isize,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    no_activate: bool,
+) {
+    if popup == 0 {
+        return;
+    }
+    let hwnd = HWND(popup as *mut std::ffi::c_void);
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let flag = WS_EX_NOACTIVATE.0 as isize;
+        let next = if no_activate {
+            style | flag
+        } else {
+            style & !flag
+        };
+        if next != style {
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
+        }
+        let (x, y, width, height) = frame_around_client(hwnd, x, y, width, height);
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_TOP),
+            x,
+            y,
+            width,
+            height,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        );
+    }
+}
+
+/// Shows a popup window that was built hidden, already moved off screen, so it never
+/// appears at its default position. Main thread only.
+pub fn show_parked_popup(popup: isize, x: i32, y: i32, width: i32, height: i32) {
+    if popup == 0 {
+        return;
+    }
+    let hwnd = HWND(popup as *mut std::ffi::c_void);
+    unsafe {
+        let (x, y, width, height) = frame_around_client(hwnd, x, y, width, height);
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            x,
+            y,
+            width,
+            height,
+            SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW,
+        );
+    }
+}
+
+/// Moves a popup window off screen. A popup that had the keyboard hands it back to its owner.
+/// Main thread only.
+pub fn park_popup_window(popup: isize, owner: isize, x: i32, y: i32, width: i32, height: i32) {
+    if popup == 0 {
+        return;
+    }
+    let hwnd = HWND(popup as *mut std::ffi::c_void);
+    unsafe {
+        if foreground_window() == popup && owner != 0 {
+            let _ = SetForegroundWindow(HWND(owner as *mut std::ffi::c_void));
+        }
+        let (x, y, width, height) = frame_around_client(hwnd, x, y, width, height);
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            x,
+            y,
+            width,
+            height,
+            SWP_NOACTIVATE | SWP_NOZORDER,
+        );
+    }
+}
+
+/// Clips a child webview to a rounded rectangle. `width` and `height` are the size just
+/// requested. The HWND may still be the previous size, because its move is posted and not
+/// applied yet, so the region is built from this size rather than from `GetClientRect`. When
+/// `logical` is set, the size and radius are CSS pixels and are scaled by the webview's DPI.
+/// Otherwise they are already physical pixels. The main window is left alone.
 pub fn round_popup(
     webview: &Webview,
     main: isize,
     width: f64,
     height: f64,
     radius: f64,
-    shape: Vec<PopupClipRect>,
     logical: bool,
 ) {
     if width < 8.0 || height < 8.0 {
@@ -458,16 +583,7 @@ pub fn round_popup(
         let width = (width * scale).round().max(1.0) as i32;
         let height = (height * scale).round().max(1.0) as i32;
         let radius = (radius.max(1.0) * scale).round().max(1.0) as i32;
-        let shape = shape
-            .iter()
-            .map(|rect| RECT {
-                left: (rect.x * scale).round() as i32,
-                top: (rect.y * scale).round() as i32,
-                right: ((rect.x + rect.width) * scale).round() as i32,
-                bottom: ((rect.y + rect.height) * scale).round() as i32,
-            })
-            .collect::<Vec<_>>();
-        apply_region(hwnd, radius, &shape, width, height);
+        apply_region(hwnd, radius, width, height);
     });
 }
 
@@ -520,57 +636,6 @@ fn parse_document_size(raw: &str) -> Option<(f64, f64)> {
         .then_some((width, height))
 }
 
-/// Sets a child webview's position, size and zoom together. Logical pixels. The controller
-/// bounds and the zoom change in one call, so `innerWidth` stays the CSS size the page laid out.
-pub fn set_bounds_and_zoom(
-    webview: &Webview,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    zoom: f64,
-) -> std::result::Result<(), String> {
-    let zoom = zoom.max(0.1);
-    webview
-        .with_webview(move |platform| {
-            let controller = platform.controller();
-            let mut hwnd = HWND(std::ptr::null_mut());
-            if unsafe { controller.ParentWindow(std::ptr::addr_of_mut!(hwnd)) }.is_err()
-                || hwnd.0.is_null()
-            {
-                return;
-            }
-            let scale = hwnd_scale(hwnd);
-            let width = (width * scale).round().max(1.0) as i32;
-            let height = (height * scale).round().max(1.0) as i32;
-            let x = (x * scale).round() as i32;
-            let y = (y * scale).round() as i32;
-            let _ = unsafe {
-                controller.SetBoundsAndZoomFactor(
-                    RECT {
-                        left: 0,
-                        top: 0,
-                        right: width,
-                        bottom: height,
-                    },
-                    zoom,
-                )
-            };
-            let _ = unsafe {
-                SetWindowPos(
-                    hwnd,
-                    Some(HWND_TOP),
-                    x,
-                    y,
-                    width,
-                    height,
-                    SWP_NOACTIVATE | SWP_NOZORDER,
-                )
-            };
-        })
-        .map_err(|error| error.to_string())
-}
-
 /// The popup HWND's DPI, as a scale from 96. This is the factor wry uses when it turns a
 /// logical size into physical pixels.
 fn hwnd_scale(hwnd: HWND) -> f64 {
@@ -586,11 +651,10 @@ struct Clip {
     match_height: i32,
     draw_width: i32,
     draw_height: i32,
-    shape: Vec<RECT>,
 }
 
-fn apply_region(hwnd: HWND, radius: i32, shape: &[RECT], width: i32, height: i32) {
-    clip_round(hwnd, radius, shape, width, height);
+fn apply_region(hwnd: HWND, radius: i32, width: i32, height: i32) {
+    clip_round(hwnd, radius, width, height);
     let Some((match_width, match_height)) = client_size(hwnd) else {
         return;
     };
@@ -600,7 +664,6 @@ fn apply_region(hwnd: HWND, radius: i32, shape: &[RECT], width: i32, height: i32
         match_height,
         draw_width: width,
         draw_height: height,
-        shape: shape.to_vec(),
     };
     let _ = unsafe {
         EnumChildWindows(
@@ -619,13 +682,7 @@ unsafe extern "system" fn clip_matching_child(child: HWND, param: LPARAM) -> BOO
         let near_target =
             (width - clip.draw_width).abs() <= 8 && (height - clip.draw_height).abs() <= 8;
         if near_window || near_target {
-            clip_round(
-                child,
-                clip.radius,
-                &clip.shape,
-                clip.draw_width,
-                clip.draw_height,
-            );
+            clip_round(child, clip.radius, clip.draw_width, clip.draw_height);
         }
     }
     BOOL(1)
@@ -645,44 +702,15 @@ fn client_size(hwnd: HWND) -> Option<(i32, i32)> {
     }
 }
 
-fn clip_round(hwnd: HWND, radius: i32, shape: &[RECT], width: i32, height: i32) {
+fn clip_round(hwnd: HWND, radius: i32, width: i32, height: i32) {
     if width < 8 || height < 8 {
         return;
     }
-    let whole = [RECT {
-        left: 0,
-        top: 0,
-        right: width,
-        bottom: height,
-    }];
-    let rects = if shape.is_empty() { &whole[..] } else { shape };
     let diameter = radius.max(1).saturating_mul(2);
-    let mut region: Option<HRGN> = None;
-    for rect in rects {
-        let part = unsafe {
-            CreateRoundRectRgn(
-                rect.left,
-                rect.top,
-                rect.right + 1,
-                rect.bottom + 1,
-                diameter,
-                diameter,
-            )
-        };
-        if part.0.is_null() {
-            continue;
-        }
-        match region {
-            None => region = Some(part),
-            Some(total) => {
-                let _ = unsafe { CombineRgn(Some(total), Some(total), Some(part), RGN_OR) };
-                let _ = unsafe { DeleteObject(HGDIOBJ(part.0)) };
-            }
-        }
-    }
-    let Some(region) = region else {
+    let region = unsafe { CreateRoundRectRgn(0, 0, width + 1, height + 1, diameter, diameter) };
+    if region.0.is_null() {
         return;
-    };
+    }
     if unsafe { SetWindowRgn(hwnd, Some(region), true) } == 0 {
         let _ = unsafe { DeleteObject(HGDIOBJ(region.0)) };
     }
@@ -702,8 +730,7 @@ pub fn attach_popup_hooks(app: &AppHandle, webview: &Webview, label: &str) {
     });
 }
 
-/// Closes the popup when it loses focus. Attached once, for the life of the host. A parked
-/// host and a drag-opened menu (which never takes focus) are left alone.
+/// Closes the popup stack when focus leaves it. Attached once, for the life of the window.
 pub fn attach_popup_blur(app: &AppHandle, webview: &Webview, label: &str) {
     let app = app.clone();
     let label = label.to_string();
@@ -719,7 +746,7 @@ pub fn attach_popup_blur(app: &AppHandle, webview: &Webview, label: &str) {
             }
             let app = blur_app.clone();
             let label = label.clone();
-            tauri::async_runtime::spawn(async move { tabs::popup_lost_focus(&app, &label) });
+            tauri::async_runtime::spawn(async move { popup::lost_focus(&app, &label) });
             Ok(())
         }));
         let _ = unsafe { platform.controller().add_LostFocus(&handler, &mut token) };
@@ -1195,6 +1222,27 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
     Ok(())
 }
 
+fn resource_kind(context: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> &'static str {
+    match context {
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT => "document",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET => "stylesheet",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE => "image",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA => "media",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT => "font",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT => "script",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_XML_HTTP_REQUEST => "xhr",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH => "fetch",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_TEXT_TRACK => "track",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_EVENT_SOURCE => "event",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_WEBSOCKET => "websocket",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MANIFEST => "manifest",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SIGNED_EXCHANGE => "exchange",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING => "ping",
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_CSP_VIOLATION_REPORT => "report",
+        _ => "other",
+    }
+}
+
 fn attach_adblock(
     app: &AppHandle,
     platform: &PlatformWebview,
@@ -1269,7 +1317,13 @@ fn attach_adblock(
                 let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
                 let _ = args.ResourceContext(&mut context);
                 let is_document = context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT;
-                if crate::adblock::should_block(&request_app, id, &uri, is_document) {
+                if crate::adblock::should_block(
+                    &request_app,
+                    id,
+                    &uri,
+                    is_document,
+                    resource_kind(context),
+                ) {
                     let response = environment.CreateWebResourceResponse(
                         None::<&IStream>,
                         403,
@@ -1575,8 +1629,6 @@ fn add_page_items(
                         y,
                         "selection-translate",
                         params,
-                        360.0,
-                        240.0,
                     );
                 },
             )?);
@@ -1595,16 +1647,7 @@ fn add_page_items(
                         .append_pair("title", "")
                         .append_pair("question", &question)
                         .finish();
-                    crate::page_menu::open_popup_at(
-                        &assistant_app,
-                        id,
-                        x,
-                        y,
-                        "assistant",
-                        params,
-                        360.0,
-                        460.0,
-                    );
+                    crate::page_menu::open_popup_at(&assistant_app, id, x, y, "assistant", params);
                 },
             )?);
             let (link_app, text, page_url) = (app.clone(), selection.clone(), page.clone());

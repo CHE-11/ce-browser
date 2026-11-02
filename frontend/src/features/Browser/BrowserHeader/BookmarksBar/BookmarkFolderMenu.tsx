@@ -1,50 +1,31 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ChevronRight, ExternalLink, Folder, Group } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
-import { PopupMenu, PopupMenuItem, PopupMenuSeparator, popupSurfaceClass } from "@/components/PopupFrame";
-import { windowPoint, createTab, navigate, closePopup, openFolderAsGroup } from "@/lib/browser-client";
+import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "@/components/PopupFrame";
+import {
+  closePopup,
+  closeSubmenus,
+  closeThisPopup,
+  createTab,
+  navigate,
+  openFolderAsGroup,
+  openPopup,
+} from "@/lib/browser-client";
 import { BOOKMARK_DROP_END, useBookmarkDrag } from "@/lib/bookmark-drag";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { cn } from "@/lib/cn";
 import { faviconKey } from "@/lib/format";
-import { POPUP_SHAPE_ATTR, usePopupShape } from "@/lib/popup-shape";
+import { usePopupHost } from "@/lib/popup-host";
 import { useBookmarksState, useTabs, findFolder, useSiteFavicons, useSettingsState } from "@/lib/use-browser";
 import { BookmarkNode } from "@type/browser";
-import { BookmarksBarContextMenuItems, type BookmarkMenuTarget } from "./BookmarksBarContextMenu";
+import type { BookmarkMenuTarget } from "./BookmarksBarContextMenu";
 
 type BookmarkFolderMenuProps = {
   folderId: string;
-  /** Left edge of the folder button, in popup px. */
-  left: number;
   /** The bookmarks bar opened this popup because a drag rested on the folder. */
   dragOpened?: boolean;
 };
 
-type Side = "left" | "right";
-
-/** One folder's menu and where it sits in the popup. */
-type Panel = {
-  id: string;
-  left: number;
-  /** Wanted top. The panel moves up when it would run past the bottom. */
-  top: number;
-  /** Side its own submenus try first. */
-  side: Side;
-  /** Opened from the keyboard, so its first item takes focus. */
-  focus: boolean;
-};
-
-type FolderContext = {
-  x: number;
-  y: number;
-  windowX: number;
-  windowY: number;
-  parentId: string;
-  target: BookmarkMenuTarget | null;
-};
-
-const PANEL_WIDTH = 300;
-const SUBMENU_GAP = 2;
 /** Matches the vertical padding of `PopupMenu`, so a submenu's first row lines up with its folder. */
 const MENU_PADDING = 6;
 const HOVER_DELAY = 250;
@@ -66,334 +47,121 @@ function targetKind(node: BookmarkNode): BookmarkMenuTarget["kind"] {
   return "folder";
 }
 
-function isFolder(node: BookmarkNode) {
-  return !node.url && !node.separator;
-}
-
-function rowId(node: BookmarkNode | Panel) {
+function rowId(node: BookmarkNode) {
   return `bookmark-folder-menu-${node.id}`;
 }
 
-/** Rows and separators `BookmarksBarContextMenuItems` renders for this target. */
-function contextMenuShape(target: BookmarkMenuTarget | null) {
-  if (!target) {
-    return { rows: 3, separators: 1 };
-  }
-  if (target.kind === "separator") {
-    return { rows: 4, separators: 2 };
-  }
-  if (target.kind === "folder") {
-    return { rows: 6, separators: 3 };
-  }
-  return { rows: 7, separators: 3 };
-}
-
-/** Room kept below the cursor so the context menu is not clipped. */
-function contextMenuReserve(target: BookmarkMenuTarget | null, text: number, padding: number) {
-  const { rows, separators } = contextMenuShape(target);
-  const root = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-  const row = (text * 1.35 + padding) * root;
-  const separator = root * 0.5 + 1;
-  const chrome = root * 0.75;
-  const gaps = Math.max(0, rows + separators - 1) * root * 0.125;
-  return Math.ceil(rows * row + separators * separator + chrome + gaps + 8);
-}
-
-/** Beside `parent` on `preferred`, or the other side when that one has no room. */
-function placeSubmenu(parent: DOMRect, row: DOMRect, preferred: Side): Omit<Panel, "id" | "focus"> {
-  const width = window.innerWidth;
-  const rightLeft = parent.right + SUBMENU_GAP;
-  const leftLeft = parent.left - SUBMENU_GAP - PANEL_WIDTH;
-  const fitsRight = rightLeft + PANEL_WIDTH <= width;
-  const fitsLeft = leftLeft >= 0;
-  const side: Side = preferred === "right" ? (fitsRight || !fitsLeft ? "right" : "left") : fitsLeft || !fitsRight ? "left" : "right";
-  const left = side === "right" ? Math.min(rightLeft, Math.max(0, width - PANEL_WIDTH)) : Math.max(0, leftLeft);
-  return { left, top: row.top - MENU_PADDING, side };
-}
-
-/** Moves the panel up when it would run past the bottom of the popup. */
-function placePanel(element: HTMLElement, top: number) {
-  element.style.top = `${Math.max(0, Math.min(top, window.innerHeight - element.offsetHeight))}px`;
-}
-
-export function BookmarkFolderMenu({ folderId, left, dragOpened = false }: BookmarkFolderMenuProps) {
-  const { tree } = useBookmarksState();
+/**
+ * One bookmark folder. Its subfolders open as their own popups beside it, each one level up
+ * the popup stack, so every menu can reach the edge of the screen.
+ */
+export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFolderMenuProps) {
+  const { tree, loaded } = useBookmarksState();
   const { settings } = useSettingsState();
   const rowStyle = bookmarkItemStyle(settings?.bookmarkFolderTextSize, settings?.bookmarkFolderPadding, {
     text: BOOKMARK_SIZE.folderText,
     padding: BOOKMARK_SIZE.folderPadding,
   });
   const { activeId } = useTabs();
-  const [submenus, setSubmenus] = useState<Panel[]>([]);
-  const [context, setContext] = useState<FolderContext | null>(null);
-  const hover = useRef<{ level: number; timer: number } | null>(null);
-  const shape = usePopupShape();
-
-  const root: Panel = {
-    id: folderId,
-    left: Math.max(0, Math.min(left, window.innerWidth - PANEL_WIDTH)),
-    top: 0,
-    side: "right",
-    focus: false,
-  };
-  const panels = [root];
-  for (const submenu of submenus) {
-    if (!findFolder(tree, submenu.id)) {
-      break;
-    }
-    panels.push(submenu);
-  }
+  const host = usePopupHost();
+  const level = host?.level ?? 0;
+  const folder = findFolder(tree, folderId);
+  const children = folder?.children ?? [];
+  const links = children.filter((node) => node.url);
+  const icons = useSiteFavicons(children.map((node) => node.url));
+  const prefix = `bookmark-folder-panel-${folderId}`;
+  /** Folder whose submenu is open beside this one. */
+  const [openChild, setOpenChild] = useState<string | null>(null);
+  const openChildRef = useRef(openChild);
+  openChildRef.current = openChild;
+  const hover = useRef<number | null>(null);
 
   const cancelHover = () => {
-    if (hover.current) {
-      window.clearTimeout(hover.current.timer);
+    if (hover.current !== null) {
+      window.clearTimeout(hover.current);
       hover.current = null;
     }
   };
 
   useEffect(() => cancelHover, []);
 
-  const scheduleHover = (level: number, action: () => void) => {
-    cancelHover();
-    const timer = window.setTimeout(() => {
-      hover.current = null;
-      action();
-    }, HOVER_DELAY);
-    hover.current = { level, timer };
-  };
-
-  /** Shows `node` beside the panel at `level`, replacing any deeper submenus. */
-  const openSubmenu = (level: number, node: BookmarkNode, row: HTMLElement, focus: boolean) => {
-    cancelHover();
-    const parent = row.closest<HTMLElement>(`[${POPUP_SHAPE_ATTR}]`);
-    if (!parent || !row.isConnected) {
-      return;
-    }
-    if (submenus[level]?.id === node.id) {
-      if (focus) {
-        document.getElementById(`bookmark-folder-panel-${node.id}`)?.querySelector<HTMLElement>(MENU_ITEM)?.focus();
-      }
-      return;
-    }
-    const place = placeSubmenu(parent.getBoundingClientRect(), row.getBoundingClientRect(), panels[level].side);
-    setSubmenus((current) => [...current.slice(0, level), { id: node.id, ...place, focus }]);
-  };
-
-  /** Closes every submenu deeper than the panel at `level`. */
-  const closeAfter = (level: number) => {
-    setSubmenus((current) => (current.length > level ? current.slice(0, level) : current));
-  };
-
-  const hoverRow = (level: number, node: BookmarkNode | null, row: HTMLElement) => {
-    const child = submenus[level];
-    if (node && isFolder(node)) {
-      if (child?.id === node.id) {
-        cancelHover();
-        return;
-      }
-      scheduleHover(level, () => openSubmenu(level, node, row, false));
-      return;
-    }
-    if (!child) {
-      cancelHover();
-      return;
-    }
-    scheduleHover(level, () => closeAfter(level));
-  };
-
-  /** The pointer reached a submenu, so a pending change from a row on the way there is dropped. */
-  const enterPanel = (level: number) => {
-    if (hover.current && hover.current.level < level) {
-      cancelHover();
-    }
-  };
-
-  /** Closes the panel at `level` and everything past it, and focuses the folder row that opened it. */
-  const back = (level: number) => {
-    const panel = panels[level];
-    if (level === 0 || !panel) {
-      return;
-    }
-    cancelHover();
-    closeAfter(level - 1);
-    document.getElementById(rowId(panel))?.focus();
-  };
-
+  // A pointer on its way to a submenu crosses other rows. Leaving the window drops what they asked.
   useEffect(() => {
-    if (!context) {
+    document.documentElement.addEventListener("mouseleave", cancelHover);
+    return () => document.documentElement.removeEventListener("mouseleave", cancelHover);
+  }, []);
+
+  // A submenu opened from the keyboard gets focus, and so does its parent when it closes.
+  useEffect(() => {
+    const onFocus = () => {
+      const child = openChildRef.current;
+      if (child) {
+        setOpenChild(null);
+        document.getElementById(`bookmark-folder-menu-${child}`)?.focus();
+        return;
+      }
+      if (level > 0 && document.activeElement === document.body) {
+        document.getElementById(prefix)?.querySelector<HTMLElement>(MENU_ITEM)?.focus();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [level, prefix]);
+
+  const openSubmenu = (node: BookmarkNode, row: HTMLElement, focus: boolean) => {
+    cancelHover();
+    if (!row.isConnected) {
       return;
     }
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-      event.stopPropagation();
-      setContext(null);
-    };
-    const onPointer = (event: PointerEvent) => {
-      const target = event.target;
-      const menu = document.getElementById("bookmark-folder-context");
-      if (target instanceof Node && menu?.contains(target)) {
-        return;
-      }
-      setContext(null);
-    };
-    window.addEventListener("keydown", onKey, true);
-    window.addEventListener("pointerdown", onPointer, true);
-    return () => {
-      window.removeEventListener("keydown", onKey, true);
-      window.removeEventListener("pointerdown", onPointer, true);
-    };
-  }, [context]);
-
-  const { report } = shape;
-  useLayoutEffect(report, [context, report]);
-
-  const openContext = (event: MouseEvent, parentId: string, node?: BookmarkNode) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const x = event.clientX;
-    const y = event.clientY;
-    const target = node ? { id: node.id, kind: targetKind(node), url: node.url ?? undefined } : null;
-    setContext({ x, y, windowX: x, windowY: y, parentId, target });
-    void windowPoint(x, y).then((point) => {
-      setContext((current) => (current && current.x === x && current.y === y ? { ...current, windowX: point.x, windowY: point.y } : current));
-    });
+    const box = row.getBoundingClientRect();
+    const params = new URLSearchParams({ id: node.id });
+    if (dragOpened) {
+      params.set("drag", "1");
+    }
+    setOpenChild(node.id);
+    void openPopup(
+      "bookmark-folder",
+      { x: 0, y: box.top - MENU_PADDING, width: window.innerWidth, height: box.height },
+      { params: params.toString(), placement: "right-start", child: true, focus: focus && !dragOpened },
+    );
   };
 
-  return (
-    <div id="bookmark-folder-menu" className="fixed inset-0" onContextMenu={(event) => event.preventDefault()}>
-      {panels.map((panel, level) => (
-        <FolderPanel
-          key={panel.id}
-          panel={panel}
-          folder={findFolder(tree, panel.id)}
-          openChildId={panels[level + 1]?.id ?? null}
-          rowStyle={rowStyle}
-          activeId={activeId}
-          dragOpened={dragOpened}
-          onLayout={report}
-          onEnter={() => enterPanel(level)}
-          onHoverRow={(node, row) => hoverRow(level, node, row)}
-          onOpenFolder={(node, row, focus) => openSubmenu(level, node, row, focus)}
-          onBack={level > 0 ? () => back(level) : null}
-          onContext={(event, node) => openContext(event, panel.id, node)}
-        />
-      ))}
-      {context ? (
-        <div
-          id="bookmark-folder-context"
-          data-popup-shape=""
-          className={cn("fixed z-50 w-60", popupSurfaceClass)}
-          style={{
-            left: Math.max(8, Math.min(context.x, window.innerWidth - 248)),
-            top: Math.max(
-              8,
-              Math.min(
-                context.y,
-                window.innerHeight -
-                  contextMenuReserve(
-                    context.target,
-                    settings?.bookmarksBarMenuTextSize ?? BOOKMARK_SIZE.menuText,
-                    settings?.bookmarksBarMenuPadding ?? BOOKMARK_SIZE.menuPadding,
-                  ),
-              ),
-            ),
-          }}
-        >
-          <BookmarksBarContextMenuItems
-            idPrefix="bookmark-folder-context"
-            parentId={context.parentId}
-            divider="horizontal"
-            x={context.windowX}
-            y={context.windowY}
-            target={context.target}
-            onDone={() => setContext(null)}
-          />
-        </div>
-      ) : null}
-    </div>
-  );
-}
+  const closeChild = () => {
+    cancelHover();
+    if (openChildRef.current) {
+      setOpenChild(null);
+      void closeSubmenus();
+    }
+  };
 
-type FolderPanelProps = {
-  panel: Panel;
-  folder: BookmarkNode | null;
-  /** Folder whose submenu is open beside this panel. */
-  openChildId: string | null;
-  rowStyle: CSSProperties;
-  activeId: number | null;
-  dragOpened: boolean;
-  /** The panel moved, resized, mounted or unmounted. */
-  onLayout: () => void;
-  onEnter: () => void;
-  /** `node` is null for rows that are not bookmarks. */
-  onHoverRow: (node: BookmarkNode | null, row: HTMLElement) => void;
-  onOpenFolder: (node: BookmarkNode, row: HTMLElement, focus: boolean) => void;
-  /** Null for the first panel, which has nothing to go back to. */
-  onBack: (() => void) | null;
-  onContext: (event: MouseEvent, node?: BookmarkNode) => void;
-};
-
-function FolderPanel({
-  panel,
-  folder,
-  openChildId,
-  rowStyle,
-  activeId,
-  dragOpened,
-  onLayout,
-  onEnter,
-  onHoverRow,
-  onOpenFolder,
-  onBack,
-  onContext,
-}: FolderPanelProps) {
-  const ref = useRef<HTMLDivElement>(null);
-  const children = folder?.children ?? [];
-  const links = children.filter((node) => node.url);
-  const icons = useSiteFavicons(children.map((node) => node.url));
-  const prefix = `bookmark-folder-panel-${panel.id}`;
+  const hoverRow = (node: BookmarkNode | null, row: HTMLElement) => {
+    cancelHover();
+    if (node && !node.url && !node.separator) {
+      if (openChild === node.id) {
+        return;
+      }
+      hover.current = window.setTimeout(() => {
+        hover.current = null;
+        openSubmenu(node, row, false);
+      }, HOVER_DELAY);
+      return;
+    }
+    if (!openChild) {
+      return;
+    }
+    hover.current = window.setTimeout(() => {
+      hover.current = null;
+      closeChild();
+    }, HOVER_DELAY);
+  };
 
   const drag = useBookmarkDrag({
-    parentId: panel.id,
+    parentId: folderId,
     axis: "y",
     hoverDelay: DRAG_HOVER_DELAY,
-    onHoverFolder: (node, element) => onOpenFolder(node, element, false),
+    onHoverFolder: (node, element) => openSubmenu(node, element, false),
     onDropped: dragOpened ? () => void closePopup() : undefined,
   });
-
-  const wantedTop = useRef(panel.top);
-  wantedTop.current = panel.top;
-
-  useLayoutEffect(() => {
-    if (ref.current) {
-      placePanel(ref.current, panel.top);
-      onLayout();
-    }
-  });
-
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (!element) {
-      return;
-    }
-    const observer = new ResizeObserver(() => {
-      placePanel(element, wantedTop.current);
-      onLayout();
-    });
-    observer.observe(element);
-    return () => {
-      observer.disconnect();
-      onLayout();
-    };
-  }, [onLayout]);
-
-  useEffect(() => {
-    if (panel.focus) {
-      ref.current?.querySelector<HTMLElement>(MENU_ITEM)?.focus();
-    }
-  }, [panel.focus]);
 
   const openLink = (url: string, event: MouseEvent) => {
     if (drag.dragged.current) {
@@ -416,7 +184,24 @@ function FolderPanel({
       drag.dragged.current = false;
       return;
     }
-    onOpenFolder(node, event.currentTarget, event.detail === 0);
+    openSubmenu(node, event.currentTarget, event.detail === 0);
+  };
+
+  const openContext = (event: MouseEvent, node?: BookmarkNode) => {
+    event.preventDefault();
+    event.stopPropagation();
+    cancelHover();
+    setOpenChild(null);
+    const params = new URLSearchParams({ parent: folderId, divider: "horizontal" });
+    if (node) {
+      const kind = targetKind(node);
+      params.set("target", node.id);
+      params.set("kind", kind);
+      if (kind === "link" && node.url) {
+        params.set("url", node.url);
+      }
+    }
+    void openPopup("bookmarks-bar-menu", { x: event.clientX, y: event.clientY }, { params: params.toString(), child: true });
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -426,27 +211,19 @@ function FolderPanel({
       const node = id ? children.find((child) => child.id === id) : undefined;
       if (row instanceof HTMLElement && node) {
         event.preventDefault();
-        onOpenFolder(node, row, true);
+        openSubmenu(node, row, true);
       }
       return;
     }
-    if (event.key === "ArrowLeft" && onBack) {
+    if (event.key === "ArrowLeft" && level > 0) {
       event.preventDefault();
-      onBack();
+      void closeThisPopup();
     }
   };
 
   return (
-    <div
-      id={prefix}
-      ref={ref}
-      data-popup-shape=""
-      className={cn("absolute flex max-h-full flex-col", popupSurfaceClass)}
-      style={{ left: panel.left, width: PANEL_WIDTH }}
-      onPointerEnter={onEnter}
-      onContextMenu={(event) => onContext(event)}
-    >
-      <div id={`${prefix}-scroller`} className="min-h-0 flex-1 overflow-y-auto">
+    <PopupFrame id="bookmark-folder-menu" width="menu" maxHeight={2000} ready={loaded}>
+      <div id={prefix} onContextMenu={(event) => openContext(event)}>
         <PopupMenu id={`${prefix}-items`} label={folder?.title ?? "Bookmarks"} onKeyDown={onKeyDown}>
           <div
             id={`${prefix}-list`}
@@ -467,8 +244,8 @@ function FolderPanel({
                   id={rowId(node)}
                   role="separator"
                   className={cn("flex h-3 shrink-0 items-center px-3", drag.dropChrome(node.id))}
-                  onPointerEnter={(event) => onHoverRow(null, event.currentTarget)}
-                  onContextMenu={(event) => onContext(event, node)}
+                  onPointerEnter={(event) => hoverRow(null, event.currentTarget)}
+                  onContextMenu={(event) => openContext(event, node)}
                   {...drag.itemProps(node, index)}
                 >
                   <div id={`${rowId(node)}-line`} className="h-px w-full bg-zinc-600" />
@@ -482,8 +259,8 @@ function FolderPanel({
                   title={node.url}
                   className={cn(rowClass, drag.dropChrome(node.id))}
                   style={rowStyle}
-                  onPointerEnter={(event) => onHoverRow(node, event.currentTarget)}
-                  onContextMenu={(event) => onContext(event, node)}
+                  onPointerEnter={(event) => hoverRow(node, event.currentTarget)}
+                  onContextMenu={(event) => openContext(event, node)}
                   onClick={(event) => openLink(node.url ?? "", event)}
                   onAuxClick={(event) => {
                     if (event.button === 1) {
@@ -511,12 +288,12 @@ function FolderPanel({
                   role="menuitem"
                   title={node.title}
                   aria-haspopup="menu"
-                  aria-expanded={openChildId === node.id}
+                  aria-expanded={openChild === node.id}
                   data-folder-id={node.id}
-                  className={cn(rowClass, openChildId === node.id && "bg-zinc-800", drag.dropChrome(node.id))}
+                  className={cn(rowClass, openChild === node.id && "bg-zinc-800", drag.dropChrome(node.id))}
                   style={rowStyle}
-                  onPointerEnter={(event) => onHoverRow(node, event.currentTarget)}
-                  onContextMenu={(event) => onContext(event, node)}
+                  onPointerEnter={(event) => hoverRow(node, event.currentTarget)}
+                  onContextMenu={(event) => openContext(event, node)}
                   onClick={(event) => clickFolder(event, node)}
                   {...drag.itemProps(node, index)}
                 >
@@ -536,7 +313,7 @@ function FolderPanel({
           <div
             id={`${prefix}-actions`}
             className="flex flex-col gap-0.5"
-            onPointerEnter={(event) => onHoverRow(null, event.currentTarget)}
+            onPointerEnter={(event) => hoverRow(null, event.currentTarget)}
           >
             <PopupMenuItem
               id={`${prefix}-open-all`}
@@ -555,11 +332,11 @@ function FolderPanel({
               icon={<Group />}
               label="Open all as a tab group"
               disabled={links.length === 0}
-              onClick={() => void openFolderAsGroup(panel.id).finally(() => closePopup())}
+              onClick={() => void openFolderAsGroup(folderId).finally(() => closePopup())}
             />
           </div>
         </PopupMenu>
       </div>
-    </div>
+    </PopupFrame>
   );
 }

@@ -581,7 +581,7 @@ pub fn drag_file(app: &AppHandle, window: &Window, id: u32) -> Result<(), String
         let app = app.clone();
         let label = window.label().to_string();
         let _ = app.clone().run_on_main_thread(move || {
-            tabs::close_window_popup(&app, &label);
+            crate::popup::close_all(&app, &label, true);
         });
     }
     result

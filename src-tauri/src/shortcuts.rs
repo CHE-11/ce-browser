@@ -4,7 +4,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{files, paths, settings, tabs};
+use crate::{files, paths, popup, settings, tabs};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
@@ -113,8 +113,8 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             if !settings.tab_switcher {
                 return tabs::cycle_recent(app, step);
             }
-            if tabs::popup_kind(app, &window).as_deref() == Some("tab-switcher") {
-                tabs::emit_to_popup(app, &window, "tab-switcher-step", step);
+            if popup::kind(app, &window).as_deref() == Some("tab-switcher") {
+                popup::emit_to_top(app, &window, "tab-switcher-step", step);
             } else {
                 let command = if step > 0 {
                     "tab-switcher"
@@ -128,7 +128,7 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
         Action::SelectTab(index) => tabs::select_index(app, Some(index)),
         Action::LastTab => tabs::select_index(app, None),
         Action::FocusAddress => {
-            tabs::close_window_popup(app, &window);
+            popup::close_all(app, &window, false);
             tabs::send_command(app, &window, "focus-address");
             Ok(())
         }
@@ -149,17 +149,17 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             Ok(())
         }
         Action::Bookmark => {
-            tabs::close_window_popup(app, &window);
+            popup::close_all(app, &window, false);
             tabs::send_command(app, &window, "bookmark");
             Ok(())
         }
         Action::Downloads => {
-            tabs::close_window_popup(app, &window);
+            popup::close_all(app, &window, false);
             tabs::send_command(app, &window, "downloads");
             Ok(())
         }
         Action::Find => {
-            tabs::close_window_popup(app, &window);
+            popup::close_all(app, &window, false);
             tabs::send_command(app, &window, "find");
             Ok(())
         }
@@ -185,7 +185,7 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             Ok(())
         }
         Action::ClosePopup => {
-            tabs::close_window_popup(app, &window);
+            popup::close_top(app, &window);
             Ok(())
         }
         Action::ClosePeek => {
@@ -199,17 +199,17 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             tabs::switch_workspace_index(app, index)
         }
         Action::CommandPalette => {
-            tabs::close_window_popup(app, &window);
+            popup::close_all(app, &window, false);
             tabs::send_command(app, &window, "palette");
             Ok(())
         }
         Action::TabSearch => {
-            tabs::close_window_popup(app, &window);
+            popup::close_all(app, &window, false);
             tabs::send_command(app, &window, "tab-search");
             Ok(())
         }
         Action::ShortcutSheet => {
-            tabs::close_window_popup(app, &window);
+            popup::close_all(app, &window, false);
             tabs::send_command(app, &window, "shortcut-sheet");
             Ok(())
         }

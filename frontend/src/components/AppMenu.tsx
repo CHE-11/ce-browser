@@ -68,7 +68,7 @@ export function AppMenu() {
   };
 
   return (
-    <PopupFrame id="app-menu" ready={snapshot.loaded}>
+    <PopupFrame id="app-menu" width={280} ready={snapshot.loaded}>
       <PopupMenu id="app-menu-items" label="Browser menu">
         {update?.available ? (
           <>

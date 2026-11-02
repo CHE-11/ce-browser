@@ -4,7 +4,7 @@ import { ShieldCheck, ShieldOff } from "lucide-react";
 import { tabParams } from "../shared";
 import { sitePaused, useAdblockStats } from "./use-adblock-stats";
 import { IconButton } from "@/components/IconButton";
-import { openPopupBelow } from "@/lib/browser-client";
+import { openPopup } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { TabInfo, BrowserSettings } from "@type/browser";
 
@@ -12,10 +12,6 @@ type AdBlockerButtonProps = {
   activeTab: TabInfo | undefined;
   settings: BrowserSettings | null;
 };
-
-const POPOVER_WIDTH = 320;
-/** Placeholder only. The popover stays hidden until it reports its real height. */
-const POPOVER_HEIGHT = 260;
 
 /** Host name of an http(s) page, without a port. Other pages load no ads. */
 export function pageHostname(url: string | undefined) {
@@ -60,12 +56,7 @@ export function AdBlockerButton({ activeTab, settings }: AdBlockerButtonProps) {
     }
     const params = new URLSearchParams(tabParams(activeTab));
     params.set("host", host);
-    void openPopupBelow(anchor, {
-      kind: "ad-blocker",
-      params: params.toString(),
-      width: POPOVER_WIDTH,
-      height: POPOVER_HEIGHT,
-    });
+    void openPopup("ad-blocker", anchor, { params: params.toString() });
   };
 
   return (

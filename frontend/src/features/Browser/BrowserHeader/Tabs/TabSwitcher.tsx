@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Moon } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
+import { PopupFrame } from "@/components/PopupFrame";
 import { activateTab, closePopup, ctrlHeld, onTabSwitcherStep, tabThumbnail } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { hostOf } from "@/lib/format";
@@ -122,8 +123,8 @@ export function TabSwitcher({ params }: TabSwitcherProps) {
   const cards = useMemo(() => order ?? [], [order]);
 
   return (
-    <div id="tab-switcher" className="flex h-full flex-col overflow-hidden rounded-xl bg-zinc-900 p-3 text-zinc-100 ring-1 ring-inset ring-zinc-700">
-      <div id="tab-switcher-grid" role="listbox" aria-label="Recent tabs" className="grid min-h-0 flex-1 grid-cols-4 content-start gap-2 overflow-y-auto">
+    <PopupFrame id="tab-switcher" width={760} maxHeight={440} ready={order !== null} className="p-3">
+      <div id="tab-switcher-grid" role="listbox" aria-label="Recent tabs" className="grid grid-cols-4 content-start gap-2">
         {cards.map((tab, index) => (
           <div
             id={`tab-switcher-${tab.id}`}
@@ -158,6 +159,6 @@ export function TabSwitcher({ params }: TabSwitcherProps) {
           </div>
         ))}
       </div>
-    </div>
+    </PopupFrame>
   );
 }

@@ -13,7 +13,7 @@ const MAX_SCRIPTS: usize = 100;
 const MAX_SITES: usize = 500;
 const MAX_CODE: usize = 64 * 1024;
 const MAX_HIDDEN: usize = 200;
-const MAX_SELECTOR: usize = 300;
+const MAX_SELECTOR: usize = 800;
 const MAX_AGENT: usize = 256;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -565,7 +565,7 @@ fn clean_selectors(selectors: Vec<String>) -> Vec<String> {
             || selector.len() > MAX_SELECTOR
             || selector
                 .chars()
-                .any(|ch| ch.is_control() || matches!(ch, '{' | '}' | '<' | '>'))
+                .any(|ch| ch.is_control() || matches!(ch, '{' | '}' | '<' | ';'))
             || kept.iter().any(|item: &String| item == selector)
         {
             continue;
@@ -598,6 +598,52 @@ fn script_matches(host: &str, script: &UserScript) -> bool {
 }
 
 const INJECTION_JS: &str = r#"(function () {
+  function ceHideMatches() {
+    var selectors = window.__ceHidden || [];
+    if (!selectors.length) return;
+    selectors.forEach(function (selector) {
+      var parts = selector.split(" >>> ");
+      var nodes = [document];
+      for (var i = 0; i < parts.length; i++) {
+        var next = [];
+        for (var n = 0; n < nodes.length; n++) {
+          var found;
+          try { found = nodes[n].querySelectorAll(parts[i]); } catch (error) { continue; }
+          for (var f = 0; f < found.length; f++) next.push(found[f]);
+        }
+        if (i === parts.length - 1) {
+          next.forEach(function (el) {
+            el.style.setProperty("display", "none", "important");
+            el.setAttribute("data-ce-hidden", "1");
+          });
+        } else {
+          nodes = [];
+          next.forEach(function (el) {
+            if (!el.shadowRoot) return;
+            nodes.push(el.shadowRoot);
+            if (el.shadowRoot.__ceShadowWatch) return;
+            el.shadowRoot.__ceShadowWatch = true;
+            new MutationObserver(function () {
+              if (window.__ceScheduleHide) window.__ceScheduleHide();
+            }).observe(el.shadowRoot, { childList: true, subtree: true });
+          });
+        }
+      }
+    });
+  }
+  function ceReleaseHidden(root) {
+    var marked;
+    try { marked = root.querySelectorAll("[data-ce-hidden]"); } catch (error) { marked = []; }
+    for (var i = 0; i < marked.length; i++) {
+      marked[i].style.removeProperty("display");
+      marked[i].removeAttribute("data-ce-hidden");
+    }
+    var all;
+    try { all = root.querySelectorAll("*"); } catch (error) { return; }
+    for (var n = 0; n < all.length; n++) {
+      if (all[n].shadowRoot) ceReleaseHidden(all[n].shadowRoot);
+    }
+  }
   function ceApply(spec) {
     if (!/^https?:/.test(location.protocol)) return;
     window.__ceSpec = spec;
@@ -616,11 +662,16 @@ const INJECTION_JS: &str = r#"(function () {
       css.push("html { filter: invert(1) hue-rotate(180deg) brightness(" + spec.brightness + ") contrast(" + spec.contrast + ") !important; }");
       css.push("img, video, picture, canvas, iframe { filter: invert(1) hue-rotate(180deg) !important; }");
     }
-    (spec.hidden || []).forEach(function (selector) {
-      css.push(selector + " { display: none !important; }");
+    var hidden = spec.hidden || [];
+    hidden.forEach(function (selector) {
+      if (selector.indexOf(">>>") === -1) css.push(selector + " { display: none !important; }");
     });
     (spec.styles || []).forEach(function (text) { css.push(text); });
     style.textContent = css.join("\n");
+    var hadHidden = window.__ceHidden && window.__ceHidden.length;
+    window.__ceHidden = hidden;
+    if (hidden.length) ceHideMatches();
+    else if (hadHidden) ceReleaseHidden(document);
 
     if (spec.forceInteraction && !window.__ceForce) {
       window.__ceForce = true;
@@ -683,6 +734,19 @@ const INJECTION_JS: &str = r#"(function () {
       });
     };
     applyRate();
+    if (!window.__ceHideWatch) {
+      window.__ceHideWatch = true;
+      var hidePending = false;
+      window.__ceScheduleHide = function () {
+        if (hidePending || !window.__ceHidden || !window.__ceHidden.length) return;
+        hidePending = true;
+        requestAnimationFrame(function () {
+          hidePending = false;
+          ceHideMatches();
+        });
+      };
+      new MutationObserver(window.__ceScheduleHide).observe(document.documentElement, { childList: true, subtree: true });
+    }
     if (!window.__ceSpeedKeys) {
       window.__ceSpeedKeys = true;
       document.addEventListener("play", applyRate, true);
@@ -798,62 +862,199 @@ const INSPECTOR_JS: &str = r##"(function () {
 const ZAPPER_JS: &str = r##"(function () {
   if (window.__ceZap) return;
   window.__ceZap = true;
+  var root = document.documentElement;
+  var font = "font:12px/1.4 'Segoe UI',system-ui,sans-serif;";
+  var shield = document.createElement("div");
+  shield.id = "ce-zapper";
+  shield.style.cssText = "position:fixed;inset:0;z-index:2147483646;cursor:crosshair;background:transparent";
   var box = document.createElement("div");
-  box.id = "ce-zapper";
-  box.style.cssText = "position:fixed;pointer-events:none;z-index:2147483647;outline:2px solid #38bdf8;background:rgba(56,189,248,0.25)";
-  document.documentElement.appendChild(box);
+  box.style.cssText = "position:fixed;z-index:2147483647;pointer-events:none;display:none;border:2px solid #38bdf8;background:rgba(56,189,248,.2);box-sizing:border-box";
+  var label = document.createElement("div");
+  label.style.cssText = "position:fixed;z-index:2147483647;pointer-events:none;display:none;background:#0c4a6e;color:#e0f2fe;padding:2px 6px;border-radius:4px;white-space:nowrap;" + font;
+  var hint = document.createElement("div");
+  hint.textContent = "Click to hide \u00b7 Alt+scroll or \u2191 \u2193 to grow or shrink \u00b7 Esc to cancel";
+  hint.style.cssText = "position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:2147483647;pointer-events:none;background:rgba(9,9,11,.92);color:#fafafa;padding:6px 12px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.4);" + font;
+  root.appendChild(shield);
+  root.appendChild(box);
+  root.appendChild(label);
+  root.appendChild(hint);
+  var hovered = null;
   var current = null;
-  function move(event) {
-    var el = event.target;
-    if (!el || el.id === "ce-zapper") return;
-    current = el;
-    var rect = el.getBoundingClientRect();
-    box.style.left = rect.left + "px";
-    box.style.top = rect.top + "px";
-    box.style.width = rect.width + "px";
-    box.style.height = rect.height + "px";
+  var children = [];
+  var armed = false;
+  setTimeout(function () { armed = true; }, 300);
+
+  function cssEscape(value) {
+    if (window.CSS && CSS.escape) return CSS.escape(value);
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
   }
-  function selectorFor(el) {
-    if (el.id && typeof CSS !== "undefined" && CSS.escape && document.querySelectorAll("#" + CSS.escape(el.id)).length === 1) {
-      return "#" + CSS.escape(el.id);
+  function ownRoot(el) {
+    var node = el.getRootNode ? el.getRootNode() : document;
+    return node && node.querySelectorAll ? node : document;
+  }
+  function parentOf(el) {
+    if (!el || el === root) return null;
+    if (el.parentElement && el.parentElement !== root) return el.parentElement;
+    var node = el.getRootNode ? el.getRootNode() : null;
+    return node && node.host ? node.host : null;
+  }
+  function uniqueIn(scope, el) {
+    if (el.id) {
+      var byId = "#" + cssEscape(el.id);
+      try { if (scope.querySelectorAll(byId).length === 1) return byId; } catch (error) {}
     }
     var parts = [];
     var node = el;
-    for (var i = 0; node && node.parentElement && i < 3; i++) {
-      var index = 1;
-      var sib = node;
-      while ((sib = sib.previousElementSibling)) index++;
-      parts.unshift(node.tagName.toLowerCase() + ":nth-child(" + index + ")");
+    while (node && node.nodeType === 1 && node !== scope && node !== root) {
+      var part = node.tagName.toLowerCase();
+      if (node.id) part = "#" + cssEscape(node.id);
+      else if (node.classList) {
+        for (var c = 0; c < node.classList.length && part.indexOf(".") === -1; c++) {
+          var name = node.classList[c];
+          if (name && name.length < 48 && !/[{}<>;]/.test(name)) part += "." + cssEscape(name);
+        }
+        if (node.parentElement) {
+          var same = 0;
+          var index = 0;
+          for (var i = 0; i < node.parentElement.children.length; i++) {
+            var child = node.parentElement.children[i];
+            if (child.tagName === node.tagName) {
+              same++;
+              if (child === node) index = same;
+            }
+          }
+          if (same > 1) part += ":nth-of-type(" + index + ")";
+        }
+      }
+      parts.unshift(part);
+      var built = parts.join(" > ");
+      try { if (scope.querySelectorAll(built).length === 1) return built; } catch (error) {}
       node = node.parentElement;
+      if (parts.length > 12) break;
     }
     return parts.join(" > ");
   }
+  function selectorFor(el) {
+    var segments = [];
+    var node = el;
+    var guard = 0;
+    while (node && guard < 6) {
+      guard++;
+      var scope = ownRoot(node);
+      var piece = uniqueIn(scope, node);
+      if (piece) segments.unshift(piece);
+      if (!scope.host) break;
+      node = scope.host;
+    }
+    return segments.join(" >>> ");
+  }
+  function show(element) {
+    current = element;
+    if (!element) {
+      box.style.display = "none";
+      label.style.display = "none";
+      return;
+    }
+    var rect = element.getBoundingClientRect();
+    box.style.display = "block";
+    box.style.left = rect.left + "px";
+    box.style.top = rect.top + "px";
+    box.style.width = Math.max(rect.width, 2) + "px";
+    box.style.height = Math.max(rect.height, 2) + "px";
+    var name = element.tagName.toLowerCase() + (element.id ? "#" + element.id : "");
+    label.textContent = name + "  " + Math.round(rect.width) + " \u00d7 " + Math.round(rect.height);
+    label.style.display = "block";
+    label.style.left = Math.max(8, rect.left) + "px";
+    label.style.top = (rect.top > 28 ? rect.top - 24 : rect.bottom + 4) + "px";
+  }
+  function elementAt(x, y) {
+    shield.style.pointerEvents = "none";
+    var element = document.elementFromPoint(x, y);
+    shield.style.pointerEvents = "auto";
+    if (!element || element === shield || element === box || element === label || element === hint || element === root) return null;
+    return element;
+  }
+  function move(event) {
+    var element = elementAt(event.clientX, event.clientY);
+    if (!element || element === hovered) return;
+    hovered = element;
+    children = [];
+    show(element);
+  }
+  function grow() {
+    var parent = parentOf(current);
+    if (!parent) return;
+    children.push(current);
+    hovered = parent;
+    show(parent);
+  }
+  function shrink() {
+    if (!children.length) return;
+    var child = children.pop();
+    hovered = child;
+    show(child);
+  }
   function cleanup() {
+    shield.remove();
     box.remove();
+    label.remove();
+    hint.remove();
     document.removeEventListener("mousemove", move, true);
-    document.removeEventListener("click", click, true);
+    document.removeEventListener("wheel", wheel, true);
     document.removeEventListener("keydown", key, true);
+    window.removeEventListener("scroll", scrolled, true);
     window.__ceZap = false;
   }
-  function click(event) {
-    if (event.target && event.target.id === "ce-zapper") return;
+  function pick(event) {
     event.preventDefault();
     event.stopPropagation();
-    var selector = current ? selectorFor(current) : "";
+    if (!armed) return;
+    var element = current || elementAt(event.clientX, event.clientY);
+    if (!element) return;
+    var selector = selectorFor(element);
+    element.style.setProperty("display", "none", "important");
+    element.setAttribute("data-ce-hidden", "1");
     cleanup();
     if (selector && window.chrome && window.chrome.webview) {
       window.chrome.webview.postMessage({ type: "ce-zap", selector: selector });
     }
   }
+  function wheel(event) {
+    if (!event.altKey) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.deltaY < 0) grow();
+    else shrink();
+  }
   function key(event) {
     if (event.key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       cleanup();
+    } else if (event.key === "ArrowUp" || event.key === "[") {
+      event.preventDefault();
+      event.stopPropagation();
+      grow();
+    } else if (event.key === "ArrowDown" || event.key === "]") {
+      event.preventDefault();
+      event.stopPropagation();
+      shrink();
     }
   }
+  function scrolled() {
+    show(current);
+  }
+  ["mousedown", "mouseup", "click", "auxclick", "contextmenu"].forEach(function (name) {
+    shield.addEventListener(name, function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (name === "click") pick(event);
+    });
+  });
   document.addEventListener("mousemove", move, true);
-  document.addEventListener("click", click, true);
+  document.addEventListener("wheel", wheel, { capture: true, passive: false });
   document.addEventListener("keydown", key, true);
+  window.addEventListener("scroll", scrolled, true);
 })();"##;
 
 #[cfg(test)]
@@ -926,7 +1127,14 @@ mod tests {
             sites: HashMap::from([(
                 "WWW.Example.com".into(),
                 SiteControl {
-                    hidden: vec!["#ok".into(), "a{color:red}".into(), "#ok".into()],
+                    hidden: vec![
+                        "#ok".into(),
+                        "a{color:red}".into(),
+                        "#ok".into(),
+                        "div:nth-of-type(2) > a.banner".into(),
+                        "main >>> .ad".into(),
+                        "div > span { display: none }".into(),
+                    ],
                     video_speed: 9.0,
                     ..SiteControl::default()
                 },
@@ -940,7 +1148,14 @@ mod tests {
         };
         let rules = rules.normalize();
         let site = rules.sites.get("example.com").unwrap();
-        assert_eq!(site.hidden, vec!["#ok".to_string()]);
+        assert_eq!(
+            site.hidden,
+            vec![
+                "#ok".to_string(),
+                "div:nth-of-type(2) > a.banner".to_string(),
+                "main >>> .ad".to_string(),
+            ]
+        );
         assert_eq!(site.video_speed, 4.0);
         assert_eq!(rules.scripts[0].hosts, vec!["news.example.com".to_string()]);
         assert_eq!(rules.scripts[0].id, "notes");

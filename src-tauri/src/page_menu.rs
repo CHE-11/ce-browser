@@ -2,7 +2,7 @@ use std::io::{Cursor, Read};
 use std::time::Duration;
 
 use base64::Engine;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use url::Url;
 
 use crate::{media, ocr, paths, privacy, settings, tabs, undo};
@@ -85,41 +85,11 @@ pub fn copy_link_to_text(app: &AppHandle, id: u32, page: &str, selection: &str) 
 }
 
 /// Opens a popup for tab `id` where the menu was, `x` and `y` being physical pixels inside the page.
-pub fn open_popup_at(
-    app: &AppHandle,
-    id: u32,
-    x: i32,
-    y: i32,
-    kind: &str,
-    params: String,
-    width: f64,
-    height: f64,
-) {
-    let window = window_of(app, id);
-    let Some(handle) = app.get_window(&window) else {
+pub fn open_popup_at(app: &AppHandle, id: u32, x: i32, y: i32, kind: &str, params: String) {
+    let Some(page) = tabs::page_view(app, id) else {
         return;
     };
-    let scale = handle.scale_factor().unwrap_or(1.0);
-    let offset = tabs::page_view(app, id)
-        .and_then(|webview| webview.position().ok())
-        .map(|position| (position.x, position.y))
-        .unwrap_or_default();
-    let request = tabs::PopupRequest {
-        kind: kind.to_string(),
-        x: f64::from(offset.0 + x) / scale,
-        y: f64::from(offset.1 + y) / scale,
-        width,
-        height,
-        params,
-        focus: true,
-        anchor_x: 0.0,
-        anchor_y: 0.0,
-        anchor_width: 0.0,
-        anchor_height: 0.0,
-        edge: String::new(),
-        align: String::new(),
-    };
-    if let Err(error) = tabs::open_popup(app, &window, request) {
+    if let Err(error) = crate::popup::open_from_page(app, &page, x, y, kind, params) {
         eprintln!("page menu popup: {error}");
     }
 }

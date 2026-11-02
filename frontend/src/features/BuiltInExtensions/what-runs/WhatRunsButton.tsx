@@ -2,16 +2,12 @@ import { useRef } from "react";
 import { Layers } from "lucide-react";
 import { capturable, tabParams } from "../shared";
 import { IconButton } from "@/components/IconButton";
-import { openPopupBelow } from "@/lib/browser-client";
+import { openPopup } from "@/lib/browser-client";
 import { TabInfo } from "../../../../../types/browser";
 
 type WhatRunsButtonProps = {
   activeTab: TabInfo | undefined;
 };
-
-const POPOVER_WIDTH = 320;
-/** Placeholder only. The popover stays hidden until it reports its real height. */
-const POPOVER_HEIGHT = 300;
 
 export function WhatRunsButton({ activeTab }: WhatRunsButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -21,12 +17,7 @@ export function WhatRunsButton({ activeTab }: WhatRunsButtonProps) {
     if (!activeTab || !anchor) {
       return;
     }
-    void openPopupBelow(anchor, {
-      kind: "what-runs",
-      params: tabParams(activeTab),
-      width: POPOVER_WIDTH,
-      height: POPOVER_HEIGHT,
-    });
+    void openPopup("what-runs", anchor, { params: tabParams(activeTab) });
   };
 
   return (

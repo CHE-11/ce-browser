@@ -63,8 +63,11 @@ import type {
   PeekInfo,
   PermissionGrant,
   PopupChange,
+  PopupKind,
+  PopupPlacement,
   PopupRect,
   PopupRequest,
+  PopupShow,
   TabGroupColor,
   TabsSnapshot,
   UserStyles,
@@ -337,10 +340,6 @@ export function copyText(text: string) {
 
 export function showNotice(message: string) {
   return invoke<void>("show_notice", { message });
-}
-
-export function waybackUrl(save: boolean, url: string) {
-  return invoke<string>("wayback_url", { save, url });
 }
 
 export function readingStats(id: number) {
@@ -699,62 +698,103 @@ export function onBrowserCommand(handler: (command: BrowserCommand) => void): Pr
   return listen<BrowserCommand>("browser-command", (event) => handler(event.payload));
 }
 
+/** The browser window `label` belongs to. Popups are their own windows, owned by one. */
+function ownerWindowLabel(label: string) {
+  if (label.startsWith("extpopup-")) return label.slice("extpopup-".length);
+  if (label.startsWith("popup-")) return label.slice("popup-".length).replace(/-\d+$/, "");
+  return label;
+}
+
 /** Sends a command to this window's browser UI from a popup or a `ce://` page. */
 export function sendUiCommand(command: BrowserCommand) {
-  const label = getCurrentWindow().label;
+  const label = ownerWindowLabel(getCurrentWindow().label);
   const ui = label === "main" ? "ui" : label.replace(/^main-/, "ui-");
   return emitTo(ui, "browser-command", command);
 }
 
 // Popups
 
-export function openPopup(request: PopupRequest) {
-  return invoke<boolean>("open_popup", { request: { focus: true, params: "", ...request } });
+/** A button, a click point, or a rectangle, in this webview's CSS px. */
+export type PopupAnchor = HTMLElement | { x: number; y: number } | PopupRect;
+
+export type PopupOptions = {
+  params?: string;
+  /** Defaults to `left-start` in the vertical tool strip, `bottom-end` under other buttons
+   * and `point` at a click point. */
+  placement?: PopupPlacement;
+  focus?: boolean;
+  /** Opens beside the popup that asks instead of replacing it. */
+  child?: boolean;
+  minWidth?: number;
+};
+
+function anchorRect(anchor: PopupAnchor): PopupRect {
+  if (anchor instanceof HTMLElement) {
+    const box = anchor.getBoundingClientRect();
+    return { x: box.left, y: box.top, width: box.width, height: box.height };
+  }
+  if ("width" in anchor) return anchor;
+  return { x: anchor.x, y: anchor.y, width: 0, height: 0 };
 }
 
+function defaultPlacement(anchor: PopupAnchor, rect: PopupRect): PopupPlacement {
+  if (anchor instanceof HTMLElement) {
+    return anchor.closest("#vertical-toolbar") ? "left-start" : "bottom-end";
+  }
+  return rect.width || rect.height ? "bottom-end" : "point";
+}
+
+/** Opens a popup beside `anchor`. It sizes itself to its content once that has rendered.
+ * Resolves false when the request closed the same popup instead. */
+export function openPopup(kind: PopupKind, anchor: PopupAnchor, options: PopupOptions = {}) {
+  const rect = anchorRect(anchor);
+  const request: PopupRequest = {
+    kind,
+    params: options.params ?? "",
+    anchor: rect,
+    placement: options.placement ?? defaultPlacement(anchor, rect),
+    focus: options.focus ?? true,
+    child: options.child ?? false,
+    minWidth: options.minWidth ?? 0,
+  };
+  return invoke<boolean>("open_popup", { request });
+}
+
+/** Closes every popup of this window. */
 export function closePopup() {
   return invoke<void>("close_popup");
 }
 
-/** Resizes the open popup to its content height and slides it so the button stays put. */
-export function fitPopup(height: number) {
-  return invoke<void>("fit_popup", { height });
+/** Closes the popup this page is in and the submenus opened from it. */
+export function closeThisPopup() {
+  return invoke<void>("close_popup", { scope: "this" });
 }
 
-/** Draws only these parts of the popup. The rest shows, and passes clicks to, the page below. */
-export function setPopupShape(shape: PopupRect[]) {
-  return invoke<void>("set_popup_shape", { shape });
+/** Closes the submenus opened from this popup. It stays open. */
+export function closeSubmenus() {
+  return invoke<void>("close_popup", { scope: "above" });
 }
 
-/** The parked popup host has applied the saved theme and can show a menu. */
-export function popupHostReady() {
-  return invoke<void>("popup_host_ready");
+/** Reports this popup's content size, in CSS px. `ready` is false while it shows a placeholder. */
+export function popupMeasured(token: number, width: number, height: number, ready: boolean) {
+  return invoke<void>("popup_measured", { token, width, height, ready });
+}
+
+/** What this popup window should show, when it booted after it was asked. */
+export function popupCurrent() {
+  return invoke<PopupShow | null>("popup_current");
+}
+
+export function onPopupShow(handler: (show: PopupShow) => void): Promise<UnlistenFn> {
+  return getCurrentWebview().listen<PopupShow>("popup-show", (event) => handler(event.payload));
+}
+
+export function onPopupHide(handler: () => void): Promise<UnlistenFn> {
+  return getCurrentWebview().listen("popup-hide", () => handler());
 }
 
 export function onPopupChanged(handler: (change: PopupChange) => void): Promise<UnlistenFn> {
   return listen<PopupChange>("popup-changed", (event) => handler(event.payload));
-}
-
-/** Opens a popup from `element`. The vertical tool strip opens it to the left;
- * every other button hangs it underneath, right edges aligned unless `align` is `start`. */
-export function openPopupBelow(
-  element: HTMLElement,
-  request: Omit<PopupRequest, "x" | "y">,
-  align: "start" | "end" = "end",
-) {
-  const rect = element.getBoundingClientRect();
-  const edge = element.closest("#vertical-toolbar") ? "left" : "below";
-  return openPopup({
-    ...request,
-    x: 0,
-    y: 0,
-    anchorX: rect.left,
-    anchorY: rect.top,
-    anchorWidth: rect.width,
-    anchorHeight: rect.height,
-    edge,
-    align,
-  });
 }
 
 export function sendOmniboxState(state: OmniboxState) {
@@ -827,7 +867,16 @@ export function listMedia() {
   return invoke<MediaElement[]>("list_media");
 }
 
-export function controlMedia(tab: number, index: number, action: "play" | "pause" | "seek", time?: number) {
+export function setAllMediaMuted(muted: boolean) {
+  return invoke<void>("set_all_media_muted", { muted });
+}
+
+export function controlMedia(
+  tab: number,
+  index: number,
+  action: "play" | "pause" | "seek" | "mute" | "unmute",
+  time?: number,
+) {
   return invoke<void>("control_media", { tab, index, action, time });
 }
 
@@ -893,7 +942,7 @@ export function onPageToolRequest(handler: (request: PageToolRequest) => void): 
 
 /** Label of the browser window this webview belongs to. */
 export function currentWindowLabel() {
-  return getCurrentWindow().label;
+  return ownerWindowLabel(getCurrentWindow().label);
 }
 
 /** Asks where to save a file. Returns null when the dialog is cancelled. */
@@ -916,25 +965,6 @@ export function addBookmark(
   separator = false,
 ) {
   return invoke<BookmarkNode>("add_bookmark", { parentId, title, url, index, separator });
-}
-
-/** Maps a click inside this webview to logical pixels in the browser window. */
-export async function windowPoint(clientX: number, clientY: number) {
-  try {
-    const webview = getCurrentWebview();
-    const appWindow = getCurrentWindow();
-    const [webviewPos, windowPos, scale] = await Promise.all([
-      webview.position(),
-      appWindow.innerPosition(),
-      appWindow.scaleFactor(),
-    ]);
-    return {
-      x: (webviewPos.x - windowPos.x) / scale + clientX,
-      y: (webviewPos.y - windowPos.y) / scale + clientY,
-    };
-  } catch {
-    return { x: clientX, y: clientY };
-  }
 }
 
 export function updateBookmark(id: string, title: string, url: string | null) {

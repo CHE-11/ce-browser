@@ -1,11 +1,14 @@
-import { useContext, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { PopupShow } from "@type/browser";
 import { AppMenu } from "@components/AppMenu";
+import { PopupFrame } from "@/components/PopupFrame";
 import { StatusPopover } from "@/components/StatusPopover";
 import { Toast } from "@/components/Toast";
-import { PopupAppearanceContext, usePopupHostReady } from "@lib/popup-ready";
+import { onPopupHide, onPopupShow, popupCurrent } from "@lib/browser-client";
+import { PopupHostContext, type PopupHostState } from "@lib/popup-host";
 import { useAppearanceState, useBookmarksState, useExtensions, useTabs } from "@lib/use-browser";
 import { AddressBarEllipsisMenu } from "@/features/Browser/BrowserHeader/Addressbar/AddressBarEllipsisMenu";
-import { ExtensionPinMenu } from "@/features/Browser/BrowserHeader/Addressbar/ExtensionPinMenu";
+import { ExtensionPinContextMenu } from "@/features/Browser/BrowserHeader/Addressbar/ExtensionPinContextMenu";
 import { BookmarkAdd } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarkAdd";
 import { BookmarkRename } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarkRename";
 import { BookmarkEditor } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarkEditor";
@@ -28,7 +31,6 @@ import { ReadingPopover } from "@features/BuiltInExtensions/reading/Reading";
 import { ShoppingPopover } from "@features/BuiltInExtensions/shopping/Shopping";
 import { TranslatePopover } from "@features/BuiltInExtensions/translate/Translate";
 import { SelectionTranslatePopover } from "@features/BuiltInExtensions/translate/SelectionTranslate";
-import { WaybackPopover } from "@features/BuiltInExtensions/wayback/Wayback";
 import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
 import { CommandPalette } from "@features/CommandPalette/CommandPalette";
 import { TabSearch } from "@/features/Browser/BrowserHeader/Tabs/TabSearch";
@@ -40,50 +42,81 @@ import { FindAllPopover } from "@features/FindAll/FindAllPopover";
 import { ShortcutSheet } from "@features/Shortcuts/ShortcutSheet";
 import { NetworkPopover } from "@features/Network/NetworkPopover";
 import { DownloadsPanel } from "@features/Downloads/DownloadsPanel";
-import { MediaGrid } from "@features/Media/MediaGrid";
-import { MediaHub } from "@features/Media/MediaHub";
+import { MediaGrid } from "@/features/BuiltInExtensions/media/MediaGrid";
+import { MediaHub } from "@/features/BuiltInExtensions/media/MediaHub";
 
 type PopupPageProps = {
   popup: string;
   params: URLSearchParams;
 };
 
+/** `host` is a popup window that stays loaded and shows whatever it is sent. Toasts load
+ * their own route. */
 export function PopupPage({ popup, params }: PopupPageProps) {
   const { loaded } = useAppearanceState();
   useBookmarksState();
   useTabs();
   useExtensions();
 
+  if (popup === "host") {
+    return <PopupHost appearanceReady={loaded} />;
+  }
+  return <RoutedPopup key={`${popup}?${params.toString()}`} popup={popup} params={params} />;
+}
+
+function RoutedPopup({ popup, params }: PopupPageProps) {
   useEffect(() => {
     document.title = `ce-browser ${popup}`;
   }, [popup]);
-
-  return (
-    <PopupAppearanceContext.Provider value={loaded}>
-      {popup === "ready" ? (
-        <PopupStandby />
-      ) : (
-        <MountedPopup key={`${popup}?${params.toString()}`} popup={popup} params={params} />
-      )}
-    </PopupAppearanceContext.Provider>
-  );
-}
-
-function PopupStandby() {
-  const appearanceReady = useContext(PopupAppearanceContext);
-  usePopupHostReady(appearanceReady);
-  return null;
-}
-
-function MountedPopup({ popup, params }: PopupPageProps) {
   return <PopupContent popup={popup} params={params} />;
+}
+
+function PopupHost({ appearanceReady }: { appearanceReady: boolean }) {
+  const [show, setShow] = useState<PopupShow | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const unlisteners = [onPopupShow((next) => setShow(next)), onPopupHide(() => setShow(null))];
+    void popupCurrent()
+      .then((current) => {
+        if (alive && current) {
+          setShow((shown) => (shown && shown.token >= current.token ? shown : current));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+      for (const unlisten of unlisteners) {
+        void unlisten.then((stop) => stop());
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    document.title = show ? `ce-browser ${show.kind}` : "ce-browser popup";
+  }, [show]);
+
+  const params = useMemo(() => new URLSearchParams(show?.params ?? ""), [show?.params]);
+  const host = useMemo<PopupHostState | null>(
+    () => (show ? { token: show.token, level: show.level, appearanceReady } : null),
+    [show, appearanceReady],
+  );
+
+  if (!show || !host) {
+    return null;
+  }
+  return (
+    <PopupHostContext.Provider value={host}>
+      <PopupContent key={show.token} popup={show.kind} params={params} />
+    </PopupHostContext.Provider>
+  );
 }
 
 function UnknownPopup() {
   return (
-    <div id="popup-unknown" className="p-3 text-sm text-zinc-500">
+    <PopupFrame id="popup-unknown" width={240} className="p-3 text-sm text-zinc-500">
       Unknown popup.
-    </div>
+    </PopupFrame>
   );
 }
 
@@ -105,17 +138,11 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <BookmarkEditor url={params.get("url") ?? ""} title={params.get("title") ?? ""} />;
     case "bookmark-folder":
       return (
-        <BookmarkFolderMenu
-          folderId={params.get("id") ?? "bar"}
-          left={Number(params.get("left")) || 0}
-          dragOpened={params.get("drag") === "1"}
-        />
+        <BookmarkFolderMenu folderId={params.get("id") ?? "bar"} dragOpened={params.get("drag") === "1"} />
       );
     case "bookmarks-bar-menu":
       return (
         <BookmarksBarContextMenu
-          x={Number(params.get("x")) || 0}
-          y={Number(params.get("y")) || 0}
           parentId={params.get("parent") || "bar"}
           divider={params.get("divider") === "horizontal" ? "horizontal" : "vertical"}
           target={bookmarkMenuTarget(params)}
@@ -168,14 +195,12 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <PricePopover params={params} />;
     case "shopping":
       return <ShoppingPopover params={params} />;
-    case "wayback":
-      return <WaybackPopover params={params} />;
     case "reading":
       return <ReadingPopover params={params} />;
     case "assistant":
       return <AssistantPopover params={params} />;
     case "extension-pin":
-      return <ExtensionPinMenu extensionId={params.get("id") ?? ""} />;
+      return <ExtensionPinContextMenu extensionId={params.get("id") ?? ""} />;
     case "tab-group":
       return <TabGroupFlyout groupId={Number(params.get("id"))} />;
     case "tab-group-menu":

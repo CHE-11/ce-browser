@@ -1,6 +1,6 @@
 import { IconButton } from "@/components/IconButton";
 import {
-  openPopupBelow,
+  openPopup,
   saveSettings,
   defaultDownloadDir,
   chooseSavePath,
@@ -31,10 +31,6 @@ type PageCaptureButtonProps = {
   settings: BrowserSettings | null;
 };
 
-const POPOVER_WIDTH = 320;
-/** Placeholder only. The popover stays hidden until it reports its real height. */
-const POPOVER_HEIGHT = 560;
-
 export function PageCaptureButton({ activeTab, settings }: PageCaptureButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [status, setStatus] = useToolStatus();
@@ -45,12 +41,7 @@ export function PageCaptureButton({ activeTab, settings }: PageCaptureButtonProp
   const showPopover = (params: URLSearchParams) => {
     const anchor = buttonRef.current;
     if (anchor) {
-      void openPopupBelow(anchor, {
-        kind: "page-capture",
-        params: params.toString(),
-        width: POPOVER_WIDTH,
-        height: POPOVER_HEIGHT,
-      });
+      void openPopup("page-capture", anchor, { params: params.toString() });
     }
   };
 
@@ -151,7 +142,7 @@ export function PageCaptureButton({ activeTab, settings }: PageCaptureButtonProp
       } else if (request.action === "media") {
         const anchor = buttonRef.current;
         if (anchor) {
-          void openPopupBelow(anchor, { kind: "media-grid", params: `id=${request.tabId}`, width: 420, height: 420 });
+          void openPopup("media-grid", anchor, { params: `id=${request.tabId}` });
         }
         return;
       } else if (request.action === "save-html" || request.action === "save-markdown") {

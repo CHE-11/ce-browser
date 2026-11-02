@@ -61,7 +61,7 @@ export function BookmarkAdd({ mode, parentId }: BookmarkAddProps) {
   };
 
   return (
-    <PopupFrame id="bookmark-add" ready={treeLoaded && (!isLink || snapshot.loaded)}>
+    <PopupFrame id="bookmark-add" width={340} ready={treeLoaded && (!isLink || snapshot.loaded)}>
       <form
         id="bookmark-add-form"
         className="flex flex-col gap-3 p-4"

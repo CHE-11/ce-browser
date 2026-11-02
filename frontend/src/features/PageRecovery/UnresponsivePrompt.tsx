@@ -30,7 +30,7 @@ export function UnresponsivePrompt({ tabId }: UnresponsivePromptProps) {
   };
 
   return (
-    <PopupFrame id="unresponsive" ready={snapshot.loaded}>
+    <PopupFrame id="unresponsive" width={400} ready={snapshot.loaded}>
       <div id="unresponsive-body" role="alertdialog" aria-labelledby="unresponsive-title" aria-describedby="unresponsive-text" className="flex flex-col gap-3 p-4">
         <div id="unresponsive-head" className="flex items-start gap-3">
           <Hourglass id="unresponsive-icon" className="mt-0.5 size-5 shrink-0 text-amber-400" aria-hidden />

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Fuse from "fuse.js";
 import { Layers, Moon, RotateCcw, X } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
+import { PopupFrame } from "@/components/PopupFrame";
 import { TabAlertDot } from "@/features/Browser/BrowserHeader/Tabs/TabAlertDot";
 import { activateTab, closePopup, closeTab, restoreClosed } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
@@ -103,7 +104,7 @@ export function TabSearch({ params }: TabSearchProps) {
   let lastWorkspace: string | null = null;
 
   return (
-    <div id="tab-search" className="flex h-full flex-col overflow-hidden rounded-xl bg-zinc-900 text-zinc-100 ring-1 ring-inset ring-zinc-700">
+    <PopupFrame id="tab-search" width={onlyWorkspace ? 420 : 520} maxHeight={2000} ready={snapshot.loaded} className="flex flex-col">
       <input
         id="tab-search-input"
         ref={inputRef}
@@ -128,7 +129,7 @@ export function TabSearch({ params }: TabSearchProps) {
           }
         }}
       />
-      <div id="tab-search-list" ref={listRef} role="listbox" aria-label="Tabs" className="min-h-0 flex-1 overflow-y-auto p-1.5">
+      <div id="tab-search-list" ref={listRef} role="listbox" aria-label="Tabs" className="max-h-104 overflow-y-auto p-1.5">
         {rows.length === 0 ? (
           <div id="tab-search-empty" className="px-3 py-6 text-center text-sm text-zinc-500">
             {query.trim() ? "No tabs match." : "No tabs."}
@@ -242,6 +243,6 @@ export function TabSearch({ params }: TabSearchProps) {
           })
         )}
       </div>
-    </div>
+    </PopupFrame>
   );
 }

@@ -15,7 +15,6 @@ export function ReadingButton({ activeTab }: { activeTab: TabInfo | undefined })
       kind="reading"
       icon={<BookOpen id="address-reading-icon" aria-hidden />}
       activeTab={activeTab}
-      height={220}
     />
   );
 }
@@ -32,7 +31,7 @@ export function ReadingPopover({ params }: { params: URLSearchParams }) {
   }, [tab.id]);
 
   return (
-    <PopupFrame id="reading-popover" maxHeight={240}>
+    <PopupFrame id="reading-popover" width={320} maxHeight={240}>
       <PopoverHeader id="reading-header" icon={<BookOpen aria-hidden />} title="Reading" subtitle={tab.title || tab.url} />
       <div id="reading-body" className="grid grid-cols-3 gap-2 px-3 pb-3 text-center">
         {error ? (

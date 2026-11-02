@@ -51,7 +51,7 @@ export function TabGroupMenu({ groupId }: TabGroupMenuProps) {
 
   if (!group) {
     return (
-      <PopupFrame id="tab-group-menu" ready={snapshot.loaded}>
+      <PopupFrame id="tab-group-menu" width={280} ready={snapshot.loaded}>
         <div id="tab-group-menu-missing" className="px-3 py-2 text-sm text-zinc-500">
           That group is gone.
         </div>
@@ -66,7 +66,7 @@ export function TabGroupMenu({ groupId }: TabGroupMenuProps) {
   };
 
   return (
-    <PopupFrame id="tab-group-menu" ready={snapshot.loaded}>
+    <PopupFrame id="tab-group-menu" width={280} ready={snapshot.loaded}>
       <div id="tab-group-menu-edit" className="flex flex-col gap-2 px-3 pb-1 pt-3">
         <input
           id="tab-group-menu-name"

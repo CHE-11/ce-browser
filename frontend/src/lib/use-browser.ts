@@ -1,9 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { BookmarkNode, BookmarkTree, BrowserSettings, ClosedEntry, PageRules, TabsSnapshot } from "../../../types/browser";
 import { publishAppearance } from "./appearance";
 import {
+  currentWindowLabel as browserWindowLabel,
   getPageRules,
   getSettings,
   listBookmarks,
@@ -111,7 +111,7 @@ const EMPTY_TABS: TabsSnapshot = {
 
 function currentWindowLabel() {
   try {
-    return getCurrentWindow().label;
+    return browserWindowLabel();
   } catch {
     return "main";
   }

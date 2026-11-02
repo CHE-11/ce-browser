@@ -18,11 +18,12 @@ type BookmarksBarMenuItemsProps = {
   idPrefix: string;
   parentId: string;
   divider: DividerOrientation;
-  x: number;
-  y: number;
   target?: BookmarkMenuTarget | null;
   onDone: () => void;
 };
+
+/** Top-left of this menu. The add and rename forms replace it there. */
+const MENU_CORNER = { x: 0, y: 0 };
 
 function deleteLabel(kind: BookmarkMenuTarget["kind"]) {
   if (kind === "folder") {
@@ -34,7 +35,7 @@ function deleteLabel(kind: BookmarkMenuTarget["kind"]) {
   return "Delete bookmark";
 }
 
-export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, x, y, target, onDone }: BookmarksBarMenuItemsProps) {
+export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, target, onDone }: BookmarksBarMenuItemsProps) {
   const settings = useSettings();
   const itemStyle = bookmarkItemStyle(settings?.bookmarksBarMenuTextSize, settings?.bookmarksBarMenuPadding, {
     text: BOOKMARK_SIZE.menuText,
@@ -42,14 +43,7 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, x, y
   });
   const openAdd = (mode: "link" | "folder") => {
     const params = new URLSearchParams({ mode, parent: parentId });
-    void openPopup({
-      kind: "bookmark-add",
-      params: params.toString(),
-      x,
-      y,
-      width: 340,
-      height: mode === "folder" ? 248 : 300,
-    });
+    void openPopup("bookmark-add", MENU_CORNER, { params: params.toString() });
   };
 
   const addDivider = () => {
@@ -73,14 +67,7 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, x, y
       return;
     }
     const params = new URLSearchParams({ id: target.id });
-    void openPopup({
-      kind: "bookmark-rename",
-      params: params.toString(),
-      x,
-      y,
-      width: 340,
-      height: 188,
-    });
+    void openPopup("bookmark-rename", MENU_CORNER, { params: params.toString() });
   };
 
   return (
@@ -159,22 +146,18 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, x, y
 }
 
 type BookmarksBarMenuProps = {
-  x: number;
-  y: number;
   parentId: string;
   divider: DividerOrientation;
   target?: BookmarkMenuTarget | null;
 };
 
-export function BookmarksBarContextMenu({ x, y, parentId, divider, target }: BookmarksBarMenuProps) {
+export function BookmarksBarContextMenu({ parentId, divider, target }: BookmarksBarMenuProps) {
   return (
-    <PopupFrame id="bookmarks-bar-menu">
+    <PopupFrame id="bookmarks-bar-menu" width={240}>
       <BookmarksBarContextMenuItems
         idPrefix="bookmarks-bar-menu"
         parentId={parentId}
         divider={divider}
-        x={x}
-        y={y}
         target={target}
         onDone={() => void closePopup()}
       />

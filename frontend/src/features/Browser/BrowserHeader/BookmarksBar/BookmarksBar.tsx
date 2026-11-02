@@ -28,23 +28,15 @@ const itemClass = cn(
 );
 const iconClass = "size-[1.2em] shrink-0";
 
-/** The backend keeps a popup this far inside the window. */
-const POPUP_INSET = 4;
-
-/** The folder popup spans the window below `element` so submenus can open beside it. */
+/** Hangs the folder's menu under `element`, left edges aligned. */
 function openFolderPopup(element: HTMLElement, node: BookmarkNode, dragOpened = false) {
-  const rect = element.getBoundingClientRect();
-  const params = new URLSearchParams({ id: node.id, left: String(Math.round(rect.left - POPUP_INSET)) });
+  const params = new URLSearchParams({ id: node.id });
   if (dragOpened) {
     params.set("drag", "1");
   }
-  return openPopup({
-    kind: "bookmark-folder",
+  return openPopup("bookmark-folder", element, {
     params: params.toString(),
-    x: POPUP_INSET,
-    y: rect.bottom + 4,
-    width: window.innerWidth - POPUP_INSET * 2,
-    height: window.innerHeight,
+    placement: "bottom-start",
     focus: !dragOpened,
   });
 }
@@ -98,12 +90,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
   const openBarMenu = (event: MouseEvent, node?: BookmarkNode) => {
     event.preventDefault();
     event.stopPropagation();
-    const params = new URLSearchParams({
-      x: String(Math.round(event.clientX)),
-      y: String(Math.round(event.clientY)),
-      parent: "bar",
-      divider: "vertical",
-    });
+    const params = new URLSearchParams({ parent: "bar", divider: "vertical" });
     if (node && node.id !== "bar" && node.id !== "other") {
       const kind = node.separator ? "separator" : node.url ? "link" : "folder";
       params.set("target", node.id);
@@ -112,16 +99,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
         params.set("url", node.url);
       }
     }
-    const kind = params.get("kind");
-    const height = !params.has("target") ? 148 : kind === "folder" ? 300 : kind === "separator" ? 196 : 340;
-    void openPopup({
-      kind: "bookmarks-bar-menu",
-      params: params.toString(),
-      x: event.clientX,
-      y: event.clientY,
-      width: 240,
-      height,
-    });
+    void openPopup("bookmarks-bar-menu", { x: event.clientX, y: event.clientY }, { params: params.toString() });
   };
 
   return (

@@ -323,7 +323,6 @@ export type PopupKind =
   | "translate"
   | "password"
   | "price"
-  | "wayback"
   | "reading"
   | "assistant"
   | "shopping"
@@ -339,36 +338,49 @@ export type PopupKind =
   | "boards"
   | "board-images";
 
-export type PopupEdge = "below" | "left";
+/**
+ * Where a popup sits against its anchor. `bottom-*` hangs below (or above, near the bottom of
+ * the screen), `right-start`/`left-start` sit beside it with matching tops, `point` puts the
+ * top-left corner on a click.
+ */
+export type PopupPlacement =
+  | "bottom-start"
+  | "bottom-end"
+  | "bottom-center"
+  | "right-start"
+  | "left-start"
+  | "point";
 
-export type PopupRequest = {
-  kind: PopupKind;
-  /** Top-left when `edge` is omitted. Ignored when the popup hangs from a button. */
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  /** URL query string read by the popup page. For `extension` it is the extension id. */
-  params?: string;
-  /** Popups that take focus close when they lose it. */
-  focus?: boolean;
-  /** Button rectangle, logical px. Used with `edge`. */
-  anchorX?: number;
-  anchorY?: number;
-  anchorWidth?: number;
-  anchorHeight?: number;
-  /** `below` hangs under the button. `left` sits beside it. */
-  edge?: PopupEdge;
-  /** Which horizontal edge of a `below` popup lines up with the button. */
-  align?: "start" | "end";
-};
-
-/** Logical px inside the popup. */
+/** Logical px in the webview that asks for the popup. */
 export type PopupRect = {
   x: number;
   y: number;
   width: number;
   height: number;
+};
+
+export type PopupRequest = {
+  kind: PopupKind;
+  /** URL query string read by the popup page. For `extension` it is the extension id. */
+  params?: string;
+  /** Button or point the popup hangs from. A point has no width or height. */
+  anchor: PopupRect;
+  placement?: PopupPlacement;
+  /** Popups that take focus close when they lose it. */
+  focus?: boolean;
+  /** Opens beside the popup that asks instead of replacing it. */
+  child?: boolean;
+  /** Logical px. The popup is at least this wide. */
+  minWidth?: number;
+};
+
+/** What a popup window shows. Its size report carries `token`. */
+export type PopupShow = {
+  kind: PopupKind;
+  params: string;
+  token: number;
+  /** 0 for a popup opened from the browser UI, one more for each submenu. */
+  level: number;
 };
 
 export type PopupChange = {
@@ -689,10 +701,26 @@ export type AdblockSettings = {
   allowedSites: string[];
 };
 
+/** One kind of request blocked from a host, such as scripts or images. */
+export type AdblockKind = {
+  kind: string;
+  count: number;
+};
+
+/** A host with requests blocked on the current page. */
+export type AdblockHost = {
+  host: string;
+  count: number;
+  /** Blocklist domain that matched. Same as `host` when the host itself is listed. */
+  rule: string;
+  kinds: AdblockKind[];
+};
+
 /** Requests blocked in a tab since its current page started loading. */
 export type AdblockStats = {
   tabId: number;
   blocked: number;
+  hosts: AdblockHost[];
 };
 
 export type PrintMode = "article" | "full";
@@ -743,11 +771,26 @@ export type MediaElement = {
   tabId: number;
   index: number;
   kind: string;
+  /** Media address. Often a blob URL. */
   label: string;
+  /** Title or accessible name on the element itself. */
+  title: string;
+  /** Poster image address, when the page set one. */
+  poster: string;
   current: number;
   duration: number;
   paused: boolean;
   muted: boolean;
+  /** 0 to 1. */
+  volume: number;
+  playbackRate: number;
+  width: number;
+  height: number;
+  ended: boolean;
+  tabTitle: string;
+  tabUrl: string;
+  favicon: string | null;
+  site: string;
 };
 
 export type PageMedia = {

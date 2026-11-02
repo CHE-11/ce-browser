@@ -43,7 +43,7 @@ export function NetworkPopover({ tabId }: NetworkPopoverProps) {
   }, [tabId]);
 
   return (
-    <PopupFrame id="network-popover" maxHeight={640} ready={entries !== null}>
+    <PopupFrame id="network-popover" width={440} maxHeight={640} ready={entries !== null}>
       <PopoverHeader id="network-header" icon={<ListTree aria-hidden />} title="Network" subtitle={`${entries?.length ?? 0} recent requests`} />
       <div id="network-toolbar" className="flex justify-end px-3 pb-1">
         <button

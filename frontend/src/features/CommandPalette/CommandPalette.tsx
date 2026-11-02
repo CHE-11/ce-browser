@@ -17,9 +17,9 @@ import {
   sendUiCommand,
   sleepOtherTabs,
   switchWorkspace,
-  windowPoint,
   zoomTab,
 } from "@/lib/browser-client";
+import { PopupFrame } from "@/components/PopupFrame";
 import { cn } from "@/lib/cn";
 import { flattenBookmarks, useBookmarks, useExtensions, useHistory, useRecentlyClosed, useSettings, useTabs } from "@/lib/use-browser";
 import { BUILTIN_TOOLS } from "@features/BuiltInExtensions/builtin";
@@ -27,7 +27,7 @@ import { siteKey } from "@features/BuiltInExtensions/page-controls/site";
 import { tabParams } from "@features/BuiltInExtensions/shared";
 import { SETTINGS_INDEX } from "@features/Settings/settings-index";
 import { SETTINGS_SECTIONS } from "@features/Settings/settings-sections";
-import type { ClosedEntry, HistoryHit, TabInfo } from "@type/browser";
+import type { ClosedEntry, HistoryHit, PopupKind, TabInfo } from "@type/browser";
 
 type Hit = {
   id: string;
@@ -106,8 +106,7 @@ export function CommandPalette() {
   const active = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
 
   /** Opens another popup where this one is. Opening it closes the palette. */
-  const openHere = (kind: Parameters<typeof openPopup>[0]["kind"], params: string, width = 360, height = 480) =>
-    windowPoint(0, 0).then((point) => openPopup({ kind, params, x: point.x, y: point.y, width, height }));
+  const openHere = (kind: PopupKind, params: string) => openPopup(kind, { x: 0, y: 0 }, { params });
 
   const all = useMemo<Hit[]>(() => {
     const actions: Hit[] = [
@@ -203,7 +202,7 @@ export function CommandPalette() {
             }
             const params =
               tool.id === "page-controls" ? `${tabParams(active)}&host=${encodeURIComponent(siteKey(active.url))}` : tabParams(active);
-            return openHere(tool.id as Parameters<typeof openPopup>[0]["kind"], params);
+            return openHere(tool.id as PopupKind, params);
           },
         }))
       : [];
@@ -215,7 +214,7 @@ export function CommandPalette() {
         hint: "Extension",
         keywords: extension.description,
         group: "Extension",
-        run: () => openHere("extension", extension.id, 380, 520),
+        run: () => openHere("extension", `id=${extension.id}`),
       }));
     const pages: Hit[] = [
       ...flattenBookmarks(bookmarks).map((bookmark) => ({
@@ -335,7 +334,7 @@ export function CommandPalette() {
   };
 
   return (
-    <div id="command-palette" className="flex h-full flex-col overflow-hidden rounded-xl bg-zinc-900 text-zinc-100 ring-1 ring-inset ring-zinc-700">
+    <PopupFrame id="command-palette" width={560} maxHeight={2000} className="flex flex-col">
       <input
         id="command-palette-input"
         ref={inputRef}
@@ -360,7 +359,7 @@ export function CommandPalette() {
           }
         }}
       />
-      <div id="command-palette-list" ref={listRef} role="listbox" aria-label="Results" className="min-h-0 flex-1 overflow-y-auto p-1.5">
+      <div id="command-palette-list" ref={listRef} role="listbox" aria-label="Results" className="max-h-93 overflow-y-auto p-1.5">
         {ranked.length === 0 ? (
           <div id="command-palette-empty" className="px-3 py-4 text-sm text-zinc-500">
             No matches.
@@ -394,6 +393,6 @@ export function CommandPalette() {
           ))
         )}
       </div>
-    </div>
+    </PopupFrame>
   );
 }

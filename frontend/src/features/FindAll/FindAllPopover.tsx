@@ -45,7 +45,7 @@ export function FindAllPopover({ params }: { params: URLSearchParams }) {
   };
 
   return (
-    <PopupFrame id="find-all" maxHeight={480}>
+    <PopupFrame id="find-all" width={380} maxHeight={480}>
       <header id="find-all-header" className="flex items-center gap-2 px-4 pb-2 pt-3">
         <Search id="find-all-icon" className="size-4 text-zinc-400" aria-hidden />
         <h2 id="find-all-title" className="min-w-0 flex-1 truncate text-sm font-semibold">

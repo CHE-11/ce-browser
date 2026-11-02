@@ -155,7 +155,6 @@ Drag a pinned icon on the address bar onto another to reorder the built-in tools
 
 **Prices** reads a product price from the page and remembers it in `prices.json`. Check updates a tracked product when that page is open, and marks a lower price or a stock change.
 
-**Wayback** opens the current site in the Internet Archive, or asks the archive to save it.
 
 **Reading** shows the word count, the minutes at 200 words a minute, and a reading-ease score.
 

@@ -1,10 +1,12 @@
-import { Archive, BookOpen, Clapperboard, Eraser, ImageDown, KeyRound, Languages, Layers, LayoutGrid, Printer, Shield, ShoppingCart, SlidersHorizontal, Sparkles, Tags, type LucideIcon } from "lucide-react";
+import { BookOpen, Clapperboard, Eraser, ImageDown, KeyRound, Languages, Layers, LayoutGrid, Printer, Shield, ShoppingCart, SlidersHorizontal, Sparkles, Tags, type LucideIcon } from "lucide-react";
 
 export type BuiltinTool = {
   id: string;
   name: string;
   description: string;
   icon: LucideIcon;
+  /** Drawn in a fixed address-bar slot instead of the tool strip. */
+  address?: boolean;
 };
 
 /** Tools that ship on the address bar. Their ids are stored when they are unpinned. */
@@ -32,6 +34,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Media",
     description: "Play, pause and seek audio and video in open tabs.",
     icon: Clapperboard,
+    address: true,
   },
   {
     id: "clear-cache",
@@ -80,12 +83,6 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Shopping",
     description: "Find coupons and better prices for this product.",
     icon: ShoppingCart,
-  },
-  {
-    id: "wayback",
-    name: "Wayback",
-    description: "Open or save the page in the Internet Archive.",
-    icon: Archive,
   },
   {
     id: "reading",

@@ -44,7 +44,7 @@ export function BookmarkRename({ id }: BookmarkRenameProps) {
   };
 
   return (
-    <PopupFrame id="bookmark-rename" ready={loaded}>
+    <PopupFrame id="bookmark-rename" width={340} ready={loaded}>
       <form
         id="bookmark-rename-form"
         className="flex flex-col gap-3 p-4"

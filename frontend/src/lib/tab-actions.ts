@@ -8,14 +8,7 @@ export function openTabMenu(event: MouseEvent, tab: TabInfo, grouped: boolean) {
   if (!grouped) {
     void activateTab(tab.id);
   }
-  void openPopup({
-    kind: "tab-menu",
-    params: `id=${tab.id}`,
-    x: event.clientX,
-    y: event.clientY,
-    width: 260,
-    height: 520,
-  });
+  void openPopup("tab-menu", { x: event.clientX, y: event.clientY }, { params: `id=${tab.id}` });
 }
 
 /** Closes the whole selection when the tab is part of it. */

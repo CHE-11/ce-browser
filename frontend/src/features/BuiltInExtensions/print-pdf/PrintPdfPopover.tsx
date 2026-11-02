@@ -34,7 +34,7 @@ export function PrintPdfPopover({ params }: PrintPdfPopoverProps) {
   };
 
   return (
-    <PopupFrame id="print-pdf-popover" maxHeight={420}>
+    <PopupFrame id="print-pdf-popover" width={320} maxHeight={420}>
       <PopoverHeader id="print-pdf-header" icon={<Printer aria-hidden />} title="Print to PDF" subtitle={tab.title || tab.url} />
       {showResult && status ? (
         <PrintResult params={params} onAgain={() => setShowResult(false)} />

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Keyboard, Pencil } from "lucide-react";
 import { Button } from "@/components/Button";
+import { PopupFrame } from "@/components/PopupFrame";
 import { SkeletonRows } from "@/components/Skeleton";
 import { closePopup, createTab, listShortcuts, onShortcutsChanged } from "@/lib/browser-client";
 import { useSettings } from "@/lib/use-browser";
@@ -67,13 +68,15 @@ export function ShortcutSheet() {
   }, [bindings, settings?.workspacesEnabled]);
 
   return (
-    <div
+    <PopupFrame
       id="shortcut-sheet"
       role="dialog"
-      aria-labelledby="shortcut-sheet-title"
-      className="flex h-full flex-col overflow-hidden rounded-xl bg-zinc-900 text-zinc-100 ring-1 ring-inset ring-zinc-700"
+      labelledBy="shortcut-sheet-title"
+      width={760}
+      maxHeight={560}
+      ready={bindings !== null}
     >
-      <header id="shortcut-sheet-header" className="flex shrink-0 items-center gap-3 border-b border-zinc-800 px-5 py-3">
+      <header id="shortcut-sheet-header" className="sticky top-0 z-10 flex items-center gap-3 border-b border-zinc-800 bg-zinc-900 px-5 py-3">
         <Keyboard id="shortcut-sheet-icon" className="size-5 text-sky-300" aria-hidden />
         <h2 id="shortcut-sheet-title" className="flex-1 text-sm font-semibold">
           Keyboard shortcuts
@@ -83,7 +86,7 @@ export function ShortcutSheet() {
           Change shortcuts
         </Button>
       </header>
-      <div id="shortcut-sheet-body" className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      <div id="shortcut-sheet-body" className="px-5 py-4">
         {bindings === null ? (
           <SkeletonRows id="shortcut-sheet-loading" rows={8} />
         ) : (
@@ -134,6 +137,6 @@ export function ShortcutSheet() {
           </div>
         )}
       </div>
-    </div>
+    </PopupFrame>
   );
 }

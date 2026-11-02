@@ -52,7 +52,7 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
   };
 
   return (
-    <PopupFrame id="boards-popover" maxHeight={680} ready={loaded}>
+    <PopupFrame id="boards-popover" width={340} maxHeight={680} ready={loaded}>
       <PopoverHeader id="boards-header" icon={<LayoutGrid aria-hidden />} title="Save to board" subtitle={tab.title || tab.url} />
       {showResult && status ? (
         <SaveResult params={params} onAgain={() => setShowResult(false)} />

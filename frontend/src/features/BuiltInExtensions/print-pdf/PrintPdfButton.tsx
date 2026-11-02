@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { errorText, usePageToolRequests, useToolStatus } from "../use-page-tool";
 import { IconButton } from "@/components/IconButton";
-import { openPopupBelow, defaultDownloadDir, chooseSavePath, printTabToPdf, extractPage, printHtmlToPdf, openSavedFile } from "@/lib/browser-client";
+import { openPopup, defaultDownloadDir, chooseSavePath, printTabToPdf, extractPage, printHtmlToPdf, openSavedFile } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { TabInfo, BrowserSettings, PageToolRequest } from "@type/browser";
 import { LoaderCircle, Check, Printer } from "lucide-react";
@@ -14,10 +14,6 @@ type PrintPdfButtonProps = {
   settings: BrowserSettings | null;
 };
 
-const POPOVER_WIDTH = 320;
-/** Placeholder only. The popover stays hidden until it reports its real height. */
-const POPOVER_HEIGHT = 300;
-
 export function PrintPdfButton({ activeTab, settings }: PrintPdfButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [status, setStatus] = useToolStatus();
@@ -27,12 +23,7 @@ export function PrintPdfButton({ activeTab, settings }: PrintPdfButtonProps) {
   const showPopover = (params: URLSearchParams) => {
     const anchor = buttonRef.current;
     if (anchor) {
-      void openPopupBelow(anchor, {
-        kind: "print-pdf",
-        params: params.toString(),
-        width: POPOVER_WIDTH,
-        height: POPOVER_HEIGHT,
-      });
+      void openPopup("print-pdf", anchor, { params: params.toString() });
     }
   };
 

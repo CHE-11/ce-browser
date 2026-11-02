@@ -17,7 +17,6 @@ export function ShoppingButton({ activeTab }: { activeTab: TabInfo | undefined }
       kind="shopping"
       icon={<ShoppingCart id="address-shopping-icon" aria-hidden />}
       activeTab={activeTab}
-      height={480}
     />
   );
 }
@@ -62,7 +61,7 @@ export function ShoppingPopover({ params }: { params: URLSearchParams }) {
   };
 
   return (
-    <PopupFrame id="shopping-popover" maxHeight={500}>
+    <PopupFrame id="shopping-popover" width={320} maxHeight={500}>
       <PopoverHeader id="shopping-header" icon={<ShoppingCart aria-hidden />} title="Shopping" subtitle={tab.title || tab.url} />
       <div id="shopping-body" className="flex flex-col gap-3 px-3 pb-3">
         <Button id="shopping-find" variant="primary" disabled={busy} onClick={find}>

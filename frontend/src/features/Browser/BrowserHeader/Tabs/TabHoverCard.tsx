@@ -9,6 +9,8 @@ import { HIGH_TAB_MEMORY, tabProblemTitle } from "@/lib/tab-alert";
 import { groupColorClasses, groupLabel } from "@/lib/tab-rows";
 import { useTabs } from "@/lib/use-browser";
 
+const CARD_WIDTH = 280;
+
 type TabHoverCardProps = {
   tabId: number;
 };
@@ -67,7 +69,7 @@ export function TabHoverCard({ tabId }: TabHoverCardProps) {
   }, [missing]);
 
   if (!tab) {
-    return <PopupFrame id="tab-hover" ready={false}>{null}</PopupFrame>;
+    return <PopupFrame id="tab-hover" width={CARD_WIDTH} ready={false}>{null}</PopupFrame>;
   }
 
   const heavy = memory !== null && memory >= HIGH_TAB_MEMORY;
@@ -83,7 +85,7 @@ export function TabHoverCard({ tabId }: TabHoverCardProps) {
         : null;
 
   return (
-    <PopupFrame id="tab-hover" ready={snapshot.loaded && thumbnail !== undefined}>
+    <PopupFrame id="tab-hover" width={CARD_WIDTH} ready={snapshot.loaded && thumbnail !== undefined}>
       <div id="tab-hover-body" className="flex flex-col gap-2 p-3">
         <div id="tab-hover-head" className="flex items-start gap-2">
           <FavIcon id="tab-hover-icon" url={tab.url} src={tab.favicon} className="mt-0.5" />

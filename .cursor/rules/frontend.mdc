@@ -10,6 +10,8 @@ alwaysApply: false
 - Prefer to split ui functions into smaller files. 
 - Pages live in `frontend/src/features/[FeatureName]/[PageName].page.tsx` and set `document.title`. `main.tsx` picks the page from `location.hash`: no hash is the browser UI, `#/popup/<kind>` is a popup, `#/<page>` is a `ce://` page.
 - Unique Components live in `frontend/src/features/[FeatureName]/[ComponentName].tsx`.
+- Hooks and non UI functions live in `frontend/src/lib/[HookName].ts` or `frontend/src/lib/[FunctionName].ts`.
+- Types live in `frontend/src/types/[TypeName].ts`.
 - Every HTML element gets an `id` as its first attribute.
 - Style with Tailwind. Merge classes with `cn()` from `frontend/src/lib/cn.ts`.
 - The browser UI view sits behind the page views. Menus or panels that would overlap the page open through `openPopup` instead of rendering in place.

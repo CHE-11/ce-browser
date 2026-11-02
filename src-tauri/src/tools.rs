@@ -118,24 +118,19 @@ fn translate_text(template: &str, text: &str, language: &str) -> Result<String, 
 
 fn read_translation(body: &str) -> Result<String, String> {
     let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return Err("The provider returned nothing.".into());
+    }
+    // Google's gtx client returns [[["translated", "original", ...], ...], ...].
+    // The translation is the first string of each sentence, not a nested array.
     if trimmed.starts_with('[') {
         let value: serde_json::Value =
             serde_json::from_str(trimmed).map_err(|error| error.to_string())?;
-        let mut out = String::new();
-        if let Some(sentences) = value.get(0).and_then(|item| item.as_array()) {
-            for sentence in sentences {
-                if let Some(text) = sentence
-                    .get(0)
-                    .and_then(|item| item.get(0))
-                    .and_then(|item| item.as_str())
-                {
-                    out.push_str(text);
-                }
-            }
+        let out = google_sentences(&value);
+        if out.trim().is_empty() {
+            return Err("The provider returned nothing.".into());
         }
-        if !out.is_empty() {
-            return Ok(out);
-        }
+        return Ok(out);
     }
     if trimmed.starts_with('{') {
         let value: serde_json::Value =
@@ -144,15 +139,27 @@ fn read_translation(body: &str) -> Result<String, String> {
             .get("translatedText")
             .or_else(|| value.get("text"))
             .and_then(|item| item.as_str())
+            .filter(|text| !text.trim().is_empty())
         {
             return Ok(text.to_string());
         }
+        return Err("The provider returned nothing.".into());
     }
-    if trimmed.is_empty() {
-        Err("The provider returned nothing.".into())
-    } else {
-        Ok(trimmed.to_string())
+    Ok(trimmed.to_string())
+}
+
+/// Joins the translated segments from a `translate_a/single` response.
+fn google_sentences(value: &serde_json::Value) -> String {
+    let mut out = String::new();
+    let Some(sentences) = value.get(0).and_then(|item| item.as_array()) else {
+        return out;
+    };
+    for sentence in sentences {
+        if let Some(text) = sentence.get(0).and_then(|item| item.as_str()) {
+            out.push_str(text);
+        }
     }
+    out
 }
 
 fn clean_language(language: &str) -> String {
@@ -289,19 +296,6 @@ fn fill_random(bytes: &mut [u8]) -> Result<(), String> {
     } else {
         Ok(())
     }
-}
-
-pub fn wayback_url(save: bool, url: &str) -> Result<String, String> {
-    let url = url.trim();
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("Only a website can be looked up in the archive.".into());
-    }
-    let prefix = if save {
-        "https://web.archive.org/save/"
-    } else {
-        "https://web.archive.org/web/"
-    };
-    Ok(format!("{prefix}{url}"))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -745,7 +739,24 @@ pub fn ask_page(app: &AppHandle, id: u32, question: &str) -> Result<String, Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{chat_url, fill_translate_url, parse_price, password, reading_stats, wayback_url};
+    use super::{
+        chat_url, fill_translate_url, parse_price, password, read_translation, reading_stats,
+    };
+
+    #[test]
+    fn a_google_translate_response_keeps_only_the_translated_sentences() {
+        let body = r#"[[["Hola Mundo. ","Hello world. ",null,null,10],["Esta es una prueba.","This is a test.",null,null,3,null,null,[[]],[[["e050167b38f2a566522b4157651fc616","en_es_2023q1.md"]]]]],null,"en"]"#;
+        let text = read_translation(body).expect("translation");
+        assert_eq!(text, "Hola Mundo. Esta es una prueba.");
+        assert!(!text.contains("en_es_2023q1.md"));
+        assert!(!text.contains("e050167b38f2a566522b4157651fc616"));
+    }
+
+    #[test]
+    fn a_named_translate_response_uses_the_translated_text_field() {
+        let text = read_translation(r#"{"translatedText":"Hola"}"#).expect("translation");
+        assert_eq!(text, "Hola");
+    }
 
     #[test]
     fn the_translate_template_fills_the_text_and_language() {
@@ -828,15 +839,6 @@ mod tests {
         assert_eq!(stats.words, 6);
         assert_eq!(stats.minutes, 1);
         assert!(stats.ease <= 100);
-    }
-
-    #[test]
-    fn wayback_wraps_an_http_address() {
-        assert_eq!(
-            wayback_url(false, "https://example.com/a").unwrap(),
-            "https://web.archive.org/web/https://example.com/a"
-        );
-        assert!(wayback_url(true, "ce://settings").is_err());
     }
 
     #[test]

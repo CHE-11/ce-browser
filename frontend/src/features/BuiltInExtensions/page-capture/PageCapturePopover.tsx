@@ -49,7 +49,7 @@ export function PageCapturePopover({ params }: PageCapturePopoverProps) {
   };
 
   return (
-    <PopupFrame id="page-capture-popover" maxHeight={640}>
+    <PopupFrame id="page-capture-popover" width={320} maxHeight={640}>
       <PopoverHeader
         id="page-capture-header"
         icon={<ImageDown aria-hidden />}

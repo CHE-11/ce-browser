@@ -84,7 +84,7 @@ export function BoardImagesPopover({ params }: { params: URLSearchParams }) {
   };
 
   return (
-    <PopupFrame id="board-images" maxHeight={600} ready={loaded && items !== null}>
+    <PopupFrame id="board-images" width={440} maxHeight={600} ready={loaded && items !== null}>
       <PopoverHeader id="board-images-header" icon={<Images aria-hidden />} title="Save images to board" subtitle={tab.title || tab.url} />
       <div id="board-images-body" className="flex flex-col gap-2 px-3 pb-3">
         <BoardPicker id="board-images-picker" boards={boards} value={boardId} onChange={setBoardId} />

@@ -1,18 +1,21 @@
 import { useEffect, useState } from "react";
 import { getAdblockStats, onAdblockStats } from "@/lib/browser-client";
+import type { AdblockHost } from "@type/browser";
 
 /** Requests blocked in tab `tabId` since its current page started loading. Updates live. */
 export function useAdblockStats(tabId: number | null) {
   return useAdblockStatsState(tabId).blocked;
 }
 
-/** Like `useAdblockStats`, plus whether the first count for `tabId` has arrived. */
+/** Like `useAdblockStats`, plus the hosts behind the count and whether the first snapshot has arrived. */
 export function useAdblockStatsState(tabId: number | null) {
   const [blocked, setBlocked] = useState(0);
+  const [hosts, setHosts] = useState<AdblockHost[]>([]);
   const [loadedFor, setLoadedFor] = useState<number | null>(null);
 
   useEffect(() => {
     setBlocked(0);
+    setHosts([]);
     if (tabId === null) {
       return;
     }
@@ -21,6 +24,7 @@ export function useAdblockStatsState(tabId: number | null) {
       .then((stats) => {
         if (live) {
           setBlocked(stats.blocked);
+          setHosts(stats.hosts ?? []);
         }
       })
       .catch(() => undefined)
@@ -32,6 +36,7 @@ export function useAdblockStatsState(tabId: number | null) {
     const unlisten = onAdblockStats((stats) => {
       if (live && stats.tabId === tabId) {
         setBlocked(stats.blocked);
+        setHosts(stats.hosts ?? []);
       }
     });
     return () => {
@@ -40,7 +45,7 @@ export function useAdblockStatsState(tabId: number | null) {
     };
   }, [tabId]);
 
-  return { blocked, loaded: tabId === null || loadedFor === tabId };
+  return { blocked, hosts, loaded: tabId === null || loadedFor === tabId };
 }
 
 /** The form a host takes on the paused-sites list. Matches `adblock::site_key` in Rust. */

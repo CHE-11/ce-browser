@@ -15,7 +15,7 @@ export function DownloadsPanel() {
   const recent = downloads.slice(0, PANEL_LIMIT);
 
   return (
-    <PopupFrame id="downloads-panel" maxHeight={520} ready={loaded}>
+    <PopupFrame id="downloads-panel" width={380} maxHeight={520} ready={loaded}>
       <div id="downloads-panel-header" className="flex items-center justify-between gap-2 py-1 pr-1 pl-4">
         <h2 id="downloads-panel-title" className="text-sm font-medium">
           Recent download history

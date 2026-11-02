@@ -1,6 +1,6 @@
 import { ChevronDown } from "lucide-react";
 import type { Workspace } from "../../../../../../types/browser";
-import { openPopupBelow } from "../../../../lib/browser-client";
+import { openPopup } from "../../../../lib/browser-client";
 import { cn } from "../../../../lib/cn";
 import { focusRing } from "../../../../lib/focus-ring";
 import { groupColorClasses } from "../../../../lib/tab-rows";
@@ -33,7 +33,7 @@ export function WorkspaceSwitcher({ workspaces, current, compact = false, classN
         className,
       )}
       onClick={(event) =>
-        void openPopupBelow(event.currentTarget, { kind: "workspaces", width: 300, height: 360 }, "start")
+        void openPopup("workspaces", event.currentTarget, { placement: "bottom-start" })
       }
     >
       <span id="workspace-switcher-dot" className={cn("size-2.5 shrink-0 rounded-full", colors.swatch)} />

@@ -3,7 +3,7 @@ import { Cookie, ExternalLink, Lock, ShieldAlert, ShieldBan, SlidersHorizontal, 
 import { Button } from "@/components/Button";
 import { PopupFrame } from "@/components/PopupFrame";
 import { Skeleton } from "@/components/Skeleton";
-import { clearSiteCache, closePopup, createTab, openPopup, setPermission, siteInfo, windowPoint } from "@/lib/browser-client";
+import { clearSiteCache, closePopup, createTab, openPopup, setPermission, siteInfo } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { formatBytes } from "@/lib/format";
@@ -111,13 +111,11 @@ export function SiteInfoPanel({ tabId }: SiteInfoPanelProps) {
       return;
     }
     const params = new URLSearchParams({ tab: String(tab.id), title: tab.title || tab.url, url: tab.url, host: siteKey(tab.url) });
-    void windowPoint(0, 0).then((point) =>
-      openPopup({ kind: "page-controls", params: params.toString(), x: point.x, y: point.y, width: 340, height: 560 }),
-    );
+    void openPopup("page-controls", { x: 0, y: 0 }, { params: params.toString() });
   };
 
   return (
-    <PopupFrame id="site-info" ready={snapshot.loaded}>
+    <PopupFrame id="site-info" width={360} ready={snapshot.loaded}>
       <header id="site-info-header" className="flex flex-col gap-1.5 px-4 pb-3 pt-4">
         <h2 id="site-info-host" className="truncate text-sm font-semibold text-zinc-100" title={info?.url}>
           {host || tab?.title || "This page"}
