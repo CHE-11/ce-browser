@@ -20,6 +20,9 @@ pub const UI: &str = "ui";
 const MAX_CLOSED: usize = 25;
 const DEFAULT_UI_HEIGHT: f64 = 84.0;
 const POPUP_TOGGLE_WINDOW: Duration = Duration::from_millis(400);
+/// Swapping one menu for the next on the same host can make WebView2 report a focus loss.
+/// That report is the move, so it must not close the popup that just opened.
+const POPUP_SWAP_BLUR: Duration = Duration::from_millis(300);
 /// Chrome's limit for a toolbar popup. A larger document scrolls inside the popup.
 const EXTENSION_POPUP_MAX_WIDTH: f64 = 800.0;
 const EXTENSION_POPUP_MAX_HEIGHT: f64 = 600.0;
@@ -423,6 +426,8 @@ struct Popup {
     shape: Vec<PopupRect>,
     closed_key: Option<String>,
     closed_at: Option<Instant>,
+    /// Focus-loss events before this instant come from moving the host, not from the user.
+    ignore_blur_until: Option<Instant>,
 }
 
 impl Popup {
@@ -4544,7 +4549,20 @@ pub fn open_popup(
             popup.host_label.as_deref() == Some(label)
         }
     });
-    retire_popup(app, window_label, !same_host);
+    if same_host {
+        // Parking the host off-screen to swap its page makes the controller lose focus,
+        // and that closes the popup this call is opening. Leave it up and ignore that blur.
+        with_state(app, |state| {
+            if let Some(popup) = state
+                .chrome_mut(window_label)
+                .map(|chrome| &mut chrome.popup)
+            {
+                popup.ignore_blur_until = Some(Instant::now() + POPUP_SWAP_BLUR);
+            }
+        });
+    } else {
+        retire_popup(app, window_label, true);
+    }
     present_popup(app, window_label, &request, extension_url.as_ref())?;
     Ok(true)
 }
@@ -4648,13 +4666,18 @@ pub fn close_window_popup(app: &AppHandle, window_label: &str) {
 }
 
 /// Closes a focused popup that lost focus. A parked host and a drag-opened menu stay up.
+/// A loss reported while one menu is replacing another is the move, so it is ignored.
 pub fn popup_lost_focus(app: &AppHandle, label: &str) {
+    let now = Instant::now();
     let window = with_state(app, |state| {
         state
             .windows
             .iter()
             .find(|window| {
                 let popup = &window.popup;
+                if popup.ignore_blur_until.is_some_and(|until| until > now) {
+                    return false;
+                }
                 popup.label.as_deref() == Some(label) && popup.focus && popup.kind.is_some()
             })
             .map(|window| window.label.clone())
@@ -4699,12 +4722,20 @@ pub fn set_popup_shape(
     let label = with_state(app, |state| {
         let popup = &mut state.chrome_mut(window_label)?.popup;
         if !popup.open() {
-            return None;
+            return Some(None);
+        }
+        // Only the folder menu is clipped to its panels. A shape reported while that menu
+        // is being replaced would hide the popup that replaced it.
+        if popup.kind.as_deref() != Some("bookmark-folder") {
+            return Some(None);
         }
         popup.shape = shape;
-        popup.label.clone()
+        Some(popup.label.clone())
     })
-    .ok_or("No popup is open.")?;
+    .ok_or("The browser window is missing.")?;
+    let Some(label) = label else {
+        return Ok(());
+    };
     let webview = app.get_webview(&label).ok_or("No popup is open.")?;
     round_open_popup(app, &webview);
     Ok(())
