@@ -13,7 +13,7 @@ import { BookmarkFolderMenu } from "@/features/Browser/BrowserHeader/BookmarksBa
 import { BookmarksBarContextMenu, type BookmarkMenuTarget } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarksBarContextMenu";
 import { TabGroupFlyout } from "@/features/Browser/BrowserHeader/Tabs/TabGroupFlyout";
 import { TabGroupMenu } from "@/features/Browser/BrowserHeader/Tabs/TabGroupMenu";
-import { TabMenu } from "@/features/Browser/BrowserHeader/Tabs/TabMenu";
+import { TabContextMenu } from "@/features/Browser/BrowserHeader/Tabs/TabContextMenu";
 import { WorkspaceMenu } from "@/features/Browser/BrowserHeader/Workspace/WorkspaceMenu";
 import { AdBlockerPopover } from "@features/BuiltInExtensions/ad-blocker/AdBlockerPopover";
 import { AssistantPopover } from "@features/BuiltInExtensions/assistant/Assistant";
@@ -131,7 +131,7 @@ function PopupContent({ popup, params }: PopupPageProps) {
     case "bookmark-rename":
       return <BookmarkRename id={params.get("id") ?? ""} />;
     case "tab-menu":
-      return <TabMenu tabId={Number(params.get("id"))} />;
+      return <TabContextMenu tabId={Number(params.get("id"))} />;
     case "app-menu":
       return <AppMenu />;
     case "status":

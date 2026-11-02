@@ -6,6 +6,7 @@ import { accentTint } from "@/lib/accent";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { tabProblemTitle, type HeavyTab } from "@/lib/tab-alert";
+import { TAB_SIZE } from "@/lib/tab-size";
 import { useSettings } from "@/lib/use-browser";
 import { hoverTab, leaveTab } from "@/lib/tab-hover";
 import { groupColorClasses } from "@/lib/tab-rows";
@@ -53,6 +54,7 @@ export function TabItem({
 }: TabItemProps) {
   const settings = useSettings();
   const hoverPreview = settings?.tabHoverPreview !== false;
+  const tabWidth = settings?.tabWidth ?? TAB_SIZE.width;
   const accent = settings?.siteAccent && tab.accent ? tab.accent : null;
   const domId = `tab-${tab.id}`;
   const vertical = orientation === "vertical";
@@ -105,7 +107,7 @@ export function TabItem({
         "group relative flex shrink-0 cursor-default select-none items-center gap-2 text-xs transition-colors",
         focusRing,
         vertical ? "h-8 w-full rounded-lg px-2" : "h-7.5 rounded-t-lg px-2.5",
-        !vertical && (compact ? "w-10 justify-center px-0" : "w-56 min-w-[88px] shrink"),
+        !vertical && (compact ? "w-9 justify-center px-0" : "min-w-[88px] shrink"),
         vertical && compact && "w-9 justify-center px-0",
         active ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200",
         !vertical && active && "bg-zinc-900",
@@ -118,6 +120,7 @@ export function TabItem({
       )}
       style={{
         viewTransitionName: `tab-${tab.id}`,
+        ...(!vertical && !compact ? { width: tabWidth } : null),
         ...(accent
           ? {
               backgroundColor: active ? accentTint(accent, 0.28) : undefined,
@@ -217,7 +220,7 @@ export function TabItem({
       </span>
       {compact ? null : (
         <>
-          <span id={`${domId}-title`} className="min-w-0 flex-1 truncate">
+          <span id={`${domId}-title`} className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left">
             {tab.title || tab.url}
           </span>
           {tab.ephemeral ? (

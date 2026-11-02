@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { ImagePlus } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { BrowserProfile, ProfileIconChoice } from "@type/browser";
+import type { BrowserProfile, ProfileCopyScope, ProfileIconChoice } from "@type/browser";
 import { Button } from "@/components/Button";
 import { Dialog } from "@/components/Dialog";
 import { cn } from "@/lib/cn";
 import {
+  copyProfile,
   createProfile,
   deleteProfile,
   exportProfileArchive,
@@ -38,6 +39,33 @@ type ArchivePrompt = {
   error: string | null;
 };
 
+type CopyPrompt = {
+  id: string;
+  sourceName: string;
+  name: string;
+  scope: ProfileCopyScope;
+  current: boolean;
+  error: string | null;
+};
+
+const COPY_CHOICES: { id: ProfileCopyScope; label: string; hint: string }[] = [
+  {
+    id: "settings",
+    label: "App settings",
+    hint: "Search, startup, downloads, appearance, and the other Settings values.",
+  },
+  {
+    id: "data",
+    label: "Profile data",
+    hint: "App settings plus bookmarks, history, extensions, and the other files in the profile folder. Cookies stay on this computer.",
+  },
+  {
+    id: "full",
+    label: "Everything",
+    hint: "Profile data plus cookies and saved logins.",
+  },
+];
+
 function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], iconOpen: boolean) {
   const terms = [
     profile.name,
@@ -52,6 +80,7 @@ function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], iconO
   if (!profile.current) {
     terms.push("Open");
   }
+  terms.push("Copy");
   terms.push(profile.taskbar ? "Unpin" : "Pin to taskbar");
   if (!profile.startMenu) {
     terms.push("Add to Start");
@@ -82,6 +111,7 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
   const [archive, setArchive] = useState<ArchivePrompt | null>(null);
   const [archiveNote, setArchiveNote] = useState<string | null>(null);
   const [archiveWorking, setArchiveWorking] = useState(false);
+  const [copying, setCopying] = useState<CopyPrompt | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -128,6 +158,8 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
     "Export",
     "Import",
     archiveNote ?? "",
+    "Copy profile",
+    ...COPY_CHOICES.flatMap((choice) => [choice.label, choice.hint]),
     ...profiles.flatMap((profile) => profileTerms(profile, profileIcons, iconProfile === profile.id)),
     confirmText,
     pendingDelete ? "Cancel" : "",
@@ -193,6 +225,33 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
         setArchive((current) => (current ? { ...current, error: String(reason) } : current));
       })
       .finally(() => setArchiveWorking(false));
+  };
+
+  const submitCopy = () => {
+    if (!copying || profileWorking) {
+      return;
+    }
+    const name = copying.name.trim();
+    if (!name) {
+      setCopying({ ...copying, error: "A profile needs a name." });
+      return;
+    }
+    if (copying.scope === "full" && copying.current) {
+      setCopying({ ...copying, error: "Close that profile before copying its cookies and logins." });
+      return;
+    }
+    setProfileWorking(true);
+    onError(null);
+    void copyProfile(copying.id, name, copying.scope)
+      .then((next) => {
+        setProfiles(next);
+        setCopying(null);
+      })
+      .catch((reason: unknown) => {
+        setCopying((current) => (current ? { ...current, error: String(reason) } : current));
+        void listProfiles().then(setProfiles).catch(() => undefined);
+      })
+      .finally(() => setProfileWorking(false));
   };
 
   const runProfiles = (work: () => Promise<BrowserProfile[] | void>) => {
@@ -267,6 +326,16 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
           working={profileWorking}
           onToggleIcons={() => setIconProfile((current) => (current === profile.id ? null : profile.id))}
           onOpen={() => runProfiles(() => openProfile(profile.id))}
+          onCopy={() =>
+            setCopying({
+              id: profile.id,
+              sourceName: profile.name,
+              name: `${profile.name} copy`,
+              scope: "settings",
+              current: profile.current,
+              error: null,
+            })
+          }
           onPin={() => runProfiles(() => pinProfileTaskbar(profile.id))}
           onUnpin={() => runProfiles(() => unpinProfileTaskbar(profile.id))}
           onShortcut={() => runProfiles(() => installProfileShortcut(profile.id))}
@@ -354,6 +423,84 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
           </div>
         </form>
       </Dialog>
+      <Dialog
+        id="settings-profile-copy"
+        title="Copy profile"
+        open={copying !== null}
+        onClose={() => {
+          if (!profileWorking) {
+            setCopying(null);
+          }
+        }}
+        panelClassName="max-w-md"
+      >
+        <form
+          id="settings-profile-copy-form"
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submitCopy();
+          }}
+        >
+          <p id="settings-profile-copy-source" className="text-sm text-zinc-300">
+            Copy {copying?.sourceName ?? "this profile"} into a new profile.
+          </p>
+          <label id="settings-profile-copy-name-label" className="flex flex-col gap-1 text-sm text-zinc-300">
+            Name
+            <input
+              id="settings-profile-copy-name"
+              autoFocus
+              value={copying?.name ?? ""}
+              className={inputClass}
+              onChange={(event) => setCopying((current) => (current ? { ...current, name: event.target.value, error: null } : current))}
+            />
+          </label>
+          <fieldset id="settings-profile-copy-scope" className="flex flex-col gap-2">
+            <legend id="settings-profile-copy-scope-legend" className="mb-1 text-sm text-zinc-300">
+              What to copy
+            </legend>
+            {COPY_CHOICES.map((choice) => {
+              const disabled = choice.id === "full" && Boolean(copying?.current);
+              return (
+                <label
+                  key={choice.id}
+                  id={`settings-profile-copy-scope-${choice.id}-label`}
+                  className={cn("flex items-start gap-2 text-sm", disabled ? "text-zinc-500" : "text-zinc-200")}
+                >
+                  <input
+                    id={`settings-profile-copy-scope-${choice.id}`}
+                    type="radio"
+                    name="settings-profile-copy-scope"
+                    className="mt-1"
+                    checked={copying?.scope === choice.id}
+                    disabled={disabled || profileWorking}
+                    onChange={() => setCopying((current) => (current ? { ...current, scope: choice.id, error: null } : current))}
+                  />
+                  <span id={`settings-profile-copy-scope-${choice.id}-text`} className="flex flex-col">
+                    <span id={`settings-profile-copy-scope-${choice.id}-title`}>{choice.label}</span>
+                    <span id={`settings-profile-copy-scope-${choice.id}-hint`} className="text-xs text-zinc-500">
+                      {disabled ? "Close this profile before copying cookies and saved logins." : choice.hint}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </fieldset>
+          {copying?.error ? (
+            <p id="settings-profile-copy-error" className="text-sm text-red-300">
+              {copying.error}
+            </p>
+          ) : null}
+          <div id="settings-profile-copy-actions" className="flex justify-end gap-2">
+            <Button id="settings-profile-copy-cancel" size="sm" variant="ghost" disabled={profileWorking} onClick={() => setCopying(null)}>
+              Cancel
+            </Button>
+            <Button id="settings-profile-copy-save" size="sm" type="submit" disabled={profileWorking || !copying?.name.trim()}>
+              Copy
+            </Button>
+          </div>
+        </form>
+      </Dialog>
     </Section>
   );
 }
@@ -365,6 +512,7 @@ function ProfileCard({
   working,
   onToggleIcons,
   onOpen,
+  onCopy,
   onPin,
   onUnpin,
   onShortcut,
@@ -378,6 +526,7 @@ function ProfileCard({
   working: boolean;
   onToggleIcons: () => void;
   onOpen: () => void;
+  onCopy: () => void;
   onPin: () => void;
   onUnpin: () => void;
   onShortcut: () => void;
@@ -426,6 +575,9 @@ function ProfileCard({
               Open
             </Button>
           ) : null}
+          <Button id={`settings-profile-${profile.id}-copy-button`} size="sm" disabled={working} onClick={onCopy}>
+            Copy
+          </Button>
           {profile.taskbar ? (
             <Button id={`settings-profile-${profile.id}-unpin`} size="sm" disabled={working} onClick={onUnpin}>
               Unpin

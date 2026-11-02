@@ -5,6 +5,7 @@ import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
 import { cn } from "@/lib/cn";
+import { TAB_SIZE } from "@/lib/tab-size";
 import { SETTINGS_SECTIONS } from "./settings-sections";
 import { inputClass, matchesQuery, Row, Section, Segmented, useReportMatch, useSettingVisible, type SettingsSectionProps } from "./SettingsControls";
 
@@ -14,6 +15,12 @@ const WORKSPACES_LABEL = "Workspaces";
 const WORKSPACES_HINT = "The button on the left of the tab strip. Off hides switching, and the tabs you are looking at stay where they are.";
 const LAYOUT_LABEL = "Tab layout";
 const LAYOUT_HINT = "Vertical tabs sit in a sidebar left of the page.";
+const WIDTH_LABEL = "Default tab width";
+const WIDTH_HINT = "Width of a horizontal tab, in pixels. Tabs shrink when the strip is full.";
+const MENU_TEXT_LABEL = "Tab menu text size";
+const MENU_TEXT_HINT = "In rem. 1rem is the browser's base text size.";
+const MENU_PADDING_LABEL = "Tab menu padding";
+const MENU_PADDING_HINT = "Side padding in rem. Top and bottom get half.";
 const CYCLE_LABEL = "Ctrl+Tab order";
 const CYCLE_HINT = "Recently used goes to the tab you used last, then the one before it.";
 const SWITCHER_LABEL = "Show the tab switcher";
@@ -47,6 +54,12 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
     WORKSPACES_HINT,
     LAYOUT_LABEL,
     LAYOUT_HINT,
+    WIDTH_LABEL,
+    WIDTH_HINT,
+    MENU_TEXT_LABEL,
+    MENU_TEXT_HINT,
+    MENU_PADDING_LABEL,
+    MENU_PADDING_HINT,
     "horizontal",
     "vertical",
     CYCLE_LABEL,
@@ -110,6 +123,42 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
           onChange={(tabLayout) => onUpdate({ tabLayout })}
         />
       </Row>
+      <SizeSetting
+        id="settings-tab-width"
+        setting="tabWidth"
+        label={WIDTH_LABEL}
+        hint={WIDTH_HINT}
+        value={settings.tabWidth ?? TAB_SIZE.width}
+        fallback={TAB_SIZE.width}
+        limits={TAB_SIZE.widthLimits}
+        step={1}
+        unit="px"
+        onChange={(tabWidth) => onUpdate({ tabWidth })}
+      />
+      <SizeSetting
+        id="settings-tab-menu-text-size"
+        setting="tabMenuTextSize"
+        label={MENU_TEXT_LABEL}
+        hint={MENU_TEXT_HINT}
+        value={settings.tabMenuTextSize ?? TAB_SIZE.menuText}
+        fallback={TAB_SIZE.menuText}
+        limits={TAB_SIZE.text}
+        step={TAB_SIZE.step}
+        unit="rem"
+        onChange={(tabMenuTextSize) => onUpdate({ tabMenuTextSize })}
+      />
+      <SizeSetting
+        id="settings-tab-menu-padding"
+        setting="tabMenuPadding"
+        label={MENU_PADDING_LABEL}
+        hint={MENU_PADDING_HINT}
+        value={settings.tabMenuPadding ?? TAB_SIZE.menuPadding}
+        fallback={TAB_SIZE.menuPadding}
+        limits={TAB_SIZE.padding}
+        step={TAB_SIZE.step}
+        unit="rem"
+        onChange={(tabMenuPadding) => onUpdate({ tabMenuPadding })}
+      />
       <Row id="settings-tab-cycle" setting="tabCycleOrder" label={CYCLE_LABEL} hint={CYCLE_HINT} search={["ctrl+tab", "recent", "strip order"]}>
         <Segmented
           id="settings-tab-cycle-options"
@@ -184,6 +233,74 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
       </Row>
       <NeverSleep settings={settings} draft={neverSleepDraft} setDraft={setNeverSleepDraft} onAdd={addNeverSleep} onUpdate={onUpdate} />
     </Section>
+  );
+}
+
+type SizeSettingKey = "tabWidth" | "tabMenuTextSize" | "tabMenuPadding";
+
+/** An exact size. Saves on blur or Enter. */
+function SizeSetting({
+  id,
+  setting,
+  label,
+  hint,
+  value,
+  fallback,
+  limits,
+  step,
+  unit,
+  onChange,
+}: {
+  id: string;
+  setting: SizeSettingKey;
+  label: string;
+  hint: string;
+  value: number;
+  fallback: number;
+  limits: { min: number; max: number };
+  step: number;
+  unit: string;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  const commit = () => {
+    const parsed = Number(draft);
+    const next = Number.isFinite(parsed) && draft.trim() !== "" ? parsed : fallback;
+    const clamped = Math.round(Math.min(limits.max, Math.max(limits.min, next)) * 10000) / 10000;
+    setDraft(String(clamped));
+    if (clamped !== value) {
+      onChange(clamped);
+    }
+  };
+
+  return (
+    <Row id={id} label={label} hint={hint} search={[unit, String(value)]} setting={setting}>
+      <input
+        id={`${id}-input`}
+        type="number"
+        min={limits.min}
+        max={limits.max}
+        step={step}
+        value={draft}
+        aria-label={label}
+        className={cn(inputClass, "w-24 text-right")}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      <span id={`${id}-unit`} className="text-xs text-zinc-500">
+        {unit}
+      </span>
+    </Row>
   );
 }
 

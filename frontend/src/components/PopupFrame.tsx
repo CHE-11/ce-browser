@@ -24,11 +24,19 @@ export function PopupFrame({ id, children, className, fit = true, maxHeight = 64
     if (!fit || !ready || !content) {
       return;
     }
-    const height = Math.min(maxHeight, Math.ceil(content.offsetHeight));
-    if (height < 1) {
-      return;
-    }
-    void fitPopup(height).catch(() => undefined);
+    let reported = 0;
+    const measure = () => {
+      const height = Math.min(maxHeight, Math.ceil(content.offsetHeight));
+      if (height < 1 || height === reported) {
+        return;
+      }
+      reported = height;
+      void fitPopup(height).catch(() => undefined);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(content);
+    return () => observer.disconnect();
   }, [fit, ready, maxHeight]);
 
   useEffect(() => {

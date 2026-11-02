@@ -22,6 +22,7 @@ const STARTUP_MODES: &[&str] = &["restore", "home"];
 const COLOR_MODES: &[&str] = &["dark", "light", "system"];
 const BOOKMARK_TEXT_REM: (f32, f32) = (0.5, 1.5);
 const BOOKMARK_PADDING_REM: (f32, f32) = (0.0, 1.5);
+const TAB_WIDTH_PX: (u32, u32) = (88, 480);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
@@ -198,6 +199,15 @@ pub struct BrowserSettings {
     /// Resting on a tab shows a small preview of its page.
     #[serde(default = "default_true")]
     pub tab_hover_preview: bool,
+    /// Preferred width of a horizontal tab, in CSS pixels. Tabs shrink when the strip is full.
+    #[serde(default = "default_tab_width")]
+    pub tab_width: u32,
+    /// Text size of the tab context menu, in rem.
+    #[serde(default = "default_tab_menu_text_size")]
+    pub tab_menu_text_size: f32,
+    /// Side padding of rows in the tab context menu, in rem. Top and bottom get half.
+    #[serde(default = "default_tab_menu_padding")]
+    pub tab_menu_padding: f32,
     /// `none`, `mica` or `acrylic`. Windows draws it behind the tab strip and toolbars.
     #[serde(default = "default_backdrop")]
     pub window_backdrop: String,
@@ -538,6 +548,9 @@ impl Default for BrowserSettings {
             tab_cycle_order: default_tab_cycle_order(),
             tab_switcher: true,
             tab_hover_preview: true,
+            tab_width: default_tab_width(),
+            tab_menu_text_size: default_tab_menu_text_size(),
+            tab_menu_padding: default_tab_menu_padding(),
             window_backdrop: default_backdrop(),
             auto_update: true,
             last_seen_version: String::new(),
@@ -613,6 +626,17 @@ impl BrowserSettings {
             self.bookmarks_bar_menu_padding,
             BOOKMARK_PADDING_REM,
             defaults.bookmarks_bar_menu_padding,
+        );
+        self.tab_width = self.tab_width.clamp(TAB_WIDTH_PX.0, TAB_WIDTH_PX.1);
+        self.tab_menu_text_size = rem_in(
+            self.tab_menu_text_size,
+            BOOKMARK_TEXT_REM,
+            defaults.tab_menu_text_size,
+        );
+        self.tab_menu_padding = rem_in(
+            self.tab_menu_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.tab_menu_padding,
         );
         if self.theme.trim().is_empty() {
             self.theme = defaults.theme;
@@ -979,6 +1003,18 @@ fn default_menu_padding() -> f32 {
     0.625
 }
 
+fn default_tab_width() -> u32 {
+    220
+}
+
+fn default_tab_menu_text_size() -> f32 {
+    0.875
+}
+
+fn default_tab_menu_padding() -> f32 {
+    0.625
+}
+
 /// Clamps a rem value into `range` and rounds it to 0.0001. Not a number falls back.
 fn rem_in(value: f32, range: (f32, f32), fallback: f32) -> f32 {
     if !value.is_finite() {
@@ -1167,6 +1203,9 @@ mod tests {
         assert!(!loaded.mute_background_tabs);
         assert!(loaded.peek_on_shift_click);
         assert!(loaded.tab_hover_preview);
+        assert_eq!(loaded.tab_width, 220);
+        assert_eq!(loaded.tab_menu_text_size, 0.875);
+        assert_eq!(loaded.tab_menu_padding, 0.625);
         assert!(loaded.tab_sleep.enabled);
         assert_eq!(loaded.tab_sleep.minutes, 30);
         assert!(!loaded.tab_sleep.sleep_pinned);
@@ -1230,12 +1269,15 @@ mod tests {
     #[test]
     fn tab_settings_out_of_range_fall_back() {
         let loaded: super::BrowserSettings = serde_json::from_str(
-            r#"{"tabLayout":"diagonal","verticalTabsWidth":9000,"tabSleep":{"minutes":1,"neverSleepSites":["https://www.Mail.example.com/inbox","mail.example.com",""]}}"#,
+            r#"{"tabLayout":"diagonal","verticalTabsWidth":9000,"tabWidth":9000,"tabMenuTextSize":9,"tabMenuPadding":-1,"tabSleep":{"minutes":1,"neverSleepSites":["https://www.Mail.example.com/inbox","mail.example.com",""]}}"#,
         )
         .expect("settings parse");
         let loaded = loaded.normalize();
         assert_eq!(loaded.tab_layout, "horizontal");
         assert_eq!(loaded.vertical_tabs_width, 400);
+        assert_eq!(loaded.tab_width, 480);
+        assert_eq!(loaded.tab_menu_text_size, 1.5);
+        assert_eq!(loaded.tab_menu_padding, 0.0);
         assert_eq!(loaded.tab_sleep.minutes, 5);
         assert_eq!(
             loaded.tab_sleep.never_sleep_sites,

@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentProps } from "react";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "@/components/PopupFrame";
+import { bookmarkItemStyle } from "@/lib/bookmark-size";
+import { TAB_SIZE } from "@/lib/tab-size";
 import { closePopup, createEphemeralTab, createWorkspace, moveTabsToWorkspace, createTab, reload, duplicateTab, unpinTab, pinTab, setTabsMuted, addBookmark, exitSplit, splitWith, removeFromGroup, createGroup, addToGroup, sleepTab, sleepOtherTabs, neverSleepSite, closeSelectedTabs, closeTab, closeOtherTabs, closeTabsToRight, reopenClosedTab, installedBrowsers, installSite, openInBrowser, groupBySite } from "@/lib/browser-client";
 import type { ExternalBrowser } from "@type/browser";
 import { cn } from "@/lib/cn";
@@ -40,7 +42,20 @@ function Swatch({ id, color }: { id: string; color: string }) {
   return <span id={id} className={cn("size-2.5 rounded-full", groupColorClasses(color).swatch)} />;
 }
 
-export function TabMenu({ tabId }: TabMenuProps) {
+function TabMenuItem(props: Omit<ComponentProps<typeof PopupMenuItem>, "style">) {
+  const settings = useSettings();
+  return (
+    <PopupMenuItem
+      {...props}
+      style={bookmarkItemStyle(settings?.tabMenuTextSize, settings?.tabMenuPadding, {
+        text: TAB_SIZE.menuText,
+        padding: TAB_SIZE.menuPadding,
+      })}
+    />
+  );
+}
+
+export function TabContextMenu({ tabId }: TabMenuProps) {
   const snapshot = useTabs();
   const settings = useSettings();
   const workspacesEnabled = settings?.workspacesEnabled !== false;
@@ -93,41 +108,41 @@ export function TabMenu({ tabId }: TabMenuProps) {
   return (
     <PopupFrame id="tab-menu" ready={snapshot.loaded}>
       <PopupMenu id="tab-menu-items" label="Tab">
-        <PopupMenuItem
+        <TabMenuItem
           id="tab-menu-new-right"
           icon={<Plus />}
           label="New tab to the right"
           onClick={run(() => createTab(undefined, false, index + 1))}
         />
-        <PopupMenuItem
+        <TabMenuItem
           id="tab-menu-ephemeral"
           icon={<Glasses />}
           label="New ephemeral tab"
           onClick={run(() => createEphemeralTab())}
         />
         <PopupMenuSeparator id="tab-menu-separator-1" />
-        <PopupMenuItem id="tab-menu-reload" icon={<RotateCw />} label="Reload" shortcut="Ctrl+R" onClick={run(() => reload(tab.id))} />
-        <PopupMenuItem id="tab-menu-duplicate" icon={<Copy />} label="Duplicate" onClick={run(() => duplicateTab(tab.id))} />
+        <TabMenuItem id="tab-menu-reload" icon={<RotateCw />} label="Reload" shortcut="Ctrl+R" onClick={run(() => reload(tab.id))} />
+        <TabMenuItem id="tab-menu-duplicate" icon={<Copy />} label="Duplicate" onClick={run(() => duplicateTab(tab.id))} />
         {tab.pinned ? (
-          <PopupMenuItem id="tab-menu-unpin" icon={<PinOff />} label="Unpin" onClick={run(() => unpinTab(tab.id))} />
+          <TabMenuItem id="tab-menu-unpin" icon={<PinOff />} label="Unpin" onClick={run(() => unpinTab(tab.id))} />
         ) : (
-          <PopupMenuItem id="tab-menu-pin" icon={<Pin />} label="Pin" onClick={run(() => pinTab(tab.id))} />
+          <TabMenuItem id="tab-menu-pin" icon={<Pin />} label="Pin" onClick={run(() => pinTab(tab.id))} />
         )}
-        <PopupMenuItem
+        <TabMenuItem
           id="tab-menu-mute"
           icon={allMuted ? <Volume2 /> : <VolumeX />}
           label={allMuted ? (grouped ? "Unmute tabs" : "Unmute tab") : grouped ? "Mute tabs" : "Mute tab"}
           onClick={run(() => setTabsMuted(targets, !allMuted))}
         />
         {(tab.url.startsWith("http://") || tab.url.startsWith("https://")) ? (
-          <PopupMenuItem
+          <TabMenuItem
             id="tab-menu-install-site"
             icon={<AppWindowMac />}
             label="Install site"
             onClick={run(() => installSite(tab.id))}
           />
         ) : null}
-        <PopupMenuItem
+        <TabMenuItem
           id="tab-menu-bookmark"
           icon={<Star />}
           label="Bookmark tab"
@@ -137,7 +152,7 @@ export function TabMenu({ tabId }: TabMenuProps) {
         {browsers.length > 0 && (tab.url.startsWith("http://") || tab.url.startsWith("https://")) ? (
           <>
             {browsers.map((browser) => (
-              <PopupMenuItem
+              <TabMenuItem
                 id={`tab-menu-browser-${browser.id}`}
                 key={browser.id}
                 icon={<AppWindow />}
@@ -149,9 +164,9 @@ export function TabMenu({ tabId }: TabMenuProps) {
         ) : null}
         <PopupMenuSeparator id="tab-menu-separator-split" />
         {inSplit ? (
-          <PopupMenuItem id="tab-menu-exit-split" icon={<Columns2 />} label="Exit split view" onClick={run(() => exitSplit())} />
+          <TabMenuItem id="tab-menu-exit-split" icon={<Columns2 />} label="Exit split view" onClick={run(() => exitSplit())} />
         ) : (
-          <PopupMenuItem
+          <TabMenuItem
             id="tab-menu-split"
             icon={<Columns2 />}
             label="Split with current tab"
@@ -160,14 +175,14 @@ export function TabMenu({ tabId }: TabMenuProps) {
           />
         )}
         {tab.groupId !== null ? (
-          <PopupMenuItem
+          <TabMenuItem
             id="tab-menu-ungroup"
             icon={<FolderMinus />}
             label={grouped ? "Remove tabs from group" : "Remove from group"}
             onClick={run(() => removeFromGroup(targets))}
           />
         ) : null}
-        <PopupMenuItem
+        <TabMenuItem
           id="tab-menu-new-group"
           icon={<FolderPlus />}
           label={grouped ? "Add tabs to new group" : "Add to new group"}
@@ -175,7 +190,7 @@ export function TabMenu({ tabId }: TabMenuProps) {
           onClick={run(() => createGroup(targets))}
         />
         {otherGroups.map((group) => (
-          <PopupMenuItem
+          <TabMenuItem
             key={group.id}
             id={`tab-menu-group-${group.id}`}
             icon={<Swatch id={`tab-menu-group-${group.id}-swatch`} color={group.color} />}
@@ -184,7 +199,7 @@ export function TabMenu({ tabId }: TabMenuProps) {
             onClick={run(() => addToGroup(targets, group.id))}
           />
         ))}
-        <PopupMenuItem
+        <TabMenuItem
           id="tab-menu-group-by-site"
           icon={<Group />}
           label="Group tabs by site"
@@ -193,7 +208,7 @@ export function TabMenu({ tabId }: TabMenuProps) {
         />
         {workspacesEnabled
           ? otherWorkspaces.map((workspace) => (
-              <PopupMenuItem
+              <TabMenuItem
                 key={workspace.id}
                 id={`tab-menu-workspace-${workspace.id}`}
                 icon={<Swatch id={`tab-menu-workspace-${workspace.id}-swatch`} color={workspace.color} />}
@@ -203,7 +218,7 @@ export function TabMenu({ tabId }: TabMenuProps) {
             ))
           : null}
         {workspacesEnabled ? (
-          <PopupMenuItem
+          <TabMenuItem
             id="tab-menu-workspace-new"
             icon={<Layers />}
             label={grouped ? "Move tabs to new workspace" : "Move to new workspace"}
@@ -211,7 +226,7 @@ export function TabMenu({ tabId }: TabMenuProps) {
           />
         ) : null}
         <PopupMenuSeparator id="tab-menu-separator-sleep" />
-        <PopupMenuItem
+        <TabMenuItem
           id="tab-menu-sleep"
           icon={<Moon />}
           label="Sleep tab"
@@ -219,8 +234,8 @@ export function TabMenu({ tabId }: TabMenuProps) {
           disabled={foreground || tab.pinned || tab.sleeping || !tab.loaded}
           onClick={run(() => sleepTab(tab.id))}
         />
-        <PopupMenuItem id="tab-menu-sleep-others" icon={<MoonStar />} label="Sleep other tabs" onClick={run(() => sleepOtherTabs(tab.id))} />
-        <PopupMenuItem
+        <TabMenuItem id="tab-menu-sleep-others" icon={<MoonStar />} label="Sleep other tabs" onClick={run(() => sleepOtherTabs(tab.id))} />
+        <TabMenuItem
           id="tab-menu-never-sleep"
           icon={<SunMedium />}
           label="Never sleep on this site"
@@ -228,21 +243,21 @@ export function TabMenu({ tabId }: TabMenuProps) {
           onClick={run(() => neverSleepSite(tab.id))}
         />
         <PopupMenuSeparator id="tab-menu-separator-2" />
-        <PopupMenuItem
+        <TabMenuItem
           id="tab-menu-close"
           icon={<X />}
           label={closeLabel}
           shortcut="Ctrl+W"
           onClick={run(() => (grouped ? closeSelectedTabs() : closeTab(tab.id)))}
         />
-        <PopupMenuItem
+        <TabMenuItem
           id="tab-menu-close-others"
           icon={<XCircle />}
           label="Close other tabs"
           disabled={snapshot.tabs.length < 2}
           onClick={run(() => closeOtherTabs(tab.id))}
         />
-        <PopupMenuItem
+        <TabMenuItem
           id="tab-menu-close-right"
           icon={<ArrowRightToLine />}
           label="Close tabs to the right"
@@ -250,7 +265,7 @@ export function TabMenu({ tabId }: TabMenuProps) {
           onClick={run(() => closeTabsToRight(tab.id))}
         />
         <PopupMenuSeparator id="tab-menu-separator-3" />
-        <PopupMenuItem
+        <TabMenuItem
           id="tab-menu-reopen"
           icon={<History />}
           label="Reopen closed tab"

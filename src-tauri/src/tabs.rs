@@ -4917,13 +4917,7 @@ fn measure_extension_popup(app: &AppHandle, window_label: &str, label: &str) {
     });
 }
 
-fn apply_extension_size(
-    app: &AppHandle,
-    window_label: &str,
-    label: &str,
-    width: f64,
-    height: f64,
-) {
+fn apply_extension_size(app: &AppHandle, window_label: &str, label: &str, width: f64, height: f64) {
     let factor = settings::get(app).ui_zoom_factor();
     let width = width.clamp(120.0, EXTENSION_POPUP_MAX_WIDTH) * factor;
     let height = height.clamp(40.0, EXTENSION_POPUP_MAX_HEIGHT) * factor;
@@ -6799,23 +6793,26 @@ mod tests {
 
     #[test]
     fn a_popup_shrinks_only_when_the_window_cannot_hold_it() {
-        let (_, y, _, height) =
-            place_popup(800.0, 100.0, 10.0, 4.0, 0.0, 0.0, "below", "start", 200.0, 400.0);
+        let (_, y, _, height) = place_popup(
+            800.0, 100.0, 10.0, 4.0, 0.0, 0.0, "below", "start", 200.0, 400.0,
+        );
         assert_eq!(y, 4.0);
         assert_eq!(height, 88.0);
     }
 
     #[test]
     fn a_side_popup_stays_beside_its_button() {
-        let (x, y, width, height) =
-            place_popup(800.0, 500.0, 760.0, 400.0, 32.0, 32.0, "left", "", 320.0, 200.0);
+        let (x, y, width, height) = place_popup(
+            800.0, 500.0, 760.0, 400.0, 32.0, 32.0, "left", "", 320.0, 200.0,
+        );
         assert_eq!((x, y, width, height), (436.0, 292.0, 320.0, 200.0));
     }
 
     #[test]
     fn a_menu_hangs_from_the_right_edge_of_its_button() {
-        let (x, y, _, height) =
-            place_popup(800.0, 600.0, 700.0, 40.0, 32.0, 32.0, "below", "end", 280.0, 200.0);
+        let (x, y, _, height) = place_popup(
+            800.0, 600.0, 700.0, 40.0, 32.0, 32.0, "below", "end", 280.0, 200.0,
+        );
         assert_eq!((x, y, height), (452.0, 76.0, 200.0));
     }
 }

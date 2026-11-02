@@ -587,6 +587,12 @@ export type BrowserSettings = {
   lastSeenVersion: string;
   /** Resting on a tab shows a small preview of its page. */
   tabHoverPreview: boolean;
+  /** Preferred width of a horizontal tab, in CSS pixels. Tabs shrink when the strip is full. */
+  tabWidth: number;
+  /** Text size of the tab context menu, in rem. */
+  tabMenuTextSize: number;
+  /** Side padding of rows in the tab context menu, in rem. Top and bottom get half. */
+  tabMenuPadding: number;
   /** Corner or edge of the page area where toasts appear. */
   toastPosition: ToastPosition;
 };
@@ -967,6 +973,9 @@ export type BookmarkHealthProgress = {
   done: number;
   total: number;
 };
+
+/** What a copied profile takes from the source. `settings` is the default. */
+export type ProfileCopyScope = "settings" | "data" | "full";
 
 export type BrowserProfile = {
   id: string;

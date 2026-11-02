@@ -22,6 +22,7 @@ import type {
   BookmarkTree,
   BrowserCommand,
   BrowserProfile,
+  ProfileCopyScope,
   BrowserSettings,
   ClosedEntry,
   ProfileIconChoice,
@@ -1346,6 +1347,10 @@ export function listProfiles() {
 
 export function createProfile(name: string) {
   return invoke<BrowserProfile[]>("create_profile", { name });
+}
+
+export function copyProfile(id: string, name: string, scope: ProfileCopyScope) {
+  return invoke<BrowserProfile[]>("copy_profile", { id, name, scope });
 }
 
 export function openProfile(id: string) {

@@ -406,6 +406,138 @@ pub fn create_closed(app: &AppHandle, name: &str) -> Result<String, String> {
     Ok(id)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CopyScope {
+    Settings,
+    Data,
+    Full,
+}
+
+fn parse_copy_scope(scope: &str) -> Result<CopyScope, String> {
+    match scope {
+        "settings" => Ok(CopyScope::Settings),
+        "data" => Ok(CopyScope::Data),
+        "full" => Ok(CopyScope::Full),
+        _ => Err("Choose app settings, profile data, or everything.".into()),
+    }
+}
+
+/// Creates a profile named `name` and fills it from `id`. The new window stays closed.
+pub fn copy(
+    app: &AppHandle,
+    id: &str,
+    name: &str,
+    scope: &str,
+) -> Result<Vec<ProfileInfo>, String> {
+    let scope = parse_copy_scope(scope)?;
+    let source = load(app)
+        .profiles
+        .into_iter()
+        .find(|profile| profile.id == id)
+        .ok_or("That profile no longer exists.")?;
+    if scope == CopyScope::Full && profile_is_open(id) {
+        return Err("Close that profile before copying its cookies and logins.".into());
+    }
+    let new_id = create_closed(app, name)?;
+    let copied = (|| {
+        copy_profile_data(
+            &paths::profile_data_dir(app, id),
+            &paths::profile_data_dir(app, &new_id),
+            scope,
+        )?;
+        if scope != CopyScope::Settings {
+            apply_copied_icon(app, &source, &new_id)?;
+        }
+        if scope == CopyScope::Full {
+            copy_webview(
+                &paths::profile_webview_dir(app, id),
+                &paths::profile_webview_dir(app, &new_id),
+            )?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = copied {
+        if let Err(cleanup) = delete(app, &new_id) {
+            return Err(format!(
+                "{error} The new profile could not be removed ({cleanup})."
+            ));
+        }
+        return Err(error);
+    }
+    Ok(list(app))
+}
+
+/// Copies `settings.json`, or the profile folder, from `from` into `to`. Cookies stay out.
+fn copy_profile_data(from: &Path, to: &Path, scope: CopyScope) -> Result<(), String> {
+    fs::create_dir_all(to).map_err(|error| error.to_string())?;
+    if scope == CopyScope::Settings {
+        let source = from.join("settings.json");
+        if source.is_file() {
+            copy_file(&source, &to.join("settings.json"))?;
+        }
+        return Ok(());
+    }
+    for name in PROFILE_FILES {
+        let source = from.join(name);
+        if source.is_file() {
+            copy_file(&source, &to.join(name))?;
+        }
+    }
+    for name in PROFILE_DIRS {
+        let source = from.join(name);
+        if source.is_dir() {
+            files::copy_dir(&source, &to.join(name))?;
+        }
+    }
+    copy_icon_files(from, to)
+}
+
+fn copy_webview(from: &Path, to: &Path) -> Result<(), String> {
+    if !from.is_dir() {
+        return Ok(());
+    }
+    files::copy_dir(from, to)
+}
+
+fn apply_copied_icon(app: &AppHandle, source: &ProfileRecord, new_id: &str) -> Result<(), String> {
+    if source.icon.is_empty() && source.icon_file.is_empty() {
+        return Ok(());
+    }
+    let mut file = load(app);
+    let record = file
+        .profiles
+        .iter_mut()
+        .find(|profile| profile.id == new_id)
+        .ok_or("That profile no longer exists.")?;
+    record.icon.clone_from(&source.icon);
+    record.icon_file.clone_from(&source.icon_file);
+    let updated = record.clone();
+    save(app, &file)?;
+    refresh_shell_icons(app, &updated)
+}
+
+fn copy_icon_files(from: &Path, to: &Path) -> Result<(), String> {
+    let Ok(entries) = fs::read_dir(from) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let text = name.to_string_lossy();
+        if text.starts_with("window-icon") && text.ends_with(".ico") {
+            copy_file(&entry.path(), &to.join(name))?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_file(from: &Path, to: &Path) -> Result<(), String> {
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::copy(from, to).map_err(|error| format!("Could not copy {}: {error}", from.display()))?;
+    Ok(())
+}
+
 pub fn install_shortcut_for(app: &AppHandle, id: &str) -> Result<Vec<ProfileInfo>, String> {
     let mut file = load(app);
     let profile = file
@@ -1616,8 +1748,9 @@ mod tests {
     use std::fs;
 
     use super::{
-        ProfilesFile, migrate_layout, profile_child_dir, purge_profile_storage, read_profiles_file,
-        remove_profile_dir, safe_profile_id, stale_exe,
+        CopyScope, ProfilesFile, copy_profile_data, copy_webview, migrate_layout,
+        profile_child_dir, purge_profile_storage, read_profiles_file, remove_profile_dir,
+        safe_profile_id, stale_exe,
     };
 
     #[test]
@@ -1643,6 +1776,47 @@ mod tests {
 
     fn registry(root: &std::path::Path) -> ProfilesFile {
         read_profiles_file(&root.join("profiles.json"))
+    }
+
+    #[test]
+    fn copy_scopes_select_the_right_files() {
+        let root =
+            std::env::temp_dir().join(format!("ce-browser-profile-copy-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let from = root.join("from");
+        let web_from = root.join("webview-from");
+        fs::create_dir_all(from.join("extensions")).unwrap();
+        fs::create_dir_all(&web_from).unwrap();
+        fs::write(from.join("settings.json"), "{\"theme\":\"dark\"}").unwrap();
+        fs::write(from.join("bookmarks.json"), "[]").unwrap();
+        fs::write(from.join("extensions").join("manifest.json"), "{}").unwrap();
+        fs::write(from.join("window-icon-1.ico"), "ico").unwrap();
+        fs::write(web_from.join("Cookies"), "secret").unwrap();
+
+        let settings = root.join("settings");
+        copy_profile_data(&from, &settings, CopyScope::Settings).unwrap();
+        assert_eq!(
+            fs::read_to_string(settings.join("settings.json")).unwrap(),
+            "{\"theme\":\"dark\"}"
+        );
+        assert!(!settings.join("bookmarks.json").exists());
+        assert!(!settings.join("extensions").exists());
+
+        let data = root.join("data");
+        copy_profile_data(&from, &data, CopyScope::Data).unwrap();
+        assert!(data.join("bookmarks.json").is_file());
+        assert!(data.join("extensions").join("manifest.json").is_file());
+        assert!(data.join("window-icon-1.ico").is_file());
+        assert!(!data.join("Cookies").exists());
+
+        let web_to = root.join("webview-to");
+        copy_webview(&web_from, &web_to).unwrap();
+        assert_eq!(
+            fs::read_to_string(web_to.join("Cookies")).unwrap(),
+            "secret"
+        );
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -1652,6 +1652,16 @@ fn create_profile(app: AppHandle, name: String) -> Result<Vec<ProfileInfo>, Stri
 }
 
 #[tauri::command]
+async fn copy_profile(
+    app: AppHandle,
+    id: String,
+    name: String,
+    scope: String,
+) -> Result<Vec<ProfileInfo>, String> {
+    blocking(move || profiles::copy(&app, &id, &name, &scope)).await
+}
+
+#[tauri::command]
 fn open_profile(id: String) -> Result<(), String> {
     profiles::open(&id)
 }
@@ -2042,6 +2052,7 @@ pub fn run() {
             import_profile_archive,
             list_profiles,
             create_profile,
+            copy_profile,
             open_profile,
             install_profile_shortcut,
             delete_profile,
