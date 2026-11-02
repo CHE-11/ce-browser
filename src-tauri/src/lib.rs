@@ -545,7 +545,7 @@ async fn resize_popup(
     height: f64,
     generation: Option<u64>,
 ) -> Result<(), String> {
-    tabs::resize_popup(&app, window.label(), generation, width, height)
+    tabs::resize_popup(&app, window.label(), generation, width, height, None)
 }
 
 #[tauri::command]

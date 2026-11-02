@@ -33,7 +33,7 @@ const STYLES_LABEL = "Custom styles files";
 const STYLES_HINT =
   "styles.css for this profile. The starter rules are commented out, so uncomment them to change the theme. The file loads when the browser opens.";
 const UI_ZOOM_LABEL = "Browser UI size";
-const UI_ZOOM_HINT = "Scales tabs, toolbars and ce:// pages.";
+const UI_ZOOM_HINT = "Scales tabs, toolbars, ce:// pages, extension popups and extension pages.";
 const PAGE_ZOOM_LABEL = "Web page zoom";
 const PAGE_ZOOM_HINT = "Default size for websites. Ctrl +/- and Ctrl+scroll change the page you are on. Ctrl 0 returns to this size.";
 const TOAST_LABEL = "Toast position";

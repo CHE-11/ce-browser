@@ -60,6 +60,7 @@ import {
   splitWith,
   stop,
   updateExtension,
+  zoomTab,
 } from "../../../lib/browser-client";
 import { storeListing } from "../../../lib/extension-store";
 import { accentTint } from "../../../lib/accent";
@@ -629,6 +630,9 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   };
   const secure = activeTab?.url.startsWith("https://");
   const insecure = activeTab?.url.startsWith("http://");
+  const defaultZoom = !activeTab || activeTab.url.startsWith("ce://") ? 1 : (settings?.pageZoom ?? 100) / 100;
+  const zoomPercent = activeTab ? Math.round(activeTab.zoom * 100) : 100;
+  const showZoom = !!activeTab && Math.abs(activeTab.zoom - defaultZoom) > 0.001;
   const emphasis = useMemo(() => {
     if (editing || !activeTab || text !== activeTab.url) {
       return null;
@@ -802,10 +806,21 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           }}
           />
         </div>
-        {activeTab && activeTab.zoom !== 1 ? (
-          <span id="address-zoom" className="shrink-0 rounded bg-zinc-700 px-1.5 text-[11px] text-zinc-300">
-            {Math.round(activeTab.zoom * 100)}%
-          </span>
+        {showZoom ? (
+          <button
+            id="address-zoom"
+            type="button"
+            title="Reset to default zoom"
+            aria-label={`Page zoom ${zoomPercent} percent. Reset to default`}
+            className={cn(
+              "shrink-0 rounded bg-zinc-700 px-1.5 text-[11px] text-zinc-300 hover:bg-zinc-600 hover:text-zinc-100",
+              focusRing,
+            )}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => activeId !== null && void zoomTab(activeId, "reset")}
+          >
+            {zoomPercent}%
+          </button>
         ) : null}
         {storeAction ? (
           <button

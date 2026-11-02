@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
 import { faviconKey, hostOf } from "@/lib/format";
 import { parseRoute, useRoute } from "@/lib/route";
 import { BookmarkDropPlace, useAppearanceFromSettings, useBookmarks, useSiteFavicons, findFolder, bookmarkRootsOf, bookmarkContains, BOOKMARK_DRAG_TYPE, bookmarkDropPlace, findBookmarkParent, listFolders } from "@/lib/use-browser";
-import { ChevronRight, Columns3, Search, SearchX, LayoutGrid, List, Type, Upload, Download, Plus, FolderOpen, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, Link2, SeparatorHorizontal } from "lucide-react";
+import { ChevronRight, Columns3, Search, SearchX, LayoutGrid, List, Type, Upload, Download, Plus, FolderOpen, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, PencilLine, Link2, SeparatorHorizontal } from "lucide-react";
 import { useRef, useState, useEffect, useMemo, useCallback, type DragEvent, type MouseEvent } from "react";
 import { BookmarkHealthProgress, BookmarkHealthReport, BookmarkNode, BookmarkTree } from "../../../../types/browser";
 
@@ -73,6 +73,7 @@ export function BookmarksPage() {
   const [query, setQuery] = useState("");
   const [view, setView] = useState<BookmarkView>("columns");
   const [editor, setEditor] = useState<EditorState | null>(null);
+  const [renaming, setRenaming] = useState<BookmarkNode | null>(null);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [health, setHealth] = useState<BookmarkHealthReport | null>(null);
@@ -604,6 +605,15 @@ export function BookmarksPage() {
                   closeMenu();
                 }}
               />
+              <ContextMenuItem
+                id="bookmarks-menu-rename"
+                icon={<PencilLine />}
+                label="Rename"
+                onClick={() => {
+                  setRenaming(menu.node);
+                  closeMenu();
+                }}
+              />
             </>
           )}
           {bulkMenu || results || ROOT_FOLDERS.has(menu.node.id) ? null : (
@@ -665,6 +675,18 @@ export function BookmarksPage() {
                 : addBookmark(editor.parentId, title, editor.mode === "add-link" ? url : null);
             report(action);
             setEditor(null);
+          }}
+        />
+      ) : null}
+
+      {renaming ? (
+        <RenameDialog
+          key={renaming.id}
+          node={renaming}
+          onClose={() => setRenaming(null)}
+          onSave={(title) => {
+            report(updateBookmark(renaming.id, title, renaming.url));
+            setRenaming(null);
           }}
         />
       ) : null}
@@ -1155,6 +1177,59 @@ function BookmarkDialog({ editor, onClose, onSave }: BookmarkDialogProps) {
             Cancel
           </Button>
           <Button id="bookmark-dialog-save" type="submit" variant="primary" disabled={!valid}>
+            Save
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+type RenameDialogProps = {
+  node: BookmarkNode;
+  onClose: () => void;
+  onSave: (title: string) => void;
+};
+
+function RenameDialog({ node, onClose, onSave }: RenameDialogProps) {
+  const [title, setTitle] = useState(node.title);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const valid = title.trim().length > 0;
+  const heading = !node.url && !node.separator ? "Rename folder" : "Rename bookmark";
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  return (
+    <Dialog id="bookmark-rename-dialog" title={heading} open onClose={onClose} panelClassName="max-w-md">
+      <form
+        id="bookmark-rename-dialog-form"
+        className="flex flex-col gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (valid) {
+            onSave(title.trim());
+          }
+        }}
+      >
+        <label id="bookmark-rename-dialog-title-label" className="flex flex-col gap-1 text-xs text-zinc-400">
+          Name
+          <input
+            id="bookmark-rename-dialog-title"
+            ref={inputRef}
+            autoFocus
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            className="h-8 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-sky-500"
+          />
+        </label>
+        <div id="bookmark-rename-dialog-actions" className="flex justify-end gap-2 pt-1">
+          <Button id="bookmark-rename-dialog-cancel" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button id="bookmark-rename-dialog-save" type="submit" variant="primary" disabled={!valid}>
             Save
           </Button>
         </div>

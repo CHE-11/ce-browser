@@ -734,7 +734,8 @@ export function onPopupChanged(handler: (change: PopupChange) => void): Promise<
 }
 
 /** Opens a popup anchored under `element`, right-aligned when `align` is `end`.
- * A button on the vertical tool strip opens the popup to its left. */
+ * A button on the vertical tool strip opens the popup to its left, with the top
+ * lined up to the button. The window moves that popup up when it would pass the bottom. */
 export function openPopupBelow(
   element: HTMLElement,
   request: Omit<PopupRequest, "x" | "y">,
@@ -743,9 +744,7 @@ export function openPopupBelow(
   const rect = element.getBoundingClientRect();
   if (element.closest("#vertical-toolbar")) {
     const x = Math.max(8, rect.left - request.width - 4);
-    const maxY = Math.max(8, window.innerHeight - request.height - 8);
-    const y = Math.min(Math.max(8, rect.top), maxY);
-    return openPopup({ ...request, x, y });
+    return openPopup({ ...request, x, y: Math.max(8, rect.top) });
   }
   const x = align === "end" ? rect.right - request.width : rect.left;
   return openPopup({ ...request, x, y: rect.bottom + 4 });

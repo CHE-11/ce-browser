@@ -1230,6 +1230,7 @@ fn ensure_webview(app: &AppHandle, id: u32) -> Result<(), String> {
 }
 
 fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<Webview, String> {
+    let extension_page = is_extension_url(url.as_str());
     let window_label =
         with_state(app, |state| state.tab_window(id)).unwrap_or_else(|| WINDOW.to_string());
     let window = app
@@ -1250,11 +1251,14 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
             let finished = matches!(payload.event(), PageLoadEvent::Finished);
             let loading = matches!(payload.event(), PageLoadEvent::Started);
             let url = paths::display_url(&load_app, payload.url().as_str());
+            let extension_page = is_extension_url(&url);
             let new_tab_page = url == paths::NEW_TAB;
             let fresh = with_state(&load_app, |state| {
                 state.tab_mut(id).is_some_and(|tab| !tab.painted)
             });
             let first = finished && fresh;
+            let extension_zoom =
+                (finished && extension_page).then(|| settings::get(&load_app).ui_zoom_factor());
             update(&load_app, id, |tab| {
                 if tab.info.url != url {
                     tab.title_ready = false;
@@ -1263,6 +1267,9 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
                 tab.info.url = url;
                 if finished {
                     tab.painted = true;
+                }
+                if let Some(factor) = extension_zoom {
+                    tab.info.zoom = factor;
                 }
             });
             let owner = with_state(&load_app, |state| state.tab_window(id))
@@ -1278,6 +1285,12 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
                 focus_active(&load_app, &owner);
             } else if first && active {
                 focus_active(&load_app, &owner);
+            }
+            // A reload restores the profile's per-site zoom. Extension pages stay on Browser UI size.
+            if let Some(factor) = extension_zoom
+                && let Some(webview) = page_view(&load_app, id)
+            {
+                let _ = webview.set_zoom(factor);
             }
         })
         .on_document_title_changed(move |_, title| {
@@ -1310,16 +1323,23 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
             .map(|index| state.tabs[index].info.zoom)
             .unwrap_or(1.0)
     });
-    if (zoom - 1.0).abs() > 0.001 {
+    if extension_page || (zoom - 1.0).abs() > 0.001 {
         let _ = webview.set_zoom(zoom);
     }
     Ok(webview)
 }
 
-/// Zoom a page opens at: 100% for `ce://` pages, the site's remembered zoom, or the default.
+fn is_extension_url(url: &str) -> bool {
+    url.starts_with("chrome-extension:")
+}
+
+/// Zoom a page opens at: 100% for `ce://` pages, Browser UI size for extension pages,
+/// the site's remembered zoom, or the default page zoom.
 fn page_zoom_for(app: &AppHandle, url: &str) -> f64 {
     if url.starts_with(paths::INTERNAL_SCHEME) {
         1.0
+    } else if is_extension_url(url) {
+        settings::get(app).ui_zoom_factor()
     } else {
         crate::page_rules::zoom_for(app, url)
             .unwrap_or_else(|| settings::get(app).page_zoom_factor())
@@ -1453,8 +1473,13 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
     }) else {
         return NewWindowResponse::Deny;
     };
-    let width = size.width.max(240.0);
-    let height = size.height.max(160.0);
+    let factor = if extension {
+        settings::get(app).ui_zoom_factor()
+    } else {
+        1.0
+    };
+    let width = size.width.max(240.0) * factor;
+    let height = size.height.max(160.0) * factor;
     let label = with_state(app, |state| {
         state.next_popup += 1;
         format!("script-{}", state.next_popup)
@@ -1465,7 +1490,7 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
         .title(if extension { "Extension" } else { "ce-browser" })
         .inner_size(width, height)
-        .min_inner_size(240.0, 160.0)
+        .min_inner_size(240.0 * factor, 160.0 * factor)
         .decorations(true)
         .shadow(true)
         .focused(true)
@@ -1487,7 +1512,12 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
         builder = builder.position(x, y);
     }
     match builder.build() {
-        Ok(window) => NewWindowResponse::Create { window },
+        Ok(window) => {
+            if extension {
+                let _ = window.set_zoom(factor);
+            }
+            NewWindowResponse::Create { window }
+        }
         Err(error) => {
             eprintln!("script window: {error}");
             NewWindowResponse::Deny
@@ -3733,8 +3763,16 @@ pub fn select_index(app: &AppHandle, index: Option<usize>) -> Result<(), String>
     }
 }
 
-/// `change` is `in`, `out` or `reset`.
+/// `change` is `in`, `out` or `reset`. Extension pages stay on Browser UI size.
 pub fn zoom(app: &AppHandle, id: u32, change: &str) -> Result<f64, String> {
+    let extension_zoom = with_state(app, |state| {
+        state
+            .tab_mut(id)
+            .and_then(|tab| is_extension_url(&tab.info.url).then_some(tab.info.zoom))
+    });
+    if let Some(zoom) = extension_zoom {
+        return Ok(zoom);
+    }
     let default_zoom = settings::get(app).page_zoom_factor();
     let next = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
@@ -3816,7 +3854,7 @@ pub fn apply_default_page_zoom(app: &AppHandle, previous_percent: u32, next_perc
     let ids = with_state(app, |state| {
         let mut ids = Vec::new();
         for tab in &mut state.tabs {
-            if tab.info.url.starts_with(paths::INTERNAL_SCHEME) {
+            if tab.info.url.starts_with(paths::INTERNAL_SCHEME) || is_extension_url(&tab.info.url) {
                 continue;
             }
             if (tab.info.zoom - previous).abs() > 0.02 {
@@ -3836,6 +3874,109 @@ pub fn apply_default_page_zoom(app: &AppHandle, previous_percent: u32, next_perc
         }
     }
     emit_tabs(app);
+}
+
+/// Extension popups, popouts and pages follow Browser UI size. Websites keep their page zoom.
+pub fn apply_ui_zoom(app: &AppHandle, previous_percent: u32, next_percent: u32) {
+    if previous_percent == next_percent || previous_percent == 0 {
+        return;
+    }
+    let previous = f64::from(previous_percent) / 100.0;
+    let next = f64::from(next_percent) / 100.0;
+    let ratio = next / previous;
+    if app.try_state::<Tabs>().is_some() {
+        apply_extension_tab_zoom(app, next);
+        apply_extension_popup_zoom(app, next, ratio);
+    }
+    apply_extension_popout_zoom(app, next, ratio);
+}
+
+fn apply_extension_tab_zoom(app: &AppHandle, zoom: f64) {
+    let ids = with_state(app, |state| {
+        let mut ids = Vec::new();
+        for tab in &mut state.tabs {
+            if !is_extension_url(&tab.info.url) {
+                continue;
+            }
+            tab.info.zoom = zoom;
+            ids.push(tab.info.id);
+        }
+        ids
+    });
+    if ids.is_empty() {
+        return;
+    }
+    for id in ids {
+        if let Some(webview) = page_view(app, id) {
+            let _ = webview.set_zoom(zoom);
+        }
+    }
+    emit_tabs(app);
+}
+
+fn apply_extension_popup_zoom(app: &AppHandle, zoom: f64, ratio: f64) {
+    let hosts = with_state(app, |state| {
+        state
+            .windows
+            .iter()
+            .filter_map(|chrome| {
+                let label = chrome.popup.ext_label.clone()?;
+                let showing = chrome.popup.revealed
+                    && chrome.popup.kind.as_deref() == Some("extension")
+                    && chrome.popup.label.as_deref() == Some(label.as_str());
+                Some((chrome.label.clone(), label, showing))
+            })
+            .collect::<Vec<_>>()
+    });
+    for (window_label, label, showing) in hosts {
+        let Some(webview) = app.get_webview(&label) else {
+            continue;
+        };
+        if !showing {
+            let _ = webview.set_zoom(zoom);
+            continue;
+        }
+        let sized = with_state(app, |state| {
+            let popup = &mut state.chrome_mut(&window_label)?.popup;
+            let width = popup.width * ratio;
+            let height = popup.height * ratio;
+            popup.anchor_x = (popup.anchor_x + popup.width - width).max(4.0);
+            Some((width, height))
+        });
+        let Some((width, height)) = sized else {
+            let _ = webview.set_zoom(zoom);
+            continue;
+        };
+        let _ = resize_popup(app, &window_label, None, Some(width), height, Some(zoom));
+    }
+}
+
+fn apply_extension_popout_zoom(app: &AppHandle, zoom: f64, ratio: f64) {
+    let min_width = 240.0 * zoom;
+    let min_height = 160.0 * zoom;
+    for (label, webview) in app.webviews() {
+        if !label.starts_with("script-") {
+            continue;
+        }
+        let Ok(url) = webview.url() else {
+            continue;
+        };
+        if !is_extension_url(url.as_str()) {
+            continue;
+        }
+        let Some(window) = app.get_window(&label) else {
+            continue;
+        };
+        let _ = window.set_min_size(Some(LogicalSize::new(min_width, min_height)));
+        if let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor()) {
+            if scale > f64::EPSILON {
+                let width = size.width as f64 / scale * ratio;
+                let height = size.height as f64 / scale * ratio;
+                let _ = window.set_size(LogicalSize::new(width, height));
+            }
+        }
+        let _ = webview.set_zoom(zoom);
+    }
 }
 
 pub fn open_devtools(app: &AppHandle, id: u32) {
@@ -4219,6 +4360,9 @@ fn create_extension_popup_host(
                 Some((popup.ext_label.clone()?, popup.generation))
             });
             if let Some((label, generation)) = found {
+                if let Some(webview) = load_app.get_webview(&label) {
+                    let _ = webview.set_zoom(settings::get(&load_app).ui_zoom_factor());
+                }
                 measure_extension_popup(&load_app, &load_window, &label, generation);
             }
         })
@@ -4230,6 +4374,7 @@ fn create_extension_popup_host(
     let webview = window
         .add_child(builder, parked_position(), LogicalSize::new(120.0, 60.0))
         .map_err(|error| error.to_string())?;
+    let _ = webview.set_zoom(settings::get(app).ui_zoom_factor());
     webview2::attach_popup_hooks(app, &webview, label);
     webview2::attach_popup_blur(app, &webview, label);
     Ok(())
@@ -4388,14 +4533,14 @@ pub fn open_popup(
     let window = app
         .get_window(window_label)
         .ok_or("The browser window is missing.")?;
-    let size = window.inner_size().map_err(|error| error.to_string())?;
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let max_width = size.width as f64 / scale;
-    let max_height = size.height as f64 / scale;
-    let width = request.width.min(max_width - 8.0).max(120.0);
-    let y = request.y.clamp(0.0, (max_height - 60.0).max(0.0));
-    let height = request.height.min(max_height - y - 8.0).max(60.0);
-    let x = request.x.clamp(4.0, (max_width - width - 4.0).max(4.0));
+    let (max_width, max_height) =
+        logical_window_size(&window).unwrap_or((request.width + 16.0, request.height + 16.0));
+    // Keep the caller's anchor. A vertical-toolbar button sits part way down the window,
+    // and shortening the popup to the space under that button clips it. Fitting moves it up.
+    let width = request.width.clamp(120.0, (max_width - 8.0).max(120.0));
+    let height = request.height.clamp(40.0, (max_height - 12.0).max(40.0));
+    let x = request.x;
+    let y = request.y;
 
     let same_host = with_state(app, |state| {
         let Some(popup) = state.chrome(window_label).map(|chrome| &chrome.popup) else {
@@ -4535,6 +4680,7 @@ pub fn resize_popup(
     generation: Option<u64>,
     width: Option<f64>,
     height: f64,
+    zoom: Option<f64>,
 ) -> Result<(), String> {
     let window = app
         .get_window(window_label)
@@ -4550,6 +4696,8 @@ pub fn resize_popup(
         }
         let label = popup.label.clone()?;
         let width = width.unwrap_or(popup.width);
+        // `anchor_*` stays where the button opened the popup. Fitting is only the
+        // on-screen rect, so a later, shorter panel can sit next to that button again.
         let (x, y, width, height) = fit_on_screen(
             window_w,
             window_h,
@@ -4558,8 +4706,6 @@ pub fn resize_popup(
             width,
             height,
         );
-        popup.anchor_x = x;
-        popup.anchor_y = y;
         popup.width = width;
         popup.height = height;
         let origin = if popup.revealed {
@@ -4573,7 +4719,11 @@ pub fn resize_popup(
     .ok_or("No popup is open.")?;
     let (label, x, y, width, height) = placed;
     let webview = app.get_webview(&label).ok_or("No popup is open.")?;
-    apply_popup_bounds(&webview, x, y, width, height)?;
+    if let Some(zoom) = zoom {
+        webview2::set_bounds_and_zoom(&webview, x, y, width, height, zoom)?;
+    } else {
+        apply_popup_bounds(&webview, x, y, width, height)?;
+    }
     round_open_popup(app, &webview);
     Ok(())
 }
@@ -4635,6 +4785,11 @@ fn reveal_popup_after(app: &AppHandle, label: &str, generation: u64, delay: Dura
 
 fn show_popup(app: &AppHandle, label: &str, generation: u64) {
     let place = with_state(app, |state| {
+        let window_label = state
+            .windows
+            .iter()
+            .find(|window| window.popup.label.as_deref() == Some(label))
+            .map(|window| window.label.clone())?;
         let popup = state.popup_for_label_mut(label)?;
         if popup.revealed || !popup.awaiting || popup.generation != generation {
             return None;
@@ -4642,6 +4797,7 @@ fn show_popup(app: &AppHandle, label: &str, generation: u64) {
         popup.revealed = true;
         popup.awaiting = false;
         Some((
+            window_label,
             popup.focus,
             popup.anchor_x,
             popup.anchor_y,
@@ -4649,12 +4805,25 @@ fn show_popup(app: &AppHandle, label: &str, generation: u64) {
             popup.height,
         ))
     });
-    let Some((focus, x, y, width, height)) = place else {
+    let Some((window_label, focus, anchor_x, anchor_y, width, height)) = place else {
         return;
     };
     let Some(webview) = app.get_webview(label) else {
         return;
     };
+    let (x, y, width, height) = app
+        .get_window(&window_label)
+        .and_then(|window| logical_window_size(&window).ok())
+        .map(|(window_w, window_h)| {
+            fit_on_screen(window_w, window_h, anchor_x, anchor_y, width, height)
+        })
+        .unwrap_or((anchor_x, anchor_y, width, height));
+    with_state(app, |state| {
+        if let Some(popup) = state.popup_for_label_mut(label) {
+            popup.width = width;
+            popup.height = height;
+        }
+    });
     let _ = apply_popup_bounds(&webview, x, y, width, height);
     round_open_popup(app, &webview);
     webview2::raise_popup(&webview);
@@ -4719,6 +4888,12 @@ fn apply_popup_bounds(
         .map_err(|error| error.to_string())
 }
 
+fn logical_window_size(window: &tauri::Window) -> Result<(f64, f64), String> {
+    let size = window.inner_size().map_err(|error| error.to_string())?;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    Ok((size.width as f64 / scale, size.height as f64 / scale))
+}
+
 /// Keeps the popup inside the window. A panel that would pass the bottom moves up, and is
 /// shortened only when it still does not fit, so the page scroller takes the rest.
 fn fit_on_screen(
@@ -4773,8 +4948,9 @@ fn apply_extension_size(
     width: f64,
     height: f64,
 ) {
-    let width = width.clamp(120.0, EXTENSION_POPUP_MAX_WIDTH);
-    let height = height.clamp(40.0, EXTENSION_POPUP_MAX_HEIGHT);
+    let factor = settings::get(app).ui_zoom_factor();
+    let width = width.clamp(120.0, EXTENSION_POPUP_MAX_WIDTH) * factor;
+    let height = height.clamp(40.0, EXTENSION_POPUP_MAX_HEIGHT) * factor;
     let ready = with_state(app, |state| {
         let popup = &mut state.chrome_mut(window_label)?.popup;
         if popup.generation != generation
@@ -4791,7 +4967,16 @@ fn apply_extension_size(
     if ready.is_none() {
         return;
     }
-    if resize_popup(app, window_label, Some(generation), Some(width), height).is_err() {
+    if resize_popup(
+        app,
+        window_label,
+        Some(generation),
+        Some(width),
+        height,
+        Some(factor),
+    )
+    .is_err()
+    {
         return;
     }
     show_popup(app, label, generation);

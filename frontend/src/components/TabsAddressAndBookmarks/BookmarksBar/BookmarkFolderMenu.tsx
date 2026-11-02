@@ -75,6 +75,20 @@ function rowId(node: BookmarkNode | Panel) {
   return `bookmark-folder-menu-${node.id}`;
 }
 
+/** Room kept below the cursor so the context menu is not clipped. */
+function contextMenuReserve(target: BookmarkMenuTarget | null) {
+  if (!target) {
+    return 156;
+  }
+  if (target.kind === "separator") {
+    return 204;
+  }
+  if (target.kind === "folder") {
+    return 300;
+  }
+  return 252;
+}
+
 /** Beside `parent` on `preferred`, or the other side when that one has no room. */
 function placeSubmenu(parent: DOMRect, row: DOMRect, preferred: Side): Omit<Panel, "id" | "focus"> {
   const width = window.innerWidth;
@@ -265,7 +279,7 @@ export function BookmarkFolderMenu({ folderId, left, dragOpened = false }: Bookm
           className={cn("fixed z-50 w-60", popupSurfaceClass)}
           style={{
             left: Math.max(8, Math.min(context.x, window.innerWidth - 248)),
-            top: Math.max(8, Math.min(context.y, window.innerHeight - (context.target ? 204 : 156))),
+            top: Math.max(8, Math.min(context.y, window.innerHeight - contextMenuReserve(context.target))),
           }}
         >
           <BookmarksBarMenuItems

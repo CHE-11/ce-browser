@@ -1,11 +1,11 @@
-import { forwardRef } from "react";
+import { forwardRef, useRef, useState, type DragEvent } from "react";
 import { PanelTop } from "lucide-react";
 import type { BrowserSettings, ExtensionInfo, TabInfo } from "@type/browser";
 import { ToolbarIcon } from "@features/BuiltInExtensions";
 import { builtinTool } from "@features/BuiltInExtensions/builtin";
 import { openPopupBelow, saveSettings } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
-import { openToolbarPinMenu, reorderToolbar, splitToolbar, toolbarDragHandlers, toolbarPinned } from "@/lib/toolbar-pin";
+import { openToolbarPinMenu, reorderToolbarAt, splitToolbar, toolbarDragHandlers, toolbarPinned } from "@/lib/toolbar-pin";
 import { ExtensionIcon } from "@/components/ExtensionIcon";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
@@ -43,6 +43,8 @@ export function ExtensionToolbarButton({ extension, idPrefix }: ExtensionToolbar
   );
 }
 
+type DropEdge = "before" | "after";
+
 type ToolbarEntryProps = {
   id: string;
   idPrefix: string;
@@ -50,24 +52,62 @@ type ToolbarEntryProps = {
   activeTab: TabInfo | undefined;
   settings: BrowserSettings | null;
   labeled: boolean;
-  onMove: (from: string, to: string) => void;
+  onMove?: (from: string, to: string) => void;
+  /** Gap this icon shows while the vertical list is being rearranged. */
+  drop?: DropEdge | null;
+  dragging?: boolean;
+  /** Set on the vertical list, which places the drop itself. */
+  toolbarIndex?: number;
+  onDragStart?: (event: DragEvent<HTMLElement>) => void;
+  onDragEnd?: () => void;
 };
 
-export function ToolbarEntry({ id, idPrefix, extension, activeTab, settings, labeled, onMove }: ToolbarEntryProps) {
+export function ToolbarEntry({
+  id,
+  idPrefix,
+  extension,
+  activeTab,
+  settings,
+  labeled,
+  onMove,
+  drop = null,
+  dragging = false,
+  toolbarIndex,
+  onDragStart,
+  onDragEnd,
+}: ToolbarEntryProps) {
   const domId = `${idPrefix}-tool-${id}`;
   const caption = extension?.name ?? builtinTool(id)?.name ?? "";
   const stacked = idPrefix === "vertical";
+  const listDrag = toolbarIndex !== undefined;
   return (
     <span
       id={domId}
       title={caption || undefined}
+      data-toolbar-index={listDrag ? toolbarIndex : undefined}
       className={cn(
+        "relative",
         stacked ? "flex w-full flex-col items-center py-0.5" : "inline-flex",
         labeled && "gap-0 px-0.5 py-0",
+        dragging && "opacity-40",
       )}
-      {...toolbarDragHandlers(id, onMove)}
+      {...(listDrag
+        ? { draggable: true, onDragStart, onDragEnd }
+        : toolbarDragHandlers(id, onMove ?? (() => undefined)))}
       onContextMenu={(event) => openToolbarPinMenu(event, id)}
     >
+      {drop === "before" ? (
+        <span
+          id={`${domId}-drop-before`}
+          className="pointer-events-none absolute inset-x-1.5 -top-px z-10 h-0.5 rounded-full bg-sky-400 shadow-[0_0_6px_rgb(56_189_248)]"
+        />
+      ) : null}
+      {drop === "after" ? (
+        <span
+          id={`${domId}-drop-after`}
+          className="pointer-events-none absolute inset-x-1.5 -bottom-px z-10 h-0.5 rounded-full bg-sky-400 shadow-[0_0_6px_rgb(56_189_248)]"
+        />
+      ) : null}
       {extension ? (
         <ExtensionToolbarButton extension={extension} idPrefix={idPrefix} />
       ) : (
@@ -80,6 +120,32 @@ export function ToolbarEntry({ id, idPrefix, extension, activeTab, settings, lab
       ) : null}
     </span>
   );
+}
+
+/** Gap under the pointer. Counts the slots between icons, including the slot after the last one. */
+function toolbarIndexAt(container: HTMLElement, clientY: number) {
+  const items = container.querySelectorAll<HTMLElement>(":scope > [data-toolbar-index]");
+  for (const item of items) {
+    const rect = item.getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) {
+      return Number(item.dataset.toolbarIndex);
+    }
+  }
+  return items.length;
+}
+
+/** Hides the line when the icon would land in the gap it already occupies. */
+function dropEdge(index: number, count: number, fromIndex: number, dropIndex: number | null): DropEdge | null {
+  if (dropIndex === null || fromIndex < 0 || dropIndex === fromIndex || dropIndex === fromIndex + 1) {
+    return null;
+  }
+  if (dropIndex === index) {
+    return "before";
+  }
+  if (index === count - 1 && dropIndex === count) {
+    return "after";
+  }
+  return null;
 }
 
 type VerticalToolbarProps = {
@@ -99,15 +165,44 @@ export const VerticalToolbar = forwardRef<HTMLElement, VerticalToolbarProps>(fun
     toolbarExtensions.map((extension) => extension.id),
   );
   const labels = settings?.verticalToolbarLabels ?? false;
+  const draggingRef = useRef<string | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const fromIndex = dragging ? vertical.indexOf(dragging) : -1;
 
-  const moveToolbar = (from: string, to: string) => {
-    if (!settings) {
+  const rememberDrop = (index: number) => {
+    setDropIndex((current) => (current === index ? current : index));
+  };
+
+  const trackDrag = (event: DragEvent<HTMLElement>) => {
+    if (!draggingRef.current) {
       return;
     }
-    const next = reorderToolbar(all, from, to);
-    if (next) {
-      void saveSettings({ ...settings, toolbarOrder: next });
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    rememberDrop(toolbarIndexAt(event.currentTarget, event.clientY));
+  };
+
+  const clearDrag = () => {
+    draggingRef.current = null;
+    setDragging(null);
+    setDropIndex(null);
+  };
+
+  const finishDrop = (event: DragEvent<HTMLElement>) => {
+    const from = draggingRef.current;
+    if (!from) {
+      return;
     }
+    event.preventDefault();
+    const index = toolbarIndexAt(event.currentTarget, event.clientY);
+    if (settings) {
+      const next = reorderToolbarAt(all, vertical, from, index);
+      if (next) {
+        void saveSettings({ ...settings, toolbarOrder: next });
+      }
+    }
+    clearDrag();
   };
 
   if (vertical.length === 0) {
@@ -137,8 +232,18 @@ export const VerticalToolbar = forwardRef<HTMLElement, VerticalToolbarProps>(fun
           "flex min-h-0 flex-1 flex-col items-center overflow-x-hidden overflow-y-auto py-1",
           labels && "gap-3",
         )}
+        onDragEnter={trackDrag}
+        onDragOver={trackDrag}
+        onDrop={finishDrop}
+        onDragLeave={(event) => {
+          const next = event.relatedTarget;
+          if (!(next instanceof Node) || event.currentTarget.contains(next)) {
+            return;
+          }
+          setDropIndex(null);
+        }}
       >
-        {vertical.map((id) => (
+        {vertical.map((id, index) => (
           <ToolbarEntry
             key={id}
             id={id}
@@ -147,7 +252,17 @@ export const VerticalToolbar = forwardRef<HTMLElement, VerticalToolbarProps>(fun
             activeTab={activeTab}
             settings={settings}
             labeled={labels}
-            onMove={moveToolbar}
+            toolbarIndex={index}
+            dragging={dragging === id}
+            drop={dropEdge(index, vertical.length, fromIndex, dropIndex)}
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", id);
+              draggingRef.current = id;
+              setDragging(id);
+              setDropIndex(null);
+            }}
+            onDragEnd={clearDrag}
           />
         ))}
       </div>

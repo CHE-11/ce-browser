@@ -525,6 +525,57 @@ fn parse_document_size(raw: &str) -> Option<(f64, f64)> {
         .then_some((width, height))
 }
 
+/// Sets a child webview's position, size and zoom together. Logical pixels. The controller
+/// bounds and the zoom change in one call, so `innerWidth` stays the CSS size the page laid out.
+pub fn set_bounds_and_zoom(
+    webview: &Webview,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    zoom: f64,
+) -> std::result::Result<(), String> {
+    let zoom = zoom.max(0.1);
+    webview
+        .with_webview(move |platform| {
+            let controller = platform.controller();
+            let mut hwnd = HWND(std::ptr::null_mut());
+            if unsafe { controller.ParentWindow(std::ptr::addr_of_mut!(hwnd)) }.is_err()
+                || hwnd.0.is_null()
+            {
+                return;
+            }
+            let scale = hwnd_scale(hwnd);
+            let width = (width * scale).round().max(1.0) as i32;
+            let height = (height * scale).round().max(1.0) as i32;
+            let x = (x * scale).round() as i32;
+            let y = (y * scale).round() as i32;
+            let _ = unsafe {
+                controller.SetBoundsAndZoomFactor(
+                    RECT {
+                        left: 0,
+                        top: 0,
+                        right: width,
+                        bottom: height,
+                    },
+                    zoom,
+                )
+            };
+            let _ = unsafe {
+                SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOP),
+                    x,
+                    y,
+                    width,
+                    height,
+                    SWP_NOACTIVATE | SWP_NOZORDER,
+                )
+            };
+        })
+        .map_err(|error| error.to_string())
+}
+
 /// The popup HWND's DPI, as a scale from 96. This is the factor wry uses when it turns a
 /// logical size into physical pixels.
 fn hwnd_scale(hwnd: HWND) -> f64 {

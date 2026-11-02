@@ -7,6 +7,7 @@ import { useAppearanceState, useBookmarksState, useExtensions, useTabs } from "@
 import { AddressBarEllipsisMenu } from "@/components/TabsAddressAndBookmarks/Addressbar/AddressBarEllipsisMenu";
 import { ExtensionPinMenu } from "@/components/TabsAddressAndBookmarks/Addressbar/ExtensionPinMenu";
 import { BookmarkAdd } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarkAdd";
+import { BookmarkRename } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarkRename";
 import { BookmarkEditor } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarkEditor";
 import { BookmarkFolderMenu } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarkFolderMenu";
 import { BookmarksBarMenu, type BookmarkMenuTarget } from "@/components/TabsAddressAndBookmarks/BookmarksBar/BookmarksBarMenu";
@@ -132,6 +133,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
           parentId={params.get("parent") || "bar"}
         />
       );
+    case "bookmark-rename":
+      return <BookmarkRename id={params.get("id") ?? ""} />;
     case "tab-menu":
       return <TabMenu tabId={Number(params.get("id"))} />;
     case "app-menu":

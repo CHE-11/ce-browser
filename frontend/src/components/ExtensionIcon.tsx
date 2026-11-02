@@ -39,7 +39,7 @@ type ExtensionIconProps = {
 
 export function ExtensionIcon({ id, extensionId, name, src, className }: ExtensionIconProps) {
   if (src) {
-    return <img id={id} src={src} alt="" className={cn("shrink-0 rounded object-contain", className)} />;
+    return <img id={id} src={src} alt="" draggable={false} className={cn("shrink-0 rounded object-contain", className)} />;
   }
 
   const fallback = componentIcon(extensionId, name);

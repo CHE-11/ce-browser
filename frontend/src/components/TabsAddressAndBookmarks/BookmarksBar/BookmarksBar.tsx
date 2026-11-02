@@ -109,13 +109,15 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
       params.set("target", node.id);
       params.set("kind", kind);
     }
+    const kind = params.get("kind");
+    const height = !params.has("target") ? 148 : kind === "folder" ? 300 : kind === "separator" ? 196 : 252;
     void openPopup({
       kind: "bookmarks-bar-menu",
       params: params.toString(),
       x: event.clientX,
       y: event.clientY,
       width: 240,
-      height: params.has("target") ? 196 : 148,
+      height,
     });
   };
 

@@ -1,6 +1,6 @@
 import { PopupMenu, PopupMenuItem, PopupMenuSeparator, PopupFrame } from "@/components/PopupFrame";
 import { openPopup, addBookmark, closePopup, deleteBookmark, openFolderAsGroup } from "@/lib/browser-client";
-import { FolderPlus, Group, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
+import { FolderPlus, Group, PencilLine, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
 
 type DividerOrientation = "vertical" | "horizontal";
 
@@ -50,12 +50,28 @@ export function BookmarksBarMenuItems({ idPrefix, parentId, divider, x, y, targe
 
   const vertical = divider === "vertical";
   const canDelete = !!target && !PROTECTED_FOLDERS.has(target.id);
+  const canRename = !!target && target.kind !== "separator" && !PROTECTED_FOLDERS.has(target.id);
 
   const remove = () => {
     if (!target || !canDelete) {
       return;
     }
     void deleteBookmark(target.id).then(onDone);
+  };
+
+  const openRename = () => {
+    if (!target || !canRename) {
+      return;
+    }
+    const params = new URLSearchParams({ id: target.id });
+    void openPopup({
+      kind: "bookmark-rename",
+      params: params.toString(),
+      x,
+      y,
+      width: 340,
+      height: 188,
+    });
   };
 
   return (
@@ -88,6 +104,14 @@ export function BookmarksBarMenuItems({ idPrefix, parentId, divider, x, y, targe
       {canDelete && target ? (
         <>
           <PopupMenuSeparator id={`${idPrefix}-delete-separator`} />
+          {canRename ? (
+            <PopupMenuItem
+              id={`${idPrefix}-rename`}
+              icon={<PencilLine />}
+              label="Rename"
+              onClick={openRename}
+            />
+          ) : null}
           <PopupMenuItem
             id={`${idPrefix}-delete`}
             icon={<Trash2 />}

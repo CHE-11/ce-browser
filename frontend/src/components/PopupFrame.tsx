@@ -32,13 +32,15 @@ export function PopupFrame({ id, children, className, fit = true, maxHeight = 64
     }
     let last = 0;
     const report = () => {
-      const box = element.getBoundingClientRect();
-      const measured = Math.max(element.scrollHeight, element.offsetHeight, Math.ceil(box.height));
-      const height = Math.min(maxHeight, measured + 2);
-      if (Math.abs(height - last) >= 1) {
-        last = height;
-        lastResize.current = resizePopup(height, undefined, generation > 0 ? generation : undefined).catch(() => undefined);
+      // The border box, not scrollHeight. scrollHeight can report the previous popup's
+      // viewport while this one is still laying out, which leaves an empty slab under the content.
+      const measured = Math.ceil(Math.max(element.offsetHeight, element.getBoundingClientRect().height));
+      const height = Math.min(maxHeight, measured);
+      if (height < 1 || Math.abs(height - last) < 1) {
+        return;
       }
+      last = height;
+      lastResize.current = resizePopup(height, undefined, generation > 0 ? generation : undefined).catch(() => undefined);
     };
     report();
     const observer = new ResizeObserver(report);
@@ -59,14 +61,12 @@ export function PopupFrame({ id, children, className, fit = true, maxHeight = 64
   return (
     <div
       id={id}
-      className={cn("flex h-full flex-col", popupSurfaceClass, className)}
+      ref={ref}
+      style={fit ? { maxHeight, overflowX: "hidden", overflowY: "auto" } : undefined}
+      className={cn(popupSurfaceClass, !fit && "flex h-full flex-col", className)}
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div id={`${id}-scroller`} className="min-h-0 flex-1 overflow-y-auto">
-        <div id={`${id}-content`} ref={ref}>
-          {children}
-        </div>
-      </div>
+      {children}
     </div>
   );
 }

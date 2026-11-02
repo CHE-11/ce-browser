@@ -71,6 +71,36 @@ export function reorderToolbar(order: string[], from: string, to: string) {
   return next;
 }
 
+/**
+ * Moves `from` to `dropIndex` among `visible` icons.
+ * `dropIndex` counts gaps in that list, including the gap after the last icon.
+ * Icons that are not in `visible` keep their places in `order`.
+ */
+export function reorderToolbarAt(order: string[], visible: string[], from: string, dropIndex: number) {
+  const fromIndex = visible.indexOf(from);
+  if (fromIndex < 0 || dropIndex < 0 || dropIndex > visible.length) {
+    return null;
+  }
+  const target = fromIndex < dropIndex ? dropIndex - 1 : dropIndex;
+  if (target === fromIndex) {
+    return null;
+  }
+  const nextVisible = visible.filter((id) => id !== from);
+  nextVisible.splice(target, 0, from);
+  const visibleSet = new Set(visible);
+  let cursor = 0;
+  const next = order.map((id) => {
+    if (!visibleSet.has(id)) {
+      return id;
+    }
+    return nextVisible[cursor++] ?? id;
+  });
+  if (cursor !== nextVisible.length) {
+    return null;
+  }
+  return next;
+}
+
 export function toolbarDragHandlers(id: string, onMove: (from: string, to: string) => void) {
   return {
     draggable: true,

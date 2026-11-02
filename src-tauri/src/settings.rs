@@ -674,6 +674,11 @@ impl BrowserSettings {
         f64::from(self.page_zoom) / 100.0
     }
 
+    /// Browser UI size as a WebView2 zoom factor. Extension popups and pages use this.
+    pub fn ui_zoom_factor(&self) -> f64 {
+        f64::from(self.ui_zoom) / 100.0
+    }
+
     pub fn search_url(&self) -> String {
         if self.search_engine == "custom" && !self.custom_search_url.is_empty() {
             return self.custom_search_url.clone();
@@ -833,15 +838,19 @@ pub fn reload(app: &AppHandle) {
         loaded.sync_folder = root.to_string_lossy().into_owned();
     }
     crate::adblock::configure(&loaded.adblock);
-    let previous_page_zoom = {
+    let (previous_page_zoom, previous_ui_zoom) = {
         let state = app.state::<SettingsState>();
         let mut guard = state.0.lock().expect("settings lock");
-        let previous = guard.page_zoom;
+        let previous_page_zoom = guard.page_zoom;
+        let previous_ui_zoom = guard.ui_zoom;
         *guard = loaded.clone();
-        previous
+        (previous_page_zoom, previous_ui_zoom)
     };
     if loaded.page_zoom != previous_page_zoom {
         crate::tabs::apply_default_page_zoom(app, previous_page_zoom, loaded.page_zoom);
+    }
+    if loaded.ui_zoom != previous_ui_zoom {
+        crate::tabs::apply_ui_zoom(app, previous_ui_zoom, loaded.ui_zoom);
     }
     let _ = app.emit("settings-changed", &loaded);
     crate::tabs::apply_page_background(app);
@@ -872,7 +881,7 @@ pub fn store(
 ) -> Result<BrowserSettings, String> {
     let mut settings = settings.normalize();
     settings.pinned_tabs = canonicalize_pins(app, &settings);
-    let (saved, previous_page_zoom) = {
+    let (saved, previous_page_zoom, previous_ui_zoom) = {
         let state = app.state::<SettingsState>();
         let mut guard = state.0.lock().expect("settings lock");
         if keep_sync {
@@ -884,13 +893,17 @@ pub fn store(
             settings.sync_history_revision = guard.sync_history_revision;
         }
         let previous_page_zoom = guard.page_zoom;
+        let previous_ui_zoom = guard.ui_zoom;
         crate::sync_conflicts::store(app, &paths::data_file(app, FILE), &settings)?;
         crate::adblock::configure(&settings.adblock);
         *guard = settings.clone();
-        (settings, previous_page_zoom)
+        (settings, previous_page_zoom, previous_ui_zoom)
     };
     if saved.page_zoom != previous_page_zoom {
         crate::tabs::apply_default_page_zoom(app, previous_page_zoom, saved.page_zoom);
+    }
+    if saved.ui_zoom != previous_ui_zoom {
+        crate::tabs::apply_ui_zoom(app, previous_ui_zoom, saved.ui_zoom);
     }
     let _ = app.emit("settings-changed", &saved);
     crate::tabs::apply_page_background(app);

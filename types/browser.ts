@@ -301,6 +301,7 @@ export type PopupKind =
   | "bookmark-folder"
   | "bookmarks-bar-menu"
   | "bookmark-add"
+  | "bookmark-rename"
   | "tab-menu"
   | "app-menu"
   | "status"
