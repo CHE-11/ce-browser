@@ -538,14 +538,8 @@ async fn close_popup(app: AppHandle, window: Window) {
 }
 
 #[tauri::command]
-async fn resize_popup(
-    app: AppHandle,
-    window: Window,
-    width: Option<f64>,
-    height: f64,
-    generation: Option<u64>,
-) -> Result<(), String> {
-    tabs::resize_popup(&app, window.label(), generation, width, height, None)
+async fn fit_popup(app: AppHandle, window: Window, height: f64) -> Result<(), String> {
+    tabs::fit_popup(&app, window.label(), None, height, None)
 }
 
 #[tauri::command]
@@ -553,14 +547,8 @@ async fn set_popup_shape(
     app: AppHandle,
     window: Window,
     shape: Vec<tabs::PopupRect>,
-    generation: Option<u64>,
 ) -> Result<(), String> {
-    tabs::set_popup_shape(&app, window.label(), generation, shape)
-}
-
-#[tauri::command]
-async fn popup_painted(app: AppHandle, window: Window, generation: u64) {
-    tabs::popup_painted(&app, window.label(), generation);
+    tabs::set_popup_shape(&app, window.label(), shape)
 }
 
 #[tauri::command]
@@ -1886,9 +1874,8 @@ pub fn run() {
             open_devtools,
             open_popup,
             close_popup,
-            resize_popup,
+            fit_popup,
             set_popup_shape,
-            popup_painted,
             popup_host_ready,
             capture_page_png,
             copy_page_png,

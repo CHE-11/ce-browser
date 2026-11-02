@@ -52,7 +52,7 @@ import {
   openPopup,
   openPopupBelow,
   reload,
-  resizePopup,
+  fitPopup,
   restorePinnedTabs,
   saveSettings,
   showNotice,
@@ -363,7 +363,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     }
     const height = omniboxHeight(state.suggestions.length);
     if (popupOpenRef.current) {
-      void resizePopup(height);
+      void fitPopup(height);
       void sendOmniboxState(state);
       return;
     }

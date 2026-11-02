@@ -7,7 +7,6 @@ import { activateTab, closePopup, closeTab, restoreClosed } from "@/lib/browser-
 import { cn } from "@/lib/cn";
 import { hostOf } from "@/lib/format";
 import { tabProblemTitle, useHeavyTabs } from "@/lib/tab-alert";
-import { usePopupPainted } from "@/lib/popup-ready";
 import { groupColorClasses } from "@/lib/tab-rows";
 import { relativeTime } from "@/lib/time";
 import { useRecentlyClosed, useTabs } from "@/lib/use-browser";
@@ -53,8 +52,6 @@ export function TabSearch({ params }: TabSearchProps) {
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-
-  usePopupPainted(snapshot.loaded && closed !== null);
 
   const workspaceName = (id: string) => snapshot.workspaces.find((item) => item.id === id)?.name ?? "Workspace";
 

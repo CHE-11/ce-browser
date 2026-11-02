@@ -7,7 +7,6 @@ import { BOOKMARK_DROP_END, useBookmarkDrag } from "@/lib/bookmark-drag";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { cn } from "@/lib/cn";
 import { faviconKey } from "@/lib/format";
-import { usePopupPainted } from "@/lib/popup-ready";
 import { POPUP_SHAPE_ATTR, usePopupShape } from "@/lib/popup-shape";
 import { useBookmarksState, useTabs, findFolder, useSiteFavicons, useSettingsState } from "@/lib/use-browser";
 import { BookmarkNode } from "@type/browser";
@@ -107,8 +106,8 @@ function placePanel(element: HTMLElement, top: number) {
 }
 
 export function BookmarkFolderMenu({ folderId, left, dragOpened = false }: BookmarkFolderMenuProps) {
-  const { tree, loaded } = useBookmarksState();
-  const { settings, loaded: settingsLoaded } = useSettingsState();
+  const { tree } = useBookmarksState();
+  const { settings } = useSettingsState();
   const rowStyle = bookmarkItemStyle(settings?.bookmarkFolderTextSize, settings?.bookmarkFolderPadding, {
     text: BOOKMARK_SIZE.folderText,
     padding: BOOKMARK_SIZE.folderPadding,
@@ -118,8 +117,6 @@ export function BookmarkFolderMenu({ folderId, left, dragOpened = false }: Bookm
   const [context, setContext] = useState<FolderContext | null>(null);
   const hover = useRef<{ level: number; timer: number } | null>(null);
   const shape = usePopupShape();
-
-  usePopupPainted(loaded && settingsLoaded, shape.settle);
 
   const root: Panel = {
     id: folderId,

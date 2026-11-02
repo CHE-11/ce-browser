@@ -710,18 +710,14 @@ export function closePopup() {
   return invoke<void>("close_popup");
 }
 
-export function resizePopup(height: number, width?: number, generation?: number) {
-  return invoke<void>("resize_popup", { height, width, generation });
+/** Resizes the open popup to its content height and slides it so the button stays put. */
+export function fitPopup(height: number) {
+  return invoke<void>("fit_popup", { height });
 }
 
 /** Draws only these parts of the popup. The rest shows, and passes clicks to, the page below. */
-export function setPopupShape(shape: PopupRect[], generation?: number) {
-  return invoke<void>("set_popup_shape", { shape, generation });
-}
-
-/** Tells the backend this popup has drawn its first complete frame and can be shown. */
-export function popupPainted(generation: number) {
-  return invoke<void>("popup_painted", { generation });
+export function setPopupShape(shape: PopupRect[]) {
+  return invoke<void>("set_popup_shape", { shape });
 }
 
 /** The parked popup host has applied the saved theme and can show a menu. */
@@ -733,21 +729,26 @@ export function onPopupChanged(handler: (change: PopupChange) => void): Promise<
   return listen<PopupChange>("popup-changed", (event) => handler(event.payload));
 }
 
-/** Opens a popup anchored under `element`, right-aligned when `align` is `end`.
- * A button on the vertical tool strip opens the popup to its left, with the top
- * lined up to the button. The window moves that popup up when it would pass the bottom. */
+/** Opens a popup from `element`. The vertical tool strip opens it to the left;
+ * every other button hangs it underneath, right edges aligned unless `align` is `start`. */
 export function openPopupBelow(
   element: HTMLElement,
   request: Omit<PopupRequest, "x" | "y">,
   align: "start" | "end" = "end",
 ) {
   const rect = element.getBoundingClientRect();
-  if (element.closest("#vertical-toolbar")) {
-    const x = Math.max(8, rect.left - request.width - 4);
-    return openPopup({ ...request, x, y: Math.max(8, rect.top) });
-  }
-  const x = align === "end" ? rect.right - request.width : rect.left;
-  return openPopup({ ...request, x, y: rect.bottom + 4 });
+  const edge = element.closest("#vertical-toolbar") ? "left" : "below";
+  return openPopup({
+    ...request,
+    x: 0,
+    y: 0,
+    anchorX: rect.left,
+    anchorY: rect.top,
+    anchorWidth: rect.width,
+    anchorHeight: rect.height,
+    edge,
+    align,
+  });
 }
 
 export function sendOmniboxState(state: OmniboxState) {

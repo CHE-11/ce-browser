@@ -1,8 +1,8 @@
-import { useContext, useEffect, useRef } from "react";
+import { useContext, useEffect } from "react";
 import { AppMenu } from "@components/AppMenu";
 import { StatusPopover } from "@/components/StatusPopover";
 import { Toast } from "@/components/Toast";
-import { PopupAppearanceContext, PopupGenerationContext, readPopupGeneration, usePopupHostReady, usePopupPainted } from "@lib/popup-ready";
+import { PopupAppearanceContext, usePopupHostReady } from "@lib/popup-ready";
 import { useAppearanceState, useBookmarksState, useExtensions, useTabs } from "@lib/use-browser";
 import { AddressBarEllipsisMenu } from "@/components/TabsAddressAndBookmarks/Addressbar/AddressBarEllipsisMenu";
 import { ExtensionPinMenu } from "@/components/TabsAddressAndBookmarks/Addressbar/ExtensionPinMenu";
@@ -76,16 +76,10 @@ function PopupStandby() {
 }
 
 function MountedPopup({ popup, params }: PopupPageProps) {
-  const generation = useRef(readPopupGeneration()).current;
-  return (
-    <PopupGenerationContext.Provider value={generation}>
-      <PopupContent popup={popup} params={params} />
-    </PopupGenerationContext.Provider>
-  );
+  return <PopupContent popup={popup} params={params} />;
 }
 
 function UnknownPopup() {
-  usePopupPainted(true);
   return (
     <div id="popup-unknown" className="p-3 text-sm text-zinc-500">
       Unknown popup.

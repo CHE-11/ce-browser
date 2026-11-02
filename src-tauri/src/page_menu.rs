@@ -112,6 +112,12 @@ pub fn open_popup_at(
         height,
         params,
         focus: true,
+        anchor_x: 0.0,
+        anchor_y: 0.0,
+        anchor_width: 0.0,
+        anchor_height: 0.0,
+        edge: String::new(),
+        align: String::new(),
     };
     if let Err(error) = tabs::open_popup(app, &window, request) {
         eprintln!("page menu popup: {error}");

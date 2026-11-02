@@ -4,7 +4,6 @@ import { FavIcon } from "@/components/FavIcon";
 import { activateTab, closePopup, ctrlHeld, onTabSwitcherStep, tabThumbnail } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { hostOf } from "@/lib/format";
-import { usePopupPainted } from "@/lib/popup-ready";
 import { useTabs } from "@/lib/use-browser";
 import type { TabInfo } from "@type/browser";
 
@@ -25,8 +24,6 @@ export function TabSwitcher({ params }: TabSwitcherProps) {
   const selectedRef = useRef(0);
   const orderRef = useRef<TabInfo[]>([]);
   const done = useRef(false);
-
-  usePopupPainted(order !== null);
 
   useEffect(() => {
     if (order !== null || !snapshot.loaded) {

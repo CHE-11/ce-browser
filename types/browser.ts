@@ -339,9 +339,11 @@ export type PopupKind =
   | "boards"
   | "board-images";
 
+export type PopupEdge = "below" | "left";
+
 export type PopupRequest = {
   kind: PopupKind;
-  /** Logical px relative to the browser UI view. */
+  /** Top-left when `edge` is omitted. Ignored when the popup hangs from a button. */
   x: number;
   y: number;
   width: number;
@@ -350,6 +352,15 @@ export type PopupRequest = {
   params?: string;
   /** Popups that take focus close when they lose it. */
   focus?: boolean;
+  /** Button rectangle, logical px. Used with `edge`. */
+  anchorX?: number;
+  anchorY?: number;
+  anchorWidth?: number;
+  anchorHeight?: number;
+  /** `below` hangs under the button. `left` sits beside it. */
+  edge?: PopupEdge;
+  /** Which horizontal edge of a `below` popup lines up with the button. */
+  align?: "start" | "end";
 };
 
 /** Logical px inside the popup. */

@@ -5,7 +5,7 @@ use tauri::webview::PlatformWebview;
 use tauri::{AppHandle, Webview};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::*;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, RECT};
 use windows::Win32::Graphics::Gdi::{
     CombineRgn, CreateRoundRectRgn, DeleteObject, HGDIOBJ, HRGN, RGN_OR, SetWindowRgn,
 };
@@ -14,14 +14,10 @@ use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
 };
-use windows::Win32::UI::Shell::{
-    DefSubclassProc, GetWindowSubclass, RemoveWindowSubclass, SetWindowSubclass,
-};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, GW_CHILD, GW_HWNDNEXT, GWL_STYLE, GetClientRect, GetParent, GetWindow,
-    GetWindowLongPtrW, HWND_TOP, SIZE_MINIMIZED, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WM_NCDESTROY, WM_SIZE,
-    WS_CLIPSIBLINGS,
+    GetWindowLongPtrW, HWND_TOP, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_CLIPSIBLINGS,
 };
 use windows::core::{BOOL, HSTRING, Interface, PWSTR};
 
@@ -471,7 +467,6 @@ pub fn round_popup(
                 bottom: ((rect.y + rect.height) * scale).round() as i32,
             })
             .collect::<Vec<_>>();
-        remember_region(hwnd, radius, shape.clone(), width, height);
         apply_region(hwnd, radius, &shape, width, height);
     });
 }
@@ -581,101 +576,6 @@ pub fn set_bounds_and_zoom(
 fn hwnd_scale(hwnd: HWND) -> f64 {
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     if dpi == 0 { 1.0 } else { dpi as f64 / 96.0 }
-}
-
-/// Region state kept on the popup window so a later `WM_SIZE` can clip to the size the
-/// window actually landed on. A window region does not follow a resize by itself.
-struct PopupRegion {
-    radius: i32,
-    /// Physical pixels. Empty means the whole client area.
-    shape: Vec<RECT>,
-    /// Physical size last requested. A `WM_SIZE` that still reports the previous, smaller
-    /// window must not shrink the region back to that hole.
-    width: i32,
-    height: i32,
-}
-
-const POPUP_REGION_SUBCLASS: usize = 0x00CE_0001;
-
-fn remember_region(hwnd: HWND, radius: i32, shape: Vec<RECT>, width: i32, height: i32) {
-    let Some(state) = region_state(hwnd) else {
-        return;
-    };
-    unsafe {
-        (*state).radius = radius;
-        (*state).shape = shape;
-        (*state).width = width;
-        (*state).height = height;
-    }
-}
-
-fn region_state(hwnd: HWND) -> Option<*mut PopupRegion> {
-    let mut data = 0usize;
-    let found = unsafe {
-        GetWindowSubclass(
-            hwnd,
-            Some(popup_region_proc),
-            POPUP_REGION_SUBCLASS,
-            Some(&mut data),
-        )
-    };
-    if found.as_bool() && data != 0 {
-        return Some(data as *mut PopupRegion);
-    }
-    let state = Box::into_raw(Box::new(PopupRegion {
-        radius: 1,
-        shape: Vec::new(),
-        width: 0,
-        height: 0,
-    }));
-    let installed = unsafe {
-        SetWindowSubclass(
-            hwnd,
-            Some(popup_region_proc),
-            POPUP_REGION_SUBCLASS,
-            state as usize,
-        )
-    };
-    if !installed.as_bool() {
-        unsafe { drop(Box::from_raw(state)) };
-        return None;
-    }
-    Some(state)
-}
-
-unsafe extern "system" fn popup_region_proc(
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-    _id: usize,
-    data: usize,
-) -> LRESULT {
-    if msg == WM_SIZE && wparam.0 != SIZE_MINIMIZED as usize && data != 0 {
-        let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
-        let state = unsafe { &*(data as *const PopupRegion) };
-        if let Some((mut width, mut height)) = client_size(hwnd) {
-            // The posted resize may not have landed. Keep the requested clip until it does.
-            if state.shape.is_empty() {
-                if width + 2 < state.width {
-                    width = state.width;
-                }
-                if height + 2 < state.height {
-                    height = state.height;
-                }
-            }
-            apply_region(hwnd, state.radius, &state.shape, width, height);
-        }
-        return result;
-    }
-    if msg == WM_NCDESTROY && data != 0 {
-        unsafe {
-            let _ = SetWindowSubclass(hwnd, Some(popup_region_proc), POPUP_REGION_SUBCLASS, 0);
-            let _ = RemoveWindowSubclass(hwnd, Some(popup_region_proc), POPUP_REGION_SUBCLASS);
-            drop(Box::from_raw(data as *mut PopupRegion));
-        }
-    }
-    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
 
 struct Clip {
