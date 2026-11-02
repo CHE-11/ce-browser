@@ -6,6 +6,8 @@ export const BOOKMARK_SIZE = {
   barPadding: 0.5,
   folderText: 0.875,
   folderPadding: 0.75,
+  menuText: 0.875,
+  menuPadding: 0.625,
   text: { min: 0.5, max: 1.5 },
   padding: { min: 0, max: 1.5 },
   step: 0.025,

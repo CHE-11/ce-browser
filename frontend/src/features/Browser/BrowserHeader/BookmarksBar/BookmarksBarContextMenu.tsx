@@ -1,5 +1,7 @@
 import { PopupMenu, PopupMenuItem, PopupMenuSeparator, PopupFrame } from "@/components/PopupFrame";
 import { openPopup, addBookmark, closePopup, createTab, deleteBookmark, openFolderAsGroup, openInWindow } from "@/lib/browser-client";
+import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
+import { useSettings } from "@/lib/use-browser";
 import { AppWindow, ExternalLink, FolderPlus, Group, PencilLine, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
 
 type DividerOrientation = "vertical" | "horizontal";
@@ -33,6 +35,11 @@ function deleteLabel(kind: BookmarkMenuTarget["kind"]) {
 }
 
 export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, x, y, target, onDone }: BookmarksBarMenuItemsProps) {
+  const settings = useSettings();
+  const itemStyle = bookmarkItemStyle(settings?.bookmarksBarMenuTextSize, settings?.bookmarksBarMenuPadding, {
+    text: BOOKMARK_SIZE.menuText,
+    padding: BOOKMARK_SIZE.menuPadding,
+  });
   const openAdd = (mode: "link" | "folder") => {
     const params = new URLSearchParams({ mode, parent: parentId });
     void openPopup({
@@ -84,22 +91,25 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, x, y
             id={`${idPrefix}-open-tab`}
             icon={<ExternalLink />}
             label="Open in new tab"
+            style={itemStyle}
             onClick={() => void createTab(linkUrl).finally(onDone)}
           />
           <PopupMenuItem
             id={`${idPrefix}-open-window`}
             icon={<AppWindow />}
             label="Open in new window"
+            style={itemStyle}
             onClick={() => void openInWindow(linkUrl).finally(onDone)}
           />
           <PopupMenuSeparator id={`${idPrefix}-open-separator`} />
         </>
       ) : null}
-      <PopupMenuItem id={`${idPrefix}-add`} icon={<Plus />} label="Add bookmark" onClick={() => openAdd("link")} />
+      <PopupMenuItem id={`${idPrefix}-add`} icon={<Plus />} label="Add bookmark" style={itemStyle} onClick={() => openAdd("link")} />
       <PopupMenuItem
         id={`${idPrefix}-add-folder`}
         icon={<FolderPlus />}
         label="Add folder"
+        style={itemStyle}
         onClick={() => openAdd("folder")}
       />
       <PopupMenuSeparator id={`${idPrefix}-separator`} />
@@ -107,6 +117,7 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, x, y
         id={`${idPrefix}-add-divider`}
         icon={vertical ? <SeparatorVertical /> : <SeparatorHorizontal />}
         label={vertical ? "Add vertical divider" : "Add horizontal divider"}
+        style={itemStyle}
         onClick={addDivider}
       />
       {target?.kind === "folder" ? (
@@ -116,6 +127,7 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, x, y
             id={`${idPrefix}-open-group`}
             icon={<Group />}
             label="Open all as a tab group"
+            style={itemStyle}
             onClick={() => void openFolderAsGroup(target.id).finally(onDone)}
           />
         </>
@@ -128,6 +140,7 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, x, y
               id={`${idPrefix}-rename`}
               icon={<PencilLine />}
               label="Rename"
+              style={itemStyle}
               onClick={openRename}
             />
           ) : null}
@@ -135,6 +148,7 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, x, y
             id={`${idPrefix}-delete`}
             icon={<Trash2 />}
             label={deleteLabel(target.kind)}
+            style={itemStyle}
             danger
             onClick={remove}
           />

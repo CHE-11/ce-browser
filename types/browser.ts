@@ -500,6 +500,10 @@ export type BrowserSettings = {
   bookmarkFolderTextSize: number;
   /** Side padding of rows in a bookmark folder menu, in rem. Top and bottom get half. */
   bookmarkFolderPadding: number;
+  /** Text size of the bookmarks bar context menu, in rem. */
+  bookmarksBarMenuTextSize: number;
+  /** Side padding of rows in the bookmarks bar context menu, in rem. Top and bottom get half. */
+  bookmarksBarMenuPadding: number;
   /** The status bar under every page. */
   showStatusBar: boolean;
   /** Memory, time and the other status readings. Off leaves the version and zoom. */

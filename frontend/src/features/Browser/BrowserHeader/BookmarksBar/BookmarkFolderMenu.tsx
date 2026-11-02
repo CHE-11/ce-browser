@@ -74,18 +74,29 @@ function rowId(node: BookmarkNode | Panel) {
   return `bookmark-folder-menu-${node.id}`;
 }
 
-/** Room kept below the cursor so the context menu is not clipped. */
-function contextMenuReserve(target: BookmarkMenuTarget | null) {
+/** Rows and separators `BookmarksBarContextMenuItems` renders for this target. */
+function contextMenuShape(target: BookmarkMenuTarget | null) {
   if (!target) {
-    return 156;
+    return { rows: 3, separators: 1 };
   }
   if (target.kind === "separator") {
-    return 204;
+    return { rows: 4, separators: 2 };
   }
   if (target.kind === "folder") {
-    return 300;
+    return { rows: 6, separators: 3 };
   }
-  return 340;
+  return { rows: 7, separators: 3 };
+}
+
+/** Room kept below the cursor so the context menu is not clipped. */
+function contextMenuReserve(target: BookmarkMenuTarget | null, text: number, padding: number) {
+  const { rows, separators } = contextMenuShape(target);
+  const root = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  const row = (text * 1.35 + padding) * root;
+  const separator = root * 0.5 + 1;
+  const chrome = root * 0.75;
+  const gaps = Math.max(0, rows + separators - 1) * root * 0.125;
+  return Math.ceil(rows * row + separators * separator + chrome + gaps + 8);
 }
 
 /** Beside `parent` on `preferred`, or the other side when that one has no room. */
@@ -276,7 +287,18 @@ export function BookmarkFolderMenu({ folderId, left, dragOpened = false }: Bookm
           className={cn("fixed z-50 w-60", popupSurfaceClass)}
           style={{
             left: Math.max(8, Math.min(context.x, window.innerWidth - 248)),
-            top: Math.max(8, Math.min(context.y, window.innerHeight - contextMenuReserve(context.target))),
+            top: Math.max(
+              8,
+              Math.min(
+                context.y,
+                window.innerHeight -
+                  contextMenuReserve(
+                    context.target,
+                    settings?.bookmarksBarMenuTextSize ?? BOOKMARK_SIZE.menuText,
+                    settings?.bookmarksBarMenuPadding ?? BOOKMARK_SIZE.menuPadding,
+                  ),
+              ),
+            ),
           }}
         >
           <BookmarksBarContextMenuItems

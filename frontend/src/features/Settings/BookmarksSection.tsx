@@ -14,7 +14,13 @@ const FOLDER_ICONS_HINT = "Off shows folder names only. Site icons stay.";
 const TEXT_HINT = "In rem. 1rem is the browser's base text size.";
 const PADDING_HINT = "Side padding in rem. Top and bottom get half.";
 
-type RemSettingKey = "bookmarksBarTextSize" | "bookmarksBarPadding" | "bookmarkFolderTextSize" | "bookmarkFolderPadding";
+type RemSettingKey =
+  | "bookmarksBarTextSize"
+  | "bookmarksBarPadding"
+  | "bookmarkFolderTextSize"
+  | "bookmarkFolderPadding"
+  | "bookmarksBarMenuTextSize"
+  | "bookmarksBarMenuPadding";
 
 const BOOKMARK_SIZE_ROWS: {
   key: RemSettingKey;
@@ -54,6 +60,22 @@ const BOOKMARK_SIZE_ROWS: {
     label: "Bookmark folder item padding",
     hint: PADDING_HINT,
     fallback: BOOKMARK_SIZE.folderPadding,
+    limits: BOOKMARK_SIZE.padding,
+  },
+  {
+    key: "bookmarksBarMenuTextSize",
+    id: "settings-bookmarks-menu-text-size",
+    label: "Bookmarks menu text size",
+    hint: TEXT_HINT,
+    fallback: BOOKMARK_SIZE.menuText,
+    limits: BOOKMARK_SIZE.text,
+  },
+  {
+    key: "bookmarksBarMenuPadding",
+    id: "settings-bookmarks-menu-padding",
+    label: "Bookmarks menu padding",
+    hint: PADDING_HINT,
+    fallback: BOOKMARK_SIZE.menuPadding,
     limits: BOOKMARK_SIZE.padding,
   },
 ];

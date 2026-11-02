@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { useRef, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { cn } from "../lib/cn";
 import { focusRow } from "../lib/focus-ring";
 
@@ -85,11 +85,13 @@ export type MenuItemProps = {
   disabled?: boolean;
   danger?: boolean;
   title?: string;
+  style?: CSSProperties;
   onClick: () => void;
   onContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void;
 };
 
-export function MenuItem({ id, icon, label, shortcut, disabled, danger, title, onClick, onContextMenu }: MenuItemProps) {
+export function MenuItem({ id, icon, label, shortcut, disabled, danger, title, style, onClick, onContextMenu }: MenuItemProps) {
+  const sized = style !== undefined;
   return (
     <button
       id={id}
@@ -98,15 +100,24 @@ export function MenuItem({ id, icon, label, shortcut, disabled, danger, title, o
       data-label={label}
       title={title}
       disabled={disabled}
+      style={style}
       className={cn(
-        "group flex h-9 w-full items-center gap-3 rounded-lg px-2.5 text-left text-sm text-zinc-100 transition-colors hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent",
+        "group flex w-full items-center gap-3 rounded-lg text-left text-zinc-100 transition-colors hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent",
+        sized ? undefined : "h-9 px-2.5 text-sm",
         focusRow,
         danger && "text-red-300",
       )}
       onClick={onClick}
       onContextMenu={onContextMenu}
     >
-      <span id={`${id}-icon`} aria-hidden className="inline-flex size-4 shrink-0 items-center justify-center text-zinc-400 group-hover:text-zinc-200 [&_svg]:size-4">
+      <span
+        id={`${id}-icon`}
+        aria-hidden
+        className={cn(
+          "inline-flex shrink-0 items-center justify-center text-zinc-400 group-hover:text-zinc-200",
+          sized ? "size-[1.15em] [&_svg]:size-[1.15em]" : "size-4 [&_svg]:size-4",
+        )}
+      >
         {icon}
       </span>
       <span id={`${id}-label`} className="min-w-0 flex-1 truncate">
