@@ -455,6 +455,7 @@ const COPY_PARTS: &[PartSpec] = &[
         settings: &[
             "theme",
             "colorMode",
+            "uiFont",
             "uiZoom",
             "pageZoom",
             "siteAccent",

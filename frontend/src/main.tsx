@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { applyAppearance, readAppearance } from "./lib/appearance";
+import { applyAppearance, applyFont, readAppearance, readFont } from "./lib/appearance";
 import { getUserStyles, onUserStylesChanged } from "./lib/browser-client";
 import { useRoute } from "./lib/route";
 import { applyUserStyles } from "./lib/user-styles";
@@ -29,6 +29,7 @@ import "./index.css";
 
 const appearance = readAppearance();
 applyAppearance(appearance.theme, appearance.colorMode);
+applyFont(readFont());
 applyZoom(readZoom());
 
 void getUserStyles()

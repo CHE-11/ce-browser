@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { BookmarkNode, BookmarkTree, BrowserSettings, ClosedEntry, PageRules, TabsSnapshot } from "../../../types/browser";
-import { applyThemePreview, publishAppearance } from "./appearance";
+import { applyThemePreview, publishAppearance, publishFont } from "./appearance";
 import {
   currentWindowLabel as browserWindowLabel,
   getPageRules,
@@ -276,7 +276,7 @@ export function useSettings(): BrowserSettings | null {
 }
 
 /**
- * Applies theme, color mode and UI zoom from settings to this webview. `loaded` turns true in
+ * Applies theme, color mode, UI font and UI zoom from settings to this webview. `loaded` turns true in
  * the same commit that publishes the saved appearance, or when settings fail to load.
  */
 export function useAppearanceState() {
@@ -286,6 +286,7 @@ export function useAppearanceState() {
       return;
     }
     publishAppearance(settings.theme, settings.colorMode);
+    publishFont(settings.uiFont);
     publishZoom(settings.uiZoom);
   }, [settings]);
   useEffect(() => {

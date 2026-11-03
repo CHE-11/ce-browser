@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Check, Minus, Plus } from "lucide-react";
+import { Check, Minus, Plus, RotateCcw } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
-import { COLOR_MODE_OPTIONS, THEMES, resolveMode } from "@/lib/appearance";
+import { COLOR_MODE_OPTIONS, DEFAULT_FONT, FONTS, THEMES, applyFontPreview, normalizeFont, resolveMode, themeSurfaceStyle } from "@/lib/appearance";
 import { backdropSupport, getUserStyles, sendThemePreview, showUserStyles } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, PAGE_ZOOM_LEVELS, stepPageZoom, ZOOM_STEP } from "@/lib/zoom";
@@ -16,6 +16,7 @@ import {
   Segmented,
   useReportMatch,
   useSectionMatches,
+  useSettingChanged,
   useSettingVisible,
   useSettingsQuery,
   type SettingsSectionProps,
@@ -32,6 +33,8 @@ const MODE_HINT = "Colors the browser. Websites keep their own theme.";
 const BACKDROP_LABEL = "Window backdrop";
 const BACKDROP_HINT = "Mica or Acrylic shows the desktop color through the tab strip and toolbars.";
 const THEME_LABEL = "Theme";
+const FONT_LABEL = "Font";
+const FONT_HINT = "Typeface for tabs, toolbars, menus, and ce:// pages. Websites keep their own fonts.";
 const STYLES_LABEL = "Custom styles files";
 const STYLES_HINT =
   "styles.css for this profile. The starter rules are commented out, so uncomment them to change the theme. The file loads when the browser opens.";
@@ -76,6 +79,9 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
     "acrylic",
     THEME_LABEL,
     ...THEMES.map((theme) => theme.label),
+    FONT_LABEL,
+    FONT_HINT,
+    ...FONTS.map((font) => font.label),
     STYLES_LABEL,
     STYLES_HINT,
     userCssPath,
@@ -141,6 +147,7 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
       </Row>
       <BackdropRow settings={settings} onUpdate={onUpdate} />
       <ThemePicker settings={settings} onUpdate={onUpdate} />
+      <FontPicker settings={settings} onUpdate={onUpdate} />
       <UserStyles path={userCssPath} onError={onError} />
       <Row
         id="settings-ui-zoom" setting="uiZoom"
@@ -306,8 +313,8 @@ function ThemePicker({ settings, onUpdate }: { settings: SettingsSectionProps["s
                 onUpdate({ theme: theme.id });
               }}
             >
-              <span id={`settings-theme-${theme.id}-preview`} className="flex h-10 items-end gap-1 p-1.5" style={{ background: swatch.background }}>
-                <span id={`settings-theme-${theme.id}-surface`} className="h-5 flex-1 rounded-sm" style={{ background: swatch.surface }} />
+              <span id={`settings-theme-${theme.id}-preview`} className="flex h-10 items-center gap-1 p-1.5" style={{ background: swatch.background }}>
+                <span id={`settings-theme-${theme.id}-surface`} className="h-5 flex-1 rounded-sm" style={themeSurfaceStyle(swatch)} />
                 <span id={`settings-theme-${theme.id}-accent`} className="size-3 rounded-full" style={{ background: swatch.accent }} />
               </span>
               <span id={`settings-theme-${theme.id}-name`} className="truncate bg-zinc-900 px-1.5 py-1 text-[11px] text-zinc-300">
@@ -316,6 +323,82 @@ function ThemePicker({ settings, onUpdate }: { settings: SettingsSectionProps["s
               {active ? (
                 <Check id={`settings-theme-${theme.id}-check`} className="absolute right-1 top-1 size-3.5 rounded-full bg-sky-500 p-0.5 text-white" />
               ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FontPicker({ settings, onUpdate }: { settings: SettingsSectionProps["settings"]; onUpdate: SettingsSectionProps["onUpdate"] }) {
+  const labels = FONTS.map((font) => font.label);
+  const visible = useSettingVisible(FONT_LABEL, FONT_HINT, ...labels);
+  const { changed, reset } = useSettingChanged(["uiFont"]);
+  if (!visible) {
+    return null;
+  }
+  const selected = normalizeFont(settings.uiFont);
+  return (
+    <div id="settings-font" className="px-5 py-3" onMouseLeave={() => applyFontPreview(null)}>
+      <div id="settings-font-heading" className="mb-1 flex items-center gap-2">
+        <div id="settings-font-label" className="text-sm text-zinc-100">
+          {FONT_LABEL}
+        </div>
+        {changed ? (
+          <span
+            id="settings-font-changed"
+            role="img"
+            aria-label="Changed from default"
+            title="Changed from default"
+            className="size-1.5 shrink-0 rounded-full bg-sky-400"
+          />
+        ) : null}
+        {changed && reset ? (
+          <IconButton
+            id="settings-font-reset"
+            label={`Reset ${FONT_LABEL} to default`}
+            className="size-7 opacity-60 hover:opacity-100 focus-visible:opacity-100"
+            onClick={() => {
+              applyFontPreview(DEFAULT_FONT, true);
+              reset();
+            }}
+          >
+            <RotateCcw id="settings-font-reset-icon" aria-hidden />
+          </IconButton>
+        ) : null}
+      </div>
+      <p id="settings-font-hint" className="mb-3 text-xs text-zinc-500">
+        {FONT_HINT}
+      </p>
+      <div id="settings-font-options" className="flex flex-wrap gap-2">
+        {FONTS.map((font) => {
+          const active = selected === font.id;
+          return (
+            <button
+              key={font.id}
+              id={`settings-font-${font.id}`}
+              type="button"
+              aria-pressed={active}
+              className={cn(
+                "h-8 rounded-md border px-3 text-sm",
+                active ? "border-sky-500 text-zinc-100" : "border-zinc-700 text-zinc-300 hover:border-zinc-500",
+              )}
+              style={{ fontFamily: font.stack }}
+              onMouseEnter={() => applyFontPreview(font.id)}
+              onFocus={() => applyFontPreview(font.id)}
+              onBlur={(event) => {
+                const options = event.currentTarget.parentElement;
+                if (!options?.contains(event.relatedTarget as Node | null)) {
+                  applyFontPreview(null);
+                }
+              }}
+              onClick={() => {
+                applyFontPreview(font.id, true);
+                onUpdate({ uiFont: font.id });
+              }}
+            >
+              {font.label}
             </button>
           );
         })}

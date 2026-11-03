@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./themes.css";
+@import "./fonts.css";
 
 @theme inline {
   --color-zinc-50: var(--app-zinc-50);
@@ -49,6 +50,7 @@
 /* Zinc dark is the default and matches Tailwind's palette. Shade numbers are roles: 950 is the page, 100 is primary text. */
 :root {
   color-scheme: dark;
+  --app-font: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   --app-zinc-50: oklch(98.5% 0 none);
   --app-zinc-100: oklch(96.7% 0.001 286.375);
   --app-zinc-200: oklch(92% 0.004 286.32);
@@ -412,7 +414,7 @@ body,
 }
 
 body {
-  font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--app-font);
   background: var(--app-zinc-950);
   color: var(--app-zinc-100);
 }

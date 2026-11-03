@@ -18,6 +18,12 @@ export const THEME_IDS = [
   "graphite",
   "ink",
   "fog",
+  "plain",
+  "line",
+  "soft",
+  "lift",
+  "sharp",
+  "contrast",
 ] as const;
 export const COLOR_MODES = ["dark", "light", "system"] as const;
 
@@ -33,7 +39,24 @@ export type ThemeSwatch = {
   surface: string;
   accent: string;
   text: string;
+  radius?: string;
+  border?: string;
+  shadow?: string;
 };
+
+export function themeSurfaceStyle(swatch: ThemeSwatch): {
+  background: string;
+  borderRadius?: string;
+  boxShadow?: string;
+  border?: string;
+} {
+  return {
+    background: swatch.surface,
+    ...(swatch.radius !== undefined ? { borderRadius: swatch.radius } : {}),
+    ...(swatch.shadow !== undefined ? { boxShadow: swatch.shadow } : {}),
+    ...(swatch.border !== undefined ? { border: `1px solid ${swatch.border}` } : {}),
+  };
+}
 
 export const THEMES: { id: ThemeId; label: string; swatch: Record<ResolvedMode, ThemeSwatch> }[] = [
   {
@@ -164,6 +187,86 @@ export const THEMES: { id: ThemeId; label: string; swatch: Record<ResolvedMode, 
       light: { background: "#e8eaed", surface: "#f5f6f8", accent: "#1d5c94", text: "#1a1f24" },
     },
   },
+  {
+    id: "plain",
+    label: "Plain",
+    swatch: {
+      dark: { background: "#141414", surface: "#1f1f1f", accent: "#38bdf8", text: "#f4f4f4", radius: "3px", border: "#4a4a4a", shadow: "none" },
+      light: { background: "#f7f7f7", surface: "#ffffff", accent: "#0369a1", text: "#171717", radius: "3px", border: "#b0b0b0", shadow: "none" },
+    },
+  },
+  {
+    id: "line",
+    label: "Line",
+    swatch: {
+      dark: { background: "#10141a", surface: "#1a2330", accent: "#38bdf8", text: "#f1f5f9", radius: "0px", border: "#4a5a6c", shadow: "none" },
+      light: { background: "#f8fafc", surface: "#ffffff", accent: "#0369a1", text: "#0f172a", radius: "0px", border: "#a8b4c4", shadow: "none" },
+    },
+  },
+  {
+    id: "soft",
+    label: "Soft",
+    swatch: {
+      dark: {
+        background: "#1a1917",
+        surface: "#242220",
+        accent: "#38bdf8",
+        text: "#f6f4f1",
+        radius: "8px",
+        border: "#3a3632",
+        shadow: "0 2px 4px rgb(0 0 0 / 0.35)",
+      },
+      light: {
+        background: "#faf8f5",
+        surface: "#f7f4ef",
+        accent: "#0369a1",
+        text: "#1c1917",
+        radius: "8px",
+        border: "#d6cfc6",
+        shadow: "0 2px 4px rgb(0 0 0 / 0.16)",
+      },
+    },
+  },
+  {
+    id: "lift",
+    label: "Lift",
+    swatch: {
+      dark: {
+        background: "#161616",
+        surface: "#232323",
+        accent: "#38bdf8",
+        text: "#f0f0f0",
+        radius: "4px",
+        border: "#3f3f3f",
+        shadow: "0 3px 6px rgb(0 0 0 / 0.5)",
+      },
+      light: {
+        background: "#f3f3f3",
+        surface: "#f6f6f6",
+        accent: "#0369a1",
+        text: "#1a1a1a",
+        radius: "4px",
+        border: "#cfcfcf",
+        shadow: "0 3px 5px rgb(0 0 0 / 0.18)",
+      },
+    },
+  },
+  {
+    id: "sharp",
+    label: "Sharp",
+    swatch: {
+      dark: { background: "#101010", surface: "#181818", accent: "#38bdf8", text: "#f5f5f5", radius: "0px", border: "#6b6b6b", shadow: "2px 2px 0 #6b6b6b" },
+      light: { background: "#f7f7f7", surface: "#ffffff", accent: "#0369a1", text: "#111111", radius: "0px", border: "#6b6b6b", shadow: "2px 2px 0 #111111" },
+    },
+  },
+  {
+    id: "contrast",
+    label: "Contrast",
+    swatch: {
+      dark: { background: "#000000", surface: "#0a0a0a", accent: "#38bdf8", text: "#ffffff", radius: "2px", border: "#d4d4d4", shadow: "none" },
+      light: { background: "#ffffff", surface: "#ffffff", accent: "#0369a1", text: "#000000", radius: "2px", border: "#000000", shadow: "none" },
+    },
+  },
 ];
 
 export const COLOR_MODE_OPTIONS: { id: ColorMode; label: string }[] = [
@@ -277,4 +380,72 @@ export function applyThemePreview(theme: string | null, commit = false) {
     preview = theme ? normalizeTheme(theme) : null;
   }
   paint();
+}
+
+const SYSTEM_STACK = '"Segoe UI", ui-sans-serif, system-ui, sans-serif';
+
+export const FONT_KEY = "ce-browser.font";
+export const DEFAULT_FONT = "system";
+
+export const FONTS = [
+  { id: "system", label: "System", stack: SYSTEM_STACK },
+  { id: "inter", label: "Inter", stack: `"Inter Variable", ${SYSTEM_STACK}` },
+  { id: "source-sans", label: "Source Sans 3", stack: `"Source Sans 3 Variable", ${SYSTEM_STACK}` },
+  { id: "roboto", label: "Roboto Flex", stack: `"Roboto Flex Variable", ${SYSTEM_STACK}` },
+  { id: "nunito", label: "Nunito Sans", stack: `"Nunito Sans Variable", ${SYSTEM_STACK}` },
+  { id: "atkinson", label: "Atkinson Hyperlegible", stack: `"Atkinson Hyperlegible", ${SYSTEM_STACK}` },
+  { id: "plex", label: "IBM Plex Sans", stack: `"IBM Plex Sans Variable", ${SYSTEM_STACK}` },
+  { id: "source-serif", label: "Source Serif 4", stack: `"Source Serif 4 Variable", ${SYSTEM_STACK}` },
+] as const;
+
+export type FontId = (typeof FONTS)[number]["id"];
+
+let savedFont: FontId = DEFAULT_FONT;
+/** Painted over `savedFont` while the font list is hovering. Null means show the saved font. */
+let fontPreview: FontId | null = null;
+
+export function normalizeFont(value: string | null | undefined): FontId {
+  return FONTS.find((font) => font.id === value)?.id ?? DEFAULT_FONT;
+}
+
+export function readFont(): FontId {
+  return normalizeFont(readStored(FONT_KEY));
+}
+
+function paintFont() {
+  document.documentElement.dataset.font = fontPreview ?? savedFont;
+}
+
+function rememberFont(font: FontId) {
+  try {
+    localStorage.setItem(FONT_KEY, font);
+  } catch {
+    // Ignore quota and private-mode failures; the face still applies for this session.
+  }
+}
+
+export function applyFont(font: FontId) {
+  savedFont = font;
+  paintFont();
+}
+
+export function publishFont(font: string) {
+  const next = normalizeFont(font);
+  savedFont = next;
+  fontPreview = null;
+  rememberFont(next);
+  paintFont();
+  return next;
+}
+
+/** Paints `font` without writing settings. Null restores the saved font. A commit stores it first. */
+export function applyFontPreview(font: string | null, commit = false) {
+  if (commit && font) {
+    savedFont = normalizeFont(font);
+    fontPreview = null;
+    rememberFont(savedFont);
+  } else {
+    fontPreview = font ? normalizeFont(font) : null;
+  }
+  paintFont();
 }

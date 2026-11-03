@@ -622,6 +622,8 @@ export type BrowserSettings = {
   statusStats: boolean;
   theme: string;
   colorMode: "dark" | "light" | "system";
+  /** Browser UI font. `system` keeps Segoe UI. */
+  uiFont: string;
   uiZoom: number;
   /** Default website zoom, as a percent. */
   pageZoom: number;

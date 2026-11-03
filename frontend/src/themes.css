@@ -1081,3 +1081,367 @@ html[data-theme="fog"][data-mode="light"] {
   --app-red-900: #ffd8d3;
   --app-red-950: #ffebe9;
 }
+
+/* Bland chrome. Corners follow --radius-*. Shadows rewrite --tw-shadow on the shadow utilities, because those utilities do not read --shadow-*. --radius-full stays a pill, and borders stay 1px. */
+
+html[data-theme="plain"] {
+  --radius-xs: 1px;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+  --radius-2xl: 8px;
+  --radius-3xl: 8px;
+  --radius-4xl: 8px;
+}
+
+html[data-theme="line"],
+html[data-theme="sharp"] {
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+}
+
+html[data-theme="soft"] {
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+  --radius-3xl: 1.5rem;
+  --radius-4xl: 2rem;
+}
+
+html[data-theme="plain"] :is(.shadow, .shadow-2xs, .shadow-xs, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl),
+html[data-theme="line"] :is(.shadow, .shadow-2xs, .shadow-xs, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl),
+html[data-theme="contrast"] :is(.shadow, .shadow-2xs, .shadow-xs, .shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl) {
+  --tw-shadow: 0 0 #0000;
+}
+
+html[data-theme="soft"][data-mode="dark"] :is(.shadow-2xs, .shadow-xs) {
+  --tw-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
+}
+
+html[data-theme="soft"][data-mode="dark"] :is(.shadow, .shadow-sm) {
+  --tw-shadow: 0 2px 8px rgb(0 0 0 / 0.45);
+}
+
+html[data-theme="soft"][data-mode="dark"] .shadow-md {
+  --tw-shadow: 0 6px 16px rgb(0 0 0 / 0.4);
+}
+
+html[data-theme="soft"][data-mode="dark"] .shadow-lg {
+  --tw-shadow: 0 12px 28px rgb(0 0 0 / 0.45);
+}
+
+html[data-theme="soft"][data-mode="dark"] .shadow-xl {
+  --tw-shadow: 0 16px 36px rgb(0 0 0 / 0.5);
+}
+
+html[data-theme="soft"][data-mode="dark"] .shadow-2xl {
+  --tw-shadow: 0 20px 48px rgb(0 0 0 / 0.55);
+}
+
+html[data-theme="soft"][data-mode="light"] :is(.shadow-2xs, .shadow-xs) {
+  --tw-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+}
+
+html[data-theme="soft"][data-mode="light"] :is(.shadow, .shadow-sm) {
+  --tw-shadow: 0 2px 8px rgb(0 0 0 / 0.08);
+}
+
+html[data-theme="soft"][data-mode="light"] .shadow-md {
+  --tw-shadow: 0 6px 16px rgb(0 0 0 / 0.1);
+}
+
+html[data-theme="soft"][data-mode="light"] .shadow-lg {
+  --tw-shadow: 0 12px 28px rgb(0 0 0 / 0.12);
+}
+
+html[data-theme="soft"][data-mode="light"] .shadow-xl {
+  --tw-shadow: 0 16px 36px rgb(0 0 0 / 0.14);
+}
+
+html[data-theme="soft"][data-mode="light"] .shadow-2xl {
+  --tw-shadow: 0 20px 48px rgb(0 0 0 / 0.16);
+}
+
+html[data-theme="lift"][data-mode="dark"] :is(.shadow-2xs, .shadow-xs) {
+  --tw-shadow: 0 2px 4px rgb(0 0 0 / 0.5);
+}
+
+html[data-theme="lift"][data-mode="dark"] :is(.shadow, .shadow-sm) {
+  --tw-shadow: 0 4px 10px rgb(0 0 0 / 0.5);
+}
+
+html[data-theme="lift"][data-mode="dark"] .shadow-md {
+  --tw-shadow: 0 8px 18px rgb(0 0 0 / 0.5);
+}
+
+html[data-theme="lift"][data-mode="dark"] .shadow-lg {
+  --tw-shadow: 0 14px 28px rgb(0 0 0 / 0.55), 0 4px 8px rgb(0 0 0 / 0.4);
+}
+
+html[data-theme="lift"][data-mode="dark"] .shadow-xl {
+  --tw-shadow: 0 22px 40px rgb(0 0 0 / 0.6);
+}
+
+html[data-theme="lift"][data-mode="dark"] .shadow-2xl {
+  --tw-shadow: 0 28px 56px rgb(0 0 0 / 0.65);
+}
+
+html[data-theme="lift"][data-mode="light"] :is(.shadow-2xs, .shadow-xs) {
+  --tw-shadow: 0 2px 4px rgb(0 0 0 / 0.1);
+}
+
+html[data-theme="lift"][data-mode="light"] :is(.shadow, .shadow-sm) {
+  --tw-shadow: 0 4px 10px rgb(0 0 0 / 0.1);
+}
+
+html[data-theme="lift"][data-mode="light"] .shadow-md {
+  --tw-shadow: 0 8px 18px rgb(0 0 0 / 0.12);
+}
+
+html[data-theme="lift"][data-mode="light"] .shadow-lg {
+  --tw-shadow: 0 12px 24px rgb(0 0 0 / 0.16), 0 2px 6px rgb(0 0 0 / 0.08);
+}
+
+html[data-theme="lift"][data-mode="light"] .shadow-xl {
+  --tw-shadow: 0 18px 36px rgb(0 0 0 / 0.18);
+}
+
+html[data-theme="lift"][data-mode="light"] .shadow-2xl {
+  --tw-shadow: 0 24px 48px rgb(0 0 0 / 0.2);
+}
+
+html[data-theme="sharp"][data-mode="dark"] :is(.shadow, .shadow-2xs, .shadow-xs, .shadow-sm, .shadow-md) {
+  --tw-shadow: 2px 2px 0 #6b6b6b;
+}
+
+html[data-theme="sharp"][data-mode="dark"] :is(.shadow-lg, .shadow-xl, .shadow-2xl) {
+  --tw-shadow: 3px 3px 0 #6b6b6b;
+}
+
+html[data-theme="sharp"][data-mode="light"] :is(.shadow, .shadow-2xs, .shadow-xs, .shadow-sm, .shadow-md) {
+  --tw-shadow: 2px 2px 0 #111111;
+}
+
+html[data-theme="sharp"][data-mode="light"] :is(.shadow-lg, .shadow-xl, .shadow-2xl) {
+  --tw-shadow: 3px 3px 0 #111111;
+}
+
+html[data-theme="contrast"] {
+  --radius-xs: 0px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 2px;
+  --radius-2xl: 2px;
+  --radius-3xl: 2px;
+  --radius-4xl: 2px;
+}
+
+html[data-theme="plain"][data-mode="dark"] {
+  --app-zinc-50: #fafafa;
+  --app-zinc-100: #f4f4f4;
+  --app-zinc-200: #e6e6e6;
+  --app-zinc-300: #d0d0d0;
+  --app-zinc-400: #a3a3a3;
+  --app-zinc-500: #8a8a8a;
+  --app-zinc-600: #5e5e5e;
+  --app-zinc-700: #4a4a4a;
+  --app-zinc-800: #2a2a2a;
+  --app-zinc-900: #1f1f1f;
+  --app-zinc-950: #141414;
+}
+
+html[data-theme="plain"][data-mode="light"] {
+  --app-zinc-50: #141414;
+  --app-zinc-100: #171717;
+  --app-zinc-200: #262626;
+  --app-zinc-300: #404040;
+  --app-zinc-400: #525252;
+  --app-zinc-500: #5c5c5c;
+  --app-zinc-600: #a3a3a3;
+  --app-zinc-700: #b0b0b0;
+  --app-zinc-800: #e8e8e8;
+  --app-zinc-900: #ffffff;
+  --app-zinc-950: #f7f7f7;
+}
+
+html[data-theme="line"][data-mode="dark"] {
+  --app-zinc-50: #f8fafc;
+  --app-zinc-100: #f1f5f9;
+  --app-zinc-200: #e2e8f0;
+  --app-zinc-300: #cbd5e1;
+  --app-zinc-400: #94a3b8;
+  --app-zinc-500: #7d8b9c;
+  --app-zinc-600: #5c6b7d;
+  --app-zinc-700: #4a5a6c;
+  --app-zinc-800: #243040;
+  --app-zinc-900: #1a2330;
+  --app-zinc-950: #10141a;
+}
+
+html[data-theme="line"][data-mode="light"] {
+  --app-zinc-50: #0b1220;
+  --app-zinc-100: #0f172a;
+  --app-zinc-200: #1e293b;
+  --app-zinc-300: #334155;
+  --app-zinc-400: #475569;
+  --app-zinc-500: #526277;
+  --app-zinc-600: #b6c2d0;
+  --app-zinc-700: #a8b4c4;
+  --app-zinc-800: #e8eef4;
+  --app-zinc-900: #ffffff;
+  --app-zinc-950: #f8fafc;
+}
+
+html[data-theme="soft"][data-mode="dark"] {
+  --app-zinc-50: #faf8f6;
+  --app-zinc-100: #f6f4f1;
+  --app-zinc-200: #e8e4de;
+  --app-zinc-300: #d4cec6;
+  --app-zinc-400: #b7b0a6;
+  --app-zinc-500: #9a938a;
+  --app-zinc-600: #5c564f;
+  --app-zinc-700: #3a3632;
+  --app-zinc-800: #2e2b28;
+  --app-zinc-900: #242220;
+  --app-zinc-950: #1a1917;
+}
+
+html[data-theme="soft"][data-mode="light"] {
+  --app-zinc-50: #1c1917;
+  --app-zinc-100: #1c1917;
+  --app-zinc-200: #292524;
+  --app-zinc-300: #44403c;
+  --app-zinc-400: #57534e;
+  --app-zinc-500: #6b6560;
+  --app-zinc-600: #c4bdb4;
+  --app-zinc-700: #d6cfc6;
+  --app-zinc-800: #f0ebe4;
+  --app-zinc-900: #f7f4ef;
+  --app-zinc-950: #faf8f5;
+}
+
+html[data-theme="lift"][data-mode="dark"] {
+  --app-zinc-50: #f5f5f5;
+  --app-zinc-100: #f0f0f0;
+  --app-zinc-200: #e0e0e0;
+  --app-zinc-300: #c8c8c8;
+  --app-zinc-400: #a6a6a6;
+  --app-zinc-500: #8c8c8c;
+  --app-zinc-600: #5a5a5a;
+  --app-zinc-700: #3f3f3f;
+  --app-zinc-800: #2c2c2c;
+  --app-zinc-900: #232323;
+  --app-zinc-950: #161616;
+}
+
+html[data-theme="lift"][data-mode="light"] {
+  --app-zinc-50: #161616;
+  --app-zinc-100: #1a1a1a;
+  --app-zinc-200: #2a2a2a;
+  --app-zinc-300: #3f3f3f;
+  --app-zinc-400: #525252;
+  --app-zinc-500: #5e5e5e;
+  --app-zinc-600: #bdbdbd;
+  --app-zinc-700: #cfcfcf;
+  --app-zinc-800: #ececec;
+  --app-zinc-900: #f6f6f6;
+  --app-zinc-950: #f3f3f3;
+}
+
+html[data-theme="sharp"][data-mode="dark"] {
+  --app-zinc-50: #ffffff;
+  --app-zinc-100: #f5f5f5;
+  --app-zinc-200: #e5e5e5;
+  --app-zinc-300: #d4d4d4;
+  --app-zinc-400: #a3a3a3;
+  --app-zinc-500: #8a8a8a;
+  --app-zinc-600: #737373;
+  --app-zinc-700: #6b6b6b;
+  --app-zinc-800: #222222;
+  --app-zinc-900: #181818;
+  --app-zinc-950: #101010;
+}
+
+html[data-theme="sharp"][data-mode="light"] {
+  --app-zinc-50: #101010;
+  --app-zinc-100: #111111;
+  --app-zinc-200: #222222;
+  --app-zinc-300: #333333;
+  --app-zinc-400: #4a4a4a;
+  --app-zinc-500: #5a5a5a;
+  --app-zinc-600: #8a8a8a;
+  --app-zinc-700: #6b6b6b;
+  --app-zinc-800: #f0f0f0;
+  --app-zinc-900: #ffffff;
+  --app-zinc-950: #f7f7f7;
+}
+
+html[data-theme="contrast"][data-mode="dark"] {
+  --app-zinc-50: #ffffff;
+  --app-zinc-100: #ffffff;
+  --app-zinc-200: #f5f5f5;
+  --app-zinc-300: #e5e5e5;
+  --app-zinc-400: #d4d4d4;
+  --app-zinc-500: #bdbdbd;
+  --app-zinc-600: #a3a3a3;
+  --app-zinc-700: #d4d4d4;
+  --app-zinc-800: #141414;
+  --app-zinc-900: #0a0a0a;
+  --app-zinc-950: #000000;
+}
+
+html[data-theme="contrast"][data-mode="light"] {
+  --app-zinc-50: #000000;
+  --app-zinc-100: #000000;
+  --app-zinc-200: #141414;
+  --app-zinc-300: #262626;
+  --app-zinc-400: #3f3f3f;
+  --app-zinc-500: #525252;
+  --app-zinc-600: #737373;
+  --app-zinc-700: #000000;
+  --app-zinc-800: #f2f2f2;
+  --app-zinc-900: #ffffff;
+  --app-zinc-950: #ffffff;
+}
+
+html[data-theme="plain"][data-mode="light"],
+html[data-theme="line"][data-mode="light"],
+html[data-theme="soft"][data-mode="light"],
+html[data-theme="lift"][data-mode="light"],
+html[data-theme="sharp"][data-mode="light"],
+html[data-theme="contrast"][data-mode="light"] {
+  --app-sky-300: oklch(44.3% 0.11 240.79);
+  --app-sky-400: oklch(50% 0.134 242.749);
+  --app-sky-800: oklch(82.8% 0.111 230.318);
+  --app-sky-950: oklch(95.1% 0.026 236.824);
+  --app-violet-100: oklch(38% 0.189 293.745);
+  --app-violet-200: oklch(43.2% 0.232 292.759);
+  --app-violet-300: oklch(49.1% 0.27 292.581);
+  --app-violet-700: oklch(70.2% 0.183 293.541);
+  --app-violet-800: oklch(81.1% 0.111 293.571);
+  --app-violet-900: oklch(89.4% 0.057 293.283);
+  --app-violet-950: oklch(94.3% 0.029 294.588);
+  --app-emerald-300: oklch(59.6% 0.145 163.225);
+  --app-emerald-400: oklch(50.8% 0.118 165.612);
+  --app-emerald-950: oklch(95% 0.052 163.051);
+  --app-amber-200: oklch(47.3% 0.137 46.201);
+  --app-amber-300: oklch(55.5% 0.163 48.998);
+  --app-amber-400: oklch(66.6% 0.179 58.318);
+  --app-amber-900: oklch(87.9% 0.169 91.605);
+  --app-amber-950: oklch(96.2% 0.059 95.617);
+  --app-red-300: oklch(44.4% 0.177 26.899);
+  --app-red-400: oklch(50.5% 0.213 27.518);
+  --app-red-900: oklch(80.8% 0.114 19.571);
+  --app-red-950: oklch(93.6% 0.032 17.717);
+}

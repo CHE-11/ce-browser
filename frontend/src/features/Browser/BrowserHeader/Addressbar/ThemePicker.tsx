@@ -3,7 +3,7 @@ import { Check, Moon, Sun } from "lucide-react";
 import { Menu } from "@/components/Menu";
 import { PopupFrame } from "@/components/PopupFrame";
 import { closeThisPopup, getSettings, saveSettings, sendThemePreview } from "@/lib/browser-client";
-import { THEMES, normalizeTheme, resolveMode, type ThemeId } from "@/lib/appearance";
+import { THEMES, normalizeTheme, resolveMode, themeSurfaceStyle, type ThemeId } from "@/lib/appearance";
 import { cn } from "@/lib/cn";
 import { focusRing, focusRow } from "@/lib/focus-ring";
 import { useSettingsState } from "@/lib/use-browser";
@@ -138,7 +138,7 @@ export function ThemePicker() {
                   <span
                     id={`theme-picker-${theme.id}-surface`}
                     className="h-3 flex-1 rounded-[2px]"
-                    style={{ background: swatch.surface }}
+                    style={themeSurfaceStyle(swatch)}
                   />
                   <span
                     id={`theme-picker-${theme.id}-accent`}

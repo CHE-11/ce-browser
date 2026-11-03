@@ -20,6 +20,16 @@ pub const SEARCH_ENGINES: &[(&str, &str)] = &[
 ];
 const STARTUP_MODES: &[&str] = &["restore", "home"];
 const COLOR_MODES: &[&str] = &["dark", "light", "system"];
+const UI_FONTS: &[&str] = &[
+    "system",
+    "inter",
+    "source-sans",
+    "roboto",
+    "nunito",
+    "atkinson",
+    "plex",
+    "source-serif",
+];
 const BOOKMARK_TEXT_REM: (f32, f32) = (0.5, 1.5);
 const BOOKMARK_PADDING_REM: (f32, f32) = (0.0, 1.5);
 const TAB_WIDTH_PX: (u32, u32) = (88, 480);
@@ -133,6 +143,9 @@ pub struct BrowserSettings {
     pub status_stats: bool,
     pub theme: String,
     pub color_mode: String,
+    /// Browser UI font. An older file omits this and keeps Segoe UI.
+    #[serde(default = "default_ui_font")]
+    pub ui_font: String,
     pub ui_zoom: u32,
     /// Default zoom for websites, as a percent. `ce://` pages stay on the UI size.
     #[serde(default = "default_page_zoom")]
@@ -311,6 +324,10 @@ const BACKDROPS: &[&str] = &["none", "mica", "acrylic"];
 
 fn default_backdrop() -> String {
     "none".into()
+}
+
+fn default_ui_font() -> String {
+    "system".into()
 }
 
 fn default_true() -> bool {
@@ -564,6 +581,7 @@ impl Default for BrowserSettings {
             status_stats: true,
             theme: "zinc".into(),
             color_mode: "dark".into(),
+            ui_font: default_ui_font(),
             ui_zoom: 100,
             page_zoom: default_page_zoom(),
             sync_folder: String::new(),
@@ -638,6 +656,9 @@ impl BrowserSettings {
         }
         if !COLOR_MODES.contains(&self.color_mode.as_str()) {
             self.color_mode = defaults.color_mode;
+        }
+        if !UI_FONTS.contains(&self.ui_font.as_str()) {
+            self.ui_font = defaults.ui_font;
         }
         if let Some(preset) = self.legacy_bookmark_size.take() {
             let sizes = match preset.as_str() {
@@ -973,6 +994,12 @@ fn surface_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
             ("graphite", 0xff, 0xff, 0xff),
             ("ink", 0xf4, 0xf4, 0xf4),
             ("fog", 0xf5, 0xf6, 0xf8),
+            ("plain", 0xff, 0xff, 0xff),
+            ("line", 0xff, 0xff, 0xff),
+            ("soft", 0xf7, 0xf4, 0xef),
+            ("lift", 0xf6, 0xf6, 0xf6),
+            ("sharp", 0xff, 0xff, 0xff),
+            ("contrast", 0xff, 0xff, 0xff),
         ]
     } else {
         &[
@@ -991,6 +1018,12 @@ fn surface_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
             ("graphite", 0x38, 0x38, 0x38),
             ("ink", 0x17, 0x17, 0x17),
             ("fog", 0x36, 0x3c, 0x45),
+            ("plain", 0x1f, 0x1f, 0x1f),
+            ("line", 0x1a, 0x23, 0x30),
+            ("soft", 0x24, 0x22, 0x20),
+            ("lift", 0x23, 0x23, 0x23),
+            ("sharp", 0x18, 0x18, 0x18),
+            ("contrast", 0x0a, 0x0a, 0x0a),
         ]
     };
     table
@@ -1022,6 +1055,12 @@ fn page_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
             ("graphite", 0xf3, 0xf3, 0xf3),
             ("ink", 0xff, 0xff, 0xff),
             ("fog", 0xe8, 0xea, 0xed),
+            ("plain", 0xf7, 0xf7, 0xf7),
+            ("line", 0xf8, 0xfa, 0xfc),
+            ("soft", 0xfa, 0xf8, 0xf5),
+            ("lift", 0xf3, 0xf3, 0xf3),
+            ("sharp", 0xf7, 0xf7, 0xf7),
+            ("contrast", 0xff, 0xff, 0xff),
         ]
     } else {
         &[
@@ -1040,6 +1079,12 @@ fn page_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
             ("graphite", 0x2b, 0x2b, 0x2b),
             ("ink", 0x0c, 0x0c, 0x0c),
             ("fog", 0x2c, 0x31, 0x38),
+            ("plain", 0x14, 0x14, 0x14),
+            ("line", 0x10, 0x14, 0x1a),
+            ("soft", 0x1a, 0x19, 0x17),
+            ("lift", 0x16, 0x16, 0x16),
+            ("sharp", 0x10, 0x10, 0x10),
+            ("contrast", 0x00, 0x00, 0x00),
         ]
     };
     table
@@ -1597,12 +1642,28 @@ mod tests {
         let loaded = loaded.normalize();
         assert_eq!(loaded.search_engine, "bing");
         assert_eq!(loaded.theme, "nord");
+        assert_eq!(loaded.ui_font, "system");
         assert_eq!(loaded.tab_cycle_order, "strip");
         assert!(loaded.tab_switcher);
         assert_eq!(loaded.window_backdrop, "none");
         assert!(loaded.auto_update);
         assert_eq!(loaded.last_seen_version, "");
         assert_eq!(loaded.toast_position, "bottom-right");
+    }
+
+    #[test]
+    fn a_missing_ui_font_stays_on_system_and_an_unknown_one_falls_back() {
+        let missing: super::BrowserSettings =
+            serde_json::from_str(r#"{"theme":"nord"}"#).expect("settings parse");
+        let missing = missing.normalize();
+        assert_eq!(missing.theme, "nord");
+        assert_eq!(missing.ui_font, "system");
+        let unknown: super::BrowserSettings =
+            serde_json::from_str(r#"{"uiFont":"comic-sans"}"#).expect("settings parse");
+        assert_eq!(unknown.normalize().ui_font, "system");
+        let saved: super::BrowserSettings =
+            serde_json::from_str(r#"{"uiFont":"inter"}"#).expect("settings parse");
+        assert_eq!(saved.normalize().ui_font, "inter");
     }
 
     #[test]
