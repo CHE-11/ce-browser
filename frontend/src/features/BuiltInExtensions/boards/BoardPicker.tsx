@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, LayoutGrid, Plus } from "lucide-react";
 import { Button } from "@/components/Button";
 import { createBoard } from "@/lib/browser-client";
@@ -22,10 +22,20 @@ export function BoardPicker({ id, boards, value, onChange }: BoardPickerProps) {
   const [query, setQuery] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const choices = useMemo(() => boardChoices(boards), [boards]);
   const selected = choices.find((choice) => choice.board.id === value);
   const needle = query.trim().toLowerCase();
   const shown = needle ? choices.filter((choice) => choice.label.toLowerCase().includes(needle)) : choices;
+  const showSearch = choices.length > 6;
+
+  // The popup is still the closed height on this frame. A normal focus would scroll the
+  // field into view and pull the header off screen until the window grows.
+  useLayoutEffect(() => {
+    if (open && showSearch) {
+      searchRef.current?.focus({ preventScroll: true });
+    }
+  }, [open, showSearch]);
 
   const create = async () => {
     const trimmed = name.trim() || query.trim();
@@ -61,10 +71,10 @@ export function BoardPicker({ id, boards, value, onChange }: BoardPickerProps) {
       </button>
       {open ? (
         <div id={`${id}-panel`} className="flex flex-col gap-1.5 rounded-lg border border-zinc-800 bg-zinc-950/60 p-1.5">
-          {choices.length > 6 ? (
+          {showSearch ? (
             <input
               id={`${id}-search`}
-              autoFocus
+              ref={searchRef}
               value={query}
               placeholder="Find a board"
               className={inputClass}
@@ -119,7 +129,6 @@ export function BoardPicker({ id, boards, value, onChange }: BoardPickerProps) {
               id={`${id}-create-name`}
               value={name}
               placeholder="New board name"
-              autoFocus={choices.length <= 6}
               className={inputClass}
               onChange={(event) => setName(event.target.value)}
             />

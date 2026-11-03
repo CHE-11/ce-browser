@@ -1,6 +1,6 @@
 [package]
 name = "ce-browser"
-version = "0.1.12"
+version = "0.1.14"
 description = "Tabbed WebView2 browser"
 authors = ["you"]
 edition = "2024"
@@ -27,7 +27,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 url = "2"
 ureq = "2"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 
 # webview2-com and windows must match the versions wry is built against, or the
 # WebView2 interface types will not line up with `PlatformWebview::controller()`.

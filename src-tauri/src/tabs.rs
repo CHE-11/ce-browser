@@ -37,6 +37,11 @@ pub const DEFAULT_WORKSPACE: &str = "default";
 pub const GROUP_COLORS: &[&str] = &[
     "grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange",
 ];
+/// Chromium args for every WebView2 environment. Setting them replaces wry's defaults,
+/// including `--autoplay-policy=no-user-gesture-required`, so the feature list is repeated here.
+/// A page cannot start video or audio until the user clicks or presses a key on that page.
+/// Selecting the tab does not count.
+const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=user-gesture-required";
 /// Logical px between the two split panes. The browser UI shows through it as the divider.
 const SPLIT_GAP: f64 = 6.0;
 const MAX_WORKSPACES: usize = 20;
@@ -833,6 +838,7 @@ fn page_builder(app: &AppHandle, id: u32, label: &str, url: WebviewUrl) -> Webvi
     if let Some(container) = container {
         let dir = crate::privacy::container_dir(app, &container);
         let mut builder = WebviewBuilder::new(label, url)
+            .additional_browser_args(WEBVIEW_BROWSER_ARGS)
             .data_directory(dir)
             .browser_extensions_enabled(false)
             .zoom_hotkeys_enabled(false);
@@ -873,6 +879,7 @@ fn container_environment(app: &AppHandle, container: &str) -> Option<webview2::W
 
 pub fn base_builder(app: &AppHandle, label: &str, url: WebviewUrl) -> WebviewBuilder<Wry> {
     let mut builder = WebviewBuilder::new(label, url)
+        .additional_browser_args(WEBVIEW_BROWSER_ARGS)
         .data_directory(paths::profile_dir(app))
         .browser_extensions_enabled(true)
         .zoom_hotkeys_enabled(false);

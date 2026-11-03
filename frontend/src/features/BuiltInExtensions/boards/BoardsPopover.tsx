@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CircleAlert, Crop, ExternalLink, Images, LayoutGrid, Link2, Monitor, MousePointerClick, RotateCcw, ScrollText } from "lucide-react";
 import { Button } from "@/components/Button";
+import { IconButton } from "@/components/IconButton";
 import { PopupFrame } from "@/components/PopupFrame";
 import { closePopup, createTab, currentWindowLabel, movePins, requestPageTool } from "@/lib/browser-client";
 import type { PageToolRequest } from "@type/browser";
@@ -54,7 +55,17 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
 
   return (
     <PopupFrame id="boards-popover" width={340} maxHeight={680} ready={loaded}>
-      <PopoverHeader id="boards-header" icon={<LayoutGrid aria-hidden />} title="Save to board" subtitle={tab.title || tab.url} />
+      <PopoverHeader
+        id="boards-header"
+        icon={<LayoutGrid aria-hidden />}
+        title="Save to board"
+        subtitle={tab.title || tab.url}
+        action={
+          <IconButton id="boards-open" label="Open board" onClick={() => openBoardsPage(undefined)}>
+            <ExternalLink id="boards-open-icon" aria-hidden />
+          </IconButton>
+        }
+      />
       {showResult && status ? (
         <SaveResult params={params} onAgain={() => setShowResult(false)} />
       ) : (
@@ -107,15 +118,6 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
             hint="Pick one or more images"
             onClick={() => send("images")}
           />
-          <Button
-            id="boards-open"
-            variant={canCapture ? "ghost" : "primary"}
-            className={canCapture ? "justify-start" : undefined}
-            onClick={() => openBoardsPage(boardId || undefined)}
-          >
-            <ExternalLink id="boards-open-icon" className="size-4" aria-hidden />
-            Open boards
-          </Button>
         </div>
       )}
     </PopupFrame>

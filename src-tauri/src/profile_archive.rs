@@ -193,7 +193,10 @@ fn unpack_archive(bytes: &[u8], dest: &Path) -> Result<(), String> {
         let file = archive
             .by_index(index)
             .map_err(|_| "This profile file is damaged.".to_string())?;
-        let name = file.name().replace('\\', "/");
+        let name = file
+            .name()
+            .map_err(|_| "This profile file is damaged.".to_string())?
+            .replace('\\', "/");
         if !safe_zip_path(&name) {
             return Err("This profile file contains an unsafe path.".into());
         }

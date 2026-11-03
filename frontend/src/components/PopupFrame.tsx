@@ -101,7 +101,7 @@ export function PopupFrame({ id, children, className, width, maxHeight = 640, re
       className={cn(popupSurfaceClass, "flex h-screen w-screen flex-col overflow-hidden")}
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div id={`${id}-scroller`} ref={scrollerRef} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+      <div id={`${id}-scroller`} ref={scrollerRef} className="min-h-0 flex-1 overflow-anchor-none overflow-x-hidden overflow-y-auto">
         <div id={`${id}-content`} ref={contentRef} className={cn(layout.className, className)} style={layout.style}>
           {children}
         </div>

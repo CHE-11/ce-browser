@@ -107,14 +107,14 @@
     },
     {
       "label": "Install/Run App",
-      "type": "process",
-      "command": "${workspaceFolder}/src-tauri/target/release/ce-browser.exe",
+      "type": "shell",
+      "command": "pnpm install:exe",
       "group": {
         "kind": "build",
         "isDefault": true
       },
       "options": {
-        "cwd": "${workspaceFolder}/src-tauri/target/release",
+        "cwd": "${workspaceFolder}",
         "statusbar": {
           "hide": false,
           "color": "#1afbff"
