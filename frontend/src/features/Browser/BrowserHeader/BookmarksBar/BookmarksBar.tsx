@@ -1,13 +1,14 @@
-import { useRef, type MouseEvent } from "react";
+import { useLayoutEffect, useRef, useState, type DragEvent, type MouseEvent, type RefObject } from "react";
+import { flushSync } from "react-dom";
 import { ChevronsRight, Folder } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
-import { createTab, navigate, openPopup, closePopup } from "@/lib/browser-client";
-import { BOOKMARK_DROP_END, useBookmarkDrag } from "@/lib/bookmark-drag";
+import { closePopup, createTab, moveBookmark, navigate, openPopup } from "@/lib/browser-client";
+import { BOOKMARK_DROP_END, isBookmarkDrag, useBookmarkDrag } from "@/lib/bookmark-drag";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { faviconKey } from "@/lib/format";
-import { useSiteFavicons } from "@/lib/use-browser";
+import { BOOKMARK_DRAG_TYPE, useSiteFavicons } from "@/lib/use-browser";
 import { BookmarkTree, BookmarkNode } from "@type/browser";
 
 type BookmarksBarProps = {
@@ -27,6 +28,142 @@ const itemClass = cn(
   focusRing,
 );
 const iconClass = "size-[1.2em] shrink-0";
+
+function itemSignature(node: BookmarkNode) {
+  return `${node.id}\0${node.title}\0${node.url ?? ""}\0${node.separator ? 1 : 0}`;
+}
+
+/** How many leading widths fit in `available`, including the gap before each item after the first. */
+function fitCount(widths: number[], available: number, gap: number) {
+  let used = 0;
+  for (let index = 0; index < widths.length; index += 1) {
+    const next = used + (index > 0 ? gap : 0) + widths[index];
+    if (next > available + 0.5) {
+      return index;
+    }
+    used = next;
+  }
+  return widths.length;
+}
+
+/** Width of the items slot with the chevron shown or hidden. Restores the chevron before returning. */
+function slotWidth(slot: HTMLElement, chevron: HTMLButtonElement, showChevron: boolean) {
+  const wasHidden = chevron.hidden;
+  chevron.hidden = !showChevron;
+  const width = slot.clientWidth;
+  chevron.hidden = wasHidden;
+  return width;
+}
+
+/**
+ * How many bar items fit in the slot. Item width does not depend on the slot (`shrink-0`), so
+ * widths are cached until the bookmarks or their text size change. The chevron stays mounted
+ * and is hidden until a suffix does not fit; measuring it toggles that attribute before paint.
+ */
+function useFittedCount(
+  items: BookmarkNode[],
+  textSize: number | undefined,
+  padding: number | undefined,
+  folderIcons: boolean,
+  dropMarker: boolean,
+  slotRef: RefObject<HTMLDivElement | null>,
+  chevronRef: RefObject<HTMLButtonElement | null>,
+) {
+  const signature = `${textSize ?? ""}|${padding ?? ""}|${folderIcons ? 1 : 0}|${items.map(itemSignature).join("\n")}`;
+  const widths = useRef(new Map<string, number>());
+  const fontsApplied = useRef("");
+  const itemsRef = useRef(items);
+  const visibleRef = useRef(items.length);
+  const [visibleCount, setVisibleCount] = useState(items.length);
+  itemsRef.current = items;
+  visibleRef.current = visibleCount;
+
+  const seen = useRef(signature);
+  if (seen.current !== signature) {
+    seen.current = signature;
+    widths.current.clear();
+    if (visibleCount !== items.length) {
+      visibleRef.current = items.length;
+      setVisibleCount(items.length);
+    }
+  }
+
+  useLayoutEffect(() => {
+    const slot = slotRef.current;
+    if (!slot) {
+      return;
+    }
+
+    const setCount = (count: number, sync: boolean) => {
+      if (visibleRef.current === count) {
+        return;
+      }
+      visibleRef.current = count;
+      if (sync) {
+        flushSync(() => setVisibleCount(count));
+      } else {
+        setVisibleCount(count);
+      }
+    };
+
+    const measure = (sync: boolean) => {
+      const currentItems = itemsRef.current;
+      const chevron = chevronRef.current;
+      if (currentItems.length === 0 || !chevron) {
+        setCount(0, sync);
+        return;
+      }
+      for (const element of slot.querySelectorAll<HTMLElement>("[data-bar-item]")) {
+        const id = element.dataset.barItem;
+        if (!id) {
+          continue;
+        }
+        const width = element.getBoundingClientRect().width;
+        if (width > 0) {
+          widths.current.set(id, width);
+        }
+      }
+      if (currentItems.some((node) => !widths.current.has(node.id))) {
+        setCount(currentItems.length, sync);
+        return;
+      }
+      const gap = Number.parseFloat(getComputedStyle(slot).columnGap) || 0;
+      const marker = slot.querySelector<HTMLElement>("#bookmarks-bar-drop-end");
+      const reserved = marker ? marker.getBoundingClientRect().width + gap : 0;
+      const measured = currentItems.map((node) => widths.current.get(node.id) ?? 0);
+      const withoutChevron = fitCount(measured, Math.max(0, slotWidth(slot, chevron, false) - reserved), gap);
+      const count =
+        withoutChevron === currentItems.length
+          ? currentItems.length
+          : fitCount(measured, Math.max(0, slotWidth(slot, chevron, true) - reserved), gap);
+      setCount(count, sync);
+    };
+
+    measure(false);
+    const observer = new ResizeObserver(() => measure(true));
+    observer.observe(slot);
+    if (slot.parentElement) {
+      observer.observe(slot.parentElement);
+    }
+    let alive = true;
+    if (document.fonts && fontsApplied.current !== signature) {
+      void document.fonts.ready.then(() => {
+        if (!alive || fontsApplied.current === signature) {
+          return;
+        }
+        fontsApplied.current = signature;
+        widths.current.clear();
+        measure(false);
+      });
+    }
+    return () => {
+      alive = false;
+      observer.disconnect();
+    };
+  }, [signature, visibleCount, dropMarker, slotRef, chevronRef]);
+
+  return Math.min(visibleCount, items.length);
+}
 
 /** Hangs the folder's menu under `element`, left edges aligned. */
 function openFolderPopup(element: HTMLElement, node: BookmarkNode, dragOpened = false) {
@@ -56,9 +193,11 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
   const itemStyle = bookmarkItemStyle(textSize, padding, { text: BOOKMARK_SIZE.barText, padding: BOOKMARK_SIZE.barPadding });
   /** Folder whose popup this drag opened by hovering it. */
   const dragOpened = useRef<string | null>(null);
+  const slotRef = useRef<HTMLDivElement>(null);
+  const chevronRef = useRef<HTMLButtonElement>(null);
 
   const openFolderWhileDragging = (node: BookmarkNode, element: HTMLElement) => {
-    if (!drag.dragged.current || dragOpened.current === node.id) {
+    if (node.id === "bar" || !drag.dragged.current || dragOpened.current === node.id) {
       return;
     }
     dragOpened.current = node.id;
@@ -79,12 +218,31 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
     onDragEnd: closeDragPopup,
   });
 
+  const dropMarker = drag.drop?.id === BOOKMARK_DROP_END;
+  const visibleCount = useFittedCount(items, textSize, padding, folderIcons, dropMarker, slotRef, chevronRef);
+  const shown = items.slice(0, visibleCount);
+
   const openFolder = (event: MouseEvent<HTMLElement>, node: BookmarkNode) => {
     if (drag.dragged.current) {
       drag.dragged.current = false;
       return;
     }
     void openFolderPopup(event.currentTarget, node);
+  };
+
+  const openOverflow = (event: MouseEvent<HTMLElement>) => {
+    if (drag.dragged.current) {
+      drag.dragged.current = false;
+      return;
+    }
+    const ids = items.slice(visibleCount).map((node) => node.id).join(",");
+    if (!ids) {
+      return;
+    }
+    void openPopup("bookmarks-bar-overflow", event.currentTarget, {
+      params: new URLSearchParams({ ids }).toString(),
+      placement: "bottom-start",
+    });
   };
 
   const openBarMenu = (event: MouseEvent, node?: BookmarkNode) => {
@@ -102,6 +260,19 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
     void openPopup("bookmarks-bar-menu", { x: event.clientX, y: event.clientY }, { params: params.toString() });
   };
 
+  const dropAtVisibleEnd = (event: DragEvent<HTMLDivElement>) => {
+    if (!isBookmarkDrag(event)) {
+      return;
+    }
+    event.preventDefault();
+    const id = event.dataTransfer.getData(BOOKMARK_DRAG_TYPE);
+    drag.reset();
+    if (!id) {
+      return;
+    }
+    void moveBookmark(id, "bar", visibleCount).catch(() => undefined);
+  };
+
   return (
     <div
       id="bookmarks-bar"
@@ -111,20 +282,22 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
     >
       <div
         id="bookmarks-bar-items"
+        ref={slotRef}
         className="flex min-w-0 flex-1 items-center gap-0.5 self-stretch overflow-hidden"
         onDragOver={drag.listProps.onDragOver}
-        onDrop={drag.listProps.onDrop}
+        onDrop={dropAtVisibleEnd}
       >
         {items.length === 0 ? (
           <span id="bookmarks-bar-empty" className="px-2 text-xs text-zinc-500">
             Press Ctrl+D to bookmark a page. Bookmarks in the bar folder show here.
           </span>
         ) : null}
-        {items.map((node, index) =>
+        {shown.map((node, index) =>
           node.separator ? (
             <div
               key={node.id}
               id={`bookmarks-bar-${node.id}`}
+              data-bar-item={node.id}
               role="separator"
               aria-orientation="vertical"
               title="Divider"
@@ -138,6 +311,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
             <button
               key={node.id}
               id={`bookmarks-bar-${node.id}`}
+              data-bar-item={node.id}
               type="button"
               title={`${node.title}\n${node.url}`}
               className={cn(itemClass, drag.dropChrome(node.id))}
@@ -172,6 +346,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
             <button
               key={node.id}
               id={`bookmarks-bar-${node.id}`}
+              data-bar-item={node.id}
               type="button"
               title={node.title}
               aria-haspopup="menu"
@@ -190,20 +365,20 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
             </button>
           ),
         )}
-        {drag.drop?.id === BOOKMARK_DROP_END ? (
-          <div id="bookmarks-bar-drop-end" className="h-2/3 w-0.5 shrink-0 rounded bg-sky-500" />
-        ) : null}
+        {dropMarker ? <div id="bookmarks-bar-drop-end" className="h-2/3 w-0.5 shrink-0 rounded bg-sky-500" /> : null}
       </div>
-      {tree && items.length > 6 ? (
+      {tree && items.length > 0 ? (
         <button
           id="bookmarks-bar-all"
+          ref={chevronRef}
           type="button"
-          title="All bar bookmarks"
-          aria-label="All bar bookmarks"
+          hidden={visibleCount >= items.length}
+          title="More bookmarks"
+          aria-label="More bookmarks"
           aria-haspopup="menu"
           className={cn(itemClass, drag.dropChrome(tree.bar.id))}
           style={itemStyle}
-          onClick={(event) => openFolder(event, tree.bar)}
+          onClick={openOverflow}
           {...drag.targetProps(tree.bar, items.length)}
         >
           <ChevronsRight id="bookmarks-bar-all-icon" className={iconClass} aria-hidden />

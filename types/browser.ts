@@ -392,6 +392,7 @@ export type PopupKind =
   | "bookmark-edit"
   | "bookmark-folder"
   | "bookmarks-bar-menu"
+  | "bookmarks-bar-overflow"
   | "bookmark-add"
   | "bookmark-rename"
   | "tab-menu"

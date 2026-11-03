@@ -14,6 +14,7 @@ import { BookmarkRename } from "@/features/Browser/BrowserHeader/BookmarksBar/Bo
 import { BookmarkEditor } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarkEditor";
 import { BookmarkFolderMenu } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarkFolderMenu";
 import { BookmarksBarContextMenu, type BookmarkMenuTarget } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarksBarContextMenu";
+import { BookmarksBarOverflow } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarksBarOverflow";
 import { TabGroupFlyout } from "@/features/Browser/BrowserHeader/Tabs/TabGroupFlyout";
 import { TabGroupMenu } from "@/features/Browser/BrowserHeader/Tabs/TabGroupMenu";
 import { TabContextMenu } from "@/features/Browser/BrowserHeader/Tabs/TabContextMenu";
@@ -147,6 +148,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
           target={bookmarkMenuTarget(params)}
         />
       );
+    case "bookmarks-bar-overflow":
+      return <BookmarksBarOverflow ids={(params.get("ids") ?? "").split(",").filter(Boolean)} />;
     case "bookmark-add":
       return (
         <BookmarkAdd
