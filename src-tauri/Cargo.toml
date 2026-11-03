@@ -1,6 +1,6 @@
 [package]
 name = "ce-browser"
-version = "0.1.11"
+version = "0.1.12"
 description = "Tabbed WebView2 browser"
 authors = ["you"]
 edition = "2024"
@@ -64,3 +64,9 @@ windows-core = "0.61"
 [profile.release]
 panic = "abort"
 strip = true
+
+# Wry's WebView2 IPC bridge installs a permanent global named `ipc`. Google Sheets
+# declares that same name, so the spreadsheet fails to parse until the property is
+# configurable. `vendor/wry` is wry 0.55.1 with that one change.
+[patch.crates-io]
+wry = { path = "vendor/wry" }
