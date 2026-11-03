@@ -280,7 +280,7 @@ pub struct BrowserSettings {
     /// Check for a new version at startup and once a day.
     #[serde(default = "default_true")]
     pub auto_update: bool,
-    /// Version that last ran. A newer running version opens ce://whats-new once.
+    /// Version that last ran.
     #[serde(default)]
     pub last_seen_version: String,
     /// Corner or edge of the page area where toasts appear, such as `bottom-right`.

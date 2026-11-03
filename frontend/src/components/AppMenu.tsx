@@ -10,6 +10,7 @@ import {
   Minus,
   PanelLeft,
   PanelTop,
+  PartyPopper,
   Plus,
   Puzzle,
   RefreshCw,
@@ -176,6 +177,12 @@ export function AppMenu() {
           })}
         />
         <PopupMenuSeparator id="app-menu-separator-3" />
+        <PopupMenuItem
+          id="app-menu-whats-new"
+          icon={<PartyPopper />}
+          label="What's new"
+          onClick={openPage(update?.current ? `ce://whats-new?version=${encodeURIComponent(update.current)}` : "ce://whats-new")}
+        />
         <PopupMenuItem id="app-menu-settings" icon={<Settings />} label="Settings" onClick={openPage("ce://settings")} />
         <PopupMenuItem id="app-menu-exit" icon={<LogOut />} label="Exit" onClick={() => void closeWindow()} />
       </PopupMenu>

@@ -253,28 +253,15 @@ pub fn release_notes(app: &AppHandle, version: &str) -> Result<ReleaseNotes, Str
     })
 }
 
-/// After an update the new version opens ce://whats-new once. A first run only remembers the version.
+/// Remembers the running version. The What's new page stays closed until it is opened from the menu.
 pub fn note_version(app: &AppHandle) {
     let current = env!("CARGO_PKG_VERSION");
-    let seen = settings::get(app).last_seen_version;
-    if seen == current {
+    if settings::get(app).last_seen_version == current {
         return;
     }
-    if settings::update(app, |settings| {
+    let _ = settings::update(app, |settings| {
         settings.last_seen_version = current.to_string()
-    })
-    .is_err()
-    {
-        return;
-    }
-    if !seen.is_empty() && !tauri::is_dev() {
-        let _ = tabs::create_tab(
-            app,
-            Some(format!("ce://whats-new?from={seen}")),
-            false,
-            None,
-        );
-    }
+    });
 }
 
 /// Remembers which exe is running. Returns the previous exe when this one is somewhere else,

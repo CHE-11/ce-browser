@@ -698,7 +698,7 @@ export type BrowserSettings = {
   windowBackdrop: "none" | "mica" | "acrylic";
   /** Check for a new version at startup and once a day. */
   autoUpdate: boolean;
-  /** Version that last ran. A newer running version opens ce://whats-new once. */
+  /** Version that last ran. */
   lastSeenVersion: string;
   /** Resting on a tab shows a small preview of its page. */
   tabHoverPreview: boolean;

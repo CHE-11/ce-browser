@@ -12,7 +12,7 @@ type WhatsNewPageProps = {
   params: URLSearchParams;
 };
 
-/** Opened once after an update: the release notes for the version that is now running. */
+/** Release notes for the version that is now running. */
 export function WhatsNewPage({ params }: WhatsNewPageProps) {
   useAppearanceFromSettings();
   const update = useUpdateStatus();
