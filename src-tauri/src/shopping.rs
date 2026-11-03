@@ -10,7 +10,13 @@ use crate::tools::{self, ProductPrice};
 use crate::{files, paths, settings, tabs, webview2};
 
 const SEARCH_URL: &str = "https://html.duckduckgo.com/html/";
+const BING_URL: &str = "https://www.bing.com/search";
+const BRAVE_URL: &str = "https://search.brave.com/search";
 const RESULTS_PER_QUERY: usize = 8;
+const MAX_QUERIES: usize = 12;
+const CONFIRM_LIMIT: usize = 12;
+const FETCH_BATCH: usize = 4;
+const STORES: [&str; 6] = ["amazon", "walmart", "bestbuy", "target", "ebay", "newegg"];
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -46,6 +52,8 @@ pub struct Offer {
     pub shipping: String,
     /// Product image from the other page. Empty until that page is read.
     pub image_url: String,
+    /// The confirmed price is under the tracked price.
+    pub lower: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -66,6 +74,8 @@ pub struct ShoppingDeals {
     pub cached: bool,
     /// Canonical product key shared with price tracking.
     pub key: String,
+    /// Which identifier was searched, and which engines were skipped.
+    pub search_note: String,
 }
 
 const NAME_SCRIPT: &str = r#"(function () {
@@ -76,7 +86,6 @@ const NAME_SCRIPT: &str = r#"(function () {
 
 const CACHE_MS: u64 = 60 * 60 * 1000;
 const SHOPPING_FILE: &str = "shopping.json";
-const VERIFY_LIMIT: usize = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -109,7 +118,14 @@ pub fn find_deals(app: &AppHandle, id: u32, force: bool) -> Result<ShoppingDeals
         Some(title) if !title.is_empty() => clean_name(title),
         _ => clean_name(&page_name(app, id)?),
     };
-    run_deals(app, &page_url, &name, product, force)
+    run_deals(
+        app,
+        &page_url,
+        &name,
+        product,
+        prices::ProductFacts::default(),
+        force,
+    )
 }
 
 pub fn find_deals_for_product(
@@ -118,12 +134,17 @@ pub fn find_deals_for_product(
     title: &str,
     force: bool,
 ) -> Result<ShoppingDeals, String> {
-    let product = prices::preview_url(url).ok();
-    let name = match product.as_ref().map(|item| item.title.trim()) {
+    let loaded = prices::preview_page(url).ok();
+    let facts = loaded
+        .as_ref()
+        .map(|page| page.facts.clone())
+        .unwrap_or_default();
+    let name = match loaded.as_ref().map(|page| page.product.title.trim()) {
         Some(title) if !title.is_empty() => clean_name(title),
         _ => clean_name(title),
     };
-    run_deals(app, url, &name, product, force)
+    let product = loaded.map(|page| page.product);
+    run_deals(app, url, &name, product, facts, force)
 }
 
 pub fn set_coupon_feedback(
@@ -199,6 +220,7 @@ fn run_deals(
     page_url: &str,
     name: &str,
     product: Option<ProductPrice>,
+    facts: prices::ProductFacts,
     force: bool,
 ) -> Result<ShoppingDeals, String> {
     let store = store_host(page_url).ok_or("Open a store's product page to find deals.")?;
@@ -213,73 +235,44 @@ fn run_deals(
     }
     let current = settings::get(app);
     let region = current.shopping_region.trim();
-    let mut queries = vec![
-        format!("{store} coupon code"),
-        format!("{name} price"),
-        format!("{name} coupon"),
-        format!("{name} buy"),
-    ];
-    if !current.shopping_competitors.is_empty() {
-        queries.push(format!(
-            "{} {}",
-            name,
-            current.shopping_competitors.join(" ")
-        ));
+    let ai_available = crate::ai::available(app, &current);
+    let room = if ai_available { MAX_QUERIES - 4 } else { MAX_QUERIES };
+    let mut queries = build_queries(name, &store, &facts, &current.shopping_competitors, room);
+    if ai_available {
+        queries = add_ai_queries(app, &current, name, &store, &facts, queries);
     }
-    let mut sources = Vec::new();
-    let mut failure = None;
-    for query in queries {
-        match search(&query, region) {
-            Ok(results) => {
-                for result in results {
-                    if !sources
-                        .iter()
-                        .any(|kept: &SearchResult| kept.url == result.url)
-                    {
-                        sources.push(result);
-                    }
-                }
-            }
-            Err(error) => failure = Some(error),
-        }
+    let gathered = gather(&queries, region);
+    if gathered.sources.is_empty() {
+        return Err(gathered.failure.unwrap_or_else(|| "The web search found nothing for this product.".into()));
     }
-    if sources.is_empty() {
-        return Err(
-            failure.unwrap_or_else(|| "The web search found nothing for this product.".into())
-        );
-    }
+    let sources = gathered.sources;
+    let skipped = gathered.skipped;
 
     let current_price = product.as_ref().map(|item| item.price);
     let mut coupons = extract_coupons(&sources);
-    let mut offers = extract_offers(&sources, page_url, current_price);
-    let ai_available = crate::ai::available(app, &current);
     let mut summary = String::new();
+    let mut picked = None;
     if ai_available {
-        match tools::chat(
-            app,
-            &current,
-            &current.shopping_model,
-            "You find shopping deals in web search results. Reply with one JSON object and nothing else.",
-            &deals_prompt(&store, name, product.as_ref(), &sources),
-            true,
-            Duration::from_secs(90),
-        ) {
-            Ok(reply) => {
-                if let Some(parsed) = parse_reply(&reply) {
-                    summary = parsed
-                        .get("summary")
-                        .and_then(|item| item.as_str())
-                        .unwrap_or("")
-                        .trim()
-                        .to_string();
-                    coupons = grounded_coupons(&parsed, &sources);
-                    offers = grounded_offers(&parsed, &sources, page_url, current_price);
-                }
+        if let Some(parsed) = ai_pick(app, &current, name, &store, &facts, &sources) {
+            summary = parsed
+                .get("summary")
+                .and_then(|item| item.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let grounded = grounded_coupons(&parsed, &sources);
+            if !grounded.is_empty() {
+                coupons = grounded;
             }
-            Err(_) => {}
+            let urls = picked_urls(&parsed, &sources);
+            if !urls.is_empty() {
+                picked = Some(urls);
+            }
         }
     }
-    offers = verify_offers(offers, page_url, current_price, name);
+    let candidates = picked.unwrap_or_else(|| rank_candidates(&sources, page_url, &facts));
+    let offers = confirm_offers(&candidates, page_url, current_price, name, &facts);
+    let search_note = search_note(&facts, &skipped, offers.is_empty());
     let checked_at = now_ms();
     let mut deals = ShoppingDeals {
         product,
@@ -293,6 +286,7 @@ fn run_deals(
         checked_at,
         cached: false,
         key: key.clone(),
+        search_note,
     };
     let feedback = remember(app, &key, &deals)?;
     deals = apply_feedback(&deals, &feedback, false);
@@ -544,61 +538,65 @@ fn currency_hint(text: &str) -> String {
     }
 }
 
-fn verify_offers(
-    offers: Vec<Offer>,
+fn confirm_offers(
+    candidates: &[SearchResult],
     page_url: &str,
     current_price: Option<f64>,
     name: &str,
+    facts: &prices::ProductFacts,
 ) -> Vec<Offer> {
-    let mut ranked = offers;
-    ranked.sort_by(|left, right| match (left.price, right.price) {
-        (Some(left), Some(right)) => left.total_cmp(&right),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => std::cmp::Ordering::Equal,
-    });
-    ranked.truncate(VERIFY_LIMIT);
     let mut kept = Vec::new();
-    for offer in ranked {
-        let Ok(fetched) = fetch_offer(&offer.url) else {
-            continue;
-        };
-        if prices::canonical_url(&fetched.url).is_some()
-            && prices::canonical_url(&fetched.url) == prices::canonical_url(page_url)
-        {
-            continue;
-        }
-        let Some(price) = (fetched.price > 0.0).then_some(fetched.price) else {
-            continue;
-        };
-        if !accept_confirmed_price(price, current_price) {
-            continue;
-        }
-        kept.push(Offer {
-            store: if offer.store.is_empty() {
-                store_host(&fetched.url).unwrap_or_default()
-            } else {
-                offer.store
-            },
-            price: Some(price),
-            currency: if fetched.currency.is_empty() {
-                offer.currency
-            } else {
-                fetched.currency
-            },
-            url: fetched.url,
-            note: offer.note,
-            verified: true,
-            variant_mismatch: variant_mismatch(name, &fetched.title),
-            shipping: fetched.shipping,
-            image_url: fetched.image_url,
+    for chunk in candidates.chunks(FETCH_BATCH) {
+        let fetched = std::thread::scope(|scope| {
+            let mut handles = Vec::new();
+            for source in chunk {
+                let url = source.url.clone();
+                handles.push(scope.spawn(move || fetch_offer(&url)));
+            }
+            handles
+                .into_iter()
+                .filter_map(|handle| handle.join().ok().and_then(Result::ok))
+                .collect::<Vec<_>>()
         });
+        for (fetched, page_facts) in fetched {
+            if prices::canonical_url(&fetched.url).is_some()
+                && prices::canonical_url(&fetched.url) == prices::canonical_url(page_url)
+            {
+                continue;
+            }
+            if fetched.price <= 0.0 || kept.iter().any(|offer: &Offer| offer.url == fetched.url) {
+                continue;
+            }
+            let same = same_catalog(facts, &page_facts);
+            kept.push(Offer {
+                store: store_host(&fetched.url).unwrap_or_default(),
+                price: Some(fetched.price),
+                currency: fetched.currency,
+                url: fetched.url,
+                note: if same {
+                    "Same item".into()
+                } else {
+                    String::new()
+                },
+                verified: true,
+                variant_mismatch: !same && variant_mismatch(name, &fetched.title),
+                shipping: fetched.shipping,
+                image_url: fetched.image_url,
+                lower: current_price.is_some_and(|current| fetched.price < current),
+            });
+        }
     }
     kept.sort_by(|left, right| match (left.price, right.price) {
         (Some(left), Some(right)) => left.total_cmp(&right),
         _ => std::cmp::Ordering::Equal,
     });
+    kept.truncate(CONFIRM_LIMIT);
     kept
+}
+
+fn same_catalog(want: &prices::ProductFacts, got: &prices::ProductFacts) -> bool {
+    (!want.gtin.is_empty() && want.gtin == got.gtin)
+        || (!want.mpn.is_empty() && want.mpn.eq_ignore_ascii_case(&got.mpn))
 }
 
 struct FetchedOffer {
@@ -610,7 +608,7 @@ struct FetchedOffer {
     image_url: String,
 }
 
-fn fetch_offer(url: &str) -> Result<FetchedOffer, String> {
+fn fetch_offer(url: &str) -> Result<(FetchedOffer, prices::ProductFacts), String> {
     let response = ureq::get(url)
         .timeout(Duration::from_secs(12))
         .set("User-Agent", USER_AGENT)
@@ -622,14 +620,18 @@ fn fetch_offer(url: &str) -> Result<FetchedOffer, String> {
         .map_err(|_| "Couldn't open that offer.".to_string())?;
     let product = prices::parse_price(&body)
         .ok_or_else(|| "No price was found on that offer.".to_string())?;
-    Ok(FetchedOffer {
-        url: final_url,
-        title: product.title,
-        price: product.price,
-        currency: product.currency,
-        shipping: prices::shipping_hint(&body),
-        image_url: product.image_url,
-    })
+    let facts = prices::product_facts(&body);
+    Ok((
+        FetchedOffer {
+            url: final_url,
+            title: product.title,
+            price: product.price,
+            currency: product.currency,
+            shipping: prices::shipping_hint(&body),
+            image_url: product.image_url,
+        },
+        facts,
+    ))
 }
 
 pub fn variant_mismatch(product: &str, title: &str) -> bool {
@@ -688,26 +690,450 @@ fn clean_name(title: &str) -> String {
         .collect()
 }
 
-fn search(query: &str, region: &str) -> Result<Vec<SearchResult>, String> {
-    let mut request = ureq::get(SEARCH_URL)
-        .timeout(Duration::from_secs(15))
+struct Gathered {
+    sources: Vec<SearchResult>,
+    skipped: Vec<String>,
+    failure: Option<String>,
+}
+
+fn build_queries(
+    name: &str,
+    store: &str,
+    facts: &prices::ProductFacts,
+    competitors: &[String],
+    limit: usize,
+) -> Vec<String> {
+    let quoted = format!("\"{name}\"");
+    let mut queries = vec![
+        format!("{store} coupon code"),
+        format!("{name} coupon"),
+        format!("{quoted} price -site:{store}"),
+        format!("{quoted} buy -site:{store}"),
+    ];
+    if let Some((_, identifier)) = facts.identifier() {
+        queries.push(identifier.to_string());
+    }
+    for shop in STORES {
+        if queries.len() >= limit {
+            break;
+        }
+        if store.contains(shop) {
+            continue;
+        }
+        queries.push(format!("{quoted} {shop}"));
+    }
+    for host in competitors {
+        if queries.len() >= limit {
+            break;
+        }
+        let host = host.trim();
+        if host.is_empty() || store.contains(host) {
+            continue;
+        }
+        queries.push(format!("{quoted} {host}"));
+    }
+    queries.truncate(limit);
+    queries
+}
+
+fn add_ai_queries(
+    app: &AppHandle,
+    current: &settings::BrowserSettings,
+    name: &str,
+    store: &str,
+    facts: &prices::ProductFacts,
+    mut queries: Vec<String>,
+) -> Vec<String> {
+    let identifier = facts
+        .identifier()
+        .map(|(kind, value)| format!("{kind} {value}"))
+        .unwrap_or_else(|| "none".into());
+    let prompt = format!(
+        "Product: {name}\nBrand: {}\nIdentifier: {identifier}\nCurrent store: {store}\n\
+Reply with one JSON object {{\"queries\": [\"...\"]}} of up to 4 short web searches for this exact product at other stores. Do not include prices or URLs.",
+        if facts.brand.is_empty() { "unknown" } else { facts.brand.as_str() }
+    );
+    let Ok(reply) = tools::chat(
+        app,
+        current,
+        &current.shopping_model,
+        "You write web searches for one product. Reply with one JSON object and nothing else.",
+        &prompt,
+        true,
+        Duration::from_secs(25),
+    ) else {
+        return queries;
+    };
+    let Some(parsed) = parse_reply(&reply) else {
+        return queries;
+    };
+    let Some(items) = parsed.get("queries").and_then(|item| item.as_array()) else {
+        return queries;
+    };
+    for item in items.iter().take(4) {
+        let Some(query) = item.as_str().map(str::trim) else {
+            continue;
+        };
+        if query.is_empty() || query.len() > 120 || query.contains("://") {
+            continue;
+        }
+        if !queries.iter().any(|kept| kept.eq_ignore_ascii_case(query)) {
+            queries.push(query.to_string());
+        }
+    }
+    queries.truncate(MAX_QUERIES);
+    queries
+}
+
+fn gather(queries: &[String], region: &str) -> Gathered {
+    let mut sources = Vec::new();
+    let mut skipped = Vec::new();
+    let mut failure = None;
+    for query in queries {
+        let (results, blocked) = search_query(query, region);
+        for name in blocked {
+            if !skipped.iter().any(|kept| kept == &name) {
+                skipped.push(name);
+            }
+        }
+        if results.is_empty() {
+            failure = Some(engine_failure(&skipped));
+            continue;
+        }
+        for result in results {
+            if !sources.iter().any(|kept: &SearchResult| kept.url == result.url) {
+                sources.push(result);
+            }
+        }
+    }
+    Gathered {
+        sources,
+        skipped,
+        failure,
+    }
+}
+
+fn engine_failure(skipped: &[String]) -> String {
+    if skipped.is_empty() {
+        "The web search found nothing for this product.".into()
+    } else if skipped.len() == 1 {
+        format!(
+            "{} asked for a check and the other searches found nothing. Wait a minute, then choose Search again.",
+            skipped[0]
+        )
+    } else {
+        format!(
+            "{} asked for a check and no search found this product. Wait a minute, then choose Search again.",
+            skipped.join(", ")
+        )
+    }
+}
+
+/// The first engine that returns results wins. A blocked engine is skipped.
+fn search_query(query: &str, region: &str) -> (Vec<SearchResult>, Vec<String>) {
+    let attempts = [
+        ("DuckDuckGo", search_duckduckgo(query, region)),
+        ("Bing", search_bing(query)),
+        ("Brave", search_brave(query)),
+    ];
+    combine_engines(&attempts)
+}
+
+fn combine_engines(
+    attempts: &[(&str, Result<Vec<SearchResult>, String>)],
+) -> (Vec<SearchResult>, Vec<String>) {
+    let mut skipped = Vec::new();
+    for (name, outcome) in attempts {
+        match outcome {
+            Ok(results) if !results.is_empty() => return (results.clone(), skipped),
+            Ok(_) => {}
+            Err(_) => skipped.push((*name).to_string()),
+        }
+    }
+    (Vec::new(), skipped)
+}
+
+fn search_duckduckgo(query: &str, region: &str) -> Result<Vec<SearchResult>, String> {
+    let body = fetch_search(SEARCH_URL, query, if region.is_empty() { None } else { Some(("kl", region)) })?;
+    let results = parse_results(&body, RESULTS_PER_QUERY);
+    if results.is_empty() && body.contains("anomaly") {
+        return Err("DuckDuckGo asked for a captcha.".into());
+    }
+    Ok(results)
+}
+
+fn search_bing(query: &str) -> Result<Vec<SearchResult>, String> {
+    let body = fetch_search(BING_URL, query, None)?;
+    let results = parse_bing(&body, RESULTS_PER_QUERY);
+    if results.is_empty() && blocked_page(&body) {
+        return Err("Bing asked for a check.".into());
+    }
+    Ok(results)
+}
+
+fn search_brave(query: &str) -> Result<Vec<SearchResult>, String> {
+    let body = fetch_search(BRAVE_URL, query, None)?;
+    let results = parse_brave(&body, RESULTS_PER_QUERY);
+    if results.is_empty() && blocked_page(&body) {
+        return Err("Brave asked for a check.".into());
+    }
+    Ok(results)
+}
+
+fn fetch_search(url: &str, query: &str, extra: Option<(&str, &str)>) -> Result<String, String> {
+    let mut request = ureq::get(url)
+        .timeout(Duration::from_secs(12))
         .set("User-Agent", USER_AGENT)
         .query("q", query);
-    if !region.is_empty() {
-        request = request.query("kl", region);
+    if let Some((key, value)) = extra {
+        request = request.query(key, value);
     }
-    let body = request
+    request
         .call()
         .map_err(|error| format!("Couldn't reach the web search. {error}"))?
         .into_string()
-        .map_err(|error| error.to_string())?;
-    let results = parse_results(&body, RESULTS_PER_QUERY);
-    if results.is_empty() && body.contains("anomaly") {
-        return Err(
-            "The web search asked for a captcha. Wait a minute, then choose Search again.".into(),
-        );
+        .map_err(|error| error.to_string())
+}
+
+fn blocked_page(body: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    lower.contains("cf-challenge")
+        || lower.contains("captcha")
+        || lower.contains("unusual traffic")
+        || lower.contains("just a moment")
+}
+
+fn parse_bing(html: &str, limit: usize) -> Vec<SearchResult> {
+    parse_blocks(html, "class=\"b_algo\"", limit, |block| {
+        let href = first_href(block)?;
+        if store_host(&href).is_some_and(|host| host.contains("bing.com")) {
+            return None;
+        }
+        let title = anchor_text(block).unwrap_or_default();
+        let snippet = paragraph_text(block);
+        (!title.is_empty()).then_some(SearchResult {
+            title,
+            url: href,
+            snippet,
+        })
+    })
+}
+
+fn parse_brave(html: &str, limit: usize) -> Vec<SearchResult> {
+    parse_blocks(html, "data-type=\"web\"", limit, |block| {
+        let href = first_href(block)?;
+        if store_host(&href).is_some_and(|host| host.contains("brave.com")) {
+            return None;
+        }
+        let title = marked_text(block, "class=\"title").or_else(|| anchor_text(block))?;
+        let snippet = marked_text(block, "snippet-description").unwrap_or_default();
+        (!title.is_empty()).then_some(SearchResult {
+            title,
+            url: href,
+            snippet,
+        })
+    })
+}
+
+fn parse_blocks(
+    html: &str,
+    marker: &str,
+    limit: usize,
+    read: impl Fn(&str) -> Option<SearchResult>,
+) -> Vec<SearchResult> {
+    let mut out = Vec::new();
+    let mut offset = 0;
+    while out.len() < limit {
+        let Some(found) = html[offset..].find(marker) else {
+            break;
+        };
+        let at = offset + found;
+        let next = html[at + marker.len()..]
+            .find(marker)
+            .map(|index| at + marker.len() + index)
+            .unwrap_or(html.len());
+        if let Some(result) = read(&html[at..next]) {
+            if !out.iter().any(|kept: &SearchResult| kept.url == result.url) {
+                out.push(result);
+            }
+        }
+        offset = at + marker.len();
     }
-    Ok(results)
+    out
+}
+
+fn first_href(block: &str) -> Option<String> {
+    let start = block.find("href=\"")? + 6;
+    let end = block[start..].find('"')? + start;
+    let href = decode_entities(&block[start..end]);
+    if href.starts_with("http://") || href.starts_with("https://") {
+        Some(href)
+    } else {
+        None
+    }
+}
+
+fn anchor_text(block: &str) -> Option<String> {
+    let start = block.find("href=\"")?;
+    let open = block[start..].find('>')? + start + 1;
+    let end = block[open..].find("</a>")? + open;
+    let title = text(&block[open..end]);
+    (!title.is_empty()).then_some(title)
+}
+
+fn paragraph_text(block: &str) -> String {
+    let Some(start) = block.find("<p") else {
+        return String::new();
+    };
+    let Some(open) = block[start..].find('>').map(|index| start + index + 1) else {
+        return String::new();
+    };
+    let end = block[open..]
+        .find("</p>")
+        .map(|index| open + index)
+        .unwrap_or(block.len());
+    text(&block[open..end])
+}
+
+fn marked_text(block: &str, marker: &str) -> Option<String> {
+    let start = block.find(marker)?;
+    let open = block[start..].find('>')? + start + 1;
+    let end = block[open..]
+        .find('<')
+        .map(|index| open + index)
+        .unwrap_or(block.len());
+    let value = text(&block[open..end]);
+    (!value.is_empty()).then_some(value)
+}
+
+fn rank_candidates(
+    sources: &[SearchResult],
+    page_url: &str,
+    facts: &prices::ProductFacts,
+) -> Vec<SearchResult> {
+    let current = store_host(page_url);
+    let identifier = facts
+        .identifier()
+        .map(|(_, value)| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    let mut ranked: Vec<(i32, &SearchResult)> = sources
+        .iter()
+        .filter(|source| {
+            !same_url(&source.url, page_url)
+                && store_host(&source.url) != current
+                && !skip_host(&source.url)
+        })
+        .map(|source| {
+            let blob = format!("{} {}", source.title, source.url).to_ascii_lowercase();
+            let mut score = 0;
+            if !identifier.is_empty() && blob.contains(&identifier) {
+                score += 2;
+            }
+            if snippet_price(&source.snippet)
+                .or_else(|| snippet_price(&source.title))
+                .is_some()
+            {
+                score += 1;
+            }
+            (score, source)
+        })
+        .collect();
+    ranked.sort_by(|left, right| right.0.cmp(&left.0));
+    ranked
+        .into_iter()
+        .take(CONFIRM_LIMIT)
+        .map(|(_, source)| source.clone())
+        .collect()
+}
+
+fn skip_host(url: &str) -> bool {
+    store_host(url).is_some_and(|host| {
+        ["reddit.com", "youtube.com", "facebook.com", "pinterest.com", "wikipedia.org"]
+            .iter()
+            .any(|blocked| host == *blocked || host.ends_with(&format!(".{blocked}")))
+    })
+}
+
+fn picked_urls(reply: &serde_json::Value, sources: &[SearchResult]) -> Vec<SearchResult> {
+    let Some(items) = reply.get("urls").and_then(|item| item.as_array()) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in items {
+        let Some(url) = item.as_str() else {
+            continue;
+        };
+        let Some(source) = sources.iter().find(|source| same_url(&source.url, url)) else {
+            continue;
+        };
+        if !out.iter().any(|kept: &SearchResult| same_url(&kept.url, &source.url)) {
+            out.push(source.clone());
+        }
+        if out.len() >= CONFIRM_LIMIT {
+            break;
+        }
+    }
+    out
+}
+
+fn ai_pick(
+    app: &AppHandle,
+    current: &settings::BrowserSettings,
+    name: &str,
+    store: &str,
+    facts: &prices::ProductFacts,
+    sources: &[SearchResult],
+) -> Option<serde_json::Value> {
+    let identifier = facts
+        .identifier()
+        .map(|(kind, value)| format!("{kind} {value}"))
+        .unwrap_or_else(|| "none".into());
+    let mut results = String::new();
+    for (index, result) in sources.iter().take(24).enumerate() {
+        results.push_str(&format!(
+            "[{}] {}\nURL: {}\n{}\n\n",
+            index + 1,
+            result.title,
+            result.url,
+            result.snippet
+        ));
+    }
+    let prompt = format!(
+        "Product: {name}\nBrand: {}\nIdentifier: {identifier}\nCurrent store: {store}\n\nSearch results:\n{results}\
+Return a JSON object with these keys:\n\
+- \"summary\": one or two sentences on whether another store sells this product.\n\
+- \"coupons\": a list of {{\"code\", \"description\", \"source\"}} for coupon codes that appear word for word in the results. \"source\" is that result's URL.\n\
+- \"urls\": the result URLs that are this same product sold by another store, not a review, an accessory, or {store}.\n\
+Use only the results above. Do not invent codes or URLs.",
+        if facts.brand.is_empty() { "unknown" } else { facts.brand.as_str() }
+    );
+    let reply = tools::chat(
+        app,
+        current,
+        &current.shopping_model,
+        "You match a product to web search results. Reply with one JSON object and nothing else.",
+        &prompt,
+        true,
+        Duration::from_secs(45),
+    )
+    .ok()?;
+    parse_reply(&reply)
+}
+
+fn search_note(facts: &prices::ProductFacts, skipped: &[String], none_confirmed: bool) -> String {
+    let mut parts = Vec::new();
+    if let Some((kind, value)) = facts.identifier() {
+        parts.push(format!("Searched {kind} {value}."));
+    }
+    if skipped.len() == 1 {
+        parts.push(format!("{} was skipped.", skipped[0]));
+    } else if skipped.len() > 1 {
+        parts.push(format!("{} were skipped.", skipped.join(", ")));
+    }
+    if none_confirmed {
+        parts.push("No price could be confirmed.".into());
+    }
+    parts.join(" ")
 }
 
 /// Reads organic results from a DuckDuckGo HTML results page. Ads are skipped.
@@ -866,39 +1292,6 @@ fn decode_entities(text: &str) -> String {
     out
 }
 
-fn deals_prompt(
-    store: &str,
-    name: &str,
-    product: Option<&ProductPrice>,
-    sources: &[SearchResult],
-) -> String {
-    let price = product
-        .map(|item| {
-            format!("{} {}", item.currency, item.price)
-                .trim()
-                .to_string()
-        })
-        .unwrap_or_else(|| "unknown".into());
-    let mut results = String::new();
-    for (index, result) in sources.iter().enumerate() {
-        results.push_str(&format!(
-            "[{}] {}\nURL: {}\n{}\n\n",
-            index + 1,
-            result.title,
-            result.url,
-            result.snippet
-        ));
-    }
-    format!(
-        "Store: {store}\nProduct: {name}\nCurrent price: {price}\n\nSearch results:\n{results}\
-Return a JSON object with these keys:\n\
-- \"summary\": one or two sentences on whether a coupon or a lower price was found.\n\
-- \"coupons\": a list of {{\"code\", \"description\", \"source\"}} for coupon or promo codes for {store} that appear word for word in the results. \"source\" is the URL of that result.\n\
-- \"offers\": a list of {{\"store\", \"price\", \"currency\", \"url\", \"note\"}} for this same product sold somewhere else. \"price\" is a number or null. \"url\" is the URL of that result.\n\
-Use only the results above. Leave a list empty when nothing qualifies. Do not invent codes, prices or URLs."
-    )
-}
-
 fn parse_reply(reply: &str) -> Option<serde_json::Value> {
     let start = reply.find('{')?;
     let end = reply.rfind('}')?;
@@ -1034,9 +1427,9 @@ fn offer_price(value: &serde_json::Value) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        SearchResult, accept_confirmed_price, clean_name, extract_coupons, extract_offers,
-        grounded_coupons, grounded_offers, parse_reply, parse_results, target_url,
-        variant_mismatch,
+        SearchResult, accept_confirmed_price, build_queries, clean_name, combine_engines,
+        extract_coupons, extract_offers, grounded_coupons, grounded_offers, parse_bing,
+        parse_brave, parse_reply, parse_results, search_note, target_url, variant_mismatch,
     };
 
     const PAGE: &str = r#"
@@ -1151,6 +1544,82 @@ mod tests {
             "Blue ceramic mug 12oz",
             "Blue ceramic mug 12oz at Other Store"
         ));
+    }
+
+    #[test]
+    fn queries_include_the_identifier_and_other_stores() {
+        let facts = crate::prices::ProductFacts {
+            gtin: "0012345678905".into(),
+            ..crate::prices::ProductFacts::default()
+        };
+        let queries = build_queries(
+            "Blue Mug",
+            "mugshop.test",
+            &facts,
+            &["bhphotovideo.com".into()],
+            12,
+        );
+        assert!(queries.iter().any(|query| query == "0012345678905"));
+        assert!(queries.iter().any(|query| query.contains("amazon")));
+        assert!(queries.iter().any(|query| query.contains("-site:mugshop.test")));
+        assert!(queries.iter().any(|query| query.contains("bhphotovideo.com")));
+    }
+
+    #[test]
+    fn a_blocked_engine_is_skipped_when_another_returns_results() {
+        let hit = SearchResult {
+            title: "Blue Mug".into(),
+            url: "https://other.test/mug".into(),
+            snippet: "$9.99".into(),
+        };
+        let (results, skipped) = combine_engines(&[
+            ("DuckDuckGo", Err("captcha".into())),
+            ("Bing", Ok(vec![hit])),
+            ("Brave", Err("captcha".into())),
+        ]);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].url, "https://other.test/mug");
+        assert_eq!(skipped, vec!["DuckDuckGo".to_string()]);
+    }
+
+    #[test]
+    fn every_blocked_engine_is_named() {
+        let (results, skipped) = combine_engines(&[
+            ("DuckDuckGo", Err("captcha".into())),
+            ("Bing", Err("captcha".into())),
+            ("Brave", Err("captcha".into())),
+        ]);
+        assert!(results.is_empty());
+        assert_eq!(skipped, vec!["DuckDuckGo", "Bing", "Brave"]);
+    }
+
+    #[test]
+    fn bing_and_brave_results_keep_the_product_link() {
+        let bing = r#"<li class="b_algo"><h2><a href="https://other.test/mug">Blue Mug</a></h2><div class="b_caption"><p>Blue Mug for $9.99</p></div></li>"#;
+        let parsed = parse_bing(bing, 8);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].url, "https://other.test/mug");
+        assert_eq!(parsed[0].title, "Blue Mug");
+        assert!(parsed[0].snippet.contains("9.99"));
+
+        let brave = r#"<div class="snippet" data-type="web"><a href="https://other.test/mug"><div class="title">Blue Mug</div></a><div class="snippet-description">Blue Mug for $9.99</div></div>"#;
+        let parsed = parse_brave(brave, 8);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].url, "https://other.test/mug");
+        assert_eq!(parsed[0].title, "Blue Mug");
+        assert!(parsed[0].snippet.contains("9.99"));
+    }
+
+    #[test]
+    fn the_search_note_names_the_identifier_and_a_skipped_engine() {
+        let facts = crate::prices::ProductFacts {
+            gtin: "0012345678905".into(),
+            ..crate::prices::ProductFacts::default()
+        };
+        let note = search_note(&facts, &["DuckDuckGo".into()], true);
+        assert!(note.contains("GTIN 0012345678905"));
+        assert!(note.contains("DuckDuckGo was skipped"));
+        assert!(note.contains("No price could be confirmed"));
     }
 
     #[test]

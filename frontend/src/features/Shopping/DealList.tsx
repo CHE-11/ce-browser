@@ -161,9 +161,14 @@ export function DealList({
             <h3 id={`${id}-offers-title`} className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
               {deals.offers.some((offer) => offer.verified) ? "Verified prices" : "Unverified prices"}
             </h3>
+            {deals.searchNote ? (
+              <p id={`${id}-search-note`} className="text-xs text-zinc-500">
+                {deals.searchNote}
+              </p>
+            ) : null}
             {deals.offers.length === 0 ? (
               <p id={`${id}-offers-empty`} className="text-sm text-zinc-500">
-                No lower price found.
+                {pricesOnly ? "No price could be confirmed." : "No lower price found."}
               </p>
             ) : (
               <ul id={`${id}-offer-list`} className="flex flex-col gap-1">
@@ -188,6 +193,7 @@ export function DealList({
                           <span id={`${id}-offer-store-${index}`} className="block truncate text-sm">
                             {offer.store || hostOf(offer.url)}
                             {offer.verified ? "" : " · unverified"}
+                            {offer.lower ? " · lower" : ""}
                             {offer.variantMismatch ? " · may be a different variant" : ""}
                           </span>
                           {offer.note || offer.shipping ? (
@@ -196,7 +202,7 @@ export function DealList({
                             </span>
                           ) : null}
                         </span>
-                        <span id={`${id}-offer-price-${index}`} className="shrink-0 text-sm font-medium text-emerald-300">
+                        <span id={`${id}-offer-price-${index}`} className={offer.lower ? "shrink-0 text-sm font-medium text-emerald-300" : "shrink-0 text-sm font-medium"}>
                           {formatPrice(offer.price, offer.currency || deals.product?.currency || "")}
                         </span>
                       </button>

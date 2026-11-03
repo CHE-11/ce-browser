@@ -156,6 +156,45 @@ pub struct AlertNotice {
     pub launch: String,
 }
 
+/// Brand and catalog ids from a product page. Empty when the page does not say.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProductFacts {
+    pub brand: String,
+    pub gtin: String,
+    pub mpn: String,
+    pub sku: String,
+}
+
+impl ProductFacts {
+    /// The best catalog id: GTIN, then MPN, then SKU.
+    pub fn identifier(&self) -> Option<(&str, &str)> {
+        if !self.gtin.is_empty() {
+            return Some(("GTIN", self.gtin.as_str()));
+        }
+        if !self.mpn.is_empty() {
+            return Some(("MPN", self.mpn.as_str()));
+        }
+        if !self.sku.is_empty() {
+            return Some(("SKU", self.sku.as_str()));
+        }
+        None
+    }
+}
+
+/// A product page and the catalog ids read from the same HTML.
+pub struct PreviewPage {
+    pub product: ProductPrice,
+    pub facts: ProductFacts,
+}
+
+pub fn preview_page(url: &str) -> Result<PreviewPage, String> {
+    let fetched = fetch_page(url)?;
+    Ok(PreviewPage {
+        product: fetched.product,
+        facts: fetched.facts,
+    })
+}
+
 pub fn parse_price(html: &str) -> Option<ProductPrice> {
     let mut price = price_from_json_ld(html)
         .or_else(|| price_from_meta(html))
@@ -483,6 +522,7 @@ fn fetch_batch(plan: &[(String, Option<u32>)]) -> Vec<BatchOutcome> {
             outcomes.push(BatchOutcome::Fetched(match result {
                 Ok(page) => Ok(FetchedPage {
                     product: page.product.clone(),
+                    facts: page.facts.clone(),
                 }),
                 Err(error) => Err(error.clone()),
             }));
@@ -836,6 +876,7 @@ fn open_tab(app: &AppHandle, url: &str) -> Option<u32> {
 
 struct FetchedPage {
     product: ProductPrice,
+    facts: ProductFacts,
 }
 
 fn fetch_page(url: &str) -> Result<FetchedPage, String> {
@@ -882,7 +923,8 @@ fn product_from_body(url: &str, body: &str) -> Result<FetchedPage, String> {
     product.url = url.to_string();
     product.store = store_host(url).unwrap_or_default();
     product.last_method = "fetch".into();
-    Ok(FetchedPage { product })
+    let facts = product_facts(body);
+    Ok(FetchedPage { product, facts })
 }
 
 fn looks_like_challenge(body: &str) -> bool {
@@ -1011,6 +1053,92 @@ fn price_from_meta(html: &str) -> Option<ProductPrice> {
         None,
         String::new(),
     ))
+}
+
+/// Brand, GTIN, MPN and SKU from schema.org Product JSON-LD. Other markup is ignored.
+pub fn product_facts(html: &str) -> ProductFacts {
+    let mut facts = ProductFacts::default();
+    let lower = html.to_ascii_lowercase();
+    let mut search = html;
+    let mut search_lower = lower.as_str();
+    while let Some(index) = search_lower.find("application/ld+json") {
+        search = &search[index..];
+        search_lower = &search_lower[index..];
+        let Some(start) = search.find('>').map(|at| at + 1) else {
+            break;
+        };
+        let Some(end) = search_lower[start..].find("</script>").map(|at| start + at) else {
+            break;
+        };
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(search[start..end].trim()) {
+            fill_facts(&value, &mut facts);
+        }
+        search = &search[end..];
+        search_lower = &search_lower[end..];
+    }
+    facts
+}
+
+fn fill_facts(value: &serde_json::Value, facts: &mut ProductFacts) {
+    if let Some(array) = value.as_array() {
+        for item in array {
+            fill_facts(item, facts);
+        }
+        return;
+    }
+    let Some(object) = value.as_object() else {
+        return;
+    };
+    if let Some(graph) = object.get("@graph") {
+        fill_facts(graph, facts);
+    }
+    let product = is_type(value, "Product") || object.contains_key("offers");
+    if product {
+        if facts.brand.is_empty() {
+            facts.brand = brand_text(object.get("brand"));
+        }
+        if facts.gtin.is_empty() {
+            facts.gtin = gtin_text(object);
+        }
+        if facts.mpn.is_empty() {
+            facts.mpn = catalog_text(object.get("mpn"));
+        }
+        if facts.sku.is_empty() {
+            facts.sku = catalog_text(object.get("sku"));
+        }
+    }
+    for item in object.values() {
+        if item.is_object() || item.is_array() {
+            fill_facts(item, facts);
+        }
+    }
+}
+
+fn brand_text(value: Option<&serde_json::Value>) -> String {
+    let Some(value) = value else {
+        return String::new();
+    };
+    if let Some(text) = value.as_str() {
+        return text.trim().chars().take(80).collect();
+    }
+    json_text(value.get("name")).chars().take(80).collect()
+}
+
+fn gtin_text(object: &serde_json::Map<String, serde_json::Value>) -> String {
+    for key in ["gtin", "gtin13", "gtin12", "gtin8", "gtin14"] {
+        let digits: String = json_text(object.get(key))
+            .chars()
+            .filter(|character| character.is_ascii_digit())
+            .collect();
+        if (8..=14).contains(&digits.len()) {
+            return digits;
+        }
+    }
+    String::new()
+}
+
+fn catalog_text(value: Option<&serde_json::Value>) -> String {
+    json_text(value).chars().take(40).collect()
 }
 
 fn price_from_json_ld(html: &str) -> Option<ProductPrice> {
@@ -1374,9 +1502,21 @@ fn tag_attribute(tag: &str, name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ProductPrice, alerts_for, canonical_url, migrate_item, parse_price, product_key,
-        push_history, same_tracked, shipping_hint,
+        ProductPrice, alerts_for, canonical_url, migrate_item, parse_price, product_facts,
+        product_key, push_history, same_tracked, shipping_hint,
     };
+
+    #[test]
+    fn a_product_block_keeps_its_brand_and_catalog_ids() {
+        let html = r#"<script type="application/ld+json">{"@type":"Product","name":"Mug","sku":"MUG-1","mpn":"AC-12","gtin13":"0012345678905","brand":{"@type":"Brand","name":"Acme"},"offers":{"price":"12.50","priceCurrency":"USD"}}</script>"#;
+        let facts = product_facts(html);
+        assert_eq!(facts.brand, "Acme");
+        assert_eq!(facts.gtin, "0012345678905");
+        assert_eq!(facts.mpn, "AC-12");
+        assert_eq!(facts.sku, "MUG-1");
+        assert_eq!(facts.identifier(), Some(("GTIN", "0012345678905")));
+        assert!(product_facts("<p>No product</p>").identifier().is_none());
+    }
 
     #[test]
     fn a_product_block_yields_its_price() {

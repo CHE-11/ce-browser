@@ -245,6 +245,8 @@ export type Offer = {
   shipping: string;
   /** Product image from the other page. Empty until that page is read. */
   imageUrl: string;
+  /** The confirmed price is under the tracked price. */
+  lower: boolean;
 };
 
 export type ShoppingDeals = {
@@ -256,7 +258,7 @@ export type ShoppingDeals = {
   store: string;
   summary: string;
   coupons: Coupon[];
-  /** Cheaper offers elsewhere, cheapest first. */
+  /** Confirmed prices elsewhere, cheapest first. */
   offers: Offer[];
   sources: SearchResult[];
   aiAvailable: boolean;
@@ -264,6 +266,8 @@ export type ShoppingDeals = {
   cached: boolean;
   /** Canonical product key shared with price tracking. */
   key: string;
+  /** Which identifier was searched, and which engines were skipped. */
+  searchNote: string;
 };
 
 export type StoragePair = {
