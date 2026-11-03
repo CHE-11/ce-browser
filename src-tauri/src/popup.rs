@@ -1523,9 +1523,15 @@ mod tests {
             height: 0.0,
         };
         let placed = place(anchor, 400.0, 200.0, Placement::Center, SCREEN, 4.0, 2.0);
-        assert_eq!((placed.x, placed.y, placed.width, placed.height), (300.0, 300.0, 400.0, 200.0));
+        assert_eq!(
+            (placed.x, placed.y, placed.width, placed.height),
+            (300.0, 300.0, 400.0, 200.0)
+        );
         let fitted = place(anchor, 2000.0, 2000.0, Placement::Center, SCREEN, 4.0, 2.0);
-        assert_eq!((fitted.x, fitted.y, fitted.width, fitted.height), (0.0, 0.0, 1000.0, 800.0));
+        assert_eq!(
+            (fitted.x, fitted.y, fitted.width, fitted.height),
+            (0.0, 0.0, 1000.0, 800.0)
+        );
     }
 
     #[test]

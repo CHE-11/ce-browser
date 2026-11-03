@@ -1252,7 +1252,8 @@ struct EarlyScriptSlot {
 }
 
 fn early_slots() -> &'static Mutex<HashMap<u32, EarlyScriptSlot>> {
-    static SLOTS: std::sync::OnceLock<Mutex<HashMap<u32, EarlyScriptSlot>>> = std::sync::OnceLock::new();
+    static SLOTS: std::sync::OnceLock<Mutex<HashMap<u32, EarlyScriptSlot>>> =
+        std::sync::OnceLock::new();
     SLOTS.get_or_init(Default::default)
 }
 

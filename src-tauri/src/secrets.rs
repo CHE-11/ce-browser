@@ -70,7 +70,8 @@ pub fn store_key(app: &AppHandle, provider: &str, key: &str) -> Result<(), Strin
     if key.chars().count() > 512 {
         return Err("That key is too long.".into());
     }
-    let ciphertext = protect(key).map_err(|_| "Couldn't save the key on this computer.".to_string())?;
+    let ciphertext =
+        protect(key).map_err(|_| "Couldn't save the key on this computer.".to_string())?;
     let encoded = base64::engine::general_purpose::STANDARD.encode(ciphertext);
     let mut file = read_file(app);
     file.keys.retain(|slot| slot.provider != provider);
@@ -174,7 +175,7 @@ fn unprotect(ciphertext: &[u8]) -> Result<String, ()> {
 fn protect_bytes(plain: &[u8]) -> Result<Vec<u8>, ()> {
     use windows::Win32::Foundation::{HLOCAL, LocalFree};
     use windows::Win32::Security::Cryptography::{
-        CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+        CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData,
     };
 
     if plain.is_empty() {
@@ -212,7 +213,7 @@ fn protect_bytes(plain: &[u8]) -> Result<Vec<u8>, ()> {
 fn unprotect_bytes(ciphertext: &[u8]) -> Result<Vec<u8>, ()> {
     use windows::Win32::Foundation::{HLOCAL, LocalFree};
     use windows::Win32::Security::Cryptography::{
-        CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+        CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptUnprotectData,
     };
 
     if ciphertext.is_empty() {
@@ -262,7 +263,11 @@ mod tests {
         let plain = "sk-test-secret-value";
         let cipher = protect(plain).expect("encrypt");
         assert!(!cipher.is_empty());
-        assert!(!cipher.windows(plain.len()).any(|window| window == plain.as_bytes()));
+        assert!(
+            !cipher
+                .windows(plain.len())
+                .any(|window| window == plain.as_bytes())
+        );
         let opened = unprotect(&cipher).expect("decrypt");
         assert_eq!(opened, plain);
         assert_eq!(hint_of(plain), "alue");

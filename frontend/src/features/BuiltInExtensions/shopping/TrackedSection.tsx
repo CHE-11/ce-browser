@@ -23,12 +23,16 @@ export function TrackedSection({
     <section id={id} className="flex flex-col gap-2">
       {/* Divider between the header and the content */}
       <div id='divider' className="h-px w-full bg-zinc-800"></div>
-      <div id={`${id}-summary`} className="flex items-center justify-between gap-2 text-xs text-zinc-400">
-        <p id={`${id}-counts`}>
-          {hits ? ` · ${hits} at target` : ""}
-          {errors ? ` · ${errors} with errors` : ""}
-        </p>
-      </div>
+      <h1 id={`${id}-title`} className="text-sm font-medium text-zinc-100 mt-2">Tracked Items</h1>
+      {hits > 0 || errors > 0 ? (
+        <div id={`${id}-summary`} className="flex items-center justify-between gap-2 text-xs text-zinc-400">
+          <p id={`${id}-counts`}>
+            {hits ? ` · ${hits} at target` : ""}
+            {errors ? ` · ${errors} with errors` : ""}
+          </p>
+        </div>
+      ) : null}
+
       {error ? (
         <p id={`${id}-error`} className="text-xs text-amber-300">
           {error}

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { LayoutGrid, ShoppingCart, Table2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, LayoutGrid, ShoppingCart, Table2, Trash } from "lucide-react";
 import { Button } from "@/components/Button";
 import { Dialog } from "@/components/Dialog";
 import { EmptyState } from "@/components/EmptyState";
@@ -22,6 +22,7 @@ import { useAppearanceFromSettings } from "@/lib/use-browser";
 import type { PriceCheckProgress, ProductPrice, ShoppingDeals } from "@type/browser";
 import { errorText } from "@features/BuiltInExtensions/use-page-tool";
 import { formatPrice, matchesFilter, matchesQuery, sortItems, summaryOf, type ShoppingFilter, type ShoppingSort } from "./format";
+import { DealList } from "./DealList";
 import { ProductDetail } from "./ProductDetail";
 import { TargetDialog } from "./TargetDialog";
 import { TrackedGrid } from "./TrackedGrid";
@@ -51,6 +52,11 @@ export function ShoppingPage({ params }: { params: URLSearchParams }) {
   const [progress, setProgress] = useState<PriceCheckProgress | null>(null);
   const [deals, setDeals] = useState<ShoppingDeals | null>(null);
   const [dealsBusy, setDealsBusy] = useState(false);
+  const [compareItem, setCompareItem] = useState<ProductPrice | null>(null);
+  const [compareDeals, setCompareDeals] = useState<ShoppingDeals | null>(null);
+  const [compareBusy, setCompareBusy] = useState(false);
+  const [compareError, setCompareError] = useState("");
+  const compareRequest = useRef("");
 
   useEffect(() => {
     document.title = "Shopping";
@@ -101,6 +107,33 @@ export function ShoppingPage({ params }: { params: URLSearchParams }) {
 
   const run = (work: Promise<ProductPrice[]>) => {
     void work.then(setItems).catch((reason: unknown) => setError(errorText(reason)));
+  };
+
+  const findCheaper = (item: ProductPrice, force = false) => {
+    compareRequest.current = item.id;
+    setCompareItem(item);
+    setCompareError("");
+    if (!force) {
+      setCompareDeals(null);
+    }
+    setCompareBusy(true);
+    void findDealsForProduct(item.url, item.title, force)
+      .then((next) => {
+        if (compareRequest.current !== item.id) {
+          return;
+        }
+        setCompareDeals(next);
+      })
+      .catch((reason: unknown) => {
+        if (compareRequest.current === item.id) {
+          setCompareError(errorText(reason));
+        }
+      })
+      .finally(() => {
+        if (compareRequest.current === item.id) {
+          setCompareBusy(false);
+        }
+      });
   };
 
   const searchDeals = (force: boolean) => {
@@ -158,54 +191,66 @@ export function ShoppingPage({ params }: { params: URLSearchParams }) {
           {error}
         </p>
       ) : null}
-      <div id="shopping-toolbar" className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-6 py-3">
-        <input
-          id="shopping-search"
-          className="h-8 w-56 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm"
-          placeholder="Search title, store, note, tag"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <select id="shopping-filter" className="h-8 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm" value={filter} onChange={(event) => setFilter(event.target.value as ShoppingFilter)}>
-          <option id="shopping-filter-all" value="all">All</option>
-          <option id="shopping-filter-dropped" value="dropped">Dropped</option>
-          <option id="shopping-filter-target" value="target">Below target</option>
-          <option id="shopping-filter-stock" value="stock">In stock</option>
-          <option id="shopping-filter-error" value="error">Has error</option>
-          <option id="shopping-filter-paused" value="paused">Paused</option>
-        </select>
-        <select id="shopping-sort" className="h-8 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm" value={sort} onChange={(event) => setSort(event.target.value as ShoppingSort)}>
-          <option id="shopping-sort-drop" value="drop">Biggest drop</option>
-          <option id="shopping-sort-percent" value="percent">Biggest percent</option>
-          <option id="shopping-sort-price" value="price">Lowest price</option>
-          <option id="shopping-sort-checked" value="checked">Recently checked</option>
-        </select>
-        <form
-          id="shopping-add-form"
-          className="flex gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void previewPriceUrl(url)
-              .then(setPreview)
-              .catch((reason: unknown) => setError(errorText(reason)));
-          }}
-        >
+      <div id="shopping-toolbar" className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 px-6 py-3">
+        <div id="shopping-toolbar-left" className="flex items-center gap-2">
           <input
-            id="shopping-add-url"
-            className="h-8 w-64 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm"
-            placeholder="Add by product URL"
-            value={url}
-            onChange={(event) => setUrl(event.target.value)}
+            id="shopping-search"
+            className="h-8 w-56 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm"
+            placeholder="Search title, store, note, tag"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
           />
-          <Button id="shopping-add-preview" size="sm" type="submit">
-            Preview
-          </Button>
-        </form>
-        {view === "table" && picked.size > 0 ? (
-          <Button id="shopping-remove-selected" size="sm" variant="destructive" onClick={() => setConfirmIds([...picked])}>
-            Remove {picked.size}
-          </Button>
-        ) : null}
+          <select id="shopping-filter" className="h-8 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm" value={filter} onChange={(event) => setFilter(event.target.value as ShoppingFilter)}>
+            <option id="shopping-filter-all" value="all">All</option>
+            <option id="shopping-filter-dropped" value="dropped">Dropped</option>
+            <option id="shopping-filter-target" value="target">Below target</option>
+            <option id="shopping-filter-stock" value="stock">In stock</option>
+            <option id="shopping-filter-error" value="error">Has error</option>
+            <option id="shopping-filter-paused" value="paused">Paused</option>
+          </select>
+          <select id="shopping-sort" className="h-8 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm" value={sort} onChange={(event) => setSort(event.target.value as ShoppingSort)}>
+            <option id="shopping-sort-drop" value="drop">Biggest drop</option>
+            <option id="shopping-sort-percent" value="percent">Biggest percent</option>
+            <option id="shopping-sort-price" value="price">Lowest price</option>
+            <option id="shopping-sort-checked" value="checked">Recently checked</option>
+          </select>
+          <form
+            id="shopping-add-form"
+            className="flex gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void previewPriceUrl(url)
+                .then(setPreview)
+                .catch((reason: unknown) => setError(errorText(reason)));
+            }}
+          >
+            <input
+              id="shopping-add-url"
+              className="h-8 w-64 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm"
+              placeholder="Add by product URL"
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+            />
+            <Button id="shopping-add-preview" size="sm" type="submit">
+              Preview
+            </Button>
+          </form>
+        </div>
+        <div id="shopping-toolbar-right" className="flex items-center gap-2">
+          {view === "table" && picked.size > 0 ? (
+            <>
+            <Button id="shopping-check-selected" size="sm" variant="primary" onClick={() => run(checkPrices([...picked]))}>
+              <Check id="shopping-check-selected-icon" aria-hidden className="size-3.5" />
+              Check {picked.size}
+            </Button>
+            <Button id="shopping-remove-selected" size="sm" variant="destructive" onClick={() => setConfirmIds([...picked])}>
+              <Trash id="shopping-remove-selected-icon" aria-hidden className="size-3.5" />
+              Remove {picked.size}
+            </Button>
+            </>
+          ) : null}
+        </div>
+
       </div>
       <div id="shopping-content" className="flex min-h-0 flex-1 gap-4 overflow-auto px-6 py-4">
         <div id="shopping-list" className="min-w-0 flex-1">
@@ -233,8 +278,17 @@ export function ShoppingPage({ params }: { params: URLSearchParams }) {
                 }
                 setPicked(next);
               }}
+              onToggleAll={(select) => {
+                const next = new Set(picked);
+                for (const item of visible) {
+                  if (select) next.add(item.id);
+                  else next.delete(item.id);
+                }
+                setPicked(next);
+              }}
               onOpen={(item) => void createTab(item.url)}
               onCheck={(item) => run(checkPrice(item.id))}
+              onFindCheaper={(item) => findCheaper(item)}
               onPause={(item) => run(updateTrackedPrice({ id: item.id, paused: !item.paused }))}
               onNote={(item) => {
                 setNoteItem(item);
@@ -265,6 +319,39 @@ export function ShoppingPage({ params }: { params: URLSearchParams }) {
           />
         ) : null}
       </div>
+      <Dialog
+        id="shopping-compare-dialog"
+        title="Cheaper at other stores"
+        open={compareItem !== null}
+        onClose={() => {
+          compareRequest.current = "";
+          setCompareItem(null);
+        }}
+      >
+        {compareItem ? (
+          <div id="shopping-compare" className="flex flex-col gap-3">
+            <div id="shopping-compare-heading">
+              <p id="shopping-compare-product" className="text-sm">{compareItem.title || compareItem.url}</p>
+              <p id="shopping-compare-price" className="text-sm text-zinc-400">
+                {formatPrice(compareItem.price, compareItem.currency)} at {compareItem.store || "this store"}
+              </p>
+            </div>
+            {compareError ? (
+              <p id="shopping-compare-error" className="text-sm text-amber-300">{compareError}</p>
+            ) : null}
+            <DealList
+              key={compareItem.id}
+              id="shopping-compare-deals"
+              deals={compareDeals}
+              busy={compareBusy}
+              pricesOnly
+              onSearch={(force) => findCheaper(compareItem, force)}
+              onFeedback={setCompareDeals}
+              onTrack={(offerUrl) => run(addPriceUrl(offerUrl))}
+            />
+          </div>
+        ) : null}
+      </Dialog>
       <TargetDialog
         key={targetItem?.id ?? "shopping-target-closed"}
         item={targetItem}

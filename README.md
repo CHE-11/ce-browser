@@ -149,7 +149,7 @@ Drag a pinned icon on the address bar onto another to reorder the built-in tools
 
 ## Tools
 
-**Translate** replaces the article text on the page. Show original, or click the icon again, reloads the page. Settings > Tools sets the language and the provider URL. `%s` is the text and `%t` is the language. The default provider needs no key.
+**Translate** replaces the article text on the page. Show original, or click the icon again, reloads the page. Settings > Translate sets the language and the provider URL. `%s` is the text and `%t` is the language. The default provider needs no key.
 
 **Password** builds a password on this computer and copies it. The length and the character types are chosen in the popup.
 

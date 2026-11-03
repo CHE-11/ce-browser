@@ -1,7 +1,7 @@
 mod accelerator;
 mod accent;
-mod ai;
 mod adblock;
+mod ai;
 mod answer;
 mod backdrop;
 mod boards;
@@ -1257,8 +1257,8 @@ async fn track_price(app: AppHandle, id: u32) -> Result<tools::ProductPrice, Str
 }
 
 #[tauri::command]
-async fn check_prices(app: AppHandle) -> Result<Vec<tools::ProductPrice>, String> {
-    blocking(move || tools::check_prices(&app)).await
+async fn check_prices(app: AppHandle, ids: Option<Vec<String>>) -> Result<Vec<tools::ProductPrice>, String> {
+    blocking(move || tools::check_prices(&app, ids.as_deref())).await
 }
 
 #[tauri::command]
@@ -1423,7 +1423,11 @@ async fn save_pin_image(app: AppHandle, id: String, path: String) -> Result<(), 
 }
 
 #[tauri::command]
-async fn find_deals(app: AppHandle, id: u32, force: Option<bool>) -> Result<shopping::ShoppingDeals, String> {
+async fn find_deals(
+    app: AppHandle,
+    id: u32,
+    force: Option<bool>,
+) -> Result<shopping::ShoppingDeals, String> {
     blocking(move || shopping::find_deals(&app, id, force.unwrap_or(false))).await
 }
 
@@ -1434,7 +1438,8 @@ async fn find_deals_for_product(
     title: String,
     force: Option<bool>,
 ) -> Result<shopping::ShoppingDeals, String> {
-    blocking(move || shopping::find_deals_for_product(&app, &url, &title, force.unwrap_or(false))).await
+    blocking(move || shopping::find_deals_for_product(&app, &url, &title, force.unwrap_or(false)))
+        .await
 }
 
 #[tauri::command]
@@ -1453,7 +1458,11 @@ fn ai_key_status(app: AppHandle, provider: String) -> secrets::AiKeyStatus {
 }
 
 #[tauri::command]
-fn set_ai_key(app: AppHandle, provider: String, key: String) -> Result<secrets::AiKeyStatus, String> {
+fn set_ai_key(
+    app: AppHandle,
+    provider: String,
+    key: String,
+) -> Result<secrets::AiKeyStatus, String> {
     secrets::store_key(&app, &provider, &key)?;
     Ok(secrets::status(&app, &provider))
 }

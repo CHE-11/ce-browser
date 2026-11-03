@@ -2,33 +2,29 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/Button";
 import { aiKeyStatus, clearAiKey, listAiModels, setAiKey, testAiConnection } from "@/lib/browser-client";
 import type { AiKeyStatus, AiProviderId, AiProviderSlot } from "@type/browser";
+import { AI_PROVIDERS, remoteProvider } from "./ai-providers";
+import { modelAcceptsThinking } from "./model-label";
+import { ModelPicker } from "./ModelPicker";
 import { SETTINGS_SECTIONS } from "./settings-sections";
 import { errorText, inputClass, matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "./SettingsControls";
+import { useAiModels } from "./useAiModels";
 
-const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-tools")!;
+const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-ai")!;
 
-const LANG_LABEL = "Translate language";
-const LANG_HINT = "Language code, for example en or es.";
-const URL_LABEL = "Translate provider";
-const URL_HINT = "%s is the text and %t is the language.";
-const PROVIDER_LABEL = "Shopping AI provider";
-const PROVIDER_HINT = "Summarizes deal search results. Price tracking works with no provider.";
+const PROVIDER_LABEL = "Provider";
+const PROVIDER_HINT = "Used for Shopping summaries. Price tracking works with no provider.";
 const ENDPOINT_LABEL = "Endpoint";
 const ENDPOINT_HINT = "An OpenAI-compatible base URL. A local server may omit the key.";
 const MODEL_LABEL = "Model";
-const KEY_LABEL = "API key";
-const REGION_LABEL = "Shopping region";
-const REGION_HINT = "DuckDuckGo region for coupon and price searches, for example us-en or uk-en.";
-const SHOPPING_MODEL_LABEL = "Shopping model";
-const COMPETITORS_LABEL = "Competitor stores";
-const COMPETITORS_HINT = "Optional hosts, separated by commas. Adds one extra deal search.";
-
-const PROVIDERS: { id: AiProviderId; label: string }[] = [
-  { id: "openai", label: "OpenAI" },
-  { id: "claude", label: "Claude" },
-  { id: "custom", label: "Custom" },
-  { id: "local", label: "Local / Ollama" },
+const THINKING_LABEL = "Thinking";
+const THINKING_HINT = "How long the model thinks before it answers. Higher costs more.";
+const THINKING_LEVELS = [
+  { value: "", label: "Default" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
 ];
+const KEY_LABEL = "API key";
 
 function keyLabel(provider: AiProviderId) {
   if (provider === "openai") {
@@ -40,47 +36,49 @@ function keyLabel(provider: AiProviderId) {
   return "API key";
 }
 
-function providerName(provider: AiProviderId) {
-  return PROVIDERS.find((item) => item.id === provider)?.label ?? "Local / Ollama";
-}
-
 function slotOf(settings: SettingsSectionProps["settings"], provider: AiProviderId): AiProviderSlot {
   return settings.aiProviders[provider];
 }
 
-export function ToolsSection({ settings, query, onUpdate, onError, onMatch }: SettingsSectionProps) {
+export function AiSection({ settings, query, onUpdate, onError, onMatch }: SettingsSectionProps) {
   const provider = settings.aiProvider;
   const slot = slotOf(settings, provider);
+  const remote = remoteProvider(provider);
   const showEndpoint = provider === "custom" || provider === "local";
-  const shoppingHint = `Leave blank to use the ${providerName(provider)} model.`;
+  const fetched = useAiModels(provider, remote);
+  const [localModels, setLocalModels] = useState<string[]>([]);
+  const modelHint = !remote
+    ? "Model name on this server."
+    : fetched.loading
+      ? "Loading text models…"
+      : fetched.error
+        ? fetched.error
+        : fetched.models.length === 0
+          ? "No text models were returned."
+          : "The six newest text models. $ is cheaper and $$$$ costs more.";
   const visible = matchesQuery(
     query,
     section.title,
-    LANG_LABEL,
-    LANG_HINT,
-    URL_LABEL,
-    URL_HINT,
+    "tools",
     PROVIDER_LABEL,
     PROVIDER_HINT,
     ENDPOINT_LABEL,
     ENDPOINT_HINT,
     MODEL_LABEL,
+    modelHint,
+    THINKING_LABEL,
+    THINKING_HINT,
     KEY_LABEL,
     keyLabel(provider),
-    REGION_LABEL,
-    REGION_HINT,
-    SHOPPING_MODEL_LABEL,
-    shoppingHint,
-    COMPETITORS_LABEL,
-    COMPETITORS_HINT,
-    "coupons",
-    "deals",
+    "openai",
+    "claude",
+    "ollama",
+    "assistant",
     "dpapi",
   );
   useReportMatch(section.id, visible, onMatch);
   const [draftKey, setDraftKey] = useState("");
   const [status, setStatus] = useState<AiKeyStatus | null>(null);
-  const [models, setModels] = useState<string[]>([]);
   const [testing, setTesting] = useState(false);
   const [testMessage, setTestMessage] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
@@ -116,10 +114,10 @@ export function ToolsSection({ settings, query, onUpdate, onError, onMatch }: Se
     });
   };
 
-  const refreshModels = () => {
+  const refreshLocal = () => {
     void listAiModels()
-      .then(setModels)
-      .catch(() => setModels([]));
+      .then(setLocalModels)
+      .catch(() => setLocalModels([]));
   };
 
   const saveKey = () => {
@@ -134,6 +132,9 @@ export function ToolsSection({ settings, query, onUpdate, onError, onMatch }: Se
         setConfirmClear(false);
         setTestMessage("Saved on this computer.");
         onError(null);
+        if (remote) {
+          fetched.refresh();
+        }
       })
       .catch((reason: unknown) => onError(errorText(reason)));
   };
@@ -156,7 +157,11 @@ export function ToolsSection({ settings, query, onUpdate, onError, onMatch }: Se
       .then(() => {
         setTestMessage("Connected.");
         onError(null);
-        refreshModels();
+        if (remote) {
+          fetched.refresh();
+        } else {
+          refreshLocal();
+        }
       })
       .catch((reason: unknown) => setTestMessage(errorText(reason)))
       .finally(() => setTesting(false));
@@ -172,23 +177,6 @@ export function ToolsSection({ settings, query, onUpdate, onError, onMatch }: Se
 
   return (
     <Section id={section.id} title={section.title}>
-      <Row id="settings-translate-language" setting="translateLanguage" label={LANG_LABEL} hint={LANG_HINT}>
-        <input
-          id="settings-translate-language-input"
-          className={inputClass}
-          value={settings.translateLanguage}
-          onChange={(event) => onUpdate({ translateLanguage: event.target.value })}
-        />
-      </Row>
-      <Row id="settings-translate-url" setting="translateUrl" label={URL_LABEL} hint={URL_HINT}>
-        <input
-          id="settings-translate-url-input"
-          className={inputClass}
-          value={settings.translateUrl}
-          spellCheck={false}
-          onChange={(event) => onUpdate({ translateUrl: event.target.value })}
-        />
-      </Row>
       <Row id="settings-ai-provider" setting="aiProvider" label={PROVIDER_LABEL} hint={PROVIDER_HINT}>
         <select
           id="settings-ai-provider-input"
@@ -200,7 +188,7 @@ export function ToolsSection({ settings, query, onUpdate, onError, onMatch }: Se
             onUpdate({ aiProvider: event.target.value as AiProviderId });
           }}
         >
-          {PROVIDERS.map((item) => (
+          {AI_PROVIDERS.map((item) => (
             <option id={`settings-ai-provider-${item.id}`} key={item.id} value={item.id}>
               {item.label}
             </option>
@@ -218,22 +206,34 @@ export function ToolsSection({ settings, query, onUpdate, onError, onMatch }: Se
           />
         </Row>
       ) : null}
-      <Row id="settings-ai-model" setting="aiProviders" label={MODEL_LABEL}>
-        <input
-          id="settings-ai-model-input"
-          className={inputClass}
-          list="settings-ai-model-list"
+      <Row id="settings-ai-model" setting="aiProviders" label={MODEL_LABEL} hint={modelHint}>
+        <ModelPicker
+          id="settings-ai-model"
           value={slot.model}
-          spellCheck={false}
-          onChange={(event) => updateSlot({ model: event.target.value })}
-          onFocus={refreshModels}
+          models={remote ? fetched.models : localModels}
+          loading={remote && fetched.loading}
+          remote={remote}
+          onChange={(model) => updateSlot({ model })}
+          onRefresh={remote ? fetched.refresh : refreshLocal}
+          onFocus={remote ? undefined : refreshLocal}
         />
-        <datalist id="settings-ai-model-list">
-          {models.map((model, index) => (
-            <option id={`settings-ai-model-option-${index}`} key={model} value={model} />
-          ))}
-        </datalist>
       </Row>
+      {modelAcceptsThinking(provider, slot.model) ? (
+        <Row id="settings-ai-thinking" setting="aiProviders" label={THINKING_LABEL} hint={THINKING_HINT} search={["reasoning", "effort"]}>
+          <select
+            id="settings-ai-thinking-input"
+            className={inputClass}
+            value={THINKING_LEVELS.some((level) => level.value === slot.thinking) ? slot.thinking : ""}
+            onChange={(event) => updateSlot({ thinking: event.target.value })}
+          >
+            {THINKING_LEVELS.map((level) => (
+              <option id={`settings-ai-thinking-${level.value || "default"}`} key={level.label} value={level.value}>
+                {level.label}
+              </option>
+            ))}
+          </select>
+        </Row>
+      ) : null}
       <Row id="settings-ai-key" setting="aiProvider" label={keyLabel(provider)} hint={keyHint}>
         <div id="settings-ai-key-row" className="flex flex-col gap-2">
           <input
@@ -276,41 +276,6 @@ export function ToolsSection({ settings, query, onUpdate, onError, onMatch }: Se
             Encrypted with Windows DPAPI for this Windows user, never synced, never exported.
           </p>
         </div>
-      </Row>
-      <Row id="settings-shopping-region" setting="shoppingRegion" label={REGION_LABEL} hint={REGION_HINT} search={["coupons", "deals"]}>
-        <input
-          id="settings-shopping-region-input"
-          className={inputClass}
-          value={settings.shoppingRegion}
-          spellCheck={false}
-          onChange={(event) => onUpdate({ shoppingRegion: event.target.value })}
-        />
-      </Row>
-      <Row id="settings-shopping-model" setting="shoppingModel" label={SHOPPING_MODEL_LABEL} hint={shoppingHint} search={["coupons", "deals"]}>
-        <input
-          id="settings-shopping-model-input"
-          className={inputClass}
-          value={settings.shoppingModel}
-          placeholder={slot.model}
-          spellCheck={false}
-          onChange={(event) => onUpdate({ shoppingModel: event.target.value })}
-        />
-      </Row>
-      <Row id="settings-shopping-competitors" setting="shoppingCompetitors" label={COMPETITORS_LABEL} hint={COMPETITORS_HINT} search={["coupons", "deals"]}>
-        <input
-          id="settings-shopping-competitors-input"
-          className={inputClass}
-          value={settings.shoppingCompetitors.join(", ")}
-          spellCheck={false}
-          onChange={(event) =>
-            onUpdate({
-              shoppingCompetitors: event.target.value
-                .split(",")
-                .map((item) => item.trim())
-                .filter(Boolean),
-            })
-          }
-        />
       </Row>
     </Section>
   );

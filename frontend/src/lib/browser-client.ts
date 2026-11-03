@@ -454,8 +454,8 @@ export function trackPrice(id: number) {
   return invoke<ProductPrice>("track_price", { id });
 }
 
-export function checkPrices() {
-  return invoke<ProductPrice[]>("check_prices");
+export function checkPrices(ids?: string[]) {
+  return invoke<ProductPrice[]>("check_prices", { ids: ids && ids.length > 0 ? ids : null });
 }
 
 export function untrackPrice(id: string) {

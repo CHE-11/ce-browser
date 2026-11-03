@@ -9,6 +9,7 @@ import { useRoute } from "@/lib/route";
 import { useSettings } from "@/lib/use-browser";
 import { SETTINGS_INDEX } from "./settings-index";
 import { AdBlockSection } from "./AdBlockSection";
+import { AiSection } from "./AiSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { BookmarksSection } from "./BookmarksSection";
 import { DownloadsSection } from "./DownloadsSection";
@@ -17,11 +18,12 @@ import { ProfilesSection } from "./ProfilesSection";
 import { SearchSection } from "./SearchSection";
 import { SettingsQueryProvider, SettingsValuesProvider } from "./SettingsControls";
 import { SETTINGS_SECTIONS } from "./settings-sections";
+import { ShoppingSection } from "./ShoppingSection";
 import { StartupSection } from "./StartupSection";
 import { SyncSection } from "./SyncSection";
 import { SystemSection } from "./SystemSection";
 import { TabsSection } from "./TabsSection";
-import { ToolsSection } from "./ToolsSection";
+import { TranslateSection } from "./TranslateSection";
 
 export function SettingsPage() {
   const settings = useSettings();
@@ -214,7 +216,9 @@ export function SettingsPage() {
           <AdBlockSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <AppearanceSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <BookmarksSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
-          <ToolsSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          <AiSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          <TranslateSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          <ShoppingSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <SystemSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <SyncSection
             settings={settings}

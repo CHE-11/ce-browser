@@ -1,5 +1,6 @@
 //! Tracked products in `prices.json`. A v1 file still loads; the next save writes the current shape.
 
+use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -243,7 +244,10 @@ pub fn same_tracked(existing: &ProductPrice, url: &str, title: &str) -> bool {
                 existing.store.clone()
             };
             let name = normalize_name(title);
-            !name.is_empty() && name == normalize_name(&existing.title) && !store.is_empty() && store == existing_store
+            !name.is_empty()
+                && name == normalize_name(&existing.title)
+                && !store.is_empty()
+                && store == existing_store
         }
     }
 }
@@ -293,7 +297,10 @@ pub fn untrack_price(app: &AppHandle, id: &str) -> Result<Vec<ProductPrice>, Str
     publish(app, items)
 }
 
-pub fn update_tracked(app: &AppHandle, patch: TrackedPricePatch) -> Result<Vec<ProductPrice>, String> {
+pub fn update_tracked(
+    app: &AppHandle,
+    patch: TrackedPricePatch,
+) -> Result<Vec<ProductPrice>, String> {
     let mut items = list_prices(app);
     let Some(item) = items.iter_mut().find(|item| item.id == patch.id) else {
         return Err("That product is not being tracked.".into());
@@ -356,23 +363,37 @@ pub fn check_price(app: &AppHandle, id: &str) -> Result<Vec<ProductPrice>, Strin
     publish(app, items)
 }
 
-pub fn check_prices(app: &AppHandle) -> Result<Vec<ProductPrice>, String> {
+pub fn check_prices(app: &AppHandle, ids: Option<&[String]>) -> Result<Vec<ProductPrice>, String> {
     let mut items = list_prices(app);
-    let total = items.len() as u32;
+    let selected: Vec<usize> = match ids {
+        Some(ids) => {
+            let wanted: HashSet<&str> = ids.iter().map(String::as_str).collect();
+            items
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| wanted.contains(item.id.as_str()))
+                .map(|(index, _)| index)
+                .collect()
+        }
+        None => (0..items.len()).collect(),
+    };
+    let total = selected.len() as u32;
     emit_progress(app, 0, total, false);
-    let mut index = 0;
-    while index < items.len() {
-        let end = (index + 4).min(items.len());
-        let plan: Vec<(String, Option<u32>)> = items[index..end]
+    let mut done = 0u32;
+    for chunk in selected.chunks(4) {
+        let plan: Vec<(String, Option<u32>)> = chunk
             .iter()
-            .map(|item| (item.url.clone(), open_tab(app, &item.url)))
+            .map(|index| {
+                let item = &items[*index];
+                (item.url.clone(), open_tab(app, &item.url))
+            })
             .collect();
         let fetched = fetch_batch(&plan);
         for (offset, outcome) in fetched.into_iter().enumerate() {
-            apply_outcome(app, &mut items[index + offset], outcome, true);
-            emit_progress(app, (index + offset + 1) as u32, total, false);
+            apply_outcome(app, &mut items[chunk[offset]], outcome, true);
+            done += 1;
+            emit_progress(app, done, total, false);
         }
-        index = end;
     }
     let saved = publish(app, items)?;
     emit_progress(app, total, total, true);
@@ -466,7 +487,9 @@ fn fetch_batch(plan: &[(String, Option<u32>)]) -> Vec<BatchOutcome> {
                 Err(error) => Err(error.clone()),
             }));
         } else {
-            outcomes.push(BatchOutcome::Fetched(Err("Couldn't check this price.".into())));
+            outcomes.push(BatchOutcome::Fetched(Err(
+                "Couldn't check this price.".into()
+            )));
         }
     }
     outcomes
@@ -563,7 +586,11 @@ fn observe(item: &mut ProductPrice, fresh: &ProductPrice, at: u64) -> Vec<AlertN
     notices
 }
 
-pub fn alerts_for(item: &mut ProductPrice, previous_price: f64, previous_availability: &str) -> Vec<AlertNotice> {
+pub fn alerts_for(
+    item: &mut ProductPrice,
+    previous_price: f64,
+    previous_availability: &str,
+) -> Vec<AlertNotice> {
     let mut notices = Vec::new();
     let dropped = item.price < previous_price;
     if item.alert_on_drop {
@@ -617,7 +644,9 @@ fn format_money(price: f64, currency: &str) -> String {
 }
 
 fn is_out_of_stock(availability: &str) -> bool {
-    let lower = availability.to_ascii_lowercase().replace([' ', '_', '-'], "");
+    let lower = availability
+        .to_ascii_lowercase()
+        .replace([' ', '_', '-'], "");
     lower.contains("outofstock") || lower.contains("soldout") || lower.contains("discontinued")
 }
 
@@ -625,11 +654,20 @@ fn is_in_stock(availability: &str) -> bool {
     if is_out_of_stock(availability) {
         return false;
     }
-    let lower = availability.to_ascii_lowercase().replace([' ', '_', '-'], "");
-    lower.contains("instock") || lower.contains("limitedavailability") || lower.contains("preorder") || lower.contains("onlineonly")
+    let lower = availability
+        .to_ascii_lowercase()
+        .replace([' ', '_', '-'], "");
+    lower.contains("instock")
+        || lower.contains("limitedavailability")
+        || lower.contains("preorder")
+        || lower.contains("onlineonly")
 }
 
-fn upsert(app: &AppHandle, mut fresh: ProductPrice, from_tab: bool) -> Result<Vec<ProductPrice>, String> {
+fn upsert(
+    app: &AppHandle,
+    mut fresh: ProductPrice,
+    from_tab: bool,
+) -> Result<Vec<ProductPrice>, String> {
     if fresh.url.trim().is_empty() {
         return Err("This page has no address to track.".into());
     }
@@ -644,7 +682,10 @@ fn upsert(app: &AppHandle, mut fresh: ProductPrice, from_tab: bool) -> Result<Ve
     }
     let mut items = list_prices(app);
     let at = now_ms();
-    if let Some(existing) = items.iter_mut().find(|item| same_tracked(item, &fresh.url, &fresh.title)) {
+    if let Some(existing) = items
+        .iter_mut()
+        .find(|item| same_tracked(item, &fresh.url, &fresh.title))
+    {
         let _ = observe(existing, &fresh, at);
         if existing.tracked_at == 0 {
             existing.tracked_at = at;
@@ -689,7 +730,11 @@ pub fn migrate_item(item: &mut ProductPrice) -> bool {
         }
     }
     if item.history.is_empty() && item.price > 0.0 {
-        let at = if item.tracked_at == 0 { now_ms() } else { item.tracked_at };
+        let at = if item.tracked_at == 0 {
+            now_ms()
+        } else {
+            item.tracked_at
+        };
         if let Some(previous) = item.previous_price {
             item.history.push(PricePoint {
                 at: at.saturating_sub(1),
@@ -707,7 +752,11 @@ pub fn migrate_item(item: &mut ProductPrice) -> bool {
         changed = true;
     }
     if item.tracked_at == 0 {
-        item.tracked_at = item.history.first().map(|point| point.at).unwrap_or_else(now_ms);
+        item.tracked_at = item
+            .history
+            .first()
+            .map(|point| point.at)
+            .unwrap_or_else(now_ms);
         changed = true;
     }
     if item.check_interval_hours == 0 {
@@ -828,7 +877,8 @@ fn product_from_body(url: &str, body: &str) -> Result<FetchedPage, String> {
     if looks_like_challenge(body) {
         return Err("The store asked for a captcha.".into());
     }
-    let mut product = parse_price(body).ok_or_else(|| "No price was found on this page.".to_string())?;
+    let mut product =
+        parse_price(body).ok_or_else(|| "No price was found on this page.".to_string())?;
     product.url = url.to_string();
     product.store = store_host(url).unwrap_or_default();
     product.last_method = "fetch".into();
@@ -923,7 +973,9 @@ pub fn read_page_price(app: &AppHandle, id: u32) -> Result<ProductPrice, String>
     }
     if let Some(og_title) = value.get("ogTitle").and_then(|item| item.as_str()) {
         if !og_title.is_empty() {
-            html.push_str(&format!("<meta property=\"og:title\" content=\"{og_title}\">"));
+            html.push_str(&format!(
+                "<meta property=\"og:title\" content=\"{og_title}\">"
+            ));
         }
     }
     if let Some(micro) = value.get("micro").and_then(|item| item.as_array()) {
@@ -938,7 +990,8 @@ pub fn read_page_price(app: &AppHandle, id: u32) -> Result<ProductPrice, String>
             html.push_str(&format!("<span class=\"price\">{dom}</span>"));
         }
     }
-    let mut price = parse_price(&html).ok_or_else(|| "No product price was found on this page.".to_string())?;
+    let mut price =
+        parse_price(&html).ok_or_else(|| "No product price was found on this page.".to_string())?;
     price.url = url;
     if price.title.is_empty() {
         price.title = title;
@@ -950,7 +1003,14 @@ pub fn read_page_price(app: &AppHandle, id: u32) -> Result<ProductPrice, String>
 fn price_from_meta(html: &str) -> Option<ProductPrice> {
     let amount = meta_content(html, "product:price:amount")?;
     let price = parse_amount(&amount)?;
-    Some(filled(String::new(), price, meta_content(html, "product:price:currency").unwrap_or_default(), String::new(), None, String::new()))
+    Some(filled(
+        String::new(),
+        price,
+        meta_content(html, "product:price:currency").unwrap_or_default(),
+        String::new(),
+        None,
+        String::new(),
+    ))
 }
 
 fn price_from_json_ld(html: &str) -> Option<ProductPrice> {
@@ -1024,7 +1084,9 @@ fn offer_price(offers: &serde_json::Value) -> Option<(f64, String, String, Optio
     };
     let mut aggregate = None;
     for offer in list {
-        if is_type(offer, "AggregateOffer") || (offer.get("lowPrice").is_some() && offer.get("price").is_none()) {
+        if is_type(offer, "AggregateOffer")
+            || (offer.get("lowPrice").is_some() && offer.get("price").is_none())
+        {
             if aggregate.is_none() {
                 if let Some(low) = offer.get("lowPrice").and_then(json_price) {
                     aggregate = Some((
@@ -1037,7 +1099,11 @@ fn offer_price(offers: &serde_json::Value) -> Option<(f64, String, String, Optio
             }
             continue;
         }
-        if let Some(price) = offer.get("price").and_then(json_price).or_else(|| nested_offer_price(offer)) {
+        if let Some(price) = offer
+            .get("price")
+            .and_then(json_price)
+            .or_else(|| nested_offer_price(offer))
+        {
             return Some((
                 price,
                 json_text(offer.get("priceCurrency")),
@@ -1076,11 +1142,20 @@ fn list_price_of(offer: &serde_json::Value) -> Option<f64> {
     };
     specs.into_iter().find_map(|spec| {
         let kind = json_text(spec.get("priceType")).to_ascii_lowercase();
-        kind.contains("listprice").then(|| spec.get("price").and_then(json_price)).flatten()
+        kind.contains("listprice")
+            .then(|| spec.get("price").and_then(json_price))
+            .flatten()
     })
 }
 
-fn filled(title: String, price: f64, currency: String, availability: String, list_price: Option<f64>, image_url: String) -> ProductPrice {
+fn filled(
+    title: String,
+    price: f64,
+    currency: String,
+    availability: String,
+    list_price: Option<f64>,
+    image_url: String,
+) -> ProductPrice {
     ProductPrice {
         title,
         price,
@@ -1095,17 +1170,28 @@ fn filled(title: String, price: f64, currency: String, availability: String, lis
 fn is_type(value: &serde_json::Value, name: &str) -> bool {
     match value.get("@type") {
         Some(serde_json::Value::String(text)) => text.eq_ignore_ascii_case(name),
-        Some(serde_json::Value::Array(items)) => items.iter().any(|item| item.as_str().is_some_and(|text| text.eq_ignore_ascii_case(name))),
+        Some(serde_json::Value::Array(items)) => items.iter().any(|item| {
+            item.as_str()
+                .is_some_and(|text| text.eq_ignore_ascii_case(name))
+        }),
         _ => false,
     }
 }
 
 fn json_text(value: Option<&serde_json::Value>) -> String {
-    value.and_then(|item| item.as_str()).unwrap_or("").trim().to_string()
+    value
+        .and_then(|item| item.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 fn availability_text(value: Option<&serde_json::Value>) -> String {
-    json_text(value).rsplit('/').next().unwrap_or("").to_string()
+    json_text(value)
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .to_string()
 }
 
 fn json_image(value: Option<&serde_json::Value>) -> String {
@@ -1143,7 +1229,11 @@ fn price_from_microdata(html: &str) -> Option<ProductPrice> {
         String::new(),
         price,
         itemprop_value(html, "priceCurrency").unwrap_or_default(),
-        availability_text(itemprop_value(html, "availability").map(|text| serde_json::Value::String(text)).as_ref()),
+        availability_text(
+            itemprop_value(html, "availability")
+                .map(|text| serde_json::Value::String(text))
+                .as_ref(),
+        ),
         None,
         String::new(),
     ))
@@ -1158,7 +1248,8 @@ fn itemprop_value(html: &str, name: &str) -> Option<String> {
         let tag_start = html[..index].rfind('<')?;
         let tag_end = html[index..].find('>')? + index;
         let tag = &html[tag_start..tag_end];
-        if let Some(content) = tag_attribute(tag, "content").or_else(|| tag_attribute(tag, "href")) {
+        if let Some(content) = tag_attribute(tag, "content").or_else(|| tag_attribute(tag, "href"))
+        {
             if !content.trim().is_empty() {
                 return Some(content);
             }
@@ -1187,7 +1278,8 @@ fn price_from_dom(html: &str) -> Option<ProductPrice> {
         let tag_end = at + tag_rel;
         let tag = &lower[tag_start..=tag_end];
         from = tag_end + 1;
-        let interesting = (tag.contains("data-testid") || tag.contains("class=")) && tag.contains("price");
+        let interesting =
+            (tag.contains("data-testid") || tag.contains("class=")) && tag.contains("price");
         if !interesting {
             continue;
         }
@@ -1195,7 +1287,14 @@ fn price_from_dom(html: &str) -> Option<ProductPrice> {
         let text_end = rest.find('<').unwrap_or(rest.len()).min(80);
         let text = rest[..text_end].trim();
         if let Some(price) = parse_amount(text) {
-            return Some(filled(String::new(), price, currency_hint(text), String::new(), None, String::new()));
+            return Some(filled(
+                String::new(),
+                price,
+                currency_hint(text),
+                String::new(),
+                None,
+                String::new(),
+            ));
         }
     }
     None
@@ -1229,7 +1328,12 @@ fn parse_amount(text: &str) -> Option<f64> {
     }
     let normalized = if raw.contains(',') && raw.contains('.') {
         raw.replace(',', "")
-    } else if raw.matches(',').count() == 1 && raw.split(',').next_back().is_some_and(|part| part.len() == 2) {
+    } else if raw.matches(',').count() == 1
+        && raw
+            .split(',')
+            .next_back()
+            .is_some_and(|part| part.len() == 2)
+    {
         raw.replace(',', ".")
     } else {
         raw.replace(',', "")
@@ -1243,7 +1347,10 @@ fn meta_content(html: &str, property: &str) -> Option<String> {
         let needle = format!("property={quote}{property}{quote}");
         if let Some(index) = html.find(&needle) {
             let tag_start = html[..index].rfind('<').unwrap_or(index);
-            let tag_end = html[index..].find('>').map(|end| index + end).unwrap_or(html.len());
+            let tag_end = html[index..]
+                .find('>')
+                .map(|end| index + end)
+                .unwrap_or(html.len());
             if let Some(content) = tag_attribute(&html[tag_start..tag_end], "content") {
                 return Some(content);
             }
@@ -1267,8 +1374,8 @@ fn tag_attribute(tag: &str, name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ProductPrice, alerts_for, canonical_url, migrate_item, parse_price, product_key, push_history,
-        same_tracked, shipping_hint,
+        ProductPrice, alerts_for, canonical_url, migrate_item, parse_price, product_key,
+        push_history, same_tracked, shipping_hint,
     };
 
     #[test]
@@ -1385,9 +1492,21 @@ mod tests {
             ..ProductPrice::default()
         };
         let first = alerts_for(&mut item, 10.0, "OutOfStock");
-        assert!(first.iter().any(|notice| notice.title.starts_with("Price drop")));
-        assert!(first.iter().any(|notice| notice.title.starts_with("Target price")));
-        assert!(first.iter().any(|notice| notice.title.starts_with("Back in stock")));
+        assert!(
+            first
+                .iter()
+                .any(|notice| notice.title.starts_with("Price drop"))
+        );
+        assert!(
+            first
+                .iter()
+                .any(|notice| notice.title.starts_with("Target price"))
+        );
+        assert!(
+            first
+                .iter()
+                .any(|notice| notice.title.starts_with("Back in stock"))
+        );
         let second = alerts_for(&mut item, 10.0, "OutOfStock");
         assert!(second.is_empty());
         item.price = 12.0;

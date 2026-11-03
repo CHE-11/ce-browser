@@ -21,6 +21,7 @@ export function DealList({
   onSearch,
   onTrack,
   onFeedback,
+  pricesOnly = false,
 }: {
   id: string;
   deals: ShoppingDeals | null;
@@ -28,9 +29,11 @@ export function DealList({
   onSearch: (force: boolean) => void;
   onTrack?: (url: string) => void;
   onFeedback?: (deals: ShoppingDeals) => void;
+  /** Skips coupons and opens on lower prices at other stores. */
+  pricesOnly?: boolean;
 }) {
   const [copied, setCopied] = useState("");
-  const [focus, setFocus] = useState<"coupons" | "prices" | null>(null);
+  const [focus, setFocus] = useState<"coupons" | "prices" | null>(pricesOnly ? "prices" : null);
   const [hidden, setHidden] = useState(false);
   const minutes = deals?.checkedAt ? Math.max(0, Math.round((Date.now() - deals.checkedAt) / 60000)) : null;
   const showing = Boolean(deals && focus && !hidden);
@@ -48,11 +51,13 @@ export function DealList({
     <div id={id} className="flex flex-col gap-3">
       <div id={`${id}-actions`} className="flex flex-col gap-2">
         <div id={`${id}-action-buttons`} className="flex w-full gap-2">
-          <Button id={`${id}-coupons-find`} className="flex-1" variant={focus === "coupons" ? "primary" : "secondary"} disabled={busy} onClick={() => choose("coupons")}>
-            {busy && focus === "coupons" ? "Searching…" : "Find Coupons"}
-          </Button>
+          {pricesOnly ? null : (
+            <Button id={`${id}-coupons-find`} className="flex-1" variant={focus === "coupons" ? "primary" : "secondary"} disabled={busy} onClick={() => choose("coupons")}>
+              {busy && focus === "coupons" ? "Searching…" : "Find Coupons"}
+            </Button>
+          )}
           <Button id={`${id}-prices-find`} className="flex-1" variant={focus === "prices" ? "primary" : "secondary"} disabled={busy} onClick={() => choose("prices")}>
-            {busy && focus === "prices" ? "Searching…" : "Compare Prices"}
+            {busy && focus === "prices" ? "Searching…" : pricesOnly && deals ? "Search again" : "Compare Prices"}
           </Button>
         </div>
         {showing || minutes !== null ? (

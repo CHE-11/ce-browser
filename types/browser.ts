@@ -136,6 +136,8 @@ export type AiProviderId = "openai" | "claude" | "custom" | "local";
 export type AiProviderSlot = {
   endpoint: string;
   model: string;
+  /** `low`, `medium`, or `high`. Empty keeps the provider default. */
+  thinking: string;
 };
 
 export type AiProviders = {

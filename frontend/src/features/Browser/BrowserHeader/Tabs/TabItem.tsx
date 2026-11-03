@@ -121,7 +121,7 @@ export function TabItem({
       }}
       onMouseLeave={() => leaveTab()}
       className={cn(
-        "group relative flex shrink-0 cursor-default select-none items-center gap-2 text-xs transition-colors",
+        "group relative flex shrink-0 cursor-default select-none items-center gap-2 text-[11px] transition-colors",
         focusRing,
         vertical ? "h-8 w-full rounded-lg px-2" : "h-7.5 rounded-t-lg px-2.5",
         !vertical && (compact ? "w-9 justify-center px-0" : "min-w-22 shrink"),
@@ -254,14 +254,15 @@ export function TabItem({
             title={grouped ? "Close selected tabs (Ctrl+W)" : "Close tab (Ctrl+W)"}
             aria-label={grouped ? "Close selected tabs" : `Close ${tab.title}`}
             className={cn(
-              "inline-flex size-5 shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100",
+              "pointer-events-none -ml-2 inline-flex h-5 w-0 min-w-0 shrink-0 items-center justify-center overflow-hidden rounded p-0 text-zinc-400 opacity-0 transition-[width,opacity,margin] duration-100 hover:bg-zinc-700 hover:text-zinc-100",
+              "group-hover:pointer-events-auto group-hover:ml-0 group-hover:w-5 group-hover:overflow-visible group-hover:opacity-100",
+              "focus-visible:pointer-events-auto focus-visible:ml-0 focus-visible:w-5 focus-visible:overflow-visible focus-visible:opacity-100",
               focusRing,
-              !active && !grouped && "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 group-focus-visible:opacity-100",
             )}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onClose}
           >
-            <X id={`${domId}-close-icon`} className="size-3.5" aria-hidden />
+            <X id={`${domId}-close-icon`} className="size-3.5 shrink-0" aria-hidden />
           </button>
         </>
       )}

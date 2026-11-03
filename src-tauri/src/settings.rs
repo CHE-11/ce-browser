@@ -30,6 +30,9 @@ pub const AI_PROVIDER_IDS: &[&str] = &["openai", "claude", "custom", "local"];
 pub struct AiProviderSlot {
     pub endpoint: String,
     pub model: String,
+    /// `low`, `medium`, or `high` when the model should think. Empty keeps the provider default.
+    #[serde(default)]
+    pub thinking: String,
 }
 
 impl Default for AiProviderSlot {
@@ -37,6 +40,7 @@ impl Default for AiProviderSlot {
         Self {
             endpoint: String::new(),
             model: String::new(),
+            thinking: String::new(),
         }
     }
 }
@@ -57,15 +61,18 @@ impl Default for AiProviders {
             openai: AiProviderSlot {
                 endpoint: crate::ai::OPENAI_ENDPOINT.into(),
                 model: "gpt-4o-mini".into(),
+                thinking: String::new(),
             },
             claude: AiProviderSlot {
                 endpoint: crate::ai::CLAUDE_ENDPOINT.into(),
                 model: "claude-3-5-haiku-latest".into(),
+                thinking: String::new(),
             },
             custom: AiProviderSlot::default(),
             local: AiProviderSlot {
                 endpoint: crate::ai::LOCAL_ENDPOINT.into(),
                 model: "llama3.2".into(),
+                thinking: String::new(),
             },
         }
     }
@@ -766,10 +773,7 @@ impl BrowserSettings {
     /// An older file stored one endpoint. A localhost address becomes Local; anything else becomes Custom.
     fn migrate_ai_provider(&mut self) {
         if self.ai_provider.trim().is_empty() {
-            let endpoint = self
-                .legacy_assistant_endpoint
-                .clone()
-                .unwrap_or_default();
+            let endpoint = self.legacy_assistant_endpoint.clone().unwrap_or_default();
             let model = self.legacy_assistant_model.clone().unwrap_or_default();
             let endpoint = endpoint.trim().to_string();
             let model = model.trim().to_string();
@@ -814,12 +818,16 @@ impl BrowserSettings {
         }
         self.ai_providers.openai.endpoint = self.ai_providers.openai.endpoint.trim().to_string();
         self.ai_providers.openai.model = self.ai_providers.openai.model.trim().to_string();
+        self.ai_providers.openai.thinking = clean_thinking(&self.ai_providers.openai.thinking);
         self.ai_providers.claude.endpoint = self.ai_providers.claude.endpoint.trim().to_string();
         self.ai_providers.claude.model = self.ai_providers.claude.model.trim().to_string();
+        self.ai_providers.claude.thinking = clean_thinking(&self.ai_providers.claude.thinking);
         self.ai_providers.custom.endpoint = self.ai_providers.custom.endpoint.trim().to_string();
         self.ai_providers.custom.model = self.ai_providers.custom.model.trim().to_string();
+        self.ai_providers.custom.thinking = clean_thinking(&self.ai_providers.custom.thinking);
         self.ai_providers.local.endpoint = self.ai_providers.local.endpoint.trim().to_string();
         self.ai_providers.local.model = self.ai_providers.local.model.trim().to_string();
+        self.ai_providers.local.thinking = clean_thinking(&self.ai_providers.local.thinking);
         self.legacy_assistant_endpoint = None;
         self.legacy_assistant_model = None;
     }
@@ -1203,6 +1211,13 @@ pub fn hotkey_blank(token: &str) -> bool {
     token.trim().is_empty() || crate::system::hotkey_mods(token).is_none()
 }
 
+fn clean_thinking(value: &str) -> String {
+    match value.trim() {
+        "low" | "medium" | "high" => value.trim().to_string(),
+        _ => String::new(),
+    }
+}
+
 fn clean_language(language: &str) -> String {
     let cleaned: String = language
         .chars()
@@ -1567,12 +1582,21 @@ mod tests {
             r#"{"assistantEndpoint":"https://openrouter.ai/api/v1","assistantModel":"openai/gpt-4o-mini","assistantKey":"sk-secret-value","theme":"zinc"}"#,
         )
         .expect("settings parse");
-        assert_eq!(loaded.legacy_assistant_key.as_deref(), Some("sk-secret-value"));
+        assert_eq!(
+            loaded.legacy_assistant_key.as_deref(),
+            Some("sk-secret-value")
+        );
         let mut loaded = loaded.normalize();
         assert_eq!(loaded.ai_provider, "custom");
-        assert_eq!(loaded.ai_providers.custom.endpoint, "https://openrouter.ai/api/v1");
+        assert_eq!(
+            loaded.ai_providers.custom.endpoint,
+            "https://openrouter.ai/api/v1"
+        );
         assert_eq!(loaded.ai_providers.custom.model, "openai/gpt-4o-mini");
-        assert_eq!(loaded.ai_providers.local.endpoint, "http://127.0.0.1:11434/v1");
+        assert_eq!(
+            loaded.ai_providers.local.endpoint,
+            "http://127.0.0.1:11434/v1"
+        );
         loaded.legacy_assistant_key = None;
         let saved = serde_json::to_string(&loaded).expect("settings json");
         assert!(!saved.contains("sk-secret-value"));
@@ -1582,7 +1606,10 @@ mod tests {
         let again: super::BrowserSettings = serde_json::from_str(&saved).expect("round trip");
         let again = again.normalize();
         assert_eq!(again.ai_provider, "custom");
-        assert_eq!(again.ai_providers.custom.endpoint, loaded.ai_providers.custom.endpoint);
+        assert_eq!(
+            again.ai_providers.custom.endpoint,
+            loaded.ai_providers.custom.endpoint
+        );
         assert!(again.legacy_assistant_key.is_none());
     }
 
@@ -1596,6 +1623,20 @@ mod tests {
         assert_eq!(loaded.ai_provider, "local");
         assert_eq!(loaded.ai_providers.local.model, "llama3.2");
         assert_eq!(loaded.ai_providers.custom.endpoint, "");
+    }
+
+    #[test]
+    fn an_older_ai_slot_without_thinking_still_loads() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"aiProvider":"openai","aiProviders":{"openai":{"endpoint":"https://api.openai.com/v1","model":"gpt-4o-mini","thinking":"max"}}}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.ai_providers.openai.model, "gpt-4o-mini");
+        assert_eq!(loaded.ai_providers.openai.thinking, "");
+        assert_eq!(loaded.ai_providers.claude.thinking, "");
+        let saved = serde_json::to_string(&loaded).expect("settings save");
+        assert!(saved.contains("\"thinking\":\"\""));
     }
 
     #[test]

@@ -9,7 +9,9 @@ use tauri::AppHandle;
 
 use crate::{settings, tabs, webview2};
 
-pub use crate::prices::{ProductPrice, check_prices, list_prices, parse_price, read_page_price, track_price};
+pub use crate::prices::{
+    ProductPrice, check_prices, list_prices, parse_price, read_page_price, track_price,
+};
 
 pub const DEFAULT_TRANSLATE_URL: &str =
     "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=%t&dt=t&q=%s";
@@ -382,7 +384,6 @@ fn plain_text(html: &str) -> String {
     out.push_str(rest);
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
-
 
 pub fn chat_url(endpoint: &str) -> String {
     format!("{}/chat/completions", endpoint.trim().trim_end_matches('/'))

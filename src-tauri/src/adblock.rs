@@ -506,8 +506,16 @@ mod tests {
     #[test]
     fn path_rules_are_a_host_and_a_prefix() {
         for rule in path_rules() {
-            assert!(rule.host.contains('.') && !rule.host.contains('/'), "{}", rule.label);
-            assert!(rule.prefix.starts_with('/') && rule.prefix.len() > 1, "{}", rule.label);
+            assert!(
+                rule.host.contains('.') && !rule.host.contains('/'),
+                "{}",
+                rule.label
+            );
+            assert!(
+                rule.prefix.starts_with('/') && rule.prefix.len() > 1,
+                "{}",
+                rule.label
+            );
         }
     }
 

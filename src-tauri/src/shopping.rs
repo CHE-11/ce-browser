@@ -220,7 +220,11 @@ fn run_deals(
         format!("{name} buy"),
     ];
     if !current.shopping_competitors.is_empty() {
-        queries.push(format!("{} {}", name, current.shopping_competitors.join(" ")));
+        queries.push(format!(
+            "{} {}",
+            name,
+            current.shopping_competitors.join(" ")
+        ));
     }
     let mut sources = Vec::new();
     let mut failure = None;
@@ -228,7 +232,10 @@ fn run_deals(
         match search(&query, region) {
             Ok(results) => {
                 for result in results {
-                    if !sources.iter().any(|kept: &SearchResult| kept.url == result.url) {
+                    if !sources
+                        .iter()
+                        .any(|kept: &SearchResult| kept.url == result.url)
+                    {
                         sources.push(result);
                     }
                 }
@@ -237,7 +244,9 @@ fn run_deals(
         }
     }
     if sources.is_empty() {
-        return Err(failure.unwrap_or_else(|| "The web search found nothing for this product.".into()));
+        return Err(
+            failure.unwrap_or_else(|| "The web search found nothing for this product.".into())
+        );
     }
 
     let current_price = product.as_ref().map(|item| item.price);
@@ -296,13 +305,20 @@ fn fresh_cache(app: &AppHandle, key: &str) -> Option<ShoppingDeals> {
     if entry.checked_at == 0 || now_ms().saturating_sub(entry.checked_at) > CACHE_MS {
         return None;
     }
-    if entry.deals.coupons.is_empty() && entry.deals.offers.is_empty() && entry.deals.sources.is_empty() {
+    if entry.deals.coupons.is_empty()
+        && entry.deals.offers.is_empty()
+        && entry.deals.sources.is_empty()
+    {
         return None;
     }
     Some(apply_feedback(&entry.deals, &entry.feedback, true))
 }
 
-fn remember(app: &AppHandle, key: &str, deals: &ShoppingDeals) -> Result<Vec<CouponFeedback>, String> {
+fn remember(
+    app: &AppHandle,
+    key: &str,
+    deals: &ShoppingDeals,
+) -> Result<Vec<CouponFeedback>, String> {
     let mut file = load_shopping(app);
     let feedback = file
         .entries
@@ -325,7 +341,11 @@ fn remember(app: &AppHandle, key: &str, deals: &ShoppingDeals) -> Result<Vec<Cou
     Ok(feedback)
 }
 
-fn apply_feedback(deals: &ShoppingDeals, feedback: &[CouponFeedback], cached: bool) -> ShoppingDeals {
+fn apply_feedback(
+    deals: &ShoppingDeals,
+    feedback: &[CouponFeedback],
+    cached: bool,
+) -> ShoppingDeals {
     let mut deals = deals.clone();
     deals.cached = cached;
     for coupon in &mut deals.coupons {
@@ -367,7 +387,10 @@ fn extract_coupons(sources: &[SearchResult]) -> Vec<Coupon> {
     for source in sources {
         let text = format!("{} {}", source.title, source.snippet);
         for code in code_tokens(&text) {
-            if out.iter().any(|kept: &Coupon| kept.code.eq_ignore_ascii_case(&code)) {
+            if out
+                .iter()
+                .any(|kept: &Coupon| kept.code.eq_ignore_ascii_case(&code))
+            {
                 continue;
             }
             if !source.title.contains(&code) && !source.snippet.contains(&code) {
@@ -407,7 +430,9 @@ fn consider_code(out: &mut Vec<String>, token: &str) {
     if token.chars().all(|character| character.is_ascii_digit()) {
         return;
     }
-    let letters_upper = token.chars().all(|character| !character.is_ascii_lowercase());
+    let letters_upper = token
+        .chars()
+        .all(|character| !character.is_ascii_lowercase());
     let has_digit = token.chars().any(|character| character.is_ascii_digit());
     if !(letters_upper && (has_digit || token.len() >= 5)) {
         return;
@@ -429,13 +454,18 @@ fn expiry_hint(title: &str, snippet: &str) -> String {
     String::new()
 }
 
-fn extract_offers(sources: &[SearchResult], page_url: &str, current_price: Option<f64>) -> Vec<Offer> {
+fn extract_offers(
+    sources: &[SearchResult],
+    page_url: &str,
+    current_price: Option<f64>,
+) -> Vec<Offer> {
     let mut out: Vec<Offer> = Vec::new();
     for source in sources {
         if same_url(&source.url, page_url) || out.iter().any(|kept| kept.url == source.url) {
             continue;
         }
-        let Some(price) = snippet_price(&source.snippet).or_else(|| snippet_price(&source.title)) else {
+        let Some(price) = snippet_price(&source.snippet).or_else(|| snippet_price(&source.title))
+        else {
             continue;
         };
         if let Some(current) = current_price {
@@ -488,7 +518,12 @@ fn leading_amount(text: &str) -> Option<f64> {
     }
     let normalized = if raw.contains(',') && raw.contains('.') {
         raw.replace(',', "")
-    } else if raw.matches(',').count() == 1 && raw.split(',').next_back().is_some_and(|part| part.len() == 2) {
+    } else if raw.matches(',').count() == 1
+        && raw
+            .split(',')
+            .next_back()
+            .is_some_and(|part| part.len() == 2)
+    {
         raw.replace(',', ".")
     } else {
         raw.replace(',', "")
@@ -509,7 +544,12 @@ fn currency_hint(text: &str) -> String {
     }
 }
 
-fn verify_offers(offers: Vec<Offer>, page_url: &str, current_price: Option<f64>, name: &str) -> Vec<Offer> {
+fn verify_offers(
+    offers: Vec<Offer>,
+    page_url: &str,
+    current_price: Option<f64>,
+    name: &str,
+) -> Vec<Offer> {
     let mut ranked = offers;
     ranked.sort_by(|left, right| match (left.price, right.price) {
         (Some(left), Some(right)) => left.total_cmp(&right),
@@ -577,8 +617,11 @@ fn fetch_offer(url: &str) -> Result<FetchedOffer, String> {
         .call()
         .map_err(|_| "Couldn't open that offer.".to_string())?;
     let final_url = response.get_url().to_string();
-    let body = response.into_string().map_err(|_| "Couldn't open that offer.".to_string())?;
-    let product = prices::parse_price(&body).ok_or_else(|| "No price was found on that offer.".to_string())?;
+    let body = response
+        .into_string()
+        .map_err(|_| "Couldn't open that offer.".to_string())?;
+    let product = prices::parse_price(&body)
+        .ok_or_else(|| "No price was found on that offer.".to_string())?;
     Ok(FetchedOffer {
         url: final_url,
         title: product.title,
@@ -595,7 +638,10 @@ pub fn variant_mismatch(product: &str, title: &str) -> bool {
     if left.is_empty() || right.is_empty() {
         return false;
     }
-    let overlap = left.iter().filter(|token| right.iter().any(|other| other == *token)).count();
+    let overlap = left
+        .iter()
+        .filter(|token| right.iter().any(|other| other == *token))
+        .count();
     overlap * 2 < left.len()
 }
 
@@ -657,7 +703,9 @@ fn search(query: &str, region: &str) -> Result<Vec<SearchResult>, String> {
         .map_err(|error| error.to_string())?;
     let results = parse_results(&body, RESULTS_PER_QUERY);
     if results.is_empty() && body.contains("anomaly") {
-        return Err("The web search asked for a captcha. Wait a minute, then choose Search again.".into());
+        return Err(
+            "The web search asked for a captcha. Wait a minute, then choose Search again.".into(),
+        );
     }
     Ok(results)
 }
@@ -987,7 +1035,8 @@ fn offer_price(value: &serde_json::Value) -> Option<f64> {
 mod tests {
     use super::{
         SearchResult, accept_confirmed_price, clean_name, extract_coupons, extract_offers,
-        grounded_coupons, grounded_offers, parse_reply, parse_results, target_url, variant_mismatch,
+        grounded_coupons, grounded_offers, parse_reply, parse_results, target_url,
+        variant_mismatch,
     };
 
     const PAGE: &str = r#"

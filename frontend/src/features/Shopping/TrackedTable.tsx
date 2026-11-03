@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ExternalLink, Pause, Play, StickyNote, Trash2 } from "lucide-react";
+import { Check, ExternalLink, Pause, Play, StickyNote, Store, Trash2 } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
 import { cn } from "@/lib/cn";
 import type { ProductPrice } from "@type/browser";
@@ -54,8 +54,10 @@ export function TrackedTable({
   items,
   picked,
   onToggle,
+  onToggleAll,
   onOpen,
   onCheck,
+  onFindCheaper,
   onPause,
   onNote,
   onRemove,
@@ -63,17 +65,34 @@ export function TrackedTable({
   items: ProductPrice[];
   picked: Set<string>;
   onToggle: (id: string) => void;
+  onToggleAll: (select: boolean) => void;
   onOpen: (item: ProductPrice) => void;
   onCheck: (item: ProductPrice) => void;
+  onFindCheaper: (item: ProductPrice) => void;
   onPause: (item: ProductPrice) => void;
   onNote: (item: ProductPrice) => void;
   onRemove: (item: ProductPrice) => void;
 }) {
+  const allChecked = items.length > 0 && items.every((item) => picked.has(item.id));
+  const someChecked = !allChecked && items.some((item) => picked.has(item.id));
+
   return (
     <table id="shopping-table" className="w-full border-collapse text-left text-sm">
       <thead id="shopping-table-head">
         <tr id="shopping-table-head-row" className="text-xs text-zinc-500">
-          <th id="shopping-table-check" className="w-8 px-2 py-2" />
+          <th id="shopping-table-check" className="w-8 px-2 py-2">
+            <input
+              id="shopping-table-check-all"
+              type="checkbox"
+              aria-label="Check all"
+              title="Check all"
+              checked={allChecked}
+              ref={(node) => {
+                if (node) node.indeterminate = someChecked;
+              }}
+              onChange={() => onToggleAll(!allChecked)}
+            />
+          </th>
           <th id="shopping-table-thumbnail" className="w-14 px-2 py-2 font-medium">Thumbnail</th>
           <th id="shopping-table-product" className="px-2 py-2 font-medium">Product</th>
           <th id="shopping-table-price" className="px-2 py-2 font-medium">Price</th>
@@ -128,6 +147,9 @@ export function TrackedTable({
                   </IconButton>
                   <IconButton id={`shopping-row-check-now-${item.id}`} label="Check now" onClick={() => onCheck(item)}>
                     <Check id={`shopping-row-check-icon-${item.id}`} aria-hidden />
+                  </IconButton>
+                  <IconButton id={`shopping-row-cheaper-${item.id}`} label="Find cheaper" onClick={() => onFindCheaper(item)}>
+                    <Store id={`shopping-row-cheaper-icon-${item.id}`} aria-hidden />
                   </IconButton>
                   <IconButton id={`shopping-row-pause-${item.id}`} label={item.paused ? "Resume" : "Pause"} onClick={() => onPause(item)}>
                     {item.paused ? (
