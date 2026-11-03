@@ -138,7 +138,7 @@ export function TabSwitcher({ params }: TabSwitcherProps) {
             onMouseEnter={() => setSelected(index)}
             onClick={() => commit(index)}
           >
-            <div id={`tab-switcher-${tab.id}-thumb`} className="relative aspect-[16/10] w-full bg-zinc-800">
+            <div id={`tab-switcher-${tab.id}-thumb`} className="relative aspect-16/10 w-full bg-zinc-800">
               {thumbs[tab.id] ? (
                 <img id={`tab-switcher-${tab.id}-image`} src={thumbs[tab.id]} alt="" className="size-full object-cover object-top" />
               ) : (

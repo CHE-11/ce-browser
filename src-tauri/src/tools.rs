@@ -1,4 +1,4 @@
-//! Translate, passwords, prices, the Internet Archive, readability, and the page assistant.
+//! Translate, passwords, prices, the Internet Archive, and readability.
 
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -710,31 +710,6 @@ pub(crate) fn chat(
         .filter(|text| !text.is_empty())
         .map(str::to_string)
         .ok_or_else(|| "The assistant returned nothing.".to_string())
-}
-
-pub fn ask_page(app: &AppHandle, id: u32, question: &str) -> Result<String, String> {
-    let current = settings::get(app);
-    let page = crate::print::extract_page(app, id)?;
-    let mut article = plain_text(&page.html);
-    if article.chars().count() > 12_000 {
-        article = article.chars().take(12_000).collect();
-    }
-    let question = question.trim();
-    let user = if question.is_empty() {
-        format!("Summarize this page.\n\nTitle: {}\n\n{article}", page.title)
-    } else {
-        format!(
-            "Answer using only this page.\n\nQuestion: {question}\n\nTitle: {}\n\n{article}",
-            page.title
-        )
-    };
-    chat(
-        &current,
-        "",
-        "You answer briefly about the web page the user is reading.",
-        &user,
-        Duration::from_secs(60),
-    )
 }
 
 #[cfg(test)]

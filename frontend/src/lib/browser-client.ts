@@ -455,10 +455,6 @@ export function checkPrices() {
   return invoke<ProductPrice[]>("check_prices");
 }
 
-export function askPage(id: number, question: string) {
-  return invoke<string>("ask_page", { id, question });
-}
-
 export function findDeals(id: number) {
   return invoke<ShoppingDeals>("find_deals", { id });
 }

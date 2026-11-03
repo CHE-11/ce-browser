@@ -158,8 +158,6 @@ Drag a pinned icon on the address bar onto another to reorder the built-in tools
 
 **Reading** shows the word count, the minutes at 200 words a minute, and a reading-ease score.
 
-**Assistant** summarizes the page or answers a question about it. Settings > Tools holds an OpenAI-compatible endpoint, a model name, and an API key. A local server such as `http://127.0.0.1:11434/v1` can omit the key. The key stays on this computer and is not copied into the sync folder.
-
 ## System
 
 **Install site** in the tab menu adds a Start menu shortcut for that website. Opening it shows one window, with the site's name and icon, and Windows can give it a separate taskbar button.

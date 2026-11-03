@@ -72,7 +72,7 @@ export function WhatRunsPopover({ params }: WhatRunsPopoverProps) {
               <CircleAlert id="what-runs-error-icon" className="size-4 shrink-0" aria-hidden />
               Couldn't scan this page
             </div>
-            <p id="what-runs-error-detail" className="mt-1 break-words text-xs opacity-80">
+            <p id="what-runs-error-detail" className="mt-1 wrap-break-word text-xs opacity-80">
               {scan.message}
             </p>
           </div>

@@ -19,7 +19,6 @@ import { TabGroupMenu } from "@/features/Browser/BrowserHeader/Tabs/TabGroupMenu
 import { TabContextMenu } from "@/features/Browser/BrowserHeader/Tabs/TabContextMenu";
 import { WorkspaceMenu } from "@/features/Browser/BrowserHeader/Workspace/WorkspaceMenu";
 import { AdBlockerPopover } from "@features/BuiltInExtensions/ad-blocker/AdBlockerPopover";
-import { AssistantPopover } from "@features/BuiltInExtensions/assistant/Assistant";
 import { BoardImagesPopover } from "@features/BuiltInExtensions/boards/BoardImagesPopover";
 import { BoardsPopover } from "@features/BuiltInExtensions/boards/BoardsPopover";
 import { PageControlsPopover } from "@features/BuiltInExtensions/page-controls/PageControlsPopover";
@@ -197,8 +196,6 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <ShoppingPopover params={params} />;
     case "reading":
       return <ReadingPopover params={params} />;
-    case "assistant":
-      return <AssistantPopover params={params} />;
     case "extension-pin":
       return <ExtensionPinContextMenu extensionId={params.get("id") ?? ""} />;
     case "tab-group":

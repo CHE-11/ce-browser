@@ -1392,11 +1392,6 @@ async fn save_pin_image(app: AppHandle, id: String, path: String) -> Result<(), 
 }
 
 #[tauri::command]
-async fn ask_page(app: AppHandle, id: u32, question: String) -> Result<String, String> {
-    blocking(move || tools::ask_page(&app, id, &question)).await
-}
-
-#[tauri::command]
 async fn find_deals(app: AppHandle, id: u32) -> Result<shopping::ShoppingDeals, String> {
     blocking(move || shopping::find_deals(&app, id)).await
 }
@@ -2036,7 +2031,6 @@ pub fn run() {
             board_image,
             copy_pin_image,
             save_pin_image,
-            ask_page,
             find_deals,
             install_site,
             open_default_apps,

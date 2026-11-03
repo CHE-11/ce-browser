@@ -1,6 +1,5 @@
 import type { BrowserSettings, TabInfo } from "../../../../types/browser";
 import { AdBlockerButton } from "./ad-blocker/AdBlockerButton";
-import { AssistantButton } from "./assistant/Assistant";
 import { BoardsButton } from "./boards/BoardsButton";
 import { PageControlsButton } from "./page-controls/PageControlsButton";
 import { ClearCacheButton } from "./clear-cache/ClearCacheButton";
@@ -43,8 +42,6 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <ShoppingButton activeTab={activeTab} />;
     case "reading":
       return <ReadingButton activeTab={activeTab} />;
-    case "assistant":
-      return <AssistantButton activeTab={activeTab} />;
     default:
       return null;
   }

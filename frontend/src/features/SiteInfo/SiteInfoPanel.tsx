@@ -49,7 +49,7 @@ function Fact({ id, label, value }: { id: string; label: string; value: string }
       <span id={`${id}-label`} className="w-20 shrink-0 text-zinc-500">
         {label}
       </span>
-      <span id={`${id}-value`} className="min-w-0 break-words text-zinc-200">
+      <span id={`${id}-value`} className="min-w-0 wrap-break-word text-zinc-200">
         {value}
       </span>
     </div>

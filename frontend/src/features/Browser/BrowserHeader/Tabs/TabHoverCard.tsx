@@ -103,7 +103,7 @@ export function TabHoverCard({ tabId }: TabHoverCardProps) {
             id="tab-hover-thumbnail"
             src={thumbnail}
             alt=""
-            className={cn("aspect-[16/10] w-full rounded-md bg-zinc-800 object-cover object-top", sleeping && "opacity-60 grayscale")}
+            className={cn("aspect-16/10 w-full rounded-md bg-zinc-800 object-cover object-top", sleeping && "opacity-60 grayscale")}
           />
         ) : null}
         <div id="tab-hover-meta" className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-400">

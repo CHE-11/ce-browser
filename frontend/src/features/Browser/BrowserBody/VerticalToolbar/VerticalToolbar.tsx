@@ -109,7 +109,7 @@ export function ToolbarEntry({
         <ToolbarIcon id={id} activeTab={activeTab} settings={settings} />
       )}
       {labeled && caption ? (
-        <span id={`${domId}-label`} className="pointer-events-none -mt-1.5 line-clamp-2 w-full min-w-0 break-words text-center text-[8px] leading-none text-zinc-400">
+        <span id={`${domId}-label`} className="pointer-events-none -mt-1.5 line-clamp-2 w-full min-w-0 wrap-break-word text-center text-[8px] leading-none text-zinc-400">
           {caption}
         </span>
       ) : null}

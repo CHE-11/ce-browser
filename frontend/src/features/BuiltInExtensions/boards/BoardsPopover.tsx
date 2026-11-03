@@ -137,7 +137,7 @@ function SaveResult({ params, onAgain }: { params: URLSearchParams; onAgain: () 
             <CircleAlert id="boards-result-error-icon" className="size-4 shrink-0" aria-hidden />
             Couldn't save to the board
           </p>
-          <p id="boards-result-error-detail" className="mt-1 break-words text-xs opacity-80">
+          <p id="boards-result-error-detail" className="mt-1 wrap-break-word text-xs opacity-80">
             {params.get("message")}
           </p>
         </div>

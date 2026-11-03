@@ -1,4 +1,4 @@
-import { BookOpen, Clapperboard, Eraser, ImageDown, KeyRound, Languages, Layers, LayoutGrid, Printer, Shield, ShoppingCart, SlidersHorizontal, Sparkles, Tags, type LucideIcon } from "lucide-react";
+import { BookOpen, Clapperboard, Eraser, ImageDown, KeyRound, Languages, Layers, LayoutGrid, Printer, Shield, ShoppingCart, SlidersHorizontal, Tags, type LucideIcon } from "lucide-react";
 
 export type BuiltinTool = {
   id: string;
@@ -89,12 +89,6 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Reading",
     description: "Word count, reading time and reading ease.",
     icon: BookOpen,
-  },
-  {
-    id: "assistant",
-    name: "Assistant",
-    description: "Summarize the page or ask about it.",
-    icon: Sparkles,
   },
 ];
 

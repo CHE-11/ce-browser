@@ -1632,24 +1632,6 @@ fn add_page_items(
                     );
                 },
             )?);
-            let (assistant_app, text, page_url) = (app.clone(), selection.clone(), page.clone());
-            entries.push(menu_command(
-                environment,
-                "Ask the assistant about this",
-                move || {
-                    let question = format!(
-                        "Explain this passage from the page:\n\n\u{201c}{}\u{201d}",
-                        text.chars().take(2000).collect::<String>()
-                    );
-                    let params = url::form_urlencoded::Serializer::new(String::new())
-                        .append_pair("tab", &id.to_string())
-                        .append_pair("url", &page_url)
-                        .append_pair("title", "")
-                        .append_pair("question", &question)
-                        .finish();
-                    crate::page_menu::open_popup_at(&assistant_app, id, x, y, "assistant", params);
-                },
-            )?);
             let (link_app, text, page_url) = (app.clone(), selection.clone(), page.clone());
             if page_url.starts_with("http") {
                 entries.push(menu_command(

@@ -124,7 +124,7 @@ export function TabItem({
         "group relative flex shrink-0 cursor-default select-none items-center gap-2 text-xs transition-colors",
         focusRing,
         vertical ? "h-8 w-full rounded-lg px-2" : "h-7.5 rounded-t-lg px-2.5",
-        !vertical && (compact ? "w-9 justify-center px-0" : "min-w-[88px] shrink"),
+        !vertical && (compact ? "w-9 justify-center px-0" : "min-w-22 shrink"),
         vertical && compact && "w-9 justify-center px-0",
         active ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200",
         !vertical && active && "bg-zinc-900",

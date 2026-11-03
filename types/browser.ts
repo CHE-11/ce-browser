@@ -324,7 +324,6 @@ export type PopupKind =
   | "password"
   | "price"
   | "reading"
-  | "assistant"
   | "shopping"
   | "toast"
   | "tab-search"
