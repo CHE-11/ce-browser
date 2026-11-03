@@ -9,6 +9,7 @@ import type {
   BackdropSupport,
   Board,
   BoardFolder,
+  BoardImportItem,
   BoardsSnapshot,
   Pin,
   BookmarkNode,
@@ -444,6 +445,31 @@ export function copyPinImage(id: string) {
 
 export function savePinImage(id: string, path: string) {
   return invoke<void>("save_pin_image", { id, path });
+}
+
+/** An empty `boardId` saves to the last board used, or creates Unsorted. */
+export function importBoardItems(boardId: string, items: BoardImportItem[]) {
+  return invoke<Pin[]>("import_board_items", { boardId, items });
+}
+
+export function openPinFile(id: string) {
+  return invoke<void>("open_pin_file", { id });
+}
+
+export function savePinFile(id: string, path: string) {
+  return invoke<void>("save_pin_file", { id, path });
+}
+
+/** Returns null when the dialog is cancelled. */
+export async function pickBoardFiles() {
+  const picked = await open({ multiple: true, title: "Add to board" });
+  if (typeof picked === "string") {
+    return [picked];
+  }
+  if (Array.isArray(picked)) {
+    return picked;
+  }
+  return null;
 }
 
 export function listPrices() {

@@ -953,7 +953,18 @@ export type PageToolRequest =
       boardId: string;
     };
 
-export type PinKind = "page" | "region" | "element" | "link" | "image";
+export type PinKind = "page" | "region" | "element" | "link" | "image" | "file";
+
+/** One file, image or link sent to `import_board_items`. */
+export type BoardImportItem = {
+  name: string;
+  mime: string;
+  url: string;
+  /** Base64 file bytes. Empty when `path` or `url` is set. */
+  data: string;
+  /** Local path from the file picker. Empty for a drop, paste or link. */
+  path: string;
+};
 
 /** A folder on `ce://boards`. Folders nest; `parentId` is null at the top level. */
 export type BoardFolder = {
@@ -991,6 +1002,9 @@ export type Pin = {
   width: number;
   height: number;
   createdAt: number;
+  /** Original name for a file pin, and for an image added from a file. */
+  fileName: string;
+  mime: string;
 };
 
 export type BoardsSnapshot = {

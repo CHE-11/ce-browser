@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { Check, Copy, ExternalLink, FolderInput, ImageOff, Maximize2, Star, Trash2 } from "lucide-react";
+import { Check, Copy, ExternalLink, File, FolderInput, ImageOff, Maximize2, Save, Star, Trash2 } from "lucide-react";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ContextMenu";
 import { FavIcon } from "@/components/FavIcon";
 import { cn } from "@/lib/cn";
@@ -14,6 +14,8 @@ export type PinActions = {
   open: (pin: Pin) => void;
   openSource: (pin: Pin) => void;
   copyImage: (pin: Pin) => void;
+  openFile: (pin: Pin) => void;
+  saveFile: (pin: Pin) => void;
   move: (ids: string[], x: number, y: number) => void;
   setCover: (pin: Pin) => void;
   remove: (ids: string[]) => void;
@@ -83,7 +85,8 @@ function PinCard({ pin, boardName, selected, selection, onSelect, onMenu, action
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   const thumbnail = useThumbnail(pin.hasImage ? pin.id : null, visible);
-  const host = hostOf(pin.pageUrl);
+  const host = hostOf(pin.pageUrl || pin.linkUrl);
+  const address = pin.pageUrl || pin.linkUrl;
   const idBase = `boards-pin-${pin.id}`;
 
   useEffect(() => {
@@ -179,9 +182,16 @@ function PinCard({ pin, boardName, selected, selection, onSelect, onMenu, action
       </button>
 
       <div id={`${idBase}-actions`} className="absolute right-2 top-2 flex gap-1 opacity-0 transition group-hover:opacity-100">
-        <CardAction id={`${idBase}-source`} label="Open source" onClick={() => actions.openSource(pin)}>
-          <ExternalLink aria-hidden />
-        </CardAction>
+        {address ? (
+          <CardAction id={`${idBase}-source`} label="Open source" onClick={() => actions.openSource(pin)}>
+            <ExternalLink aria-hidden />
+          </CardAction>
+        ) : null}
+        {pin.kind === "file" ? (
+          <CardAction id={`${idBase}-file`} label="Open file" onClick={() => actions.openFile(pin)}>
+            <File aria-hidden />
+          </CardAction>
+        ) : null}
         {pin.hasImage ? (
           <CardAction id={`${idBase}-copy`} label="Copy image" onClick={() => actions.copyImage(pin)}>
             <Copy aria-hidden />
@@ -259,7 +269,7 @@ function CardAction({
   );
 }
 
-function PinMenu({ pin, ids, x, y, actions, onClose }: { pin: Pin; ids: string[]; x: number; y: number; actions: PinActions; onClose: () => void }) {
+export function PinMenu({ pin, ids, x, y, actions, onClose }: { pin: Pin; ids: string[]; x: number; y: number; actions: PinActions; onClose: () => void }) {
   const many = ids.length > 1;
   const item = (run: () => void) => () => {
     run();
@@ -268,7 +278,19 @@ function PinMenu({ pin, ids, x, y, actions, onClose }: { pin: Pin; ids: string[]
   return (
     <ContextMenu id="boards-pin-menu" label="Pin" x={x} y={y} onClose={onClose}>
       <ContextMenuItem id="boards-pin-menu-open" icon={<Maximize2 />} label="Open" disabled={many} onClick={item(() => actions.open(pin))} />
-      <ContextMenuItem id="boards-pin-menu-source" icon={<ExternalLink />} label="Open source" disabled={many} onClick={item(() => actions.openSource(pin))} />
+      <ContextMenuItem
+        id="boards-pin-menu-source"
+        icon={<ExternalLink />}
+        label="Open source"
+        disabled={many || (!pin.pageUrl && !pin.linkUrl)}
+        onClick={item(() => actions.openSource(pin))}
+      />
+      {pin.kind === "file" ? (
+        <>
+          <ContextMenuItem id="boards-pin-menu-open-file" icon={<File />} label="Open file" disabled={many} onClick={item(() => actions.openFile(pin))} />
+          <ContextMenuItem id="boards-pin-menu-save-file" icon={<Save />} label="Save file" disabled={many} onClick={item(() => actions.saveFile(pin))} />
+        </>
+      ) : null}
       <ContextMenuItem
         id="boards-pin-menu-copy"
         icon={<Copy />}

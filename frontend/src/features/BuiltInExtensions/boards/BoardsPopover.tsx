@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { CircleAlert, Crop, ExternalLink, Images, LayoutGrid, Link2, Monitor, MousePointerClick, RotateCcw, ScrollText } from "lucide-react";
 import { Button } from "@/components/Button";
 import { PopupFrame } from "@/components/PopupFrame";
-import { closePopup, createTab, currentWindowLabel, requestPageTool } from "@/lib/browser-client";
+import { closePopup, createTab, currentWindowLabel, movePins, requestPageTool } from "@/lib/browser-client";
 import type { PageToolRequest } from "@type/browser";
 import { boardLabel } from "@features/Boards/board-tree";
 import { useThumbnail } from "@features/Boards/thumbnails";
 import { useBoards } from "@features/Boards/use-boards";
 import { ActionTile, PopoverHeader } from "../PopoverParts";
 import { capturable, readPopoverTab } from "../shared";
+import { errorText } from "../use-page-tool";
 import { BoardPicker } from "./BoardPicker";
 
 type BoardsAction = Extract<PageToolRequest, { tool: "boards" }>["action"];
@@ -125,9 +126,24 @@ function SaveResult({ params, onAgain }: { params: URLSearchParams; onAgain: () 
   const { boards } = useBoards();
   const failed = params.get("status") === "error";
   const pinId = params.get("pin");
-  const boardId = params.get("board") ?? "";
+  const [boardId, setBoardId] = useState(params.get("board") ?? "");
+  const [moveError, setMoveError] = useState("");
   const thumbnail = useThumbnail(failed ? null : pinId);
   const board = boards.boards.find((item) => item.id === boardId);
+
+  const changeBoard = (next: string) => {
+    if (!pinId || next === boardId) {
+      setBoardId(next);
+      return;
+    }
+    const previous = boardId;
+    setBoardId(next);
+    setMoveError("");
+    void movePins([pinId], next).catch((reason: unknown) => {
+      setBoardId(previous);
+      setMoveError(errorText(reason));
+    });
+  };
 
   return (
     <div id="boards-result" className="flex flex-col gap-2 px-3 pb-3">
@@ -149,6 +165,12 @@ function SaveResult({ params, onAgain }: { params: URLSearchParams; onAgain: () 
           <p id="boards-result-message" className="truncate text-sm text-sky-100">
             Saved to <span id="boards-result-board" className="font-medium">{board ? boardLabel(boards, board) : "board"}</span>
           </p>
+          <BoardPicker id="boards-result-picker" boards={boards} value={boardId} onChange={changeBoard} />
+          {moveError ? (
+            <p id="boards-result-move-error" className="text-xs text-amber-200">
+              {moveError}
+            </p>
+          ) : null}
         </>
       )}
       <div id="boards-result-actions" className="flex gap-2">

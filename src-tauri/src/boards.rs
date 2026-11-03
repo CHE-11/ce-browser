@@ -31,7 +31,12 @@ const NAME_LIMIT: usize = 120;
 const NOTE_LIMIT: usize = 5000;
 /// Images saved by one "Images on this page" request.
 const MAX_IMAGES: usize = 60;
-const PIN_KINDS: [&str; 5] = ["page", "region", "element", "link", "image"];
+/// Files, images and links added together from the boards page.
+const MAX_IMPORTS: usize = 40;
+const MAX_IMPORT_BYTES: u64 = 20 * 1024 * 1024;
+const FILE_NAME_LIMIT: usize = 240;
+const MIME_LIMIT: usize = 200;
+const PIN_KINDS: [&str; 6] = ["page", "region", "element", "link", "image", "file"];
 const PICK_FAILURE: &str = "Couldn't read this page.";
 
 /// Every change reads, edits and writes `boards.json` while holding this lock.
@@ -73,6 +78,23 @@ pub struct Pin {
     pub width: u32,
     pub height: u32,
     pub created_at: u64,
+    /// Original name for a file pin, and for an image added from a file.
+    pub file_name: String,
+    pub mime: String,
+}
+
+/// One file, image or link dropped, pasted or picked on `ce://boards`.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct BoardImportItem {
+    pub name: String,
+    pub mime: String,
+    /// Set for a link. Empty when `data` or `path` carries a file.
+    pub url: String,
+    /// Base64 file bytes from a drop or paste.
+    pub data: String,
+    /// Path from the file picker. Read on this machine; not a remote address.
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -541,6 +563,10 @@ fn thumb_path(app: &AppHandle, id: &str) -> PathBuf {
     image_dir(app).join(format!("{id}.thumb.jpg"))
 }
 
+fn file_path(app: &AppHandle, id: &str) -> PathBuf {
+    image_dir(app).join(format!("{id}.bin"))
+}
+
 fn lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -582,6 +608,7 @@ fn remove_images(app: &AppHandle, ids: &[String]) {
     for id in ids.iter().filter(|id| valid_id(id)) {
         let _ = fs::remove_file(image_path(app, id));
         let _ = fs::remove_file(thumb_path(app, id));
+        let _ = fs::remove_file(file_path(app, id));
     }
 }
 
@@ -680,12 +707,39 @@ fn write_image(app: &AppHandle, id: &str, image: &RgbaImage) -> Result<(), Strin
         .map_err(|error| format!("Couldn't save the thumbnail. {error}"))
 }
 
+fn write_file(app: &AppHandle, id: &str, bytes: &[u8]) -> Result<(), String> {
+    let dir = image_dir(app);
+    fs::create_dir_all(&dir)
+        .map_err(|error| format!("Couldn't create {}. {error}", dir.display()))?;
+    fs::write(file_path(app, id), bytes).map_err(|error| format!("Couldn't save the file. {error}"))
+}
+
 struct PinDraft {
     kind: &'static str,
     title: String,
     page_url: String,
     link_url: String,
     text: String,
+    file_name: String,
+    mime: String,
+}
+
+fn pin_draft(
+    kind: &'static str,
+    title: String,
+    page_url: String,
+    link_url: String,
+    text: String,
+) -> PinDraft {
+    PinDraft {
+        kind,
+        title,
+        page_url,
+        link_url,
+        text,
+        file_name: String::new(),
+        mime: String::new(),
+    }
 }
 
 fn save_pin(
@@ -693,10 +747,17 @@ fn save_pin(
     board_id: &str,
     draft: PinDraft,
     image: Option<&RgbaImage>,
+    file_bytes: Option<&[u8]>,
 ) -> Result<Pin, String> {
     let id = new_id("p");
     if let Some(image) = image {
         if let Err(error) = write_image(app, &id, image) {
+            remove_images(app, std::slice::from_ref(&id));
+            return Err(error);
+        }
+    }
+    if let Some(bytes) = file_bytes {
+        if let Err(error) = write_file(app, &id, bytes) {
             remove_images(app, std::slice::from_ref(&id));
             return Err(error);
         }
@@ -714,6 +775,8 @@ fn save_pin(
         width: image.map(RgbaImage::width).unwrap_or(0),
         height: image.map(RgbaImage::height).unwrap_or(0),
         created_at: tabs::now_ms(),
+        file_name: clip_text(&draft.file_name, FILE_NAME_LIMIT),
+        mime: clip_text(&draft.mime, MIME_LIMIT),
     };
     let result = change(app, |boards| {
         let mut pin = pin;
@@ -755,27 +818,15 @@ fn text_of(value: &serde_json::Value, key: &str) -> String {
 pub fn pin_page(app: &AppHandle, id: u32, board_id: &str, full_page: bool) -> Result<Pin, String> {
     let (title, url) = tab_page(app, id);
     let (image, _) = capture::page_image(app, id, full_page, full_page)?;
-    let draft = PinDraft {
-        kind: "page",
-        title,
-        page_url: url.clone(),
-        link_url: url,
-        text: String::new(),
-    };
-    save_pin(app, board_id, draft, Some(&image))
+    let draft = pin_draft("page", title, url.clone(), url, String::new());
+    save_pin(app, board_id, draft, Some(&image), None)
 }
 
 pub fn pin_region(app: &AppHandle, id: u32, board_id: &str) -> Result<Pin, String> {
     let (title, url) = tab_page(app, id);
     let image = capture::region_image(app, id)?;
-    let draft = PinDraft {
-        kind: "region",
-        title,
-        page_url: url.clone(),
-        link_url: url,
-        text: String::new(),
-    };
-    save_pin(app, board_id, draft, Some(&image))
+    let draft = pin_draft("region", title, url.clone(), url, String::new());
+    save_pin(app, board_id, draft, Some(&image), None)
 }
 
 pub fn pin_element(app: &AppHandle, id: u32, board_id: &str) -> Result<Pin, String> {
@@ -799,14 +850,14 @@ pub fn pin_element(app: &AppHandle, id: u32, board_id: &str) -> Result<Pin, Stri
     let image = capture::clip_image(app, id, x, y, width, height)?;
     let heading = text_of(&value, "heading");
     let href = text_of(&value, "href");
-    let draft = PinDraft {
-        kind: "element",
-        title: if heading.is_empty() { title } else { heading },
-        page_url: url.clone(),
-        link_url: if href.is_empty() { url } else { href },
-        text: text_of(&value, "text"),
-    };
-    save_pin(app, board_id, draft, Some(&image))
+    let draft = pin_draft(
+        "element",
+        if heading.is_empty() { title } else { heading },
+        url.clone(),
+        if href.is_empty() { url } else { href },
+        text_of(&value, "text"),
+    );
+    save_pin(app, board_id, draft, Some(&image), None)
 }
 
 pub fn pin_link(app: &AppHandle, id: u32, board_id: &str) -> Result<Pin, String> {
@@ -827,14 +878,14 @@ pub fn pin_link(app: &AppHandle, id: u32, board_id: &str) -> Result<Pin, String>
     };
     let title = text_of(&value, "title");
     let link = text_of(&value, "url");
-    let draft = PinDraft {
-        kind: "link",
-        title: if title.is_empty() { tab_title } else { title },
-        page_url: url.clone(),
-        link_url: if link.is_empty() { url } else { link },
-        text: text_of(&value, "description"),
-    };
-    save_pin(app, board_id, draft, Some(&image))
+    let draft = pin_draft(
+        "link",
+        if title.is_empty() { tab_title } else { title },
+        url.clone(),
+        if link.is_empty() { url } else { link },
+        text_of(&value, "description"),
+    );
+    save_pin(app, board_id, draft, Some(&image), None)
 }
 
 /// Downloads each image and pins it. Fails only when none could be saved.
@@ -858,14 +909,14 @@ pub fn pin_images(
         let saved = page_menu::image_bytes(source)
             .and_then(|bytes| decode_image(&bytes))
             .and_then(|image| {
-                let draft = PinDraft {
-                    kind: "image",
-                    title: title.clone(),
-                    page_url: url.clone(),
-                    link_url: source.to_string(),
-                    text: String::new(),
-                };
-                save_pin(app, &board, draft, Some(&image))
+                let draft = pin_draft(
+                    "image",
+                    title.clone(),
+                    url.clone(),
+                    source.to_string(),
+                    String::new(),
+                );
+                save_pin(app, &board, draft, Some(&image), None)
             });
         match saved {
             Ok(pin) => {
@@ -946,6 +997,245 @@ pub fn copy_image(app: &AppHandle, id: &str) -> Result<(), String> {
 
 pub fn save_image_as(app: &AppHandle, id: &str, path: &Path) -> Result<(), String> {
     capture::save_edited_png(&read_png(app, id)?, path)
+}
+
+fn extension_of(name: &str) -> String {
+    name.rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+fn safe_file_name(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name).trim();
+    let cleaned: String = base
+        .chars()
+        .filter(|character| !matches!(character, '\0' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+        .take(FILE_NAME_LIMIT)
+        .collect();
+    let cleaned = cleaned.trim().trim_matches('.').to_string();
+    if cleaned.is_empty() || cleaned == ".." {
+        "file".into()
+    } else {
+        cleaned
+    }
+}
+
+fn import_name(item: &BoardImportItem) -> String {
+    if !item.name.trim().is_empty() {
+        return safe_file_name(&item.name);
+    }
+    if !item.path.trim().is_empty() {
+        return Path::new(item.path.trim())
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(safe_file_name)
+            .unwrap_or_else(|| "file".into());
+    }
+    "file".into()
+}
+
+fn title_from_name(name: &str) -> String {
+    let name = safe_file_name(name);
+    let stem = name
+        .rsplit_once('.')
+        .map(|(stem, _)| stem.trim())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or(name.as_str());
+    stem.to_string()
+}
+
+fn looks_like_image(name: &str, mime: &str) -> bool {
+    let mime = mime.trim().to_ascii_lowercase();
+    if mime == "image/svg+xml" {
+        return false;
+    }
+    if mime.starts_with("image/") {
+        return true;
+    }
+    matches!(
+        extension_of(name).as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp"
+    )
+}
+
+fn image_mime(name: &str, mime: &str) -> String {
+    let mime = mime.trim();
+    if mime.to_ascii_lowercase().starts_with("image/") {
+        return mime.to_string();
+    }
+    match extension_of(name).as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+fn http_url(raw: &str) -> Option<String> {
+    let url = raw.trim();
+    if url.len() > 2000 || url.chars().any(char::is_whitespace) {
+        return None;
+    }
+    if url.starts_with("https://") || url.starts_with("http://") {
+        Some(url.to_string())
+    } else {
+        None
+    }
+}
+
+fn item_is_empty(item: &BoardImportItem) -> bool {
+    item.url.trim().is_empty() && item.data.trim().is_empty() && item.path.trim().is_empty()
+}
+
+fn read_import_bytes(item: &BoardImportItem) -> Result<Vec<u8>, String> {
+    if !item.path.trim().is_empty() {
+        let path = Path::new(item.path.trim());
+        let meta =
+            fs::metadata(path).map_err(|error| format!("Couldn't read that file. {error}"))?;
+        if !meta.is_file() {
+            return Err("That path is not a file.".into());
+        }
+        if meta.len() > MAX_IMPORT_BYTES {
+            return Err("That file is larger than 20 MB.".into());
+        }
+        if meta.len() == 0 {
+            return Err("That file is empty.".into());
+        }
+        return fs::read(path).map_err(|error| format!("Couldn't read that file. {error}"));
+    }
+    let data = item.data.trim();
+    if data.is_empty() {
+        return Err("That file is empty.".into());
+    }
+    if data.len() > (MAX_IMPORT_BYTES as usize) / 3 * 4 + 8 {
+        return Err("That file is larger than 20 MB.".into());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|_| "Couldn't read that file.".to_string())?;
+    if bytes.is_empty() {
+        return Err("That file is empty.".into());
+    }
+    if bytes.len() as u64 > MAX_IMPORT_BYTES {
+        return Err("That file is larger than 20 MB.".into());
+    }
+    Ok(bytes)
+}
+
+fn import_one(app: &AppHandle, board_id: &str, item: &BoardImportItem) -> Result<Pin, String> {
+    let has_bytes = !item.data.trim().is_empty() || !item.path.trim().is_empty();
+    if !has_bytes {
+        let url = http_url(&item.url)
+            .ok_or_else(|| "That link needs to start with http:// or https://.".to_string())?;
+        return save_pin(
+            app,
+            board_id,
+            pin_draft("link", url.clone(), url.clone(), url, String::new()),
+            None,
+            None,
+        );
+    }
+    let bytes = read_import_bytes(item)?;
+    let name = import_name(item);
+    let mime = item.mime.trim().to_string();
+    if looks_like_image(&name, &mime) {
+        if let Ok(image) = decode_image(&bytes) {
+            let mut draft = pin_draft(
+                "image",
+                title_from_name(&name),
+                String::new(),
+                String::new(),
+                String::new(),
+            );
+            draft.file_name = name;
+            draft.mime = image_mime(&draft.file_name, &mime);
+            return save_pin(app, board_id, draft, Some(&image), None);
+        }
+    }
+    let mut draft = pin_draft(
+        "file",
+        title_from_name(&name),
+        String::new(),
+        String::new(),
+        String::new(),
+    );
+    draft.file_name = name;
+    draft.mime = if mime.is_empty() {
+        "application/octet-stream".into()
+    } else {
+        mime
+    };
+    save_pin(app, board_id, draft, None, Some(&bytes))
+}
+
+/// Saves files, images and links onto a board. An empty `board_id` uses the last board.
+/// Fails only when nothing could be saved. At most `MAX_IMPORTS` items are kept.
+pub fn import_items(
+    app: &AppHandle,
+    board_id: &str,
+    items: &[BoardImportItem],
+) -> Result<Vec<Pin>, String> {
+    let mut board = board_id.to_string();
+    let mut pins = Vec::new();
+    let mut first_error = None;
+    for item in items
+        .iter()
+        .filter(|item| !item_is_empty(item))
+        .take(MAX_IMPORTS)
+    {
+        match import_one(app, &board, item) {
+            Ok(pin) => {
+                board = pin.board_id.clone();
+                pins.push(pin);
+            }
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    if pins.is_empty() {
+        return Err(first_error.unwrap_or_else(|| "Add a file or a link.".into()));
+    }
+    Ok(pins)
+}
+
+fn read_pin_file(app: &AppHandle, id: &str) -> Result<(String, Vec<u8>), String> {
+    if !valid_id(id) {
+        return Err("That pin no longer exists.".into());
+    }
+    let boards = snapshot(app);
+    let pin = boards
+        .pins
+        .iter()
+        .find(|pin| pin.id == id)
+        .ok_or("That pin no longer exists.")?;
+    if pin.kind != "file" {
+        return Err("This pin is not a file.".into());
+    }
+    let name = pin.file_name.clone();
+    let bytes = fs::read(file_path(app, id)).map_err(|_| "This pin has no file.".to_string())?;
+    Ok((name, bytes))
+}
+
+/// Copies the file to a temp name with its original extension, then opens it.
+pub fn open_pin_file(app: &AppHandle, id: &str) -> Result<(), String> {
+    let (file_name, bytes) = read_pin_file(app, id)?;
+    let dir = std::env::temp_dir().join("ce-browser-boards").join(id);
+    fs::create_dir_all(&dir).map_err(|error| format!("Couldn't open the file. {error}"))?;
+    let path = dir.join(safe_file_name(&file_name));
+    fs::write(&path, bytes).map_err(|error| format!("Couldn't open the file. {error}"))?;
+    files::open_with_default(&path)
+}
+
+pub fn save_file_as(app: &AppHandle, id: &str, path: &Path) -> Result<(), String> {
+    let (_, bytes) = read_pin_file(app, id)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| format!("Couldn't save the file. {error}"))?;
+    }
+    fs::write(path, bytes).map_err(|error| format!("Couldn't save the file. {error}"))
 }
 
 /// Outlines the element under the mouse. Click picks it, Alt+wheel or `[` / `]` picks the
@@ -1216,6 +1506,8 @@ mod tests {
         assert!(boards.folders.is_empty());
         assert_eq!(boards.pins[0].kind, "page");
         assert_eq!(boards.pins[0].board_id, "b1");
+        assert_eq!(boards.pins[0].file_name, "");
+        assert_eq!(boards.pins[0].mime, "");
         assert_eq!(boards.boards[0].folder_id, None);
     }
 
@@ -1228,6 +1520,32 @@ mod tests {
         let last = boards.last_board_id.clone().expect("last");
         assert_eq!(boards.board_for_save("").expect("board"), last);
         assert!(boards.board_for_save("missing").is_err());
+    }
+
+    #[test]
+    fn a_file_pin_keeps_its_kind_when_new_fields_are_missing() {
+        let boards: BoardsSnapshot = serde_json::from_str(
+            r#"{ "boards": [{ "id": "b1", "name": "Ideas" }], "pins": [{ "id": "p1", "boardId": "b1", "kind": "file" }] }"#,
+        )
+        .expect("parse");
+        let boards = boards.normalize();
+        assert_eq!(boards.pins[0].kind, "file");
+        assert_eq!(boards.pins[0].file_name, "");
+        assert_eq!(boards.pins[0].mime, "");
+    }
+
+    #[test]
+    fn imports_tell_images_from_files_and_links() {
+        assert!(looks_like_image("shot.PNG", ""));
+        assert!(looks_like_image("x", "image/webp"));
+        assert!(!looks_like_image("notes.txt", "text/plain"));
+        assert!(!looks_like_image("icon.svg", "image/svg+xml"));
+        assert_eq!(
+            http_url("https://example.com/a"),
+            Some("https://example.com/a".into())
+        );
+        assert_eq!(http_url("notes.txt"), None);
+        assert_eq!(safe_file_name("../..\\report.pdf"), "report.pdf");
     }
 
     #[test]

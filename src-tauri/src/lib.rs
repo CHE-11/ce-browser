@@ -1257,7 +1257,10 @@ async fn track_price(app: AppHandle, id: u32) -> Result<tools::ProductPrice, Str
 }
 
 #[tauri::command]
-async fn check_prices(app: AppHandle, ids: Option<Vec<String>>) -> Result<Vec<tools::ProductPrice>, String> {
+async fn check_prices(
+    app: AppHandle,
+    ids: Option<Vec<String>>,
+) -> Result<Vec<tools::ProductPrice>, String> {
     blocking(move || tools::check_prices(&app, ids.as_deref())).await
 }
 
@@ -1420,6 +1423,25 @@ async fn copy_pin_image(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 async fn save_pin_image(app: AppHandle, id: String, path: String) -> Result<(), String> {
     blocking(move || boards::save_image_as(&app, &id, &PathBuf::from(path))).await
+}
+
+#[tauri::command]
+async fn import_board_items(
+    app: AppHandle,
+    board_id: String,
+    items: Vec<boards::BoardImportItem>,
+) -> Result<Vec<boards::Pin>, String> {
+    blocking(move || boards::import_items(&app, &board_id, &items)).await
+}
+
+#[tauri::command]
+async fn open_pin_file(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(move || boards::open_pin_file(&app, &id)).await
+}
+
+#[tauri::command]
+async fn save_pin_file(app: AppHandle, id: String, path: String) -> Result<(), String> {
+    blocking(move || boards::save_file_as(&app, &id, &PathBuf::from(path))).await
 }
 
 #[tauri::command]
@@ -2124,6 +2146,9 @@ pub fn run() {
             board_image,
             copy_pin_image,
             save_pin_image,
+            import_board_items,
+            open_pin_file,
+            save_pin_file,
             find_deals,
             find_deals_for_product,
             set_coupon_feedback,

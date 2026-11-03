@@ -326,7 +326,10 @@ fn recent_text_models(entries: &[(String, i64)]) -> Vec<String> {
         }
         let dated = dated_snapshot(id);
         let family = model_family(id);
-        if let Some(pick) = picks.iter_mut().find(|pick| model_family(&pick.id) == family) {
+        if let Some(pick) = picks
+            .iter_mut()
+            .find(|pick| model_family(&pick.id) == family)
+        {
             pick.family_created = pick.family_created.max(*created);
             let replace = match (pick.dated, dated) {
                 (true, false) => true,
@@ -431,9 +434,9 @@ fn openai_thinking_model(id: &str) -> bool {
     let Some(rest) = id.strip_prefix("gpt-") else {
         return false;
     };
-    rest.chars().next().is_some_and(|character| {
-        character.is_ascii_digit() && character != '3' && character != '4'
-    })
+    rest.chars()
+        .next()
+        .is_some_and(|character| character.is_ascii_digit() && character != '3' && character != '4')
 }
 
 fn claude_thinking_model(id: &str) -> bool {
@@ -694,10 +697,9 @@ fn read_body(response: ureq::Response) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        anthropic_body, anthropic_text, chat_url, claude_models_url, http_error, messages_url,
-        attach_thinking, model_accepts_thinking, model_ids, model_page, models_url, openai_body,
-        openai_text, recent_text_models, text_chat_model,
-        transport_error,
+        anthropic_body, anthropic_text, attach_thinking, chat_url, claude_models_url, http_error,
+        messages_url, model_accepts_thinking, model_ids, model_page, models_url, openai_body,
+        openai_text, recent_text_models, text_chat_model, transport_error,
     };
 
     #[test]

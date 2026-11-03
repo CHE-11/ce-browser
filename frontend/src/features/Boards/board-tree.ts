@@ -32,7 +32,49 @@ export const PIN_KIND_LABELS: Record<PinKind, string> = {
   element: "Section",
   link: "Link",
   image: "Image",
+  file: "File",
 };
+
+export const PIN_KINDS: PinKind[] = ["page", "region", "element", "link", "image", "file"];
+
+export type PinSort = "newest" | "oldest" | "title" | "kind";
+export type PinView = "grid" | "table";
+
+const VIEW_KEY = "ce-boards-view";
+const SORT_KEY = "ce-boards-sort";
+
+export function readPinView(): PinView {
+  return localStorage.getItem(VIEW_KEY) === "table" ? "table" : "grid";
+}
+
+export function writePinView(view: PinView) {
+  localStorage.setItem(VIEW_KEY, view);
+}
+
+export function readPinSort(): PinSort {
+  const stored = localStorage.getItem(SORT_KEY);
+  return stored === "oldest" || stored === "title" || stored === "kind" ? stored : "newest";
+}
+
+export function writePinSort(sort: PinSort) {
+  localStorage.setItem(SORT_KEY, sort);
+}
+
+/** `pins` stay in newest-first order until a sort asks for something else. */
+export function sortPins(pins: Pin[], sort: PinSort): Pin[] {
+  const next = [...pins];
+  if (sort === "oldest") {
+    next.reverse();
+  } else if (sort === "title") {
+    next.sort((left, right) => left.title.localeCompare(right.title, undefined, { sensitivity: "base", numeric: true }));
+  } else if (sort === "kind") {
+    next.sort((left, right) => {
+      const kind = PIN_KINDS.indexOf(left.kind) - PIN_KINDS.indexOf(right.kind);
+      return kind || left.title.localeCompare(right.title, undefined, { sensitivity: "base", numeric: true });
+    });
+  }
+  return next;
+}
 
 const byName = (left: { name: string }, right: { name: string }) =>
   left.name.localeCompare(right.name, undefined, { sensitivity: "base", numeric: true });
@@ -111,6 +153,11 @@ export function boardChoices(boards: BoardsSnapshot) {
     .sort((left, right) => left.label.localeCompare(right.label, undefined, { sensitivity: "base", numeric: true }));
 }
 
+/** Page or link address. File pins have neither. */
+export function pinAddress(pin: Pin) {
+  return pin.kind === "link" && pin.linkUrl ? pin.linkUrl : pin.pageUrl || pin.linkUrl;
+}
+
 export function hostOf(url: string) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -124,5 +171,5 @@ export function pinMatches(pin: Pin, query: string) {
   if (!needle) {
     return true;
   }
-  return [pin.title, pin.text, pin.note, pin.pageUrl, pin.linkUrl].some((field) => field.toLowerCase().includes(needle));
+  return [pin.title, pin.text, pin.note, pin.pageUrl, pin.linkUrl, pin.fileName ?? ""].some((field) => field.toLowerCase().includes(needle));
 }

@@ -1,13 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, Copy, ExternalLink, LoaderCircle, Save, Star, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, ExternalLink, File, LoaderCircle, Save, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/Button";
 import { Dialog } from "@/components/Dialog";
 import { FavIcon } from "@/components/FavIcon";
-import { boardImage, chooseSavePath, copyPinImage, defaultDownloadDir, movePins, savePinImage, setBoardCover, showNotice, updatePin } from "@/lib/browser-client";
+import { boardImage, chooseSavePath, copyPinImage, defaultDownloadDir, movePins, openPinFile, savePinImage, setBoardCover, showNotice, updatePin } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import type { BoardsSnapshot, Pin } from "@type/browser";
 import { fileNameFor, joinPath } from "@features/BuiltInExtensions/shared";
 import { PIN_KIND_LABELS, boardChoices, hostOf } from "./board-tree";
+import { savePinFileAs } from "./file-pin";
 import { cachedThumbnail } from "./thumbnails";
 
 type PinDialogProps = {
@@ -138,6 +139,13 @@ export function PinDialog({ boards, pin, onClose, onPrevious, onNext, onOpenSour
               <LoaderCircle id="boards-pin-dialog-image-spinner" className="size-6 animate-spin" aria-hidden />
             </div>
           )
+        ) : pin.kind === "file" ? (
+          <div id="boards-pin-dialog-file" className="flex max-w-md flex-col items-center gap-3 text-center text-zinc-300">
+            <File id="boards-pin-dialog-file-icon" className="size-12 text-zinc-500" aria-hidden />
+            <p id="boards-pin-dialog-file-name" className="text-sm">
+              {pin.fileName || pin.title || "File"}
+            </p>
+          </div>
         ) : (
           <p id="boards-pin-dialog-text" className="max-w-2xl whitespace-pre-line text-sm leading-relaxed text-zinc-300">
             {pin.text || "No preview."}
@@ -220,6 +228,16 @@ export function PinDialog({ boards, pin, onClose, onPrevious, onNext, onOpenSour
               {host || pin.pageUrl}
             </span>
           </dd>
+          {pin.kind === "file" ? (
+            <>
+              <dt id="boards-pin-dialog-file-label" className="text-zinc-500">
+                File
+              </dt>
+              <dd id="boards-pin-dialog-file-value" className="truncate text-zinc-300" title={pin.fileName}>
+                {pin.fileName || pin.title}
+              </dd>
+            </>
+          ) : null}
           {linkDiffers ? (
             <>
               <dt id="boards-pin-dialog-link-label" className="text-zinc-500">
@@ -239,10 +257,44 @@ export function PinDialog({ boards, pin, onClose, onPrevious, onNext, onOpenSour
         ) : null}
 
         <div id="boards-pin-dialog-actions" className="mt-auto flex flex-col gap-2 pt-2">
-          <Button id="boards-pin-dialog-open" variant="primary" onClick={() => onOpenSource(pin)}>
-            <ExternalLink id="boards-pin-dialog-open-icon" className="size-4" aria-hidden />
-            Open source
-          </Button>
+          {pin.kind === "file" ? (
+            <div id="boards-pin-dialog-file-actions" className="flex gap-2">
+              <Button
+                id="boards-pin-dialog-open-file"
+                variant="primary"
+                className="flex-1"
+                onClick={() =>
+                  void openPinFile(pin.id)
+                    .then(() => showNotice("Opened file"))
+                    .catch(onError)
+                }
+              >
+                <File id="boards-pin-dialog-open-file-icon" className="size-4" aria-hidden />
+                Open file
+              </Button>
+              <Button
+                id="boards-pin-dialog-save-file"
+                className="flex-1"
+                onClick={() =>
+                  void savePinFileAs(pin)
+                    .then((saved) => {
+                      if (saved) {
+                        return showNotice("File saved");
+                      }
+                    })
+                    .catch(onError)
+                }
+              >
+                <Save id="boards-pin-dialog-save-file-icon" className="size-4" aria-hidden />
+                Save as…
+              </Button>
+            </div>
+          ) : (
+            <Button id="boards-pin-dialog-open" variant="primary" onClick={() => onOpenSource(pin)}>
+              <ExternalLink id="boards-pin-dialog-open-icon" className="size-4" aria-hidden />
+              Open source
+            </Button>
+          )}
           {pin.hasImage ? (
             <div id="boards-pin-dialog-image-actions" className="flex gap-2">
               <Button

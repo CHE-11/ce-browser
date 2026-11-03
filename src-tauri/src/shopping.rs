@@ -236,14 +236,20 @@ fn run_deals(
     let current = settings::get(app);
     let region = current.shopping_region.trim();
     let ai_available = crate::ai::available(app, &current);
-    let room = if ai_available { MAX_QUERIES - 4 } else { MAX_QUERIES };
+    let room = if ai_available {
+        MAX_QUERIES - 4
+    } else {
+        MAX_QUERIES
+    };
     let mut queries = build_queries(name, &store, &facts, &current.shopping_competitors, room);
     if ai_available {
         queries = add_ai_queries(app, &current, name, &store, &facts, queries);
     }
     let gathered = gather(&queries, region);
     if gathered.sources.is_empty() {
-        return Err(gathered.failure.unwrap_or_else(|| "The web search found nothing for this product.".into()));
+        return Err(gathered
+            .failure
+            .unwrap_or_else(|| "The web search found nothing for this product.".into()));
     }
     let sources = gathered.sources;
     let skipped = gathered.skipped;
@@ -751,7 +757,11 @@ fn add_ai_queries(
     let prompt = format!(
         "Product: {name}\nBrand: {}\nIdentifier: {identifier}\nCurrent store: {store}\n\
 Reply with one JSON object {{\"queries\": [\"...\"]}} of up to 4 short web searches for this exact product at other stores. Do not include prices or URLs.",
-        if facts.brand.is_empty() { "unknown" } else { facts.brand.as_str() }
+        if facts.brand.is_empty() {
+            "unknown"
+        } else {
+            facts.brand.as_str()
+        }
     );
     let Ok(reply) = tools::chat(
         app,
@@ -801,7 +811,10 @@ fn gather(queries: &[String], region: &str) -> Gathered {
             continue;
         }
         for result in results {
-            if !sources.iter().any(|kept: &SearchResult| kept.url == result.url) {
+            if !sources
+                .iter()
+                .any(|kept: &SearchResult| kept.url == result.url)
+            {
                 sources.push(result);
             }
         }
@@ -854,7 +867,15 @@ fn combine_engines(
 }
 
 fn search_duckduckgo(query: &str, region: &str) -> Result<Vec<SearchResult>, String> {
-    let body = fetch_search(SEARCH_URL, query, if region.is_empty() { None } else { Some(("kl", region)) })?;
+    let body = fetch_search(
+        SEARCH_URL,
+        query,
+        if region.is_empty() {
+            None
+        } else {
+            Some(("kl", region))
+        },
+    )?;
     let results = parse_results(&body, RESULTS_PER_QUERY);
     if results.is_empty() && body.contains("anomaly") {
         return Err("DuckDuckGo asked for a captcha.".into());
@@ -1048,9 +1069,15 @@ fn rank_candidates(
 
 fn skip_host(url: &str) -> bool {
     store_host(url).is_some_and(|host| {
-        ["reddit.com", "youtube.com", "facebook.com", "pinterest.com", "wikipedia.org"]
-            .iter()
-            .any(|blocked| host == *blocked || host.ends_with(&format!(".{blocked}")))
+        [
+            "reddit.com",
+            "youtube.com",
+            "facebook.com",
+            "pinterest.com",
+            "wikipedia.org",
+        ]
+        .iter()
+        .any(|blocked| host == *blocked || host.ends_with(&format!(".{blocked}")))
     })
 }
 
@@ -1066,7 +1093,10 @@ fn picked_urls(reply: &serde_json::Value, sources: &[SearchResult]) -> Vec<Searc
         let Some(source) = sources.iter().find(|source| same_url(&source.url, url)) else {
             continue;
         };
-        if !out.iter().any(|kept: &SearchResult| same_url(&kept.url, &source.url)) {
+        if !out
+            .iter()
+            .any(|kept: &SearchResult| same_url(&kept.url, &source.url))
+        {
             out.push(source.clone());
         }
         if out.len() >= CONFIRM_LIMIT {
@@ -1105,7 +1135,11 @@ Return a JSON object with these keys:\n\
 - \"coupons\": a list of {{\"code\", \"description\", \"source\"}} for coupon codes that appear word for word in the results. \"source\" is that result's URL.\n\
 - \"urls\": the result URLs that are this same product sold by another store, not a review, an accessory, or {store}.\n\
 Use only the results above. Do not invent codes or URLs.",
-        if facts.brand.is_empty() { "unknown" } else { facts.brand.as_str() }
+        if facts.brand.is_empty() {
+            "unknown"
+        } else {
+            facts.brand.as_str()
+        }
     );
     let reply = tools::chat(
         app,
@@ -1561,8 +1595,16 @@ mod tests {
         );
         assert!(queries.iter().any(|query| query == "0012345678905"));
         assert!(queries.iter().any(|query| query.contains("amazon")));
-        assert!(queries.iter().any(|query| query.contains("-site:mugshop.test")));
-        assert!(queries.iter().any(|query| query.contains("bhphotovideo.com")));
+        assert!(
+            queries
+                .iter()
+                .any(|query| query.contains("-site:mugshop.test"))
+        );
+        assert!(
+            queries
+                .iter()
+                .any(|query| query.contains("bhphotovideo.com"))
+        );
     }
 
     #[test]
