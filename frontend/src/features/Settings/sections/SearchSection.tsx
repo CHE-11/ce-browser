@@ -5,7 +5,7 @@ import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
 import { listKeywords, onKeywordsChanged, saveKeywords } from "@/lib/browser-client";
-import { SETTINGS_SECTIONS } from "./settings-sections";
+import { SETTINGS_SECTIONS } from "../settings-sections";
 import {
   inputClass,
   matchesQuery,
@@ -16,7 +16,7 @@ import {
   useSettingVisible,
   useSettingsQuery,
   type SettingsSectionProps,
-} from "./SettingsControls";
+} from "../SettingsControls";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-search")!;
 

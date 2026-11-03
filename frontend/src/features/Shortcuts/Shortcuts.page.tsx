@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Search, SearchX } from "lucide-react";
 import { listShortcuts, onShortcutsChanged, resetShortcut, resetShortcuts, saveShortcuts } from "@/lib/browser-client";
 import { Button } from "@/components/Button";
+import { EmptyState } from "@/components/EmptyState";
 import { SkeletonRows } from "@/components/Skeleton";
 import { cn } from "@/lib/cn";
 import { formatKeys, formatKeyToken } from "@/lib/shortcut-keys";
@@ -58,6 +60,11 @@ function tokenFrom(event: KeyboardEvent) {
   return parts.join("+");
 }
 
+function matchesQuery(binding: ShortcutBinding, needle: string) {
+  const haystack = [binding.label, binding.category ?? "", binding.action, binding.keys.join(" "), formatKeys(binding.keys)].join(" ").toLowerCase();
+  return needle.split(/\s+/).every((word) => haystack.includes(word));
+}
+
 export function ShortcutsPage() {
   useAppearanceFromSettings();
   const settings = useSettings();
@@ -65,6 +72,7 @@ export function ShortcutsPage() {
   const [recording, setRecording] = useState<string | null>(null);
   const [first, setFirst] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const bindingsRef = useRef(bindings);
   bindingsRef.current = bindings;
 
@@ -84,6 +92,10 @@ export function ShortcutsPage() {
     let timer = 0;
     let chord: string | null = null;
     const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("input, textarea, [contenteditable='true']")) {
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       const token = tokenFrom(event);
@@ -119,6 +131,12 @@ export function ShortcutsPage() {
   const conflict = (binding: ShortcutBinding) =>
     bindings?.find((other) => other.action !== binding.action && other.keys.join(" ") === binding.keys.join(" ") && binding.keys.length > 0);
 
+  const visible = useMemo(() => {
+    const rows = (bindings ?? []).filter((binding) => settings?.workspacesEnabled !== false || binding.category !== "Workspaces");
+    const needle = query.trim().toLowerCase();
+    return needle ? rows.filter((binding) => matchesQuery(binding, needle)) : rows;
+  }, [bindings, query, settings?.workspacesEnabled]);
+
   return (
     <main id="shortcuts-page" className="h-full overflow-y-auto bg-zinc-950 text-zinc-100">
       <div id="shortcuts-body" className="mx-auto flex max-w-3xl flex-col gap-4 px-6 py-8">
@@ -131,14 +149,27 @@ export function ShortcutsPage() {
               Record keeps the first key, then a second key within one second makes a chord. Esc still closes menus.
             </p>
           </div>
-          <Button
-            id="shortcuts-reset-all"
-            size="sm"
-            variant="outline"
-            onClick={() => void resetShortcuts().then(setBindings).catch((reason: unknown) => setError(String(reason)))}
-          >
-            Reset all
-          </Button>
+          <div id="shortcuts-header-actions" className="flex shrink-0 items-center gap-2">
+            <label id="shortcuts-search" className="flex h-8 w-64 items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900 px-2">
+              <Search id="shortcuts-search-icon" className="size-4 text-zinc-500" aria-hidden />
+              <input
+                id="shortcuts-search-input"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search shortcuts"
+                aria-label="Search shortcuts"
+                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-500"
+              />
+            </label>
+            <Button
+              id="shortcuts-reset-all"
+              size="sm"
+              variant="outline"
+              onClick={() => void resetShortcuts().then(setBindings).catch((reason: unknown) => setError(String(reason)))}
+            >
+              Reset all
+            </Button>
+          </div>
         </header>
         {error ? (
           <p id="shortcuts-error" className="text-sm text-red-300">
@@ -146,10 +177,14 @@ export function ShortcutsPage() {
           </p>
         ) : null}
         {bindings === null && !error ? <SkeletonRows id="shortcuts-loading" rows={8} className="rounded-lg border border-zinc-800 p-4" /> : null}
-        <ul id="shortcuts-list" className={cn("flex flex-col divide-y divide-zinc-800 rounded-lg border border-zinc-800", bindings === null && "hidden")}>
-          {(bindings ?? [])
-            .filter((binding) => settings?.workspacesEnabled !== false || binding.category !== "Workspaces")
-            .map((binding) => {
+        {bindings !== null && query.trim() && visible.length === 0 ? (
+          <EmptyState id="shortcuts-empty" icon={SearchX} title="No shortcuts match that search" hint="Search looks at names, categories, and keys." />
+        ) : null}
+        <ul
+          id="shortcuts-list"
+          className={cn("flex flex-col divide-y divide-zinc-800 rounded-lg border border-zinc-800", (bindings === null || visible.length === 0) && "hidden")}
+        >
+          {visible.map((binding) => {
             const other = conflict(binding);
             return (
               <li id={`shortcut-${binding.action}`} key={binding.action} className="flex items-center gap-3 px-4 py-3">

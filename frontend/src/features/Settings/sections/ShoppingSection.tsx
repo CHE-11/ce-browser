@@ -1,8 +1,8 @@
-import { providerName, remoteProvider } from "./ai-providers";
-import { ModelPicker } from "./ModelPicker";
-import { SETTINGS_SECTIONS } from "./settings-sections";
-import { inputClass, matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "./SettingsControls";
-import { useAiModels } from "./useAiModels";
+import { providerName, remoteProvider } from "../../../lib/ai/ai-providers";
+import { AiModelPicker } from "./AiModelPicker";
+import { SETTINGS_SECTIONS } from "../settings-sections";
+import { inputClass, matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "../SettingsControls";
+import { useAiModels } from "../../../lib/ai/useAiModels";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-shopping")!;
 
@@ -56,7 +56,7 @@ export function ShoppingSection({ settings, query, onUpdate, onMatch }: Settings
         />
       </Row>
       <Row id="settings-shopping-model" setting="shoppingModel" label={MODEL_LABEL} hint={modelHint} search={["coupons", "deals"]}>
-        <ModelPicker
+        <AiModelPicker
           id="settings-shopping-model"
           value={settings.shoppingModel}
           models={fetched.models}

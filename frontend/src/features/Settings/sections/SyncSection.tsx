@@ -13,8 +13,8 @@ import {
   showSyncFolder,
   syncStatus,
 } from "@/lib/browser-client";
-import { SETTINGS_SECTIONS } from "./settings-sections";
-import { errorText, matchesQuery, Row, Section, useReportMatch, useSettingVisible, type SettingsSectionProps } from "./SettingsControls";
+import { SETTINGS_SECTIONS } from "../settings-sections";
+import { errorText, matchesQuery, Row, Section, useReportMatch, useSettingVisible, type SettingsSectionProps } from "../SettingsControls";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-sync")!;
 

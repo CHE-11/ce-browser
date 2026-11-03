@@ -38,6 +38,7 @@ import type {
   FindTabResult,
   HistoryItem,
   Keyword,
+  PasswordSettings,
   ShortcutBinding,
   PageCaptureResult,
   PageMedia,
@@ -334,8 +335,17 @@ export function generatePassword(
   symbols: boolean,
   minSymbols: number,
   avoidAmbiguous: boolean,
+  exclude: string,
 ) {
-  return invoke<string>("generate_password", { length, upper, lower, digits, symbols, minSymbols, avoidAmbiguous });
+  return invoke<string>("generate_password", { length, upper, lower, digits, symbols, minSymbols, avoidAmbiguous, exclude });
+}
+
+export function passwordSettings() {
+  return invoke<PasswordSettings>("password_settings");
+}
+
+export function savePasswordSettings(settings: PasswordSettings) {
+  return invoke<PasswordSettings>("save_password_settings", { settings });
 }
 
 export function copyText(text: string) {

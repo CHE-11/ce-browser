@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import type { AiProviderId } from "@type/browser";
 import { listAiModels } from "@/lib/browser-client";
-import { errorText } from "./SettingsControls";
+import { errorText } from "../../features/Settings/SettingsControls";
 
 type ModelSnapshot = {
   provider: string;

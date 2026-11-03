@@ -742,6 +742,19 @@ export type StatusText = {
   text: string;
 };
 
+/** Choices kept for the password generator, in the profile's `password.json`. */
+export type PasswordSettings = {
+  length: number;
+  upper: boolean;
+  lower: boolean;
+  digits: boolean;
+  symbols: boolean;
+  minSymbols: number;
+  avoidAmbiguous: boolean;
+  /** Characters to leave out, separated by commas. */
+  exclude: string;
+};
+
 export type Keyword = {
   keyword: string;
   title: string;

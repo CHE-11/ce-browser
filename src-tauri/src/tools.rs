@@ -195,10 +195,28 @@ const SYMBOLS: &str = "!@#$%^&*-_=+";
 /// Letters and digits that are easy to mix up. Matches the set Bitwarden skips.
 const AMBIGUOUS: &str = "lI1O0";
 
-fn pool(source: &str, avoid_ambiguous: bool) -> Vec<char> {
+/// Characters named in a comma-separated list, such as `a, e, i`.
+pub fn excluded_chars(value: &str) -> String {
+    let mut out = String::new();
+    for part in value.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        for character in part.chars() {
+            if !out.contains(character) {
+                out.push(character);
+            }
+        }
+    }
+    out
+}
+
+fn pool(source: &str, avoid_ambiguous: bool, exclude: &str) -> Vec<char> {
     source
         .chars()
         .filter(|character| !avoid_ambiguous || !AMBIGUOUS.contains(*character))
+        .filter(|character| !exclude.contains(*character))
         .collect()
 }
 
@@ -210,16 +228,18 @@ pub fn password(
     symbols: bool,
     min_symbols: usize,
     avoid_ambiguous: bool,
+    exclude: &str,
     random: &[u8],
 ) -> Result<String, String> {
     let length = length.clamp(8, 64);
     if random.is_empty() {
         return Err("Couldn't generate a password.".into());
     }
+    let exclude = excluded_chars(exclude);
     let mut alphabet = Vec::new();
     let mut required: Vec<Vec<char>> = Vec::new();
     let mut add = |source: &str, count: usize| -> Result<(), String> {
-        let class = pool(source, avoid_ambiguous);
+        let class = pool(source, avoid_ambiguous, &exclude);
         if class.is_empty() {
             return Err("That mix of characters is too small.".into());
         }
@@ -274,6 +294,7 @@ pub fn random_password(
     symbols: bool,
     min_symbols: usize,
     avoid_ambiguous: bool,
+    exclude: &str,
 ) -> Result<String, String> {
     let mut bytes = [0u8; 256];
     fill_random(&mut bytes)?;
@@ -285,6 +306,7 @@ pub fn random_password(
         symbols,
         min_symbols,
         avoid_ambiguous,
+        exclude,
         &bytes,
     )
 }
@@ -438,7 +460,8 @@ mod tests {
     #[test]
     fn a_password_has_the_requested_length_and_classes() {
         let random = [3u8, 9, 1, 8, 4, 2, 7, 5, 6, 0, 11, 12, 13, 14, 15, 16];
-        let password = password(12, true, true, true, true, 1, false, &random).expect("password");
+        let password =
+            password(12, true, true, true, true, 1, false, "", &random).expect("password");
         assert_eq!(password.chars().count(), 12);
         assert!(
             password
@@ -461,7 +484,8 @@ mod tests {
     #[test]
     fn a_password_keeps_the_minimum_number_of_symbols() {
         let random: Vec<u8> = (0..=127).collect();
-        let password = password(16, true, true, true, true, 4, false, &random).expect("password");
+        let password =
+            password(16, true, true, true, true, 4, false, "", &random).expect("password");
         let symbols = password
             .chars()
             .filter(|character| "!@#$%^&*-_=+".contains(*character))
@@ -472,7 +496,8 @@ mod tests {
     #[test]
     fn ambiguous_characters_are_left_out() {
         let random: Vec<u8> = (0..=127).collect();
-        let password = password(32, true, true, true, true, 1, true, &random).expect("password");
+        let password =
+            password(32, true, true, true, true, 1, true, "", &random).expect("password");
         assert!(
             password
                 .chars()
@@ -483,19 +508,60 @@ mod tests {
 
     #[test]
     fn too_many_required_characters_is_an_error() {
-        let error = password(8, true, true, true, true, 8, false, &[1, 2, 3]).unwrap_err();
+        let error = password(8, true, true, true, true, 8, false, "", &[1, 2, 3]).unwrap_err();
         assert_eq!(error, "Length is too short for those minimums.");
     }
 
     #[test]
     fn symbols_stay_out_when_that_class_is_off() {
         let random: Vec<u8> = (0..=63).collect();
-        let password = password(12, true, true, true, false, 5, false, &random).expect("password");
+        let password =
+            password(12, true, true, true, false, 5, false, "", &random).expect("password");
         assert!(
             password
                 .chars()
                 .all(|character| !"!@#$%^&*-_=+".contains(character))
         );
+    }
+
+    #[test]
+    fn listed_characters_are_left_out() {
+        let random: Vec<u8> = (0..=127).collect();
+        let password = password(
+            32,
+            true,
+            true,
+            true,
+            true,
+            1,
+            false,
+            "a, e, i, 1, @",
+            &random,
+        )
+        .expect("password");
+        assert!(
+            password
+                .chars()
+                .all(|character| !"aei1@".contains(character)),
+            "{password}"
+        );
+    }
+
+    #[test]
+    fn excluding_a_whole_class_is_an_error() {
+        let error = password(
+            12,
+            false,
+            false,
+            true,
+            false,
+            0,
+            false,
+            "0, 1, 2, 3, 4, 5, 6, 7, 8, 9",
+            &[1, 2, 3],
+        )
+        .unwrap_err();
+        assert_eq!(error, "That mix of characters is too small.");
     }
 
     #[test]

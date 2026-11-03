@@ -26,7 +26,7 @@ import { BUILTIN_TOOLS } from "@features/BuiltInExtensions/builtin";
 import { siteKey } from "@features/BuiltInExtensions/page-controls/site";
 import { tabParams } from "@features/BuiltInExtensions/shared";
 import { SETTINGS_INDEX } from "@features/Settings/settings-index";
-import { SETTINGS_SECTIONS } from "@features/Settings/settings-sections";
+import { SETTINGS_SECTIONS } from "@/features/Settings/settings-sections";
 import type { ClosedEntry, HistoryHit, PopupKind, TabInfo } from "@type/browser";
 
 type Hit = {

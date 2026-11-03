@@ -2,28 +2,29 @@ import { useCallback, useEffect, useState } from "react";
 import { Search, SearchX } from "lucide-react";
 import type { BrowserSettings } from "@type/browser";
 import { EmptyState } from "@/components/EmptyState";
-import { PageShell, type PageOutlineItem } from "@/components/PageShell";
+import { PageShell } from "@/components/PageShell";
 import { Skeleton, SkeletonRows } from "@/components/Skeleton";
 import { defaultSettings, saveSettings } from "@/lib/browser-client";
 import { useRoute } from "@/lib/route";
 import { useSettings } from "@/lib/use-browser";
 import { SETTINGS_INDEX } from "./settings-index";
-import { AdBlockSection } from "./AdBlockSection";
-import { AiSection } from "./AiSection";
-import { AppearanceSection } from "./AppearanceSection";
-import { BookmarksSection } from "./BookmarksSection";
-import { DownloadsSection } from "./DownloadsSection";
-import { PrivacySection } from "./PrivacySection";
-import { ProfilesSection } from "./ProfilesSection";
-import { SearchSection } from "./SearchSection";
+import { AdBlockSection } from "./sections/AdBlockSection";
+import { AiSection } from "./sections/AiSection";
+import { AppearanceSection } from "./sections/AppearanceSection";
+import { BookmarksSection } from "./sections/BookmarksSection";
+import { DownloadsSection } from "./sections/DownloadsSection";
+import { PrivacySection } from "./sections/PrivacySection";
+import { ProfilesSection } from "./sections/ProfilesSection";
+import { SearchSection } from "./sections/SearchSection";
+import { SettingsNavigation } from "./SettingsNavigation";
 import { SettingsQueryProvider, SettingsValuesProvider } from "./SettingsControls";
 import { SETTINGS_SECTIONS } from "./settings-sections";
-import { ShoppingSection } from "./ShoppingSection";
-import { StartupSection } from "./StartupSection";
-import { SyncSection } from "./SyncSection";
-import { SystemSection } from "./SystemSection";
-import { TabsSection } from "./TabsSection";
-import { TranslateSection } from "./TranslateSection";
+import { ShoppingSection } from "./sections/ShoppingSection";
+import { StartupSection } from "./sections/StartupSection";
+import { SyncSection } from "./sections/SyncSection";
+import { SystemSection } from "./sections/SystemSection";
+import { TabsSection } from "./sections/TabsSection";
+import { TranslateSection } from "./sections/TranslateSection";
 
 export function SettingsPage() {
   const settings = useSettings();
@@ -33,7 +34,6 @@ export function SettingsPage() {
   const [matched, setMatched] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(SETTINGS_SECTIONS.map((section) => [section.id, true])),
   );
-  const [activeId, setActiveId] = useState<string>(SETTINGS_SECTIONS[0].id);
   const [defaults, setDefaults] = useState<BrowserSettings | null>(null);
 
   useEffect(() => {
@@ -51,82 +51,8 @@ export function SettingsPage() {
   const needle = query.trim();
   const loaded = settings !== null;
   const visibleSections = SETTINGS_SECTIONS.filter((section) => !needle || matched[section.id] !== false);
-  const visibleKey = visibleSections.map((section) => section.id).join("|");
-  const currentId = visibleSections.some((section) => section.id === activeId) ? activeId : visibleSections[0]?.id;
-  const outline: PageOutlineItem[] = visibleSections.map((section) => ({
-    id: section.id,
-    label: section.title,
-    active: section.id === currentId,
-  }));
   const none = needle.length > 0 && SETTINGS_SECTIONS.every((section) => matched[section.id] === false);
-
-  useEffect(() => {
-    const root = document.getElementById("settings-page-body");
-    if (!root) {
-      return undefined;
-    }
-    const nodes = SETTINGS_SECTIONS.map((section) => document.getElementById(section.id)).filter(
-      (node): node is HTMLElement => node instanceof HTMLElement,
-    );
-    if (nodes.length === 0) {
-      return undefined;
-    }
-    const seen = new Set<string>();
-    const pickActive = () => {
-      const atBottom = root.scrollTop > 8 && root.scrollTop + root.clientHeight >= root.scrollHeight - 8;
-      if (atBottom) {
-        const last = nodes[nodes.length - 1];
-        if (last) {
-          setActiveId(last.id);
-        }
-        return;
-      }
-      const rootTop = root.getBoundingClientRect().top;
-      let best: { id: string; top: number } | null = null;
-      for (const id of seen) {
-        const node = document.getElementById(id);
-        if (!node) {
-          continue;
-        }
-        const top = node.getBoundingClientRect().top - rootTop;
-        if (top <= 32 && (best === null || top > best.top)) {
-          best = { id, top };
-        }
-      }
-      if (!best) {
-        for (const id of seen) {
-          const node = document.getElementById(id);
-          if (!node) {
-            continue;
-          }
-          const top = node.getBoundingClientRect().top - rootTop;
-          if (best === null || top < best.top) {
-            best = { id, top };
-          }
-        }
-      }
-      if (best) {
-        setActiveId(best.id);
-      }
-    };
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            seen.add(entry.target.id);
-          } else {
-            seen.delete(entry.target.id);
-          }
-        }
-        pickActive();
-      },
-      { root, threshold: 0 },
-    );
-    for (const node of nodes) {
-      observer.observe(node);
-    }
-    return () => observer.disconnect();
-  }, [visibleKey, loaded]);
+  const navigation = <SettingsNavigation sections={visibleSections} enabled={loaded} />;
 
   useEffect(() => {
     document.getElementById("settings-page-body")?.scrollTo({ top: 0 });
@@ -157,7 +83,7 @@ export function SettingsPage() {
 
   if (!settings) {
     return (
-      <PageShell id="settings-page" page="settings" title="Settings" lockHorizontalScroll>
+      <PageShell id="settings-page" page="settings" title="Settings" nav={navigation} lockHorizontalScroll>
         <div id="settings-page-loading" role="status" aria-label="Loading settings" className="mx-auto flex max-w-3xl flex-col gap-6">
           {[0, 1, 2].map((index) => (
             <div id={`settings-page-loading-${index}`} key={index} className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-5">
@@ -180,7 +106,7 @@ export function SettingsPage() {
       id="settings-page"
       page="settings"
       title="Settings"
-      outline={outline}
+      nav={navigation}
       lockHorizontalScroll
       actions={
         <label id="settings-page-search" className="flex h-8 w-64 items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900 px-2">

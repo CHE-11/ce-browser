@@ -144,6 +144,7 @@ pub fn shutdown(app: &AppHandle) {
     crate::page_errors::note_exiting();
     crate::undo::finish_all(app);
     let _ = save_now(app);
+    crate::placement::flush(app);
     crate::status::flush(app);
     if let Some(saver) = app.try_state::<SessionSaver>() {
         saver.tx.lock().expect("session lock").take();

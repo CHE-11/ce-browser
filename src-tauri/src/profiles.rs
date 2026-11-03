@@ -1367,11 +1367,13 @@ fn wide(value: impl AsRef<std::ffi::OsStr>) -> Vec<u16> {
 
 pub(crate) const PROFILE_FILES: &[&str] = &[
     "settings.json",
+    "password.json",
     "history.json",
     "bookmarks.json",
     "extensions.json",
     "downloads.json",
     "session.json",
+    "window.json",
     "styles.css",
     "site-controls.json",
     "permissions.json",

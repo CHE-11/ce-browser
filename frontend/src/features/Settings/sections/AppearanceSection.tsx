@@ -7,7 +7,7 @@ import { backdropSupport, getUserStyles, showUserStyles } from "@/lib/browser-cl
 import { cn } from "@/lib/cn";
 import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, PAGE_ZOOM_LEVELS, stepPageZoom, ZOOM_STEP } from "@/lib/zoom";
 import type { BackdropSupport, ToastPosition } from "@type/browser";
-import { SETTINGS_SECTIONS } from "./settings-sections";
+import { SETTINGS_SECTIONS } from "../settings-sections";
 import {
   inputClass,
   matchesQuery,
@@ -19,7 +19,7 @@ import {
   useSettingVisible,
   useSettingsQuery,
   type SettingsSectionProps,
-} from "./SettingsControls";
+} from "../SettingsControls";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-appearance")!;
 

@@ -4,8 +4,8 @@ import type { BrowserSettings } from "@type/browser";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
-import { SETTINGS_SECTIONS } from "./settings-sections";
-import { inputClass, matchesQuery, Row, Section, useReportMatch, useSettingVisible, type SettingsSectionProps } from "./SettingsControls";
+import { SETTINGS_SECTIONS } from "../settings-sections";
+import { inputClass, matchesQuery, Row, Section, useReportMatch, useSettingVisible, type SettingsSectionProps } from "../SettingsControls";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-privacy")!;
 

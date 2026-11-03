@@ -25,8 +25,10 @@ mod ocr;
 mod page_errors;
 mod page_menu;
 mod page_rules;
+mod password;
 mod paths;
 mod peek;
+mod placement;
 mod popup;
 mod prices;
 mod print;
@@ -1219,6 +1221,7 @@ fn generate_password(
     symbols: bool,
     min_symbols: usize,
     avoid_ambiguous: bool,
+    exclude: String,
 ) -> Result<String, String> {
     tools::random_password(
         length,
@@ -1228,7 +1231,21 @@ fn generate_password(
         symbols,
         min_symbols,
         avoid_ambiguous,
+        &exclude,
     )
+}
+
+#[tauri::command]
+fn password_settings(app: AppHandle) -> password::PasswordSettings {
+    password::get(&app)
+}
+
+#[tauri::command]
+fn save_password_settings(
+    app: AppHandle,
+    settings: password::PasswordSettings,
+) -> Result<password::PasswordSettings, String> {
+    password::save(&app, settings)
 }
 
 #[tauri::command]
@@ -1871,6 +1888,7 @@ pub fn run() {
             peek::init(&handle);
             popup::init(&handle);
             session::init(&handle);
+            placement::init(&handle);
             status::init(&handle);
             tab_sleep::init(&handle);
             update::init(&handle);
@@ -1914,8 +1932,10 @@ pub fn run() {
             match event {
                 WindowEvent::Moved(_) => {
                     popup::close_all(window.app_handle(), &label, false);
+                    placement::note(window);
                 }
                 WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                    placement::note(window);
                     let app = window.app_handle().clone();
                     let label = label.clone();
                     tauri::async_runtime::spawn(async move { tabs::layout(&app, &label) });
@@ -1927,6 +1947,7 @@ pub fn run() {
                         tabs::discard_window(&app, &label);
                         return;
                     }
+                    placement::note(window);
                     if !sync::configured(&app) || sync::closing_allowed() {
                         session::shutdown(&app);
                         return;
@@ -2113,6 +2134,8 @@ pub fn run() {
             restore_translation,
             translate_selection,
             generate_password,
+            password_settings,
+            save_password_settings,
             copy_text,
             show_notice,
             reading_stats,

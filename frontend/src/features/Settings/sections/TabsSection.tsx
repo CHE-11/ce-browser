@@ -6,8 +6,8 @@ import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
 import { cn } from "@/lib/cn";
 import { TAB_SIZE } from "@/lib/tab-size";
-import { SETTINGS_SECTIONS } from "./settings-sections";
-import { inputClass, matchesQuery, Row, Section, Segmented, useReportMatch, useSettingVisible, type SettingsSectionProps } from "./SettingsControls";
+import { SETTINGS_SECTIONS } from "../settings-sections";
+import { inputClass, matchesQuery, Row, Section, Segmented, useReportMatch, useSettingVisible, type SettingsSectionProps } from "../SettingsControls";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-tabs")!;
 

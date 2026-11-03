@@ -1612,16 +1612,25 @@ pub fn create_browser_window(app: &AppHandle, label: &str) -> Result<(), String>
     .ok_or("The browser window is missing.")?;
     // Mica and Acrylic only show through a window created transparent.
     let backdrop = crate::backdrop::wanted(app).is_some();
-    let window = WindowBuilder::new(app, label)
+    let saved = (label == WINDOW)
+        .then(|| crate::placement::saved(app))
+        .flatten();
+    let restoring = saved.is_some();
+    let mut builder = WindowBuilder::new(app, label)
         .title(crate::profiles::window_title(app))
         .inner_size(1280.0, 840.0)
         .min_inner_size(640.0, 420.0)
         .decorations(false)
         .shadow(true)
-        .transparent(backdrop)
-        .build()
-        .map_err(|error| error.to_string())?;
+        .transparent(backdrop);
+    if restoring {
+        builder = builder.visible(false);
+    }
+    let window = builder.build().map_err(|error| error.to_string())?;
     crate::profiles::apply_window_icon(app, &window);
+    if let Some(saved) = saved {
+        crate::placement::apply(app, &window, saved);
+    }
     let size = window.inner_size().map_err(|error| error.to_string())?;
     if backdrop {
         crate::backdrop::note_transparent(label);
@@ -1653,6 +1662,9 @@ pub fn create_browser_window(app: &AppHandle, label: &str) -> Result<(), String>
         crate::backdrop::apply_all(app);
     }
     crate::popup::ensure_pool(app, label);
+    if restoring {
+        let _ = window.show();
+    }
     let _ = window.set_focus();
     Ok(())
 }

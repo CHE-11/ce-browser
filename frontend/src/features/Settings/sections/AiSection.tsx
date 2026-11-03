@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/Button";
 import { aiKeyStatus, clearAiKey, listAiModels, setAiKey, testAiConnection } from "@/lib/browser-client";
 import type { AiKeyStatus, AiProviderId, AiProviderSlot } from "@type/browser";
-import { AI_PROVIDERS, remoteProvider } from "./ai-providers";
-import { modelAcceptsThinking } from "./model-label";
-import { ModelPicker } from "./ModelPicker";
-import { SETTINGS_SECTIONS } from "./settings-sections";
-import { errorText, inputClass, matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "./SettingsControls";
-import { useAiModels } from "./useAiModels";
+import { AI_PROVIDERS, remoteProvider } from "../../../lib/ai/ai-providers";
+import { modelAcceptsThinking } from "../../../lib/ai/model-label";
+import { SETTINGS_SECTIONS } from "../settings-sections";
+import { errorText, inputClass, matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "../SettingsControls";
+import { useAiModels } from "../../../lib/ai/useAiModels";
+import { AiModelPicker } from "./AiModelPicker";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-ai")!;
 
@@ -207,7 +207,7 @@ export function AiSection({ settings, query, onUpdate, onError, onMatch }: Setti
         </Row>
       ) : null}
       <Row id="settings-ai-model" setting="aiProviders" label={MODEL_LABEL} hint={modelHint}>
-        <ModelPicker
+        <AiModelPicker
           id="settings-ai-model"
           value={slot.model}
           models={remote ? fetched.models : localModels}

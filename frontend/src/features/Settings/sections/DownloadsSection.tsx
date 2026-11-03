@@ -3,8 +3,8 @@ import { FolderOpen, RotateCcw } from "lucide-react";
 import { Button } from "@/components/Button";
 import { Toggle } from "@/components/Toggle";
 import { chooseFolder, defaultDownloadDir } from "@/lib/browser-client";
-import { SETTINGS_SECTIONS } from "./settings-sections";
-import { matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "./SettingsControls";
+import { SETTINGS_SECTIONS } from "../settings-sections";
+import { matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "../SettingsControls";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-downloads")!;
 
