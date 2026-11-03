@@ -12,6 +12,12 @@ export const THEME_IDS = [
   "rosepine",
   "github",
   "onedark",
+  "slate",
+  "stone",
+  "paper",
+  "graphite",
+  "ink",
+  "fog",
 ] as const;
 export const COLOR_MODES = ["dark", "light", "system"] as const;
 
@@ -110,6 +116,54 @@ export const THEMES: { id: ThemeId; label: string; swatch: Record<ResolvedMode, 
       light: { background: "#fafafa", surface: "#f0f0f0", accent: "#4078f2", text: "#383a42" },
     },
   },
+  {
+    id: "slate",
+    label: "Slate",
+    swatch: {
+      dark: { background: "#0f172a", surface: "#1e293b", accent: "#3b82f6", text: "#f8fafc" },
+      light: { background: "#f8fafc", surface: "#ffffff", accent: "#1d4ed8", text: "#0f172a" },
+    },
+  },
+  {
+    id: "stone",
+    label: "Stone",
+    swatch: {
+      dark: { background: "#1c1917", surface: "#292524", accent: "#3b82f6", text: "#fafaf9" },
+      light: { background: "#fafaf9", surface: "#ffffff", accent: "#1d4ed8", text: "#1c1917" },
+    },
+  },
+  {
+    id: "paper",
+    label: "Paper",
+    swatch: {
+      dark: { background: "#1e1e1c", surface: "#2a2a27", accent: "#3b82f6", text: "#f6f6f2" },
+      light: { background: "#ffffff", surface: "#f4f4f0", accent: "#1d4ed8", text: "#141413" },
+    },
+  },
+  {
+    id: "graphite",
+    label: "Graphite",
+    swatch: {
+      dark: { background: "#2b2b2b", surface: "#383838", accent: "#3b82f6", text: "#f3f3f3" },
+      light: { background: "#f3f3f3", surface: "#ffffff", accent: "#1d4ed8", text: "#1a1a1a" },
+    },
+  },
+  {
+    id: "ink",
+    label: "Ink",
+    swatch: {
+      dark: { background: "#0c0c0c", surface: "#171717", accent: "#60a5fa", text: "#ffffff" },
+      light: { background: "#ffffff", surface: "#f4f4f4", accent: "#1d4ed8", text: "#000000" },
+    },
+  },
+  {
+    id: "fog",
+    label: "Fog",
+    swatch: {
+      dark: { background: "#2c3138", surface: "#363c45", accent: "#6aa0cc", text: "#f4f6f8" },
+      light: { background: "#e8eaed", surface: "#f5f6f8", accent: "#1d5c94", text: "#1a1f24" },
+    },
+  },
 ];
 
 export const COLOR_MODE_OPTIONS: { id: ColorMode; label: string }[] = [
@@ -123,7 +177,9 @@ type Appearance = {
   colorMode: ColorMode;
 };
 
-let current: Appearance = { theme: DEFAULT_THEME, colorMode: DEFAULT_COLOR_MODE };
+let saved: Appearance = { theme: DEFAULT_THEME, colorMode: DEFAULT_COLOR_MODE };
+/** Painted over `saved` while a picker is hovering. Null means show the saved theme. */
+let preview: ThemeId | null = null;
 let listening = false;
 
 export function normalizeTheme(value: string | null | undefined): ThemeId {
@@ -165,21 +221,25 @@ function writeAttributes(theme: ThemeId, colorMode: ColorMode) {
   root.dataset.mode = resolveMode(colorMode);
 }
 
+function paint() {
+  writeAttributes(preview ?? saved.theme, saved.colorMode);
+}
+
 function ensureSystemListener() {
   if (listening || typeof window === "undefined") {
     return;
   }
   listening = true;
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    if (current.colorMode === "system") {
-      writeAttributes(current.theme, current.colorMode);
+    if (saved.colorMode === "system") {
+      paint();
     }
   });
 }
 
 export function applyAppearance(theme: ThemeId, colorMode: ColorMode) {
-  current = { theme, colorMode };
-  writeAttributes(theme, colorMode);
+  saved = { theme, colorMode };
+  paint();
   ensureSystemListener();
 }
 
@@ -197,7 +257,24 @@ export function publishAppearance(theme: string, colorMode: string) {
     theme: normalizeTheme(theme),
     colorMode: normalizeColorMode(colorMode),
   };
-  applyAppearance(next.theme, next.colorMode);
+  saved = next;
   rememberAppearance(next.theme, next.colorMode);
+  paint();
+  ensureSystemListener();
   return next;
+}
+
+/**
+ * Paints `theme` without writing settings. Null restores the saved theme.
+ * A commit stores the theme first, so the preview can drop without flashing the previous one.
+ */
+export function applyThemePreview(theme: string | null, commit = false) {
+  if (commit && theme) {
+    saved = { ...saved, theme: normalizeTheme(theme) };
+    preview = null;
+    rememberAppearance(saved.theme, saved.colorMode);
+  } else {
+    preview = theme ? normalizeTheme(theme) : null;
+  }
+  paint();
 }

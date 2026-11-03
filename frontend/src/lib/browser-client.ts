@@ -73,10 +73,12 @@ import type {
   PopupRect,
   PopupRequest,
   PopupShow,
+  ThemePreview,
   TabGroupColor,
   TabsSnapshot,
   UserStyles,
 } from "../../../types/browser";
+import { applyThemePreview } from "./appearance";
 
 // Tabs
 
@@ -910,6 +912,16 @@ export function sendOmniboxPick(suggestion: OmniboxSuggestion) {
 
 export function onOmniboxPick(handler: (suggestion: OmniboxSuggestion) => void): Promise<UnlistenFn> {
   return listen<OmniboxSuggestion>("omnibox-pick", (event) => handler(event.payload));
+}
+
+/** Paints a theme on this webview and tells the others. Nothing is written until `commit`. */
+export function sendThemePreview(theme: string | null, commit = false) {
+  applyThemePreview(theme, commit);
+  return emit("theme-preview", { theme, commit } satisfies ThemePreview);
+}
+
+export function onThemePreview(handler: (preview: ThemePreview) => void): Promise<UnlistenFn> {
+  return listen<ThemePreview>("theme-preview", (event) => handler(event.payload));
 }
 
 // Built-in page tools

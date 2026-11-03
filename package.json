@@ -1,7 +1,7 @@
 {
   "name": "ce-browser",
   "private": true,
-  "version": "0.1.21",
+  "version": "0.1.22",
   "scripts": {
     "dev": "pnpm --dir frontend dev",
     "build": "pnpm --dir frontend build",

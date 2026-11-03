@@ -8,6 +8,7 @@ import { onPopupHide, onPopupShow, popupCurrent } from "@lib/browser-client";
 import { PopupHostContext, type PopupHostState } from "@lib/popup-host";
 import { useAppearanceState, useBookmarksState, useExtensions, useTabs } from "@lib/use-browser";
 import { AddressBarEllipsisMenu } from "@/features/Browser/BrowserHeader/Addressbar/AddressBarEllipsisMenu";
+import { ThemePicker } from "@/features/Browser/BrowserHeader/Addressbar/ThemePicker";
 import { ExtensionPinContextMenu } from "@/features/Browser/BrowserHeader/Addressbar/ExtensionPinContextMenu";
 import { BookmarkAdd } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarkAdd";
 import { BookmarkRename } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarkRename";
@@ -225,6 +226,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <FindAllPopover params={params} />;
     case "shortcut-sheet":
       return <ShortcutSheet />;
+    case "theme-picker":
+      return <ThemePicker />;
     default:
       return <UnknownPopup />;
   }

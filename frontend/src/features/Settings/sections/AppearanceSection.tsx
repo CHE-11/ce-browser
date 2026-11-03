@@ -3,7 +3,7 @@ import { Check, Minus, Plus } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
 import { COLOR_MODE_OPTIONS, THEMES, resolveMode } from "@/lib/appearance";
-import { backdropSupport, getUserStyles, showUserStyles } from "@/lib/browser-client";
+import { backdropSupport, getUserStyles, sendThemePreview, showUserStyles } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, PAGE_ZOOM_LEVELS, stepPageZoom, ZOOM_STEP } from "@/lib/zoom";
 import type { BackdropSupport, ToastPosition } from "@type/browser";
@@ -25,6 +25,8 @@ const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-appearanc
 
 const ACCENT_LABEL = "Site accent";
 const ACCENT_HINT = "Tints the active tab and address bar from the site's theme color or favicon.";
+const PIN_BORDER_LABEL = "Pin tab border";
+const PIN_BORDER_HINT = "Draws the site's theme color or favicon along the top of pinned tabs.";
 const MODE_LABEL = "Mode";
 const BACKDROP_LABEL = "Window backdrop";
 const BACKDROP_HINT = "Mica or Acrylic shows the desktop color through the tab strip and toolbars.";
@@ -62,6 +64,8 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
     section.title,
     ACCENT_LABEL,
     ACCENT_HINT,
+    PIN_BORDER_LABEL,
+    PIN_BORDER_HINT,
     MODE_LABEL,
     ...COLOR_MODE_OPTIONS.map((option) => option.label),
     BACKDROP_LABEL,
@@ -101,6 +105,13 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
     <Section id={section.id} title={section.title}>
       <Row id="settings-site-accent" setting="siteAccent" label={ACCENT_LABEL} hint={ACCENT_HINT}>
         <Toggle id="settings-site-accent-toggle" checked={settings.siteAccent} onChange={(value) => onUpdate({ siteAccent: value })} />
+      </Row>
+      <Row id="settings-pin-tab-border" setting="pinTabBorder" label={PIN_BORDER_LABEL} hint={PIN_BORDER_HINT}>
+        <Toggle
+          id="settings-pin-tab-border-toggle"
+          checked={settings.pinTabBorder}
+          onChange={(value) => onUpdate({ pinTabBorder: value })}
+        />
       </Row>
       <Row id="settings-color-mode" setting="colorMode" label={MODE_LABEL} search={COLOR_MODE_OPTIONS.map((option) => option.label)}>
         <div id="settings-color-mode-options" className="flex rounded-md border border-zinc-700 p-0.5">
@@ -260,7 +271,7 @@ function ThemePicker({ settings, onUpdate }: { settings: SettingsSectionProps["s
       <div id="settings-theme-label" className="mb-3 text-sm text-zinc-100">
         {THEME_LABEL}
       </div>
-      <div id="settings-theme-grid" className="grid grid-cols-5 gap-2">
+      <div id="settings-theme-grid" className="grid grid-cols-5 gap-2" onMouseLeave={() => void sendThemePreview(null)}>
         {themes.map((theme) => {
           const swatch = theme.swatch[resolved];
           const active = settings.theme === theme.id;
@@ -274,7 +285,18 @@ function ThemePicker({ settings, onUpdate }: { settings: SettingsSectionProps["s
                 "relative flex flex-col overflow-hidden rounded-md border text-left",
                 active ? "border-sky-500 ring-1 ring-sky-500" : "border-zinc-700 hover:border-zinc-500",
               )}
-              onClick={() => onUpdate({ theme: theme.id })}
+              onMouseEnter={() => void sendThemePreview(theme.id)}
+              onFocus={() => void sendThemePreview(theme.id)}
+              onBlur={(event) => {
+                const grid = event.currentTarget.parentElement;
+                if (!grid?.contains(event.relatedTarget as Node | null)) {
+                  void sendThemePreview(null);
+                }
+              }}
+              onClick={() => {
+                void sendThemePreview(theme.id, true);
+                onUpdate({ theme: theme.id });
+              }}
             >
               <span id={`settings-theme-${theme.id}-preview`} className="flex h-10 items-end gap-1 p-1.5" style={{ background: swatch.background }}>
                 <span id={`settings-theme-${theme.id}-surface`} className="h-5 flex-1 rounded-sm" style={{ background: swatch.surface }} />

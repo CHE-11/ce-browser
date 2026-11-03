@@ -10,6 +10,7 @@ import {
   House,
   Info,
   Lock,
+  Palette,
   PanelRight,
   Pin,
   Puzzle,
@@ -965,6 +966,13 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         onClick={(event) => void openPopup("status", event.currentTarget)}
       >
         <Activity id="address-status-icon" aria-hidden />
+      </IconButton>
+      <IconButton
+        id="address-theme"
+        label="Themes"
+        onClick={(event) => void openPopup("theme-picker", event.currentTarget)}
+      >
+        <Palette id="address-theme-icon" aria-hidden />
       </IconButton>
       <IconButton id="address-settings" label="Settings" onClick={() => void createTab("ce://settings")}>
         <Settings id="address-settings-icon" aria-hidden />

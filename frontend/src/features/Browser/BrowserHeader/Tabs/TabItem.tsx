@@ -55,7 +55,8 @@ export function TabItem({
   const settings = useSettings();
   const hoverPreview = settings?.tabHoverPreview !== false;
   const tabWidth = settings?.tabWidth ?? TAB_SIZE.width;
-  const accent = settings?.siteAccent && tab.accent ? tab.accent : null;
+  const accent = settings?.siteAccent && tab.accent && !tab.pinned ? tab.accent : null;
+  const pinBorder = (settings?.pinTabBorder ?? true) && tab.pinned ? tab.accent : null;
   const domId = `tab-${tab.id}`;
   const vertical = orientation === "vertical";
   const showAudio = tab.audible || tab.muted;
@@ -141,12 +142,10 @@ export function TabItem({
         ...(accent
           ? {
               backgroundColor: active ? accentTint(accent, 0.28) : undefined,
-              // Horizontal tabs only keep the accent along the top edge when pinned.
-              ...(vertical || tab.pinned
-                ? { boxShadow: vertical ? `inset 3px 0 0 ${accent}` : `inset 0 2px 0 ${accent}` }
-                : null),
+              ...(vertical ? { boxShadow: `inset 3px 0 0 ${accent}` } : null),
             }
           : null),
+        ...(pinBorder ? { boxShadow: `inset 0 2px 0 ${pinBorder}` } : null),
       }}
       onMouseDown={(event) => {
         leaveTab(true);

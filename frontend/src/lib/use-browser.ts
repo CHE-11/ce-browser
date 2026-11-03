@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { BookmarkNode, BookmarkTree, BrowserSettings, ClosedEntry, PageRules, TabsSnapshot } from "../../../types/browser";
-import { publishAppearance } from "./appearance";
+import { applyThemePreview, publishAppearance } from "./appearance";
 import {
   currentWindowLabel as browserWindowLabel,
   getPageRules,
   getSettings,
+  onThemePreview,
   listBookmarks,
   listDownloads,
   listExtensions,
@@ -287,6 +288,12 @@ export function useAppearanceState() {
     publishAppearance(settings.theme, settings.colorMode);
     publishZoom(settings.uiZoom);
   }, [settings]);
+  useEffect(() => {
+    const unlisten = onThemePreview((preview) => applyThemePreview(preview.theme, preview.commit));
+    return () => {
+      void unlisten.then((stop) => stop());
+    };
+  }, []);
   return { settings, loaded };
 }
 

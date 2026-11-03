@@ -176,6 +176,9 @@ pub struct BrowserSettings {
     /// Tint the active tab and address bar from the site's theme color or favicon.
     #[serde(default = "default_true")]
     pub site_accent: bool,
+    /// Site theme color or favicon along the top of pinned tabs. An older file omits this and gets the border.
+    #[serde(default = "default_true")]
+    pub pin_tab_border: bool,
     /// Target language for the translate tool. `%t` in the provider URL.
     #[serde(default = "default_translate_language")]
     pub translate_language: String,
@@ -577,6 +580,7 @@ impl Default for BrowserSettings {
             vertical_toolbar_extensions: false,
             vertical_toolbar_labels: false,
             site_accent: true,
+            pin_tab_border: true,
             translate_language: default_translate_language(),
             translate_url: default_translate_url(),
             ai_provider: "local".into(),
@@ -940,6 +944,12 @@ fn surface_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
             ("rosepine", 0xff, 0xfa, 0xf3),
             ("github", 0xf6, 0xf8, 0xfa),
             ("onedark", 0xf4, 0xf4, 0xf4),
+            ("slate", 0xff, 0xff, 0xff),
+            ("stone", 0xff, 0xff, 0xff),
+            ("paper", 0xf4, 0xf4, 0xf0),
+            ("graphite", 0xff, 0xff, 0xff),
+            ("ink", 0xf4, 0xf4, 0xf4),
+            ("fog", 0xf5, 0xf6, 0xf8),
         ]
     } else {
         &[
@@ -952,6 +962,12 @@ fn surface_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
             ("rosepine", 0x1f, 0x1d, 0x2e),
             ("github", 0x16, 0x1b, 0x22),
             ("onedark", 0x2c, 0x31, 0x3a),
+            ("slate", 0x1e, 0x29, 0x3b),
+            ("stone", 0x29, 0x25, 0x24),
+            ("paper", 0x2a, 0x2a, 0x27),
+            ("graphite", 0x38, 0x38, 0x38),
+            ("ink", 0x17, 0x17, 0x17),
+            ("fog", 0x36, 0x3c, 0x45),
         ]
     };
     table
@@ -977,6 +993,12 @@ fn page_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
             ("rosepine", 0xfa, 0xf4, 0xed),
             ("github", 0xff, 0xff, 0xff),
             ("onedark", 0xfa, 0xfa, 0xfa),
+            ("slate", 0xf8, 0xfa, 0xfc),
+            ("stone", 0xfa, 0xfa, 0xf9),
+            ("paper", 0xff, 0xff, 0xff),
+            ("graphite", 0xf3, 0xf3, 0xf3),
+            ("ink", 0xff, 0xff, 0xff),
+            ("fog", 0xe8, 0xea, 0xed),
         ]
     } else {
         &[
@@ -989,6 +1011,12 @@ fn page_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
             ("rosepine", 0x19, 0x17, 0x24),
             ("github", 0x0d, 0x11, 0x17),
             ("onedark", 0x28, 0x2c, 0x34),
+            ("slate", 0x0f, 0x17, 0x2a),
+            ("stone", 0x1c, 0x19, 0x17),
+            ("paper", 0x1e, 0x1e, 0x1c),
+            ("graphite", 0x2b, 0x2b, 0x2b),
+            ("ink", 0x0c, 0x0c, 0x0c),
+            ("fog", 0x2c, 0x31, 0x38),
         ]
     };
     table

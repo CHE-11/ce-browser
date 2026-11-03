@@ -458,6 +458,7 @@ const COPY_PARTS: &[PartSpec] = &[
             "uiZoom",
             "pageZoom",
             "siteAccent",
+            "pinTabBorder",
             "windowBackdrop",
             "toastPosition",
             "showStatusBar",

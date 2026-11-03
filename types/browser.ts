@@ -428,7 +428,14 @@ export type PopupKind =
   | "find-all"
   | "selection-translate"
   | "boards"
-  | "board-images";
+  | "board-images"
+  | "theme-picker";
+
+/** A theme shown over the saved one. `commit` stores it before the settings file catches up. */
+export type ThemePreview = {
+  theme: string | null;
+  commit: boolean;
+};
 
 /**
  * Where a popup sits against its anchor. `bottom-*` hangs below (or above, near the bottom of
@@ -636,6 +643,8 @@ export type BrowserSettings = {
   verticalToolbarLabels: boolean;
   /** Tint the active tab and address bar from the site's color. */
   siteAccent: boolean;
+  /** Site theme color or favicon along the top of pinned tabs. */
+  pinTabBorder: boolean;
   /** Target language code for the translate tool. */
   translateLanguage: string;
   /** Provider URL. `%s` is the text and `%t` is the language. */
