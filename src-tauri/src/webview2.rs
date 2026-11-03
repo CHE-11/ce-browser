@@ -1337,6 +1337,13 @@ fn attach_adblock(
                 let Some(args) = args else {
                     return Ok(());
                 };
+                if let Ok(request) = args.Request() {
+                    crate::privacy::note_request_started(
+                        &request_app,
+                        id,
+                        request.as_raw() as usize,
+                    );
+                }
                 let uri = args
                     .Request()
                     .map(|request| read_pwstr(|value| request.Uri(value)))
@@ -1502,6 +1509,11 @@ fn attach_adblock(
                         let mut code = 0i32;
                         response.StatusCode(&mut code).ok().map(|_| code)
                     });
+                    let started = crate::privacy::take_request_started(
+                        &response_app,
+                        id,
+                        request.as_raw() as usize,
+                    );
                     crate::privacy::record_request(
                         &response_app,
                         id,
@@ -1509,6 +1521,7 @@ fn attach_adblock(
                         &uri,
                         "request",
                         status,
+                        started,
                     );
                     Ok(())
                 })),

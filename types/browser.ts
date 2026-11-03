@@ -786,6 +786,10 @@ export type NetworkEntry = {
   url: string;
   kind: string;
   status: number | null;
+  /** Unix milliseconds when the response arrived. */
+  time: number;
+  /** Milliseconds from the request start until the response, when the start was seen. */
+  durationMs: number | null;
 };
 
 export type AdblockSettings = {

@@ -71,6 +71,10 @@ pub struct NetworkEntry {
     pub url: String,
     pub kind: String,
     pub status: Option<i32>,
+    /// Unix milliseconds when the response arrived.
+    pub time: u64,
+    /// Milliseconds from the request start until the response, when the start was seen.
+    pub duration_ms: Option<u64>,
 }
 
 struct PrivacyState {
@@ -78,6 +82,8 @@ struct PrivacyState {
     containers: Mutex<Vec<Container>>,
     log: Mutex<HashMap<u32, VecDeque<NetworkEntry>>>,
     seeds: Mutex<HashMap<String, u32>>,
+    /// Start time for a request still waiting on its response, keyed by tab and the request pointer.
+    started: Mutex<HashMap<(u32, usize), u64>>,
 }
 
 pub fn init(app: &AppHandle) {
@@ -88,6 +94,7 @@ pub fn init(app: &AppHandle) {
         containers: Mutex::new(normalize_containers(containers.containers)),
         log: Mutex::new(HashMap::new()),
         seeds: Mutex::new(HashMap::new()),
+        started: Mutex::new(HashMap::new()),
     });
 }
 
@@ -389,6 +396,35 @@ fn local_host(url: &Url) -> bool {
         .is_some_and(|host| host.to_ascii_lowercase().ends_with(".localhost"))
 }
 
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Remember when this WebView2 request object started. `request` is the COM pointer, which the
+/// response event hands back for the same request.
+pub fn note_request_started(app: &AppHandle, tab: u32, request: usize) {
+    let now = now_ms();
+    let guard = state(app);
+    let mut started = guard.started.lock().expect("network start");
+    started.retain(|_, at| now.saturating_sub(*at) < 120_000);
+    if started.len() >= 4_000 {
+        started.clear();
+    }
+    started.insert((tab, request), now);
+}
+
+pub fn take_request_started(app: &AppHandle, tab: u32, request: usize) -> Option<u64> {
+    let guard = state(app);
+    guard
+        .started
+        .lock()
+        .expect("network start")
+        .remove(&(tab, request))
+}
+
 pub fn record_request(
     app: &AppHandle,
     tab: u32,
@@ -396,10 +432,12 @@ pub fn record_request(
     url: &str,
     kind: &str,
     status: Option<i32>,
+    started_at: Option<u64>,
 ) {
     if url.starts_with("ce:") || url.starts_with("chrome-extension:") || url.starts_with("data:") {
         return;
     }
+    let time = now_ms();
     let guard = state(app);
     let mut log = guard.log.lock().expect("network log");
     let entries = log.entry(tab).or_default();
@@ -408,6 +446,8 @@ pub fn record_request(
         url: url.chars().take(2000).collect(),
         kind: kind.chars().take(32).collect(),
         status,
+        time,
+        duration_ms: started_at.map(|started| time.saturating_sub(started)),
     });
     while entries.len() > MAX_LOG {
         entries.pop_front();
