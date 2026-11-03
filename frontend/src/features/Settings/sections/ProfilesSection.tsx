@@ -1,16 +1,12 @@
 import { useEffect, useState } from "react";
-import { ImagePlus } from "lucide-react";
+import { ImagePlus, Trash2 } from "lucide-react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { BrowserProfile, ProfileCopyScope, ProfileIconChoice } from "@type/browser";
+import type { BrowserProfile, ProfileIconChoice } from "@type/browser";
 import { Button } from "@/components/Button";
-import { Dialog } from "@/components/Dialog";
 import { cn } from "@/lib/cn";
 import {
-  copyProfile,
   createProfile,
   deleteProfile,
-  exportProfileArchive,
-  importProfileArchive,
   installProfileShortcut,
   listProfileIcons,
   listProfiles,
@@ -22,6 +18,8 @@ import {
 } from "@/lib/browser-client";
 import { SETTINGS_SECTIONS } from "../settings-sections";
 import { inputClass, matchesQuery, Row, Section, useReportMatch, useSettingVisible, type SettingsSectionProps } from "../SettingsControls";
+import { ProfilesArchiveDialog, type ProfileArchiveRequest } from "./ProfilesArchiveDialog";
+import { PROFILE_COPY_CHOICES, ProfilesCopyDialog, type ProfileCopyRequest } from "./ProfilesCopyDialog";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-profiles")!;
 
@@ -30,41 +28,6 @@ const NEW_PROFILE_HINT =
 const ARCHIVE_LABEL = "Profile file";
 const ARCHIVE_HINT =
   "Saves this profile's bookmarks, history, extensions, and settings in one encrypted file. Cookies stay on this computer.";
-
-type ArchivePrompt = {
-  mode: "export" | "import";
-  path: string;
-  password: string;
-  confirm: string;
-  error: string | null;
-};
-
-type CopyPrompt = {
-  id: string;
-  sourceName: string;
-  name: string;
-  scope: ProfileCopyScope;
-  current: boolean;
-  error: string | null;
-};
-
-const COPY_CHOICES: { id: ProfileCopyScope; label: string; hint: string }[] = [
-  {
-    id: "settings",
-    label: "App settings",
-    hint: "Search, startup, downloads, appearance, and the other Settings values.",
-  },
-  {
-    id: "data",
-    label: "Profile data",
-    hint: "App settings plus bookmarks, history, extensions, and the other files in the profile folder. Cookies stay on this computer.",
-  },
-  {
-    id: "full",
-    label: "Everything",
-    hint: "Profile data plus cookies and saved logins.",
-  },
-];
 
 function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], iconOpen: boolean) {
   const terms = [
@@ -86,7 +49,7 @@ function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], iconO
     terms.push("Add to Start");
   }
   if (profile.id !== "default" && !profile.current) {
-    terms.push("Remove");
+    terms.push("Delete");
   }
   if (iconOpen) {
     terms.push(
@@ -108,10 +71,9 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
   const [profileWorking, setProfileWorking] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [iconProfile, setIconProfile] = useState<string | null>(null);
-  const [archive, setArchive] = useState<ArchivePrompt | null>(null);
+  const [archive, setArchive] = useState<ProfileArchiveRequest | null>(null);
   const [archiveNote, setArchiveNote] = useState<string | null>(null);
-  const [archiveWorking, setArchiveWorking] = useState(false);
-  const [copying, setCopying] = useState<CopyPrompt | null>(null);
+  const [copying, setCopying] = useState<ProfileCopyRequest | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -159,7 +121,8 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
     "Import",
     archiveNote ?? "",
     "Copy profile",
-    ...COPY_CHOICES.flatMap((choice) => [choice.label, choice.hint]),
+    "App settings",
+    ...PROFILE_COPY_CHOICES.flatMap((choice) => [choice.label, choice.hint]),
     ...profiles.flatMap((profile) => profileTerms(profile, profileIcons, iconProfile === profile.id)),
     confirmText,
     pendingDelete ? "Cancel" : "",
@@ -187,71 +150,10 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
     void Promise.resolve(dialog)
       .then((path) => {
         if (typeof path === "string" && path) {
-          setArchive({ mode, path, password: "", confirm: "", error: null });
+          setArchive({ mode, path });
         }
       })
       .catch((reason: unknown) => onError(String(reason)));
-  };
-
-  const submitArchive = () => {
-    if (!archive || archiveWorking) {
-      return;
-    }
-    if (!archive.password) {
-      setArchive({ ...archive, error: "Enter a password." });
-      return;
-    }
-    if (archive.mode === "export" && archive.password !== archive.confirm) {
-      setArchive({ ...archive, error: "Those passwords do not match." });
-      return;
-    }
-    setArchiveWorking(true);
-    const prompt = archive;
-    const work =
-      prompt.mode === "export"
-        ? exportProfileArchive(prompt.path, prompt.password).then(() => "Profile exported.")
-        : importProfileArchive(prompt.path, prompt.password).then((imported) => {
-            return listProfiles().then((next) => {
-              setProfiles(next);
-              return `Imported as ${imported.name}. Open it from the list.`;
-            });
-          });
-    void work
-      .then((note) => {
-        setArchive(null);
-        setArchiveNote(note);
-      })
-      .catch((reason: unknown) => {
-        setArchive((current) => (current ? { ...current, error: String(reason) } : current));
-      })
-      .finally(() => setArchiveWorking(false));
-  };
-
-  const submitCopy = () => {
-    if (!copying || profileWorking) {
-      return;
-    }
-    const name = copying.name.trim();
-    if (!name) {
-      setCopying({ ...copying, error: "A profile needs a name." });
-      return;
-    }
-    if (copying.scope === "full" && copying.current) {
-      setCopying({ ...copying, error: "Close that profile before copying its cookies and logins." });
-      return;
-    }
-    setProfileWorking(true);
-    onError(null);
-    void copyProfile(copying.id, name, copying.scope)
-      .then((next) => {
-        setProfiles(next);
-        setCopying(null);
-      })
-      .catch((reason: unknown) => {
-        setCopying((current) => (current ? { ...current, error: String(reason) } : current));
-        void listProfiles().then(setProfiles).catch(() => undefined);
-      })
-      .finally(() => setProfileWorking(false));
   };
 
   const runProfiles = (work: () => Promise<BrowserProfile[] | void>) => {
@@ -305,10 +207,10 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
         </Button>
       </Row>
       <Row id="settings-profiles-archive" label={ARCHIVE_LABEL} hint={ARCHIVE_HINT} search={["Export", "Import", archiveNote ?? ""]}>
-        <Button id="settings-profiles-export" size="sm" disabled={profileWorking || archiveWorking} onClick={() => chooseArchive("export")}>
+        <Button id="settings-profiles-export" size="sm" disabled={profileWorking} onClick={() => chooseArchive("export")}>
           Export
         </Button>
-        <Button id="settings-profiles-import" size="sm" disabled={profileWorking || archiveWorking} onClick={() => chooseArchive("import")}>
+        <Button id="settings-profiles-import" size="sm" disabled={profileWorking} onClick={() => chooseArchive("import")}>
           Import
         </Button>
       </Row>
@@ -331,9 +233,7 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
               id: profile.id,
               sourceName: profile.name,
               name: `${profile.name} copy`,
-              scope: "settings",
               current: profile.current,
-              error: null,
             })
           }
           onPin={() => runProfiles(() => pinProfileTaskbar(profile.id))}
@@ -363,144 +263,18 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
           }}
         />
       ) : null}
-      <Dialog
-        id="settings-profile-archive"
-        title={archive?.mode === "import" ? "Import profile" : "Export profile"}
-        open={archive !== null}
-        onClose={() => {
-          if (!archiveWorking) {
-            setArchive(null);
+      <ProfilesArchiveDialog
+        request={archive}
+        onClose={() => setArchive(null)}
+        onDone={(note, next) => {
+          if (next) {
+            setProfiles(next);
           }
+          setArchive(null);
+          setArchiveNote(note);
         }}
-        panelClassName="max-w-md"
-      >
-        <form
-          id="settings-profile-archive-form"
-          className="flex flex-col gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            submitArchive();
-          }}
-        >
-          <p id="settings-profile-archive-path" className="break-all text-xs text-zinc-500">
-            {archive?.path}
-          </p>
-          <label id="settings-profile-archive-password-label" className="flex flex-col gap-1 text-sm text-zinc-300">
-            Password
-            <input
-              id="settings-profile-archive-password"
-              type="password"
-              autoFocus
-              value={archive?.password ?? ""}
-              className={inputClass}
-              onChange={(event) => setArchive((current) => (current ? { ...current, password: event.target.value, error: null } : current))}
-            />
-          </label>
-          {archive?.mode === "export" ? (
-            <label id="settings-profile-archive-confirm-label" className="flex flex-col gap-1 text-sm text-zinc-300">
-              Confirm password
-              <input
-                id="settings-profile-archive-confirm"
-                type="password"
-                value={archive.confirm}
-                className={inputClass}
-                onChange={(event) => setArchive((current) => (current ? { ...current, confirm: event.target.value, error: null } : current))}
-              />
-            </label>
-          ) : null}
-          {archive?.error ? (
-            <p id="settings-profile-archive-error" className="text-sm text-red-300">
-              {archive.error}
-            </p>
-          ) : null}
-          <div id="settings-profile-archive-actions" className="flex justify-end gap-2">
-            <Button id="settings-profile-archive-cancel" size="sm" variant="ghost" disabled={archiveWorking} onClick={() => setArchive(null)}>
-              Cancel
-            </Button>
-            <Button id="settings-profile-archive-save" size="sm" type="submit" disabled={archiveWorking}>
-              {archive?.mode === "import" ? "Import" : "Export"}
-            </Button>
-          </div>
-        </form>
-      </Dialog>
-      <Dialog
-        id="settings-profile-copy"
-        title="Copy profile"
-        open={copying !== null}
-        onClose={() => {
-          if (!profileWorking) {
-            setCopying(null);
-          }
-        }}
-        panelClassName="max-w-md"
-      >
-        <form
-          id="settings-profile-copy-form"
-          className="flex flex-col gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            submitCopy();
-          }}
-        >
-          <p id="settings-profile-copy-source" className="text-sm text-zinc-300">
-            Copy {copying?.sourceName ?? "this profile"} into a new profile.
-          </p>
-          <label id="settings-profile-copy-name-label" className="flex flex-col gap-1 text-sm text-zinc-300">
-            Name
-            <input
-              id="settings-profile-copy-name"
-              autoFocus
-              value={copying?.name ?? ""}
-              className={inputClass}
-              onChange={(event) => setCopying((current) => (current ? { ...current, name: event.target.value, error: null } : current))}
-            />
-          </label>
-          <fieldset id="settings-profile-copy-scope" className="flex flex-col gap-2">
-            <legend id="settings-profile-copy-scope-legend" className="mb-1 text-sm text-zinc-300">
-              What to copy
-            </legend>
-            {COPY_CHOICES.map((choice) => {
-              const disabled = choice.id === "full" && Boolean(copying?.current);
-              return (
-                <label
-                  key={choice.id}
-                  id={`settings-profile-copy-scope-${choice.id}-label`}
-                  className={cn("flex items-start gap-2 text-sm", disabled ? "text-zinc-500" : "text-zinc-200")}
-                >
-                  <input
-                    id={`settings-profile-copy-scope-${choice.id}`}
-                    type="radio"
-                    name="settings-profile-copy-scope"
-                    className="mt-1"
-                    checked={copying?.scope === choice.id}
-                    disabled={disabled || profileWorking}
-                    onChange={() => setCopying((current) => (current ? { ...current, scope: choice.id, error: null } : current))}
-                  />
-                  <span id={`settings-profile-copy-scope-${choice.id}-text`} className="flex flex-col">
-                    <span id={`settings-profile-copy-scope-${choice.id}-title`}>{choice.label}</span>
-                    <span id={`settings-profile-copy-scope-${choice.id}-hint`} className="text-xs text-zinc-500">
-                      {disabled ? "Close this profile before copying cookies and saved logins." : choice.hint}
-                    </span>
-                  </span>
-                </label>
-              );
-            })}
-          </fieldset>
-          {copying?.error ? (
-            <p id="settings-profile-copy-error" className="text-sm text-red-300">
-              {copying.error}
-            </p>
-          ) : null}
-          <div id="settings-profile-copy-actions" className="flex justify-end gap-2">
-            <Button id="settings-profile-copy-cancel" size="sm" variant="ghost" disabled={profileWorking} onClick={() => setCopying(null)}>
-              Cancel
-            </Button>
-            <Button id="settings-profile-copy-save" size="sm" type="submit" disabled={profileWorking || !copying?.name.trim()}>
-              Copy
-            </Button>
-          </div>
-        </form>
-      </Dialog>
+      />
+      <ProfilesCopyDialog request={copying} onClose={() => setCopying(null)} onProfiles={setProfiles} onError={onError} />
     </Section>
   );
 }
@@ -593,8 +367,17 @@ function ProfileCard({
             </Button>
           ) : null}
           {profile.id !== "default" && !profile.current ? (
-            <Button id={`settings-profile-${profile.id}-remove`} size="sm" variant="ghost" disabled={working} onClick={onRemove}>
-              Remove
+            <Button
+              id={`settings-profile-${profile.id}-remove`}
+              size="sm"
+              variant="destructiveOutline"
+              disabled={working}
+              title="Delete"
+              aria-label={`Delete ${profile.name}`}
+              className="size-7 px-0"
+              onClick={onRemove}
+            >
+              <Trash2 id={`settings-profile-${profile.id}-remove-icon`} className="size-3.5" aria-hidden />
             </Button>
           ) : null}
         </div>

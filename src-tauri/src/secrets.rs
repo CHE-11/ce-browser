@@ -1,6 +1,7 @@
 //! API keys for Shopping summaries, encrypted with Windows DPAPI for the current user.
 //! Ciphertext lives under local app data, never in the syncable profile folder.
 
+use std::fs;
 use std::path::PathBuf;
 
 use base64::Engine;
@@ -130,13 +131,31 @@ fn hint_of(key: &str) -> String {
 }
 
 fn secret_path(app: &AppHandle) -> PathBuf {
-    let id = profiles::active_id();
+    key_path(app, &profiles::active_id())
+}
+
+fn key_path(app: &AppHandle, id: &str) -> PathBuf {
     let name = if id == profiles::DEFAULT_ID {
         FILE_NAME.to_string()
     } else {
         format!("{id}-{FILE_NAME}")
     };
     paths::root_local_dir(app).join("secrets").join(name)
+}
+
+/// Copies this user's saved API keys from one profile to another. The ciphertext stays
+/// DPAPI-protected and is never written into the syncable profile folder.
+pub fn copy_keys(app: &AppHandle, from_id: &str, to_id: &str) -> Result<(), String> {
+    let from = key_path(app, from_id);
+    if !from.is_file() {
+        return Ok(());
+    }
+    let to = key_path(app, to_id);
+    if let Some(parent) = to.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::copy(&from, &to).map_err(|error| format!("Could not copy saved keys: {error}"))?;
+    Ok(())
 }
 
 fn read_file(app: &AppHandle) -> SecretFile {

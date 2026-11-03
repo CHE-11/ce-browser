@@ -1142,8 +1142,36 @@ export type BookmarkHealthProgress = {
   total: number;
 };
 
-/** What a copied profile takes from the source. `settings` is the default. */
-export type ProfileCopyScope = "settings" | "data" | "full";
+/**
+ * One part of a profile the copy dialog can include.
+ * Keep this list in step with `COPY_PARTS` in `src-tauri/src/profiles.rs`.
+ */
+export type ProfileCopyPart =
+  | "search"
+  | "history"
+  | "appearance"
+  | "downloads"
+  | "bookmarks"
+  | "extensions"
+  | "cookies"
+  | "logins"
+  | "siteData"
+  | "tabs"
+  | "startup"
+  | "openTabs"
+  | "privacy"
+  | "adblock"
+  | "ai"
+  | "shopping"
+  | "translate"
+  | "system"
+  | "shortcuts"
+  | "rewrites"
+  | "boards"
+  | "passwords"
+  | "print"
+  | "window"
+  | "icon";
 
 export type BrowserProfile = {
   id: string;

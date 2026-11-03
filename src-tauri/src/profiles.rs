@@ -406,20 +406,221 @@ pub fn create_closed(app: &AppHandle, name: &str) -> Result<String, String> {
     Ok(id)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CopyScope {
-    Settings,
-    Data,
-    Full,
+/// One switch in the copy dialog. Ids match `ProfileCopyPart` in `types/browser.ts`.
+struct PartSpec {
+    id: &'static str,
+    files: &'static [&'static str],
+    dirs: &'static [&'static str],
+    settings: &'static [&'static str],
+    /// `(new key, old key)`. The old key fills the new one when the file still uses it.
+    aliases: &'static [(&'static str, &'static str)],
+    /// Retired keys copied through so the next load can map them.
+    extra: &'static [&'static str],
+    cookies: bool,
+    logins: bool,
+    site_data: bool,
+    icon: bool,
+    secrets: bool,
 }
 
-fn parse_copy_scope(scope: &str) -> Result<CopyScope, String> {
-    match scope {
-        "settings" => Ok(CopyScope::Settings),
-        "data" => Ok(CopyScope::Data),
-        "full" => Ok(CopyScope::Full),
-        _ => Err("Choose app settings, profile data, or everything.".into()),
+const fn bare(id: &'static str) -> PartSpec {
+    PartSpec {
+        id,
+        files: &[],
+        dirs: &[],
+        settings: &[],
+        aliases: &[],
+        extra: &[],
+        cookies: false,
+        logins: false,
+        site_data: false,
+        icon: false,
+        secrets: false,
     }
+}
+
+const COPY_PARTS: &[PartSpec] = &[
+    PartSpec {
+        files: &["keywords.json"],
+        settings: &["searchEngine", "customSearchUrl", "mouseGestures"],
+        aliases: &[("searchEngine", "searchProvider")],
+        ..bare("search")
+    },
+    PartSpec {
+        files: &["history.json", "history-text.json"],
+        ..bare("history")
+    },
+    PartSpec {
+        files: &["styles.css"],
+        settings: &[
+            "theme",
+            "colorMode",
+            "uiZoom",
+            "pageZoom",
+            "siteAccent",
+            "windowBackdrop",
+            "toastPosition",
+            "showStatusBar",
+            "statusStats",
+            "verticalToolbar",
+            "verticalToolbarLabels",
+        ],
+        ..bare("appearance")
+    },
+    PartSpec {
+        files: &["downloads.json"],
+        settings: &[
+            "downloadDir",
+            "askWhereToSave",
+            "accelerateDownloads",
+            "downloadNameTemplate",
+        ],
+        ..bare("downloads")
+    },
+    PartSpec {
+        files: &["bookmarks.json"],
+        settings: &[
+            "showBookmarksBar",
+            "bookmarksBarFolderIcons",
+            "bookmarksBarTextSize",
+            "bookmarksBarPadding",
+            "bookmarkFolderTextSize",
+            "bookmarkFolderPadding",
+            "bookmarksBarMenuTextSize",
+            "bookmarksBarMenuPadding",
+        ],
+        extra: &["bookmarkSize"],
+        ..bare("bookmarks")
+    },
+    PartSpec {
+        files: &["extensions.json"],
+        dirs: &["extensions"],
+        settings: &[
+            "hiddenToolbarExtensions",
+            "toolbarOrder",
+            "verticalToolbarExtensions",
+        ],
+        ..bare("extensions")
+    },
+    PartSpec {
+        cookies: true,
+        ..bare("cookies")
+    },
+    PartSpec {
+        logins: true,
+        ..bare("logins")
+    },
+    PartSpec {
+        site_data: true,
+        ..bare("siteData")
+    },
+    PartSpec {
+        settings: &[
+            "workspacesEnabled",
+            "tabLayout",
+            "verticalTabsCollapsed",
+            "verticalTabsWidth",
+            "muteBackgroundTabs",
+            "peekOnShiftClick",
+            "tabSleep",
+            "tabCycleOrder",
+            "tabSwitcher",
+            "tabHoverPreview",
+            "tabWidth",
+            "tabMenuTextSize",
+            "tabMenuPadding",
+        ],
+        ..bare("tabs")
+    },
+    PartSpec {
+        settings: &["homePage", "startup", "pinnedTabs"],
+        ..bare("startup")
+    },
+    PartSpec {
+        files: &["session.json"],
+        ..bare("openTabs")
+    },
+    PartSpec {
+        files: &["permissions.json", "site-controls.json", "containers.json"],
+        settings: &[
+            "stripTracking",
+            "fingerprintShield",
+            "httpsOnly",
+            "httpsExceptions",
+            "indexPageText",
+        ],
+        ..bare("privacy")
+    },
+    PartSpec {
+        settings: &["adblock"],
+        ..bare("adblock")
+    },
+    PartSpec {
+        settings: &["aiProvider", "aiProviders"],
+        extra: &["assistantEndpoint", "assistantModel", "assistantKey"],
+        secrets: true,
+        ..bare("ai")
+    },
+    PartSpec {
+        files: &["prices.json"],
+        settings: &["shoppingRegion", "shoppingModel", "shoppingCompetitors"],
+        ..bare("shopping")
+    },
+    PartSpec {
+        settings: &["translateLanguage", "translateUrl"],
+        ..bare("translate")
+    },
+    PartSpec {
+        settings: &["summonHotkey", "batterySaver", "autoUpdate"],
+        ..bare("system")
+    },
+    PartSpec {
+        files: &["shortcuts.json"],
+        ..bare("shortcuts")
+    },
+    PartSpec {
+        files: &["rewrite-rules.json"],
+        ..bare("rewrites")
+    },
+    PartSpec {
+        files: &["boards.json"],
+        dirs: &["boards"],
+        ..bare("boards")
+    },
+    PartSpec {
+        files: &["password.json"],
+        ..bare("passwords")
+    },
+    PartSpec {
+        settings: &["printEditor", "pageCapture"],
+        ..bare("print")
+    },
+    PartSpec {
+        files: &["window.json"],
+        ..bare("window")
+    },
+    PartSpec {
+        files: &["window-icon.png"],
+        icon: true,
+        ..bare("icon")
+    },
+];
+
+fn selected_parts(ids: &[String]) -> Result<Vec<&'static PartSpec>, String> {
+    if ids.is_empty() {
+        return Err("Choose at least one thing to copy.".into());
+    }
+    let mut chosen = Vec::new();
+    for id in ids {
+        let Some(spec) = COPY_PARTS.iter().find(|part| part.id == id) else {
+            return Err(format!("{id} can't be copied."));
+        };
+        if chosen.iter().any(|part: &&PartSpec| part.id == spec.id) {
+            continue;
+        }
+        chosen.push(spec);
+    }
+    Ok(chosen)
 }
 
 /// Creates a profile named `name` and fills it from `id`. The new window stays closed.
@@ -427,32 +628,43 @@ pub fn copy(
     app: &AppHandle,
     id: &str,
     name: &str,
-    scope: &str,
+    parts: &[String],
 ) -> Result<Vec<ProfileInfo>, String> {
-    let scope = parse_copy_scope(scope)?;
+    let chosen = selected_parts(parts)?;
+    let cookies = chosen.iter().any(|part| part.cookies);
+    let logins = chosen.iter().any(|part| part.logins);
+    let site_data = chosen.iter().any(|part| part.site_data);
     let source = load(app)
         .profiles
         .into_iter()
         .find(|profile| profile.id == id)
         .ok_or("That profile no longer exists.")?;
-    if scope == CopyScope::Full && profile_is_open(id) {
-        return Err("Close that profile before copying its cookies and logins.".into());
+    if (cookies || logins || site_data) && profile_is_open(id) {
+        return Err(
+            "Close that profile before copying its cookies, site data, or saved logins.".into(),
+        );
     }
     let new_id = create_closed(app, name)?;
     let copied = (|| {
-        copy_profile_data(
+        copy_part_files(
             &paths::profile_data_dir(app, id),
             &paths::profile_data_dir(app, &new_id),
-            scope,
+            &chosen,
         )?;
-        if scope != CopyScope::Settings {
+        if chosen.iter().any(|part| part.icon) {
             apply_copied_icon(app, &source, &new_id)?;
         }
-        if scope == CopyScope::Full {
-            copy_webview(
+        if cookies || logins || site_data {
+            copy_webview_selection(
                 &paths::profile_webview_dir(app, id),
                 &paths::profile_webview_dir(app, &new_id),
+                cookies,
+                logins,
+                site_data,
             )?;
+        }
+        if chosen.iter().any(|part| part.secrets) {
+            crate::secrets::copy_keys(app, id, &new_id)?;
         }
         Ok(())
     })();
@@ -467,36 +679,174 @@ pub fn copy(
     Ok(list(app))
 }
 
-/// Copies `settings.json`, or the profile folder, from `from` into `to`. Cookies stay out.
-fn copy_profile_data(from: &Path, to: &Path, scope: CopyScope) -> Result<(), String> {
+/// Copies the selected files, folders, and settings keys. The sync folder stays on this computer.
+fn copy_part_files(from: &Path, to: &Path, parts: &[&PartSpec]) -> Result<(), String> {
     fs::create_dir_all(to).map_err(|error| error.to_string())?;
-    if scope == CopyScope::Settings {
-        let source = from.join("settings.json");
-        if source.is_file() {
-            copy_file(&source, &to.join("settings.json"))?;
+    write_settings_slice(from, to, parts)?;
+    for part in parts {
+        for name in part.files {
+            let source = from.join(name);
+            if source.is_file() {
+                copy_file(&source, &to.join(name))?;
+            }
         }
-        return Ok(());
-    }
-    for name in PROFILE_FILES {
-        let source = from.join(name);
-        if source.is_file() {
-            copy_file(&source, &to.join(name))?;
+        for name in part.dirs {
+            let source = from.join(name);
+            if source.is_dir() {
+                files::copy_dir(&source, &to.join(name))?;
+            }
+        }
+        if part.icon {
+            copy_icon_files(from, to)?;
         }
     }
-    for name in PROFILE_DIRS {
-        let source = from.join(name);
-        if source.is_dir() {
-            files::copy_dir(&source, &to.join(name))?;
-        }
-    }
-    copy_icon_files(from, to)
+    Ok(())
 }
 
-fn copy_webview(from: &Path, to: &Path) -> Result<(), String> {
-    if !from.is_dir() {
+fn write_settings_slice(from: &Path, to: &Path, parts: &[&PartSpec]) -> Result<(), String> {
+    let mut keys = Vec::new();
+    let mut extras = Vec::new();
+    let mut aliases = Vec::new();
+    for part in parts {
+        for key in part.settings {
+            if !keys.contains(key) {
+                keys.push(*key);
+            }
+        }
+        for key in part.extra {
+            if !extras.contains(key) {
+                extras.push(*key);
+            }
+        }
+        for alias in part.aliases {
+            if !aliases.contains(alias) {
+                aliases.push(*alias);
+            }
+        }
+    }
+    if keys.is_empty() && extras.is_empty() {
         return Ok(());
     }
-    files::copy_dir(from, to)
+    let source = read_settings_object(&from.join("settings.json"))?;
+    let mut dest_obj = serde_json::Map::new();
+    for key in keys {
+        if let Some(value) = source.get(key).cloned().or_else(|| {
+            aliases
+                .iter()
+                .find(|(name, _)| *name == key)
+                .and_then(|(_, alias)| source.get(*alias).cloned())
+        }) {
+            dest_obj.insert(key.to_string(), value);
+        }
+    }
+    for key in extras {
+        if let Some(value) = source.get(key) {
+            dest_obj.insert(key.to_string(), value.clone());
+        }
+    }
+    for key in [
+        "syncFolder",
+        "syncFile",
+        "syncRevision",
+        "syncBookmarksRevision",
+        "syncExtensionsRevision",
+        "syncSettingsRevision",
+        "syncHistoryRevision",
+        "lastSeenVersion",
+    ] {
+        dest_obj.remove(key);
+    }
+    files::write_json(&to.join("settings.json"), &dest_obj)
+}
+
+fn read_settings_object(path: &Path) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    if !path.is_file() {
+        return Ok(serde_json::Map::new());
+    }
+    let text = fs::read_to_string(path)
+        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|_| "That profile's settings could not be read.".to_string())?;
+    value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "That profile's settings could not be read.".into())
+}
+
+/// Copies cookie, login, or site-data files out of a WebView2 folder. Cache stays behind.
+/// `Local State` comes along so the copied files can still be decrypted.
+fn copy_webview_selection(
+    from: &Path,
+    to: &Path,
+    cookies: bool,
+    logins: bool,
+    site_data: bool,
+) -> Result<(), String> {
+    if !from.is_dir() || !(cookies || logins || site_data) {
+        return Ok(());
+    }
+    copy_webview_tree(from, to, from, cookies, logins, site_data)
+}
+
+fn copy_webview_tree(
+    root_from: &Path,
+    root_to: &Path,
+    dir: &Path,
+    cookies: bool,
+    logins: bool,
+    site_data: bool,
+) -> Result<(), String> {
+    let entries =
+        fs::read_dir(dir).map_err(|error| format!("Could not read {}: {error}", dir.display()))?;
+    for entry in entries.flatten() {
+        let source = entry.path();
+        let name = entry.file_name();
+        let text = name.to_string_lossy();
+        let relative = source.strip_prefix(root_from).unwrap_or(&source);
+        let target = root_to.join(relative);
+        if source.is_dir() {
+            if site_data && site_data_dir(&text) {
+                files::copy_dir(&source, &target)?;
+            } else {
+                copy_webview_tree(root_from, root_to, &source, cookies, logins, site_data)?;
+            }
+        } else if webview_file(&text, cookies, logins, site_data) {
+            copy_file(&source, &target)?;
+        }
+    }
+    Ok(())
+}
+
+fn site_data_dir(name: &str) -> bool {
+    matches!(
+        name,
+        "Local Storage" | "IndexedDB" | "Session Storage" | "Service Worker" | "File System"
+    )
+}
+
+fn webview_file(name: &str, cookies: bool, logins: bool, site_data: bool) -> bool {
+    if (cookies || logins || site_data) && name.eq_ignore_ascii_case("Local State") {
+        return true;
+    }
+    if cookies
+        && (name.eq_ignore_ascii_case("Cookies") || name.eq_ignore_ascii_case("Cookies-journal"))
+    {
+        return true;
+    }
+    if logins
+        && (name.eq_ignore_ascii_case("Login Data")
+            || name.eq_ignore_ascii_case("Login Data-journal")
+            || name.eq_ignore_ascii_case("Login Data For Account")
+            || name.eq_ignore_ascii_case("Login Data For Account-journal"))
+    {
+        return true;
+    }
+    if site_data
+        && (name.eq_ignore_ascii_case("Web Data") || name.eq_ignore_ascii_case("Web Data-journal"))
+    {
+        return true;
+    }
+    false
 }
 
 fn apply_copied_icon(app: &AppHandle, source: &ProfileRecord, new_id: &str) -> Result<(), String> {
@@ -1750,9 +2100,9 @@ mod tests {
     use std::fs;
 
     use super::{
-        CopyScope, ProfilesFile, copy_profile_data, copy_webview, migrate_layout,
-        profile_child_dir, purge_profile_storage, read_profiles_file, remove_profile_dir,
-        safe_profile_id, stale_exe,
+        ProfilesFile, copy_part_files, copy_webview_selection, migrate_layout, profile_child_dir,
+        purge_profile_storage, read_profiles_file, remove_profile_dir, safe_profile_id,
+        selected_parts, stale_exe,
     };
 
     #[test]
@@ -1781,42 +2131,102 @@ mod tests {
     }
 
     #[test]
-    fn copy_scopes_select_the_right_files() {
+    fn copy_parts_select_the_right_files() {
         let root =
             std::env::temp_dir().join(format!("ce-browser-profile-copy-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let from = root.join("from");
-        let web_from = root.join("webview-from");
+        let web_from = root.join("webview-from").join("EBWebView");
         fs::create_dir_all(from.join("extensions")).unwrap();
-        fs::create_dir_all(&web_from).unwrap();
-        fs::write(from.join("settings.json"), "{\"theme\":\"dark\"}").unwrap();
+        fs::create_dir_all(web_from.join("Default").join("Network")).unwrap();
+        fs::create_dir_all(web_from.join("Default").join("Local Storage")).unwrap();
+        fs::create_dir_all(web_from.join("Default").join("Cache")).unwrap();
+        fs::write(
+            from.join("settings.json"),
+            r#"{"theme":"nord","searchProvider":"bing","showBookmarksBar":false,"syncFolder":"C:\\sync"}"#,
+        )
+        .unwrap();
         fs::write(from.join("bookmarks.json"), "[]").unwrap();
         fs::write(from.join("extensions").join("manifest.json"), "{}").unwrap();
         fs::write(from.join("window-icon-1.ico"), "ico").unwrap();
-        fs::write(web_from.join("Cookies"), "secret").unwrap();
+        fs::write(web_from.join("Local State"), "key").unwrap();
+        fs::write(
+            web_from.join("Default").join("Network").join("Cookies"),
+            "secret",
+        )
+        .unwrap();
+        fs::write(web_from.join("Default").join("Login Data"), "login").unwrap();
+        fs::write(
+            web_from.join("Default").join("Local Storage").join("level"),
+            "store",
+        )
+        .unwrap();
+        fs::write(web_from.join("Default").join("Cache").join("junk"), "cache").unwrap();
 
-        let settings = root.join("settings");
-        copy_profile_data(&from, &settings, CopyScope::Settings).unwrap();
+        let search = selected_parts(&["search".into()]).unwrap();
+        let search_dir = root.join("search");
+        copy_part_files(&from, &search_dir, &search).unwrap();
+        let search_settings: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(search_dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(search_settings["searchEngine"], "bing");
+        assert!(search_settings.get("theme").is_none());
+        assert!(search_settings.get("syncFolder").is_none());
+        assert!(!search_dir.join("bookmarks.json").exists());
+
+        let data =
+            selected_parts(&["bookmarks".into(), "extensions".into(), "icon".into()]).unwrap();
+        let data_dir = root.join("data");
+        copy_part_files(&from, &data_dir, &data).unwrap();
+        assert!(data_dir.join("bookmarks.json").is_file());
+        assert!(data_dir.join("extensions").join("manifest.json").is_file());
+        assert!(data_dir.join("window-icon-1.ico").is_file());
+        let bookmark_settings: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(data_dir.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(bookmark_settings["showBookmarksBar"], false);
+        assert!(bookmark_settings.get("theme").is_none());
+
+        let cookies_dir = root.join("cookies");
+        copy_webview_selection(&web_from, &cookies_dir, true, false, false).unwrap();
         assert_eq!(
-            fs::read_to_string(settings.join("settings.json")).unwrap(),
-            "{\"theme\":\"dark\"}"
-        );
-        assert!(!settings.join("bookmarks.json").exists());
-        assert!(!settings.join("extensions").exists());
-
-        let data = root.join("data");
-        copy_profile_data(&from, &data, CopyScope::Data).unwrap();
-        assert!(data.join("bookmarks.json").is_file());
-        assert!(data.join("extensions").join("manifest.json").is_file());
-        assert!(data.join("window-icon-1.ico").is_file());
-        assert!(!data.join("Cookies").exists());
-
-        let web_to = root.join("webview-to");
-        copy_webview(&web_from, &web_to).unwrap();
-        assert_eq!(
-            fs::read_to_string(web_to.join("Cookies")).unwrap(),
+            fs::read_to_string(cookies_dir.join("Default").join("Network").join("Cookies"))
+                .unwrap(),
             "secret"
         );
+        assert_eq!(
+            fs::read_to_string(cookies_dir.join("Local State")).unwrap(),
+            "key"
+        );
+        assert!(!cookies_dir.join("Default").join("Login Data").exists());
+        assert!(!cookies_dir.join("Default").join("Cache").exists());
+
+        let logins_dir = root.join("logins");
+        copy_webview_selection(&web_from, &logins_dir, false, true, false).unwrap();
+        assert_eq!(
+            fs::read_to_string(logins_dir.join("Default").join("Login Data")).unwrap(),
+            "login"
+        );
+        assert!(
+            !logins_dir
+                .join("Default")
+                .join("Network")
+                .join("Cookies")
+                .exists()
+        );
+
+        let site_dir = root.join("site");
+        copy_webview_selection(&web_from, &site_dir, false, false, true).unwrap();
+        assert_eq!(
+            fs::read_to_string(site_dir.join("Default").join("Local Storage").join("level"))
+                .unwrap(),
+            "store"
+        );
+        assert!(!site_dir.join("Default").join("Cache").exists());
+        assert!(!site_dir.join("Default").join("Network").exists());
+
+        assert!(selected_parts(&[]).is_err());
+        assert!(selected_parts(&["settings".into()]).is_err());
 
         let _ = fs::remove_dir_all(&root);
     }

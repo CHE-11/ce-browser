@@ -1796,9 +1796,9 @@ async fn copy_profile(
     app: AppHandle,
     id: String,
     name: String,
-    scope: String,
+    parts: Vec<String>,
 ) -> Result<Vec<ProfileInfo>, String> {
-    blocking(move || profiles::copy(&app, &id, &name, &scope)).await
+    blocking(move || profiles::copy(&app, &id, &name, &parts)).await
 }
 
 #[tauri::command]

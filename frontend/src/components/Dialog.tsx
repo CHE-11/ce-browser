@@ -29,6 +29,7 @@ function focusables(panel: HTMLElement) {
 
 export function Dialog({ id, title, open, onClose, onEnter, children, panelClassName, bodyClassName }: DialogProps) {
   const ignoreBackdropUntil = useRef(0);
+  const pointerDownOnBackdrop = useRef(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -110,8 +111,18 @@ export function Dialog({ id, title, open, onClose, onEnter, children, panelClass
     <div
       id={`${id}-backdrop`}
       className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-6"
+      onPointerDown={(event) => {
+        pointerDownOnBackdrop.current = event.target === event.currentTarget;
+      }}
+      onPointerUp={(event) => {
+        if (event.target !== event.currentTarget) {
+          pointerDownOnBackdrop.current = false;
+        }
+      }}
       onClick={() => {
-        if (Date.now() < ignoreBackdropUntil.current) {
+        const pressedOnBackdrop = pointerDownOnBackdrop.current;
+        pointerDownOnBackdrop.current = false;
+        if (!pressedOnBackdrop || Date.now() < ignoreBackdropUntil.current) {
           return;
         }
         onClose();

@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes } from "react";
 import { cn } from "../lib/cn";
 import { focusRing } from "../lib/focus-ring";
 
-type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "destructive" | "link";
+type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "destructive" | "destructiveOutline" | "link";
 type ButtonSize = "default" | "sm" | "xs";
 
 type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "id"> & {
@@ -34,6 +34,7 @@ export function Button({
         variant === "outline" && "border border-zinc-600 bg-transparent text-zinc-100 hover:bg-zinc-800",
         variant === "ghost" && "text-zinc-300 hover:bg-zinc-800",
         variant === "destructive" && "bg-red-600 text-white hover:bg-red-500",
+        variant === "destructiveOutline" && "border border-red-700 bg-transparent text-red-400 hover:bg-red-950 hover:text-red-300",
         variant === "link" && "h-auto px-0 text-sky-400 underline-offset-4 hover:text-sky-300 hover:underline",
         className,
       )}
