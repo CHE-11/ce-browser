@@ -427,11 +427,14 @@ html[data-popup="true"] body {
   height: 100%;
 }
 
-button,
-input,
-select,
-textarea {
-  font: inherit;
+/* Stay in the base layer so text-size utilities can override font-size. An unlayered `font` shorthand wins over those classes. */
+@layer base {
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
 }
 
 * {

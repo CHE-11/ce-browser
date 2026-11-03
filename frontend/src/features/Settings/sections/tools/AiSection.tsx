@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/Button";
 import { aiKeyStatus, clearAiKey, listAiModels, setAiKey, testAiConnection } from "@/lib/browser-client";
 import type { AiKeyStatus, AiProviderId, AiProviderSlot } from "@type/browser";
-import { AI_PROVIDERS, remoteProvider } from "../../../lib/ai/ai-providers";
-import { modelAcceptsThinking } from "../../../lib/ai/model-label";
-import { SETTINGS_SECTIONS } from "../settings-sections";
-import { errorText, inputClass, matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "../SettingsControls";
-import { useAiModels } from "../../../lib/ai/useAiModels";
+import { AI_PROVIDERS, remoteProvider } from "../../../../lib/ai/ai-providers";
+import { modelAcceptsThinking } from "../../../../lib/ai/model-label";
+import { SETTINGS_SECTIONS } from "../../settings-sections";
+import { errorText, inputClass, matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "../../SettingsControls";
+import { useAiModels } from "../../../../lib/ai/useAiModels";
 import { AiModelPicker } from "./AiModelPicker";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-ai")!;

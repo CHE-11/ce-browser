@@ -1,8 +1,8 @@
-import { providerName, remoteProvider } from "../../../lib/ai/ai-providers";
+import { providerName, remoteProvider } from "../../../../lib/ai/ai-providers";
 import { AiModelPicker } from "./AiModelPicker";
-import { SETTINGS_SECTIONS } from "../settings-sections";
-import { inputClass, matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "../SettingsControls";
-import { useAiModels } from "../../../lib/ai/useAiModels";
+import { SETTINGS_SECTIONS } from "../../settings-sections";
+import { inputClass, matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "../../SettingsControls";
+import { useAiModels } from "../../../../lib/ai/useAiModels";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-shopping")!;
 

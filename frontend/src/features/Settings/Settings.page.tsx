@@ -8,8 +8,6 @@ import { defaultSettings, saveSettings } from "@/lib/browser-client";
 import { useRoute } from "@/lib/route";
 import { useSettings } from "@/lib/use-browser";
 import { SETTINGS_INDEX } from "./settings-index";
-import { AdBlockSection } from "./sections/AdBlockSection";
-import { AiSection } from "./sections/AiSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
 import { BookmarksSection } from "./sections/BookmarksSection";
 import { DownloadsSection } from "./sections/DownloadsSection";
@@ -17,14 +15,13 @@ import { PrivacySection } from "./sections/PrivacySection";
 import { ProfilesSection } from "./sections/ProfilesSection";
 import { SearchSection } from "./sections/SearchSection";
 import { SettingsNavigation } from "./SettingsNavigation";
-import { SettingsQueryProvider, SettingsValuesProvider } from "./SettingsControls";
+import { SettingsQueryProvider, SettingsSectionProps, SettingsValuesProvider } from "./SettingsControls";
 import { SETTINGS_SECTIONS } from "./settings-sections";
-import { ShoppingSection } from "./sections/ShoppingSection";
 import { StartupSection } from "./sections/StartupSection";
 import { SyncSection } from "./sections/SyncSection";
 import { SystemSection } from "./sections/SystemSection";
 import { TabsSection } from "./sections/TabsSection";
-import { TranslateSection } from "./sections/TranslateSection";
+import { ToolsSection } from "./sections/tools/ToolsSection";
 
 export function SettingsPage() {
   const settings = useSettings();
@@ -96,7 +93,7 @@ export function SettingsPage() {
     );
   }
 
-  const update = (patch: Partial<BrowserSettings>) => {
+  const update: SettingsSectionProps["onUpdate"] = (patch: Partial<BrowserSettings>) => {
     setError(null);
     void saveSettings({ ...settings, ...patch }).catch((reason: unknown) => setError(String(reason)));
   };
@@ -134,18 +131,13 @@ export function SettingsPage() {
 
           ) : null}
           <ProfilesSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} revision={profileRevision} />
-          <SearchSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
-          <StartupSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
-          <DownloadsSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
-          <TabsSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
-          <PrivacySection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
-          <AdBlockSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+
           <AppearanceSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <BookmarksSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
-          <AiSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
-          <TranslateSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
-          <ShoppingSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
-          <SystemSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          <DownloadsSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          <PrivacySection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          <SearchSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          <StartupSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <SyncSection
             settings={settings}
             query={query}
@@ -154,6 +146,11 @@ export function SettingsPage() {
             onMatch={onMatch}
             onProfilesChanged={onProfilesChanged}
           />
+          <SystemSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          <TabsSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          
+          <ToolsSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+  
         </div>
         </SettingsValuesProvider>
       </SettingsQueryProvider>

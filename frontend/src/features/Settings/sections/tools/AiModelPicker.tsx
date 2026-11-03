@@ -3,8 +3,8 @@ import { ChevronDown, RefreshCw } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
-import { modelPriceMarks } from "../../../lib/ai/model-label";
-import { inputClass } from "../SettingsControls";
+import { modelPriceMarks } from "../../../../lib/ai/model-label";
+import { inputClass } from "../../SettingsControls";
 
 export function AiModelPicker({
   id,

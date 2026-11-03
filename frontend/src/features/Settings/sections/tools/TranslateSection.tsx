@@ -1,5 +1,5 @@
-import { SETTINGS_SECTIONS } from "../settings-sections";
-import { inputClass, matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "../SettingsControls";
+import { SETTINGS_SECTIONS } from "../../settings-sections";
+import { inputClass, matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "../../SettingsControls";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-translate")!;
 
