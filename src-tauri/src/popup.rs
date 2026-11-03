@@ -799,6 +799,7 @@ pub fn measured(app: &AppHandle, label: &str, token: u64, width: f64, height: f6
 
 struct Present {
     label: String,
+    token: u64,
     anchor: Bounds,
     placement: Placement,
     size: (f64, f64),
@@ -833,6 +834,7 @@ fn reveal(
         level.shown = true;
         Some(Present {
             label: level.label.clone(),
+            token: level.token,
             anchor: level.anchor,
             placement: level.placement,
             size: level.size.unwrap_or((DEFAULT_WIDTH, DEFAULT_HEIGHT)),
@@ -950,7 +952,24 @@ fn present(app: &AppHandle, window: &str, plan: Present) {
     let y = rect.y.round() as i32;
     let width = rect.width.round().max(1.0) as i32;
     let height = rect.height.round().max(1.0) as i32;
+    let token = plan.token;
+    let label = plan.label.clone();
+    let window_name = window.to_string();
+    let app_check = app.clone();
     let _ = app.run_on_main_thread(move || {
+        // A search result can be chosen while this popup is still measuring. Closing it
+        // parks the window, and this move would put the closed popup back on screen.
+        let still_open = with(&app_check, |state| {
+            state.stacks.get(&window_name).is_some_and(|stack| {
+                stack
+                    .levels
+                    .iter()
+                    .any(|level| level.label == label && level.token == token)
+            })
+        });
+        if !still_open {
+            return;
+        }
         webview2::place_popup_window(hwnd, x, y, width, height, no_activate);
         if let Some(webview) = &webview {
             let _ = webview.set_bounds(Rect {
@@ -1224,6 +1243,22 @@ pub fn emit_to_top<S: Serialize + Clone>(app: &AppHandle, window: &str, event: &
     if let Some(label) = label {
         let _ = app.emit_to(label.as_str(), event, payload);
     }
+}
+
+/// Browser windows showing a popup that never took the keyboard, like the omnibox. Escape
+/// cannot reach those, so the page or browser UI that has the keyboard closes them.
+pub fn passive_open(app: &AppHandle) -> Vec<String> {
+    if app.try_state::<Popups>().is_none() {
+        return Vec::new();
+    }
+    with(app, |state| {
+        state
+            .stacks
+            .iter()
+            .filter(|(_, stack)| stack.levels.first().is_some_and(|level| !level.focus))
+            .map(|(window, _)| window.clone())
+            .collect()
+    })
 }
 
 pub fn any_open(app: &AppHandle) -> bool {

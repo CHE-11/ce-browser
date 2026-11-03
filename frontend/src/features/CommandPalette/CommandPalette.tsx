@@ -326,11 +326,11 @@ export function CommandPalette() {
       return;
     }
     const opensPopup = hit.group === "Tool" || hit.group === "Extension" || hit.id === "tab-search" || hit.id === "shortcut-sheet";
-    void Promise.resolve(hit.run()).finally(() => {
-      if (!opensPopup) {
-        void closePopup();
-      }
-    });
+    const pending = Promise.resolve(hit.run());
+    if (!opensPopup) {
+      void closePopup();
+    }
+    void pending.catch(() => undefined);
   };
 
   return (

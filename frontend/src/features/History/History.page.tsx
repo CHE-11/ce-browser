@@ -6,7 +6,8 @@ import { FavIcon } from "@/components/FavIcon";
 import { IconButton } from "@/components/IconButton";
 import { PageShell } from "@/components/PageShell";
 import { SkeletonRows } from "@/components/Skeleton";
-import { createTab, removeHistory, clearHistory, searchHistory } from "@/lib/browser-client";
+import { createTab, removeHistory, searchHistory } from "@/lib/browser-client";
+import { ClearHistoryDialog } from "./ClearHistoryDialog";
 import { hostOf } from "@/lib/format";
 import { absoluteTime, relativeTime } from "@/lib/time";
 import { useHistoryState } from "@/lib/use-browser";
@@ -80,6 +81,7 @@ export function HistoryPage() {
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<HistoryHit[] | null>(null);
   const [hitsFor, setHitsFor] = useState("");
+  const [clearOpen, setClearOpen] = useState(false);
 
   useEffect(() => {
     const needle = query.trim();
@@ -146,12 +148,13 @@ export function HistoryPage() {
               className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-500"
             />
           </label>
-          <Button id="history-page-clear" variant="outline" disabled={history.length === 0} onClick={() => void clearHistory()}>
-            Clear all
+          <Button id="history-page-clear" variant="outline" disabled={history.length === 0} onClick={() => setClearOpen(true)}>
+            Clear
           </Button>
         </>
       }
     >
+      {clearOpen ? <ClearHistoryDialog history={history} onClose={() => setClearOpen(false)} /> : null}
       <div id="history-page-list" className="mx-auto flex max-w-3xl flex-col gap-6">
         {!loaded ? (
           <SkeletonRows id="history-page-loading" rows={8} icon />

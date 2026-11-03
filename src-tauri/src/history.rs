@@ -307,13 +307,43 @@ pub fn take(app: &AppHandle, id: u32) -> Option<HistoryItem> {
     removed
 }
 
-/// Empties the list and returns what it held. The page-text index waits for `forget_text`.
-pub fn take_all(app: &AppHandle) -> Vec<HistoryItem> {
-    let items = with_state(app, |state| std::mem::take(&mut state.items));
-    if !items.is_empty() {
+/// True when `last_visited` falls inside `[since, until]`. A missing bound is open.
+fn visited_between(last_visited: u64, since: Option<u64>, until: Option<u64>) -> bool {
+    since.is_none_or(|start| last_visited >= start) && until.is_none_or(|end| last_visited <= end)
+}
+
+/// Removes entries whose last visit falls inside `[since, until]`.
+/// Both bounds missing removes every entry.
+/// The bool is true when the list is empty afterwards.
+/// The page-text index waits for `forget_text`.
+pub fn take_between(
+    app: &AppHandle,
+    since: Option<u64>,
+    until: Option<u64>,
+) -> (Vec<HistoryItem>, bool) {
+    let (removed, emptied) = with_state(app, |state| {
+        if since.is_none() && until.is_none() {
+            let removed = std::mem::take(&mut state.items);
+            let emptied = !removed.is_empty();
+            return (removed, emptied);
+        }
+        let mut kept = Vec::new();
+        let mut removed = Vec::new();
+        for item in std::mem::take(&mut state.items) {
+            if visited_between(item.last_visited, since, until) {
+                removed.push(item);
+            } else {
+                kept.push(item);
+            }
+        }
+        state.items = kept;
+        let emptied = !removed.is_empty() && state.items.is_empty();
+        (removed, emptied)
+    });
+    if !removed.is_empty() {
         changed(app);
     }
-    items
+    (removed, emptied)
 }
 
 /// Puts removed entries back. A page visited again since keeps its newer entry.
@@ -422,5 +452,17 @@ mod tests {
         assert!(apply_title(&mut items, "https://other.test", "Renamed"));
         assert_eq!(items[1].title, "Renamed");
         assert!(!apply_title(&mut items, "https://missing.test", "Nope"));
+    }
+
+    #[test]
+    fn a_window_keeps_visits_outside_it() {
+        assert!(visited_between(1_000, None, None));
+        assert!(visited_between(1_000, Some(1_000), Some(2_000)));
+        assert!(visited_between(2_000, Some(1_000), Some(2_000)));
+        assert!(!visited_between(999, Some(1_000), Some(2_000)));
+        assert!(!visited_between(2_001, Some(1_000), Some(2_000)));
+        assert!(visited_between(5_000, Some(1_000), None));
+        assert!(visited_between(500, None, Some(1_000)));
+        assert!(!visited_between(1_001, None, Some(1_000)));
     }
 }

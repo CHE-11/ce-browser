@@ -552,7 +552,10 @@ async fn close_popup(app: AppHandle, webview: Webview, scope: Option<String>) {
         Some("this") if popup::is_popup_label(label) => popup::close_level(&app, label),
         Some("above") if popup::is_popup_label(label) => popup::close_above(&app, label),
         Some("above") => {}
-        _ => popup::close_all(&app, label, true),
+        // Popups are kept per browser window. The browser UI and page views are webviews
+        // inside it whose labels (`ui`, `tab-3`) differ from the window's.
+        _ if popup::is_popup_label(label) => popup::close_all(&app, label, true),
+        _ => popup::close_all(&app, webview.window().label(), true),
     }
 }
 
@@ -946,9 +949,11 @@ async fn remove_history(app: AppHandle, window: Window, id: u32) {
     }
 }
 
+/// `since` and `until` are millisecond timestamps. A missing bound is open.
+/// Both missing clears every entry.
 #[tauri::command]
-async fn clear_history(app: AppHandle, window: Window) {
-    let items = history::take_all(&app);
+async fn clear_history(app: AppHandle, window: Window, since: Option<u64>, until: Option<u64>) {
+    let (items, cleared) = history::take_between(&app, since, until);
     if items.is_empty() {
         return;
     }
@@ -961,10 +966,7 @@ async fn clear_history(app: AppHandle, window: Window) {
         &app,
         &browser_window(&window),
         &message,
-        undo::UndoAction::History {
-            items,
-            cleared: true,
-        },
+        undo::UndoAction::History { items, cleared },
     );
 }
 

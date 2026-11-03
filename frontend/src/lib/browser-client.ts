@@ -1090,8 +1090,12 @@ export function removeHistory(id: number) {
   return invoke<void>("remove_history", { id });
 }
 
-export function clearHistory() {
-  return invoke<void>("clear_history");
+/** Drops history whose last visit falls in `[since, until]`. Omit both to clear everything. */
+export function clearHistory(range?: { since?: number; until?: number }) {
+  return invoke<void>("clear_history", {
+    since: range?.since,
+    until: range?.until,
+  });
 }
 
 /** The next visit to what `text` resolves to began with the address typed into the address bar. */

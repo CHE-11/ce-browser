@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Clapperboard, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
 import { PopupFrame } from "@/components/PopupFrame";
@@ -38,6 +38,7 @@ export function MediaHub() {
 
   const playing = items.filter((item) => !item.paused && !item.ended).length;
   const allMuted = items.length > 0 && items.every((item) => item.muted);
+  const allPaused = items.length > 0 && playing === 0;
 
   const muteAll = () => {
     const next = !allMuted;
@@ -47,8 +48,20 @@ export function MediaHub() {
     });
   };
 
+  const pauseAll = () => {
+    const nextPaused = !allPaused;
+    setItems((current) => current.map((item) => ({ ...item, paused: nextPaused, ended: nextPaused ? item.ended : false })));
+    void Promise.all(
+      items
+        .filter((item) => (nextPaused ? !item.paused && !item.ended : true))
+        .map((item) => controlMedia(item.tabId, item.index, nextPaused ? "pause" : "play")),
+    ).catch((reason: unknown) => {
+      setError(reason instanceof Error ? reason.message : "Couldn't change playback.");
+    });
+  };
+
   return (
-    <PopupFrame id="media-hub" width={420} maxHeight={560}>
+    <PopupFrame id="media-hub" width={480} maxHeight={560}>
       <div id="media-hub-header" className="flex items-center gap-3 px-4 pb-2 pt-3">
         <span
           id="media-hub-header-icon"
@@ -66,25 +79,36 @@ export function MediaHub() {
               : `${items.length} ${items.length === 1 ? "item" : "items"}${playing > 0 ? `, ${playing} playing` : ""}`}
           </p>
         </div>
-        <button
-          id="media-hub-mute-all"
-          type="button"
-          disabled={items.length === 0}
-          aria-pressed={allMuted}
-          title={allMuted ? "Unmute all" : "Mute all"}
-          className={cn(
-            "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40",
-            focusRing,
-          )}
-          onClick={muteAll}
-        >
-          {allMuted ? (
-            <VolumeX id="media-hub-mute-all-icon" className="size-3.5" aria-hidden />
-          ) : (
-            <Volume2 id="media-hub-mute-all-icon" className="size-3.5" aria-hidden />
-          )}
-          {allMuted ? "Unmute all" : "Mute all"}
-        </button>
+        <div id="media-hub-header-actions" className="flex shrink-0 items-center gap-1">
+          <HeaderButton
+            id="media-hub-pause-all"
+            label={allPaused ? "Play all" : "Pause all"}
+            disabled={items.length === 0}
+            pressed={allPaused}
+            onClick={pauseAll}
+            icon={
+              allPaused ? (
+                <Play id="media-hub-pause-all-icon" className="size-3.5" aria-hidden />
+              ) : (
+                <Pause id="media-hub-pause-all-icon" className="size-3.5" aria-hidden />
+              )
+            }
+          />
+          <HeaderButton
+            id="media-hub-mute-all"
+            label={allMuted ? "Unmute all" : "Mute all"}
+            disabled={items.length === 0}
+            pressed={allMuted}
+            onClick={muteAll}
+            icon={
+              allMuted ? (
+                <VolumeX id="media-hub-mute-all-icon" className="size-3.5" aria-hidden />
+              ) : (
+                <Volume2 id="media-hub-mute-all-icon" className="size-3.5" aria-hidden />
+              )
+            }
+          />
+        </div>
       </div>
       {error ? (
         <p id="media-hub-error" className="px-4 pb-3 text-xs text-amber-300">
@@ -103,6 +127,40 @@ export function MediaHub() {
         </ul>
       )}
     </PopupFrame>
+  );
+}
+
+function HeaderButton({
+  id,
+  label,
+  disabled,
+  pressed,
+  onClick,
+  icon,
+}: {
+  id: string;
+  label: string;
+  disabled: boolean;
+  pressed: boolean;
+  onClick: () => void;
+  icon: ReactNode;
+}) {
+  return (
+    <button
+      id={id}
+      type="button"
+      disabled={disabled}
+      aria-pressed={pressed}
+      title={label}
+      className={cn(
+        "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40",
+        focusRing,
+      )}
+      onClick={onClick}
+    >
+      {icon}
+      <span id={`${id}-label`}>{label}</span>
+    </button>
   );
 }
 

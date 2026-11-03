@@ -288,6 +288,10 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const [storeBusy, setStoreBusy] = useState(false);
   const omniboxRef = useRef(omnibox);
   const popupOpenRef = useRef(false);
+  /** Bumped when the suggestions are dismissed, so a late search result cannot open them again. */
+  const suggestEpoch = useRef(0);
+  /** Identifies the open in flight. Dismissing the list makes that open close itself. */
+  const popupTicket = useRef(0);
   const blurTimer = useRef<number | null>(null);
   /** What the user typed. Anything after it in `text` is an inline completion. */
   const typedRef = useRef("");
@@ -345,13 +349,20 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   }, [activeId]);
 
   const hideOmnibox = useCallback(() => {
+    popupTicket.current += 1;
     omniboxRef.current = EMPTY_OMNIBOX;
     setOmnibox(EMPTY_OMNIBOX);
-    if (popupOpenRef.current) {
-      popupOpenRef.current = false;
+    const wasOpen = popupOpenRef.current;
+    popupOpenRef.current = false;
+    if (wasOpen) {
       void closePopup();
     }
   }, []);
+
+  const dismissSuggestions = useCallback(() => {
+    suggestEpoch.current += 1;
+    hideOmnibox();
+  }, [hideOmnibox]);
 
   const showOmnibox = useCallback((state: OmniboxState) => {
     omniboxRef.current = state;
@@ -365,18 +376,24 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       return;
     }
     popupOpenRef.current = true;
+    const ticket = ++popupTicket.current;
     void openPopup("omnibox", field, {
       placement: "bottom-start",
       focus: false,
       minWidth: field.getBoundingClientRect().width,
+    }).finally(() => {
+      if (ticket !== popupTicket.current && !popupOpenRef.current) {
+        void closePopup();
+      }
     });
   }, []);
 
   const finishEditing = useCallback(() => {
+    typedRef.current = "";
     setEditing(false);
-    hideOmnibox();
+    dismissSuggestions();
     inputRef.current?.blur();
-  }, [hideOmnibox]);
+  }, [dismissSuggestions]);
 
   const pick = useCallback(
     (suggestion: OmniboxSuggestion | null, inNewTab = false) => {
@@ -385,9 +402,10 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         return;
       }
       if (target.kind === "answer") {
+        typedRef.current = target.url;
         setText(target.url);
         setEditing(true);
-        hideOmnibox();
+        dismissSuggestions();
         window.setTimeout(() => inputRef.current?.select(), 0);
         return;
       }
@@ -404,7 +422,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         void navigate(activeId, target.url);
       }
     },
-    [activeId, finishEditing, text],
+    [activeId, dismissSuggestions, finishEditing, text],
   );
 
   const pickRef = useRef(pick);
@@ -515,9 +533,10 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       showOmnibox({ suggestions, selected: 0 });
     }
     const asked = value;
+    const epoch = suggestEpoch.current;
     if (asked.trim()) {
       void searchHistory(asked).then((hits) => {
-        if (typedRef.current !== asked || hits.length === 0) {
+        if (epoch !== suggestEpoch.current || typedRef.current !== asked || hits.length === 0) {
           return;
         }
         const current = omniboxRef.current.suggestions;
@@ -533,7 +552,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       });
     }
     void omniboxExtra(asked).then((extra) => {
-      if (!extra || typedRef.current !== asked) {
+      if (!extra || epoch !== suggestEpoch.current || typedRef.current !== asked) {
         return;
       }
       const row = {
@@ -583,7 +602,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     } else if (event.key === "Escape") {
       event.preventDefault();
       if (omniboxRef.current.suggestions.length > 0) {
-        hideOmnibox();
+        dismissSuggestions();
       } else {
         setText(addressText(activeTab));
         finishEditing();
