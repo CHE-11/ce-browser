@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,18 +16,17 @@ const installer = join(
 );
 
 // The updater only trusts installers signed with the key whose public half is in tauri.conf.json.
-// The private key stays outside the repo. TAURI_SIGNING_PRIVATE_KEY can also be the key text.
-const env = { ...process.env };
-if (!env.TAURI_SIGNING_PRIVATE_KEY) {
-  const keyFile = join(homedir(), ".tauri", "ce-browser.key");
-  if (!existsSync(keyFile)) {
-    console.error(`No signing key. Set TAURI_SIGNING_PRIVATE_KEY or create ${keyFile}`);
-    console.error(`with: pnpm tauri signer generate --ci -w "${keyFile}"`);
-    process.exit(1);
-  }
-  env.TAURI_SIGNING_PRIVATE_KEY = keyFile;
+const keyFile = "S:/_keys_/ce-browser.key";
+if (!existsSync(keyFile)) {
+  console.error(`No signing key at ${keyFile}`);
+  process.exit(1);
 }
-env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ??= "";
+
+const env = {
+  ...process.env,
+  TAURI_SIGNING_PRIVATE_KEY: keyFile,
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? "",
+};
 
 const child = spawn("pnpm tauri build --bundles nsis", {
   cwd: root,
