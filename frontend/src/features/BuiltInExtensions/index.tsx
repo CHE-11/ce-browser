@@ -5,11 +5,10 @@ import { PageControlsButton } from "./page-controls/PageControlsButton";
 import { ClearCacheButton } from "./clear-cache/ClearCacheButton";
 import { PageCaptureButton } from "./page-capture/PageCaptureButton";
 import { PasswordButton } from "./password/Password";
-import { PriceButton } from "./price/Price";
 import { MediaHubButton } from "./media/MediaHubButton";
 import { PrintPdfButton } from "./print-pdf/PrintPdfButton";
 import { ReadingButton } from "./reading/Reading";
-import { ShoppingButton } from "./shopping/Shopping";
+import { ShoppingButton } from "./shopping/ShoppingButton";
 import { TranslateButton } from "./translate/Translate";
 import { WhatRunsButton } from "./what-runs/WhatRunsButton";
 
@@ -36,8 +35,6 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <TranslateButton activeTab={activeTab} />;
     case "password":
       return <PasswordButton activeTab={activeTab} />;
-    case "price":
-      return <PriceButton activeTab={activeTab} />;
     case "shopping":
       return <ShoppingButton activeTab={activeTab} />;
     case "reading":

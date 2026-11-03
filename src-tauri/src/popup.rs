@@ -77,7 +77,7 @@ pub struct PopupRequest {
     /// Button or point the popup hangs from. A point is a zero-size rectangle.
     #[serde(default)]
     pub anchor: PopupRect,
-    /// `bottom-start`, `bottom-end`, `bottom-center`, `right-start`, `left-start` or `point`.
+    /// `bottom-start`, `bottom-end`, `bottom-center`, `right-start`, `left-start`, `point` or `center`.
     #[serde(default)]
     pub placement: String,
     /// Popups that take focus close when focus leaves them.
@@ -166,6 +166,7 @@ enum Placement {
     RightStart,
     LeftStart,
     Point,
+    Center,
 }
 
 impl Placement {
@@ -176,6 +177,7 @@ impl Placement {
             "right-start" => Self::RightStart,
             "left-start" => Self::LeftStart,
             "point" => Self::Point,
+            "center" => Self::Center,
             _ => Self::BottomEnd,
         }
     }
@@ -1367,6 +1369,11 @@ fn place(
             height = height.min(area.height);
             y = anchor.y.min(area.bottom() - height);
         }
+        Placement::Center => {
+            height = height.min(area.height);
+            x = area.x + (area.width - width) / 2.0;
+            y = area.y + (area.height - height) / 2.0;
+        }
         Placement::Point => {
             x = if anchor.x + width > area.right() && anchor.x - width >= area.x {
                 anchor.x - width
@@ -1505,6 +1512,20 @@ mod tests {
             2.0,
         );
         assert_eq!((placed.x, placed.y), (438.0, 400.0));
+    }
+
+    #[test]
+    fn a_centered_popup_sits_in_the_middle_and_shrinks_to_the_area() {
+        let anchor = Bounds {
+            x: 0.0,
+            y: 0.0,
+            width: 0.0,
+            height: 0.0,
+        };
+        let placed = place(anchor, 400.0, 200.0, Placement::Center, SCREEN, 4.0, 2.0);
+        assert_eq!((placed.x, placed.y, placed.width, placed.height), (300.0, 300.0, 400.0, 200.0));
+        let fitted = place(anchor, 2000.0, 2000.0, Placement::Center, SCREEN, 4.0, 2.0);
+        assert_eq!((fitted.x, fitted.y, fitted.width, fitted.height), (0.0, 0.0, 1000.0, 800.0));
     }
 
     #[test]

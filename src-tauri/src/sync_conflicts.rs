@@ -647,10 +647,8 @@ fn preserve_local(value: &mut Value, settings: &settings::BrowserSettings) {
         "syncHistoryRevision".into(),
         Value::from(settings.sync_history_revision),
     );
-    object.insert(
-        "assistantKey".into(),
-        Value::String(settings.assistant_key.clone()),
-    );
+    object.remove("assistantKey");
+    object.remove("legacyAssistantKey");
     object.insert(
         "downloadDir".into(),
         Value::String(settings.download_dir.clone()),
@@ -1386,5 +1384,21 @@ mod tests {
             summarize("Default/settings.json", &ours, &theirs),
             "Changed: theme"
         );
+    }
+
+    #[test]
+    fn a_resolved_settings_document_keeps_no_key() {
+        let mut chosen = serde_json::json!({
+            "theme": "zinc",
+            "assistantKey": "sk-secret-value",
+            "aiProvider": "openai"
+        });
+        let settings = settings::BrowserSettings::default();
+        preserve_local(&mut chosen, &settings);
+        let text = chosen.to_string();
+        assert!(!text.contains("sk-secret"));
+        assert!(chosen.get("assistantKey").is_none());
+        assert_eq!(chosen["theme"], "zinc");
+        assert_eq!(chosen["aiProvider"], "openai");
     }
 }

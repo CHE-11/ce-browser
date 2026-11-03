@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
-import { PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
+import { LayoutGrid, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import type { BrowserSettings } from "../../../../../../types/browser";
 import { createEphemeralTab, createTab, saveSettings, zoomTab } from "../../../../lib/browser-client";
 import { cn } from "../../../../lib/cn";
@@ -9,6 +9,8 @@ import { useTabMotion } from "../../../../lib/tab-motion";
 import { buildTabRows } from "../../../../lib/tab-rows";
 import type { WindowTabsState } from "../../../../lib/use-browser";
 import { zoomWheelStep } from "../../../../lib/zoom";
+import { IconButton } from "../../../../components/IconButton";
+import { openTabOverview } from "./TabOverview";
 import { TabRowsView } from "./TabRowsView";
 import { WorkspaceSwitcher } from "../Workspace/WorkspaceSwitcher";
 
@@ -101,6 +103,15 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
       style={{ width }}
     >
       <div id="vertical-tabs-top" className={cn("flex shrink-0 items-center gap-1 px-1.5 pb-1 pt-2", collapsed && "flex-col")}>
+        <IconButton
+          id="vertical-tabs-overview"
+          label="All tabs"
+          aria-haspopup="dialog"
+          className="size-7 rounded-md"
+          onClick={() => void openTabOverview()}
+        >
+          <LayoutGrid id="vertical-tabs-overview-icon" aria-hidden />
+        </IconButton>
         {settings.workspacesEnabled ? (
           <WorkspaceSwitcher
             workspaces={snapshot.workspaces}

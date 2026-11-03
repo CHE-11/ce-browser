@@ -24,14 +24,14 @@ import { BoardsPopover } from "@features/BuiltInExtensions/boards/BoardsPopover"
 import { PageControlsPopover } from "@features/BuiltInExtensions/page-controls/PageControlsPopover";
 import { PageCapturePopover } from "@features/BuiltInExtensions/page-capture/PageCapturePopover";
 import { PasswordPopover } from "@features/BuiltInExtensions/password/Password";
-import { PricePopover } from "@features/BuiltInExtensions/price/Price";
 import { PrintPdfPopover } from "@features/BuiltInExtensions/print-pdf/PrintPdfPopover";
 import { ReadingPopover } from "@features/BuiltInExtensions/reading/Reading";
-import { ShoppingPopover } from "@features/BuiltInExtensions/shopping/Shopping";
+import { ShoppingPopover } from "@/features/BuiltInExtensions/shopping/ShoppingPopover";
 import { TranslatePopover } from "@features/BuiltInExtensions/translate/Translate";
 import { SelectionTranslatePopover } from "@features/BuiltInExtensions/translate/SelectionTranslate";
 import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
 import { CommandPalette } from "@features/CommandPalette/CommandPalette";
+import { TabOverview } from "@/features/Browser/BrowserHeader/Tabs/TabOverview";
 import { TabSearch } from "@/features/Browser/BrowserHeader/Tabs/TabSearch";
 import { TabSwitcher } from "@/features/Browser/BrowserHeader/Tabs/TabSwitcher";
 import { TabHoverCard } from "@/features/Browser/BrowserHeader/Tabs/TabHoverCard";
@@ -190,8 +190,6 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <TranslatePopover params={params} />;
     case "password":
       return <PasswordPopover />;
-    case "price":
-      return <PricePopover params={params} />;
     case "shopping":
       return <ShoppingPopover params={params} />;
     case "reading":
@@ -210,6 +208,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <TabSearch params={params} />;
     case "tab-switcher":
       return <TabSwitcher params={params} />;
+    case "tab-overview":
+      return <TabOverview params={params} />;
     case "tab-hover":
       return <TabHoverCard tabId={Number(params.get("id"))} />;
     case "unresponsive":

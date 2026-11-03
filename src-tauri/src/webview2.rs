@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
@@ -1243,6 +1244,68 @@ fn resource_kind(context: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> &'static str {
     }
 }
 
+#[derive(Default)]
+struct EarlyScriptSlot {
+    script_id: Option<String>,
+    stamp: Option<String>,
+    inflight: bool,
+}
+
+fn early_slots() -> &'static Mutex<HashMap<u32, EarlyScriptSlot>> {
+    static SLOTS: std::sync::OnceLock<Mutex<HashMap<u32, EarlyScriptSlot>>> = std::sync::OnceLock::new();
+    SLOTS.get_or_init(Default::default)
+}
+
+/// Drops the document-start script id for a tab whose webview is going away.
+pub fn forget_early_script(id: u32) {
+    early_slots()
+        .lock()
+        .expect("adblock early script")
+        .remove(&id);
+}
+
+/// Registers the analytics opt-out script for documents created after this call.
+/// A second call removes the previous script when the paused-site list changed.
+fn sync_early_script(core: &ICoreWebView2, id: u32) {
+    let stamp = crate::adblock::early_stamp();
+    let mut slots = early_slots().lock().expect("adblock early script");
+    let slot = slots.entry(id).or_default();
+    if slot.inflight {
+        return;
+    }
+    if slot.stamp.as_deref() == Some(stamp.as_str()) && slot.script_id.is_some() {
+        return;
+    }
+    if let Some(script_id) = slot.script_id.take() {
+        let _ = unsafe { core.RemoveScriptToExecuteOnDocumentCreated(&HSTRING::from(script_id)) };
+    }
+    slot.inflight = true;
+    slot.stamp = Some(stamp);
+    drop(slots);
+
+    let script = HSTRING::from(crate::adblock::early_script());
+    let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(
+        move |result, script_id| {
+            let mut slots = early_slots().lock().expect("adblock early script");
+            let slot = slots.entry(id).or_default();
+            slot.inflight = false;
+            if result.is_ok() {
+                slot.script_id = Some(script_id);
+            } else {
+                slot.stamp = None;
+            }
+            Ok(())
+        },
+    ));
+    if unsafe { core.AddScriptToExecuteOnDocumentCreated(&script, &handler) }.is_err() {
+        let mut slots = early_slots().lock().expect("adblock early script");
+        if let Some(slot) = slots.get_mut(&id) {
+            slot.inflight = false;
+            slot.stamp = None;
+        }
+    }
+}
+
 fn attach_adblock(
     app: &AppHandle,
     platform: &PlatformWebview,
@@ -1263,6 +1326,8 @@ fn attach_adblock(
                 COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
             )?,
         }
+
+        sync_early_script(core, id);
 
         let environment = platform.environment();
         let request_app = app.clone();
@@ -1379,6 +1444,7 @@ fn attach_adblock(
                     crate::adblock::page_started(&navigation_app, id, &uri);
                     if let Some(core) = sender {
                         apply_page_settings(&navigation_app, &core, &uri);
+                        sync_early_script(&core, id);
                     }
                 }
                 Ok(())
@@ -1395,6 +1461,11 @@ fn attach_adblock(
                 tabs::set_progress(&content_app, id, 35);
                 let source = read_pwstr(|value| core.Source(value));
                 if source.starts_with("http") && crate::adblock::active_for(&source) {
+                    let script = HSTRING::from(crate::adblock::early_script());
+                    let _ = core.ExecuteScript(
+                        &script,
+                        None::<&ICoreWebView2ExecuteScriptCompletedHandler>,
+                    );
                     let script = HSTRING::from(crate::adblock::cosmetic_script());
                     let _ = core.ExecuteScript(
                         &script,

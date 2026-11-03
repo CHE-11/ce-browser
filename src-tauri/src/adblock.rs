@@ -10,6 +10,8 @@ use url::Url;
 use crate::settings::AdblockSettings;
 
 const DOMAINS: &str = include_str!("../resources/adblock/domains.txt");
+const PATHS: &str = include_str!("../resources/adblock/paths.txt");
+const EARLY_JS: &str = include_str!("../resources/adblock/early.js");
 const COSMETIC_CSS: &str = include_str!("../resources/adblock/cosmetic.css");
 const STATS_DELAY: Duration = Duration::from_millis(250);
 
@@ -60,6 +62,12 @@ struct TabState {
     hosts: HashMap<String, HostHit>,
 }
 
+struct PathRule {
+    host: String,
+    prefix: String,
+    label: String,
+}
+
 fn blocklist() -> &'static HashSet<String> {
     static LIST: OnceLock<HashSet<String>> = OnceLock::new();
     LIST.get_or_init(|| {
@@ -69,6 +77,45 @@ fn blocklist() -> &'static HashSet<String> {
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
             .map(str::to_ascii_lowercase)
             .collect()
+    })
+}
+
+fn path_rules() -> &'static Vec<PathRule> {
+    static RULES: OnceLock<Vec<PathRule>> = OnceLock::new();
+    RULES.get_or_init(|| {
+        PATHS
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .filter_map(|line| {
+                let line = line.to_ascii_lowercase();
+                let (host, rest) = line.split_once('/')?;
+                if host.is_empty() || rest.is_empty() {
+                    return None;
+                }
+                Some(PathRule {
+                    host: host.to_string(),
+                    prefix: format!("/{rest}"),
+                    label: line,
+                })
+            })
+            .collect()
+    })
+}
+
+/// The listed `host/path` rule that covers this URL, if the host matches exactly.
+fn matched_path(url: &str) -> Option<&'static str> {
+    let parsed = Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https" | "ws" | "wss") {
+        return None;
+    }
+    let host = parsed
+        .host_str()?
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    let path = parsed.path();
+    path_rules().iter().find_map(|rule| {
+        (rule.host == host && path.starts_with(&rule.prefix)).then_some(rule.label.as_str())
     })
 }
 
@@ -271,28 +318,43 @@ pub fn should_block(
     let Some(request_host) = http_host(request_url) else {
         return false;
     };
-    let Some(rule) = matched_rule(&request_host) else {
+    let host_rule = matched_rule(&request_host);
+    let path_rule = matched_path(request_url);
+    if host_rule.is_none() && path_rule.is_none() {
         return false;
-    };
+    }
     let page_host = tabs()
         .lock()
         .expect("adblock tabs lock")
         .get(&id)
         .and_then(|tab| tab.page_host.clone());
-    {
+    let rule = {
         let config = config().read().expect("adblock config lock");
         if !config.enabled {
             return false;
         }
         if let Some(page_host) = &page_host {
-            if paused(&config, page_host) || same_site(page_host, &request_host) {
+            if paused(&config, page_host) {
                 return false;
             }
         } else if is_document {
             return false;
         }
-    }
-    record_block(app, id, &request_host, rule, kind);
+        if is_document {
+            return false;
+        }
+        if let Some(path_rule) = path_rule {
+            path_rule.to_string()
+        } else if page_host
+            .as_deref()
+            .is_some_and(|page_host| same_site(page_host, &request_host))
+        {
+            return false;
+        } else {
+            host_rule.unwrap_or("").to_string()
+        }
+    };
+    record_block(app, id, &request_host, &rule, kind);
     true
 }
 
@@ -330,6 +392,31 @@ fn record_block(app: &AppHandle, id: u32, host: &str, rule: &str, kind: &'static
         };
         let _ = app.emit("adblock-stats", stats);
     });
+}
+
+fn early_parts() -> (bool, Vec<String>) {
+    let config = config().read().expect("adblock config lock");
+    let mut paused: Vec<String> = config.allowed.iter().cloned().collect();
+    paused.sort();
+    (config.enabled, paused)
+}
+
+/// Changes when the document-start script must be registered again.
+pub fn early_stamp() -> String {
+    let (enabled, paused) = early_parts();
+    serde_json::json!([enabled, paused]).to_string()
+}
+
+/// Document-start script: Google Analytics opt-out, ad stubs, and the cosmetic stylesheet.
+/// Paused sites and non-http pages leave the page alone.
+pub fn early_script() -> String {
+    let (enabled, paused) = early_parts();
+    let paused = serde_json::to_string(&paused).unwrap_or_else(|_| "[]".into());
+    let css = serde_json::to_string(COSMETIC_CSS).unwrap_or_else(|_| "\"\"".into());
+    EARLY_JS
+        .replace("__CE_ENABLED__", if enabled { "true" } else { "false" })
+        .replace("__CE_PAUSED__", &paused)
+        .replace("__CE_CSS__", &css)
 }
 
 /// Script that adds the element-hiding stylesheet to the current document.
@@ -395,6 +482,41 @@ mod tests {
         assert!(paused(&config, "www.example.com"));
         assert!(paused(&config, "news.example.com"));
         assert!(!paused(&config, "example.org"));
+    }
+
+    #[test]
+    fn path_rules_block_collect_urls_and_leave_search_alone() {
+        assert_eq!(
+            matched_path("https://www.google.com/pagead/ads?client=ca-pub-1"),
+            Some("www.google.com/pagead/")
+        );
+        assert_eq!(
+            matched_path("https://WWW.Google.com/ccm/collect"),
+            Some("www.google.com/ccm/")
+        );
+        assert_eq!(
+            matched_path("https://www.google.com/ads/ga-audiences/extra"),
+            Some("www.google.com/ads/ga-audiences")
+        );
+        assert_eq!(matched_path("https://www.google.com/search?q=news"), None);
+        assert_eq!(matched_path("https://www.google.com/gen_204"), None);
+        assert_eq!(matched_path("https://news.google.com/pagead/ads"), None);
+    }
+
+    #[test]
+    fn path_rules_are_a_host_and_a_prefix() {
+        for rule in path_rules() {
+            assert!(rule.host.contains('.') && !rule.host.contains('/'), "{}", rule.label);
+            assert!(rule.prefix.starts_with('/') && rule.prefix.len() > 1, "{}", rule.label);
+        }
+    }
+
+    #[test]
+    fn the_early_script_opts_out_of_google_analytics() {
+        let script = early_script();
+        assert!(script.contains("_gaUserPrefs"));
+        assert!(script.contains("ga-disable-"));
+        assert!(!script.contains("__CE_"));
     }
 
     #[test]

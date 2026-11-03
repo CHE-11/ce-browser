@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, LayoutGrid, Plus } from "lucide-react";
 import { createEphemeralTab, createTab, openPopup, zoomTab } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
@@ -9,6 +9,7 @@ import { buildTabRows } from "@/lib/tab-rows";
 import { useSettings, type WindowTabsState } from "@/lib/use-browser";
 import { zoomWheelStep } from "@/lib/zoom";
 import { IconButton } from "@/components/IconButton";
+import { openTabOverview } from "./TabOverview";
 import { TabRowsView } from "./TabRowsView";
 import { WindowControls } from "@/components/WindowControls";
 import { WorkspaceSwitcher } from "@/features/Browser/BrowserHeader/Workspace/WorkspaceSwitcher";
@@ -95,6 +96,17 @@ export function TabStrip({ snapshot }: TabStripProps) {
 
   return (
     <div id="tab-strip" className="flex h-9 shrink-0 items-stretch bg-zinc-950">
+      <div id="tab-strip-overview" className="flex shrink-0 items-end pb-1 pl-2">
+        <IconButton
+          id="tab-strip-overview-button"
+          label="All tabs"
+          aria-haspopup="dialog"
+          className="size-7 rounded-md"
+          onClick={() => void openTabOverview()}
+        >
+          <LayoutGrid id="tab-strip-overview-icon" aria-hidden />
+        </IconButton>
+      </div>
       {workspacesEnabled ? (
         <div id="tab-strip-workspace" className="flex shrink-0 items-end pb-1 pl-2">
           <WorkspaceSwitcher

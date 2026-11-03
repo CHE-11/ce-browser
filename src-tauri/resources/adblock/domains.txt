@@ -11,6 +11,9 @@ tpc.googlesyndication.com
 googletagservices.com
 google-analytics.com
 ssl.google-analytics.com
+analytics.google.com
+googleoptimize.com
+app-measurement.com
 googletagmanager.com
 fundingchoicesmessages.google.com
 ad.doubleclick.net

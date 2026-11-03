@@ -2,44 +2,54 @@
 
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
+use crate::prices;
 use crate::tools::{self, ProductPrice};
-use crate::{settings, tabs, webview2};
+use crate::{files, paths, settings, tabs, webview2};
 
 const SEARCH_URL: &str = "https://html.duckduckgo.com/html/";
 const RESULTS_PER_QUERY: usize = 8;
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct SearchResult {
     pub title: String,
     pub url: String,
     pub snippet: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct Coupon {
     pub code: String,
     pub description: String,
     pub source: String,
+    pub expiry: String,
+    pub tried_at: u64,
+    pub worked: bool,
+    pub failed: bool,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct Offer {
     pub store: String,
     pub price: Option<f64>,
     pub currency: String,
     pub url: String,
     pub note: String,
+    pub verified: bool,
+    pub variant_mismatch: bool,
+    pub shipping: String,
+    /// Product image from the other page. Empty until that page is read.
+    pub image_url: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct ShoppingDeals {
     /// Price read from the page, when it has structured product data.
     pub product: Option<ProductPrice>,
@@ -51,6 +61,11 @@ pub struct ShoppingDeals {
     pub coupons: Vec<Coupon>,
     pub offers: Vec<Offer>,
     pub sources: Vec<SearchResult>,
+    pub ai_available: bool,
+    pub checked_at: u64,
+    pub cached: bool,
+    /// Canonical product key shared with price tracking.
+    pub key: String,
 }
 
 const NAME_SCRIPT: &str = r#"(function () {
@@ -59,30 +74,161 @@ const NAME_SCRIPT: &str = r#"(function () {
   return (og && og.content) || (h1 && h1.innerText) || document.title || "";
 })()"#;
 
-pub fn find_deals(app: &AppHandle, id: u32) -> Result<ShoppingDeals, String> {
-    let current = settings::get(app);
+const CACHE_MS: u64 = 60 * 60 * 1000;
+const SHOPPING_FILE: &str = "shopping.json";
+const VERIFY_LIMIT: usize = 4;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct ShoppingFile {
+    entries: Vec<ShoppingEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct ShoppingEntry {
+    key: String,
+    checked_at: u64,
+    deals: ShoppingDeals,
+    feedback: Vec<CouponFeedback>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct CouponFeedback {
+    code: String,
+    tried_at: u64,
+    worked: bool,
+    failed: bool,
+}
+
+pub fn find_deals(app: &AppHandle, id: u32, force: bool) -> Result<ShoppingDeals, String> {
     let page_url = tabs::tab_page_url(app, id).unwrap_or_default();
-    let store = store_host(&page_url).ok_or("Open a store's product page to find deals.")?;
     let product = tools::read_page_price(app, id).ok();
     let name = match product.as_ref().map(|item| item.title.trim()) {
         Some(title) if !title.is_empty() => clean_name(title),
         _ => clean_name(&page_name(app, id)?),
     };
-    if name.is_empty() {
+    run_deals(app, &page_url, &name, product, force)
+}
+
+pub fn find_deals_for_product(
+    app: &AppHandle,
+    url: &str,
+    title: &str,
+    force: bool,
+) -> Result<ShoppingDeals, String> {
+    let product = prices::preview_url(url).ok();
+    let name = match product.as_ref().map(|item| item.title.trim()) {
+        Some(title) if !title.is_empty() => clean_name(title),
+        _ => clean_name(title),
+    };
+    run_deals(app, url, &name, product, force)
+}
+
+pub fn set_coupon_feedback(
+    app: &AppHandle,
+    key: &str,
+    code: &str,
+    action: &str,
+) -> Result<ShoppingDeals, String> {
+    let code = code.trim();
+    if code.is_empty() {
+        return Err("That coupon has no code.".into());
+    }
+    let mut file = load_shopping(app);
+    let entry = file
+        .entries
+        .iter_mut()
+        .find(|entry| entry.key == key)
+        .ok_or("Find deals for this product before marking a code.")?;
+    let now = now_ms();
+    let feedback = entry
+        .feedback
+        .iter_mut()
+        .find(|item| item.code.eq_ignore_ascii_case(code));
+    match action {
+        "tried" => {
+            if let Some(item) = feedback {
+                item.tried_at = now;
+            } else {
+                entry.feedback.push(CouponFeedback {
+                    code: code.to_string(),
+                    tried_at: now,
+                    ..CouponFeedback::default()
+                });
+            }
+        }
+        "worked" => {
+            if let Some(item) = feedback {
+                item.tried_at = now;
+                item.worked = true;
+                item.failed = false;
+            } else {
+                entry.feedback.push(CouponFeedback {
+                    code: code.to_string(),
+                    tried_at: now,
+                    worked: true,
+                    failed: false,
+                });
+            }
+        }
+        "failed" => {
+            if let Some(item) = feedback {
+                item.tried_at = now;
+                item.worked = false;
+                item.failed = true;
+            } else {
+                entry.feedback.push(CouponFeedback {
+                    code: code.to_string(),
+                    tried_at: now,
+                    worked: false,
+                    failed: true,
+                });
+            }
+        }
+        _ => return Err("Choose tried, worked, or failed.".into()),
+    }
+    let deals = apply_feedback(&entry.deals, &entry.feedback, true);
+    save_shopping(app, &file)?;
+    Ok(deals)
+}
+
+fn run_deals(
+    app: &AppHandle,
+    page_url: &str,
+    name: &str,
+    product: Option<ProductPrice>,
+    force: bool,
+) -> Result<ShoppingDeals, String> {
+    let store = store_host(page_url).ok_or("Open a store's product page to find deals.")?;
+    if name.trim().is_empty() {
         return Err("Couldn't tell which product this page is for.".into());
     }
-
+    let key = prices::product_key(page_url, name);
+    if !force {
+        if let Some(cached) = fresh_cache(app, &key) {
+            return Ok(cached);
+        }
+    }
+    let current = settings::get(app);
     let region = current.shopping_region.trim();
+    let mut queries = vec![
+        format!("{store} coupon code"),
+        format!("{name} price"),
+        format!("{name} coupon"),
+        format!("{name} buy"),
+    ];
+    if !current.shopping_competitors.is_empty() {
+        queries.push(format!("{} {}", name, current.shopping_competitors.join(" ")));
+    }
     let mut sources = Vec::new();
     let mut failure = None;
-    for query in [format!("{store} coupon code"), format!("{name} price")] {
+    for query in queries {
         match search(&query, region) {
             Ok(results) => {
                 for result in results {
-                    if !sources
-                        .iter()
-                        .any(|kept: &SearchResult| kept.url == result.url)
-                    {
+                    if !sources.iter().any(|kept: &SearchResult| kept.url == result.url) {
                         sources.push(result);
                     }
                 }
@@ -91,35 +237,377 @@ pub fn find_deals(app: &AppHandle, id: u32) -> Result<ShoppingDeals, String> {
         }
     }
     if sources.is_empty() {
-        return Err(
-            failure.unwrap_or_else(|| "The web search found nothing for this product.".into())
-        );
+        return Err(failure.unwrap_or_else(|| "The web search found nothing for this product.".into()));
     }
 
-    let reply = tools::chat(
-        &current,
-        &current.shopping_model,
-        "You find shopping deals in web search results. Reply with one JSON object and nothing else.",
-        &deals_prompt(&store, &name, product.as_ref(), &sources),
-        Duration::from_secs(90),
-    )?;
-    let parsed = parse_reply(&reply)
-        .ok_or("The assistant's reply wasn't valid JSON. Try again or pick another model.")?;
     let current_price = product.as_ref().map(|item| item.price);
-    Ok(ShoppingDeals {
-        coupons: grounded_coupons(&parsed, &sources),
-        offers: grounded_offers(&parsed, &sources, &page_url, current_price),
-        summary: parsed
-            .get("summary")
-            .and_then(|item| item.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string(),
+    let mut coupons = extract_coupons(&sources);
+    let mut offers = extract_offers(&sources, page_url, current_price);
+    let ai_available = crate::ai::available(app, &current);
+    let mut summary = String::new();
+    if ai_available {
+        match tools::chat(
+            app,
+            &current,
+            &current.shopping_model,
+            "You find shopping deals in web search results. Reply with one JSON object and nothing else.",
+            &deals_prompt(&store, name, product.as_ref(), &sources),
+            true,
+            Duration::from_secs(90),
+        ) {
+            Ok(reply) => {
+                if let Some(parsed) = parse_reply(&reply) {
+                    summary = parsed
+                        .get("summary")
+                        .and_then(|item| item.as_str())
+                        .unwrap_or("")
+                        .trim()
+                        .to_string();
+                    coupons = grounded_coupons(&parsed, &sources);
+                    offers = grounded_offers(&parsed, &sources, page_url, current_price);
+                }
+            }
+            Err(_) => {}
+        }
+    }
+    offers = verify_offers(offers, page_url, current_price, name);
+    let checked_at = now_ms();
+    let mut deals = ShoppingDeals {
         product,
-        query: name,
+        query: name.to_string(),
         store,
+        summary,
+        coupons,
+        offers,
         sources,
+        ai_available,
+        checked_at,
+        cached: false,
+        key: key.clone(),
+    };
+    let feedback = remember(app, &key, &deals)?;
+    deals = apply_feedback(&deals, &feedback, false);
+    Ok(deals)
+}
+
+fn fresh_cache(app: &AppHandle, key: &str) -> Option<ShoppingDeals> {
+    let file = load_shopping(app);
+    let entry = file.entries.iter().find(|entry| entry.key == key)?;
+    if entry.checked_at == 0 || now_ms().saturating_sub(entry.checked_at) > CACHE_MS {
+        return None;
+    }
+    if entry.deals.coupons.is_empty() && entry.deals.offers.is_empty() && entry.deals.sources.is_empty() {
+        return None;
+    }
+    Some(apply_feedback(&entry.deals, &entry.feedback, true))
+}
+
+fn remember(app: &AppHandle, key: &str, deals: &ShoppingDeals) -> Result<Vec<CouponFeedback>, String> {
+    let mut file = load_shopping(app);
+    let feedback = file
+        .entries
+        .iter()
+        .find(|entry| entry.key == key)
+        .map(|entry| entry.feedback.clone())
+        .unwrap_or_default();
+    file.entries.retain(|entry| entry.key != key);
+    file.entries.insert(
+        0,
+        ShoppingEntry {
+            key: key.to_string(),
+            checked_at: deals.checked_at,
+            deals: deals.clone(),
+            feedback: feedback.clone(),
+        },
+    );
+    file.entries.truncate(200);
+    save_shopping(app, &file)?;
+    Ok(feedback)
+}
+
+fn apply_feedback(deals: &ShoppingDeals, feedback: &[CouponFeedback], cached: bool) -> ShoppingDeals {
+    let mut deals = deals.clone();
+    deals.cached = cached;
+    for coupon in &mut deals.coupons {
+        if let Some(item) = feedback
+            .iter()
+            .find(|item| item.code.eq_ignore_ascii_case(&coupon.code))
+        {
+            coupon.tried_at = item.tried_at;
+            coupon.worked = item.worked;
+            coupon.failed = item.failed;
+        }
+    }
+    deals.coupons.sort_by(|left, right| {
+        right
+            .worked
+            .cmp(&left.worked)
+            .then(right.tried_at.cmp(&left.tried_at))
+    });
+    deals
+}
+
+fn load_shopping(app: &AppHandle) -> ShoppingFile {
+    files::read_json(&paths::data_file(app, SHOPPING_FILE))
+}
+
+fn save_shopping(app: &AppHandle, file: &ShoppingFile) -> Result<(), String> {
+    files::write_json(&paths::data_file(app, SHOPPING_FILE), file)
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn extract_coupons(sources: &[SearchResult]) -> Vec<Coupon> {
+    let mut out: Vec<Coupon> = Vec::new();
+    for source in sources {
+        let text = format!("{} {}", source.title, source.snippet);
+        for code in code_tokens(&text) {
+            if out.iter().any(|kept: &Coupon| kept.code.eq_ignore_ascii_case(&code)) {
+                continue;
+            }
+            if !source.title.contains(&code) && !source.snippet.contains(&code) {
+                continue;
+            }
+            out.push(Coupon {
+                code,
+                description: String::new(),
+                source: source.url.clone(),
+                expiry: expiry_hint(&source.title, &source.snippet),
+                ..Coupon::default()
+            });
+        }
+    }
+    out
+}
+
+fn code_tokens(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric() {
+            current.push(character);
+        } else {
+            consider_code(&mut out, &current);
+            current.clear();
+        }
+    }
+    consider_code(&mut out, &current);
+    out
+}
+
+fn consider_code(out: &mut Vec<String>, token: &str) {
+    if token.len() < 3 || token.len() > 30 || token.chars().any(char::is_whitespace) {
+        return;
+    }
+    if token.chars().all(|character| character.is_ascii_digit()) {
+        return;
+    }
+    let letters_upper = token.chars().all(|character| !character.is_ascii_lowercase());
+    let has_digit = token.chars().any(|character| character.is_ascii_digit());
+    if !(letters_upper && (has_digit || token.len() >= 5)) {
+        return;
+    }
+    if out.iter().any(|kept| kept.eq_ignore_ascii_case(token)) {
+        return;
+    }
+    out.push(token.to_string());
+}
+
+fn expiry_hint(title: &str, snippet: &str) -> String {
+    let text = format!("{title} {snippet}").to_ascii_lowercase();
+    if text.contains("expired") {
+        return "May be expired".into();
+    }
+    if text.contains("until ") || text.contains("expires") || text.contains("valid through") {
+        return "Mentions a date".into();
+    }
+    String::new()
+}
+
+fn extract_offers(sources: &[SearchResult], page_url: &str, current_price: Option<f64>) -> Vec<Offer> {
+    let mut out: Vec<Offer> = Vec::new();
+    for source in sources {
+        if same_url(&source.url, page_url) || out.iter().any(|kept| kept.url == source.url) {
+            continue;
+        }
+        let Some(price) = snippet_price(&source.snippet).or_else(|| snippet_price(&source.title)) else {
+            continue;
+        };
+        if let Some(current) = current_price {
+            if price >= current {
+                continue;
+            }
+        }
+        out.push(Offer {
+            store: store_host(&source.url).unwrap_or_default(),
+            price: Some(price),
+            currency: currency_hint(&format!("{} {}", source.title, source.snippet)),
+            url: source.url.clone(),
+            note: String::new(),
+            verified: false,
+            ..Offer::default()
+        });
+    }
+    out.sort_by(|left, right| match (left.price, right.price) {
+        (Some(left), Some(right)) => left.total_cmp(&right),
+        _ => std::cmp::Ordering::Equal,
+    });
+    out
+}
+
+fn snippet_price(text: &str) -> Option<f64> {
+    let chars: Vec<char> = text.chars().collect();
+    for (index, character) in chars.iter().enumerate() {
+        if matches!(character, '$' | '£' | '€') {
+            let rest: String = chars[index + 1..].iter().collect();
+            if let Some(price) = leading_amount(&rest) {
+                return Some(price);
+            }
+        }
+    }
+    None
+}
+
+fn leading_amount(text: &str) -> Option<f64> {
+    let trimmed = text.trim_start();
+    let mut raw = String::new();
+    for character in trimmed.chars() {
+        if character.is_ascii_digit() || character == '.' || character == ',' {
+            raw.push(character);
+        } else {
+            break;
+        }
+    }
+    if raw.is_empty() {
+        return None;
+    }
+    let normalized = if raw.contains(',') && raw.contains('.') {
+        raw.replace(',', "")
+    } else if raw.matches(',').count() == 1 && raw.split(',').next_back().is_some_and(|part| part.len() == 2) {
+        raw.replace(',', ".")
+    } else {
+        raw.replace(',', "")
+    };
+    let value: f64 = normalized.parse().ok()?;
+    (value > 0.0).then_some(value)
+}
+
+fn currency_hint(text: &str) -> String {
+    if text.contains('$') {
+        "USD".into()
+    } else if text.contains('£') {
+        "GBP".into()
+    } else if text.contains('€') {
+        "EUR".into()
+    } else {
+        String::new()
+    }
+}
+
+fn verify_offers(offers: Vec<Offer>, page_url: &str, current_price: Option<f64>, name: &str) -> Vec<Offer> {
+    let mut ranked = offers;
+    ranked.sort_by(|left, right| match (left.price, right.price) {
+        (Some(left), Some(right)) => left.total_cmp(&right),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+    ranked.truncate(VERIFY_LIMIT);
+    let mut kept = Vec::new();
+    for offer in ranked {
+        let Ok(fetched) = fetch_offer(&offer.url) else {
+            continue;
+        };
+        if prices::canonical_url(&fetched.url).is_some()
+            && prices::canonical_url(&fetched.url) == prices::canonical_url(page_url)
+        {
+            continue;
+        }
+        let Some(price) = (fetched.price > 0.0).then_some(fetched.price) else {
+            continue;
+        };
+        if !accept_confirmed_price(price, current_price) {
+            continue;
+        }
+        kept.push(Offer {
+            store: if offer.store.is_empty() {
+                store_host(&fetched.url).unwrap_or_default()
+            } else {
+                offer.store
+            },
+            price: Some(price),
+            currency: if fetched.currency.is_empty() {
+                offer.currency
+            } else {
+                fetched.currency
+            },
+            url: fetched.url,
+            note: offer.note,
+            verified: true,
+            variant_mismatch: variant_mismatch(name, &fetched.title),
+            shipping: fetched.shipping,
+            image_url: fetched.image_url,
+        });
+    }
+    kept.sort_by(|left, right| match (left.price, right.price) {
+        (Some(left), Some(right)) => left.total_cmp(&right),
+        _ => std::cmp::Ordering::Equal,
+    });
+    kept
+}
+
+struct FetchedOffer {
+    url: String,
+    title: String,
+    price: f64,
+    currency: String,
+    shipping: String,
+    image_url: String,
+}
+
+fn fetch_offer(url: &str) -> Result<FetchedOffer, String> {
+    let response = ureq::get(url)
+        .timeout(Duration::from_secs(12))
+        .set("User-Agent", USER_AGENT)
+        .call()
+        .map_err(|_| "Couldn't open that offer.".to_string())?;
+    let final_url = response.get_url().to_string();
+    let body = response.into_string().map_err(|_| "Couldn't open that offer.".to_string())?;
+    let product = prices::parse_price(&body).ok_or_else(|| "No price was found on that offer.".to_string())?;
+    Ok(FetchedOffer {
+        url: final_url,
+        title: product.title,
+        price: product.price,
+        currency: product.currency,
+        shipping: prices::shipping_hint(&body),
+        image_url: product.image_url,
     })
+}
+
+pub fn variant_mismatch(product: &str, title: &str) -> bool {
+    let left = name_tokens(product);
+    let right = name_tokens(title);
+    if left.is_empty() || right.is_empty() {
+        return false;
+    }
+    let overlap = left.iter().filter(|token| right.iter().any(|other| other == *token)).count();
+    overlap * 2 < left.len()
+}
+
+fn accept_confirmed_price(confirmed: f64, current: Option<f64>) -> bool {
+    confirmed > 0.0 && current.is_none_or(|current| confirmed < current)
+}
+
+fn name_tokens(text: &str) -> Vec<String> {
+    text.split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|token| token.len() > 2)
+        .map(|token| token.to_ascii_lowercase())
+        .collect()
 }
 
 fn page_name(app: &AppHandle, id: u32) -> Result<String, String> {
@@ -169,7 +657,7 @@ fn search(query: &str, region: &str) -> Result<Vec<SearchResult>, String> {
         .map_err(|error| error.to_string())?;
     let results = parse_results(&body, RESULTS_PER_QUERY);
     if results.is_empty() && body.contains("anomaly") {
-        return Err("The web search asked for a captcha. Try again in a minute.".into());
+        return Err("The web search asked for a captcha. Wait a minute, then choose Search again.".into());
     }
     Ok(results)
 }
@@ -420,6 +908,8 @@ fn grounded_coupons(reply: &serde_json::Value, sources: &[SearchResult]) -> Vec<
                 code,
                 description: field(item, "description"),
                 source: source.url.clone(),
+                expiry: expiry_hint(&source.title, &source.snippet),
+                ..Coupon::default()
             });
         }
     }
@@ -469,6 +959,7 @@ fn grounded_offers(
             currency: field(item, "currency"),
             url: source.url.clone(),
             note: field(item, "note"),
+            ..Offer::default()
         });
     }
     out.sort_by(|left, right| match (left.price, right.price) {
@@ -495,8 +986,8 @@ fn offer_price(value: &serde_json::Value) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        SearchResult, clean_name, grounded_coupons, grounded_offers, parse_reply, parse_results,
-        target_url,
+        SearchResult, accept_confirmed_price, clean_name, extract_coupons, extract_offers,
+        grounded_coupons, grounded_offers, parse_reply, parse_results, target_url, variant_mismatch,
     };
 
     const PAGE: &str = r#"
@@ -585,5 +1076,39 @@ mod tests {
     #[test]
     fn a_store_suffix_is_removed_from_the_name() {
         assert_eq!(clean_name("Blue  Mug 12oz | Mug Shop"), "Blue Mug 12oz");
+    }
+
+    #[test]
+    fn codes_and_prices_are_read_without_a_provider() {
+        let sources = sources();
+        let coupons = extract_coupons(&sources);
+        assert_eq!(coupons.len(), 1);
+        assert_eq!(coupons[0].code, "SAVE20");
+        assert_eq!(coupons[0].source, "https://coupons.test/mugshop");
+        let offers = extract_offers(&sources, "https://mugshop.test/blue-mug", Some(14.0));
+        assert_eq!(offers.len(), 1);
+        assert_eq!(offers[0].price, Some(9.99));
+        assert!(!offers[0].verified);
+        assert!(extract_offers(&sources, "https://mugshop.test/blue-mug", Some(8.0)).is_empty());
+    }
+
+    #[test]
+    fn a_different_variant_is_flagged() {
+        assert!(variant_mismatch(
+            "Blue ceramic mug 12oz",
+            "Stainless travel tumbler"
+        ));
+        assert!(!variant_mismatch(
+            "Blue ceramic mug 12oz",
+            "Blue ceramic mug 12oz at Other Store"
+        ));
+    }
+
+    #[test]
+    fn a_confirmed_price_that_is_not_lower_is_dropped() {
+        assert!(!accept_confirmed_price(14.0, Some(14.0)));
+        assert!(!accept_confirmed_price(16.0, Some(14.0)));
+        assert!(accept_confirmed_price(9.5, Some(14.0)));
+        assert!(!accept_confirmed_price(0.0, Some(14.0)));
     }
 }

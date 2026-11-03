@@ -23,6 +23,53 @@ const COLOR_MODES: &[&str] = &["dark", "light", "system"];
 const BOOKMARK_TEXT_REM: (f32, f32) = (0.5, 1.5);
 const BOOKMARK_PADDING_REM: (f32, f32) = (0.0, 1.5);
 const TAB_WIDTH_PX: (u32, u32) = (88, 480);
+pub const AI_PROVIDER_IDS: &[&str] = &["openai", "claude", "custom", "local"];
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AiProviderSlot {
+    pub endpoint: String,
+    pub model: String,
+}
+
+impl Default for AiProviderSlot {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            model: String::new(),
+        }
+    }
+}
+
+/// One saved endpoint and model per provider. Keys live in DPAPI, not here.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AiProviders {
+    pub openai: AiProviderSlot,
+    pub claude: AiProviderSlot,
+    pub custom: AiProviderSlot,
+    pub local: AiProviderSlot,
+}
+
+impl Default for AiProviders {
+    fn default() -> Self {
+        Self {
+            openai: AiProviderSlot {
+                endpoint: crate::ai::OPENAI_ENDPOINT.into(),
+                model: "gpt-4o-mini".into(),
+            },
+            claude: AiProviderSlot {
+                endpoint: crate::ai::CLAUDE_ENDPOINT.into(),
+                model: "claude-3-5-haiku-latest".into(),
+            },
+            custom: AiProviderSlot::default(),
+            local: AiProviderSlot {
+                endpoint: crate::ai::LOCAL_ENDPOINT.into(),
+                model: "llama3.2".into(),
+            },
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
@@ -128,20 +175,29 @@ pub struct BrowserSettings {
     /// Provider URL. `%s` is the text and `%t` is the language code.
     #[serde(default = "default_translate_url")]
     pub translate_url: String,
-    /// OpenAI-compatible base URL, for example `http://127.0.0.1:11434/v1`.
-    #[serde(default = "default_assistant_endpoint")]
-    pub assistant_endpoint: String,
-    #[serde(default = "default_assistant_model")]
-    pub assistant_model: String,
-    /// Kept on this computer. The sync folder does not receive it.
+    /// Active Shopping summary provider: `openai`, `claude`, `custom`, or `local`.
+    /// Empty means an older file has not been migrated yet.
     #[serde(default)]
-    pub assistant_key: String,
+    pub ai_provider: String,
+    #[serde(default)]
+    pub ai_providers: AiProviders,
+    /// Older installs stored the endpoint here. Read once, then dropped.
+    #[serde(default, alias = "assistantEndpoint", skip_serializing)]
+    pub legacy_assistant_endpoint: Option<String>,
+    #[serde(default, alias = "assistantModel", skip_serializing)]
+    pub legacy_assistant_model: Option<String>,
+    /// Older installs stored a plaintext key here. Moved to DPAPI, then dropped.
+    #[serde(default, alias = "assistantKey", skip_serializing)]
+    pub legacy_assistant_key: Option<String>,
     /// DuckDuckGo region (`kl`) for shopping searches, for example `us-en`.
     #[serde(default = "default_shopping_region")]
     pub shopping_region: String,
-    /// Model for the shopping tool. Blank uses `assistant_model`.
+    /// Model override for Shopping summaries. Blank uses the active provider's model.
     #[serde(default)]
     pub shopping_model: String,
+    /// Store hosts used for one extra deal search, for example `walmart.com`. Empty skips that query.
+    #[serde(default)]
+    pub shopping_competitors: Vec<String>,
     /// Restores the window and focuses the address bar. Default is Ctrl+Alt+Space.
     #[serde(default = "default_hotkey")]
     pub summon_hotkey: String,
@@ -257,14 +313,6 @@ fn default_translate_language() -> String {
 
 fn default_translate_url() -> String {
     crate::tools::DEFAULT_TRANSLATE_URL.into()
-}
-
-fn default_assistant_endpoint() -> String {
-    "http://127.0.0.1:11434/v1".into()
-}
-
-fn default_assistant_model() -> String {
-    "llama3.2".into()
 }
 
 fn default_shopping_region() -> String {
@@ -524,11 +572,14 @@ impl Default for BrowserSettings {
             site_accent: true,
             translate_language: default_translate_language(),
             translate_url: default_translate_url(),
-            assistant_endpoint: default_assistant_endpoint(),
-            assistant_model: default_assistant_model(),
-            assistant_key: String::new(),
+            ai_provider: "local".into(),
+            ai_providers: AiProviders::default(),
+            legacy_assistant_endpoint: None,
+            legacy_assistant_model: None,
+            legacy_assistant_key: None,
             shopping_region: default_shopping_region(),
             shopping_model: String::new(),
+            shopping_competitors: Vec::new(),
             summon_hotkey: default_hotkey(),
             battery_saver: true,
             adblock: AdblockSettings::default(),
@@ -647,18 +698,14 @@ impl BrowserSettings {
         self.ui_zoom = ((self.ui_zoom.clamp(80, 150) + 2) / 5) * 5;
         self.page_zoom = snap_page_zoom(self.page_zoom);
         self.print_editor = self.print_editor.normalize();
-        self.hidden_toolbar_extensions = toolbar_hidden(&self.hidden_toolbar_extensions);
-        self.toolbar_order = toolbar_hidden(&self.toolbar_order);
+        self.hidden_toolbar_extensions =
+            toolbar_hidden(&map_retired_tools(&self.hidden_toolbar_extensions));
+        self.toolbar_order = toolbar_hidden(&map_retired_tools(&self.toolbar_order));
         self.translate_language = clean_language(&self.translate_language);
         if self.translate_url.trim().is_empty() {
             self.translate_url = default_translate_url();
         }
-        if self.assistant_endpoint.trim().is_empty() {
-            self.assistant_endpoint = default_assistant_endpoint();
-        }
-        if self.assistant_model.trim().is_empty() {
-            self.assistant_model = default_assistant_model();
-        }
+        self.migrate_ai_provider();
         self.shopping_region = self
             .shopping_region
             .trim()
@@ -670,7 +717,11 @@ impl BrowserSettings {
         if self.shopping_region.is_empty() {
             self.shopping_region = default_shopping_region();
         }
-        self.shopping_model = self.shopping_model.trim().to_string();
+        self.shopping_model = self.shopping_model.trim().chars().take(120).collect();
+        self.shopping_competitors = clean_hosts(&self.shopping_competitors);
+        if self.shopping_competitors.len() > 12 {
+            self.shopping_competitors.truncate(12);
+        }
         if hotkey_blank(&self.summon_hotkey) {
             self.summon_hotkey = default_hotkey();
         }
@@ -710,6 +761,67 @@ impl BrowserSettings {
             self.sync_history_revision = self.sync_revision;
         }
         self
+    }
+
+    /// An older file stored one endpoint. A localhost address becomes Local; anything else becomes Custom.
+    fn migrate_ai_provider(&mut self) {
+        if self.ai_provider.trim().is_empty() {
+            let endpoint = self
+                .legacy_assistant_endpoint
+                .clone()
+                .unwrap_or_default();
+            let model = self.legacy_assistant_model.clone().unwrap_or_default();
+            let endpoint = endpoint.trim().to_string();
+            let model = model.trim().to_string();
+            if endpoint.is_empty() && model.is_empty() {
+                self.ai_provider = "local".into();
+            } else if endpoint.is_empty() || crate::ai::localhost_endpoint(&endpoint) {
+                self.ai_provider = "local".into();
+                if !endpoint.is_empty() {
+                    self.ai_providers.local.endpoint = endpoint;
+                }
+                if !model.is_empty() {
+                    self.ai_providers.local.model = model;
+                }
+            } else {
+                self.ai_provider = "custom".into();
+                self.ai_providers.custom.endpoint = endpoint;
+                if !model.is_empty() {
+                    self.ai_providers.custom.model = model;
+                }
+            }
+        }
+        if !AI_PROVIDER_IDS.contains(&self.ai_provider.as_str()) {
+            self.ai_provider = "local".into();
+        }
+        if self.ai_providers.openai.endpoint.trim().is_empty() {
+            self.ai_providers.openai.endpoint = crate::ai::OPENAI_ENDPOINT.into();
+        }
+        if self.ai_providers.openai.model.trim().is_empty() {
+            self.ai_providers.openai.model = "gpt-4o-mini".into();
+        }
+        if self.ai_providers.claude.endpoint.trim().is_empty() {
+            self.ai_providers.claude.endpoint = crate::ai::CLAUDE_ENDPOINT.into();
+        }
+        if self.ai_providers.claude.model.trim().is_empty() {
+            self.ai_providers.claude.model = "claude-3-5-haiku-latest".into();
+        }
+        if self.ai_providers.local.endpoint.trim().is_empty() {
+            self.ai_providers.local.endpoint = crate::ai::LOCAL_ENDPOINT.into();
+        }
+        if self.ai_providers.local.model.trim().is_empty() {
+            self.ai_providers.local.model = "llama3.2".into();
+        }
+        self.ai_providers.openai.endpoint = self.ai_providers.openai.endpoint.trim().to_string();
+        self.ai_providers.openai.model = self.ai_providers.openai.model.trim().to_string();
+        self.ai_providers.claude.endpoint = self.ai_providers.claude.endpoint.trim().to_string();
+        self.ai_providers.claude.model = self.ai_providers.claude.model.trim().to_string();
+        self.ai_providers.custom.endpoint = self.ai_providers.custom.endpoint.trim().to_string();
+        self.ai_providers.custom.model = self.ai_providers.custom.model.trim().to_string();
+        self.ai_providers.local.endpoint = self.ai_providers.local.endpoint.trim().to_string();
+        self.ai_providers.local.model = self.ai_providers.local.model.trim().to_string();
+        self.legacy_assistant_endpoint = None;
+        self.legacy_assistant_model = None;
     }
 
     pub fn page_zoom_factor(&self) -> f64 {
@@ -760,9 +872,20 @@ impl BrowserSettings {
 pub struct SettingsState(Mutex<BrowserSettings>);
 
 pub fn init(app: &AppHandle) {
-    let mut loaded: BrowserSettings =
-        crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
+    let path = paths::data_file(app, FILE);
+    let mut loaded: BrowserSettings = crate::sync_conflicts::read_json(app, &path);
+    let legacy_key = loaded
+        .legacy_assistant_key
+        .take()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
     loaded = loaded.normalize();
+    if let Some(key) = legacy_key {
+        let provider = loaded.ai_provider.clone();
+        if crate::secrets::store_key(app, &provider, &key).is_ok() {
+            let _ = crate::files::write_json(&path, &loaded);
+        }
+    }
     loaded.pinned_tabs = canonicalize_pins(app, &loaded);
     crate::adblock::configure(&loaded.adblock);
     app.manage(SettingsState(Mutex::new(loaded)));
@@ -872,9 +995,20 @@ fn page_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
 }
 
 pub fn reload(app: &AppHandle) {
-    let mut loaded: BrowserSettings =
-        crate::sync_conflicts::read_json(app, &paths::data_file(app, FILE));
+    let path = paths::data_file(app, FILE);
+    let mut loaded: BrowserSettings = crate::sync_conflicts::read_json(app, &path);
+    let legacy_key = loaded
+        .legacy_assistant_key
+        .take()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
     loaded = loaded.normalize();
+    if let Some(key) = legacy_key {
+        let provider = loaded.ai_provider.clone();
+        if crate::secrets::store_key(app, &provider, &key).is_ok() {
+            let _ = crate::files::write_json(&path, &loaded);
+        }
+    }
     loaded.pinned_tabs = canonicalize_pins(app, &loaded);
     if let Some(root) = paths::storage_root() {
         loaded.sync_folder = root.to_string_lossy().into_owned();
@@ -921,7 +1055,16 @@ pub fn store(
     settings: BrowserSettings,
     keep_sync: bool,
 ) -> Result<BrowserSettings, String> {
+    let mut settings = settings;
+    let legacy_key = settings
+        .legacy_assistant_key
+        .take()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
     let mut settings = settings.normalize();
+    if let Some(key) = legacy_key {
+        let _ = crate::secrets::store_key(app, &settings.ai_provider, &key);
+    }
     settings.pinned_tabs = canonicalize_pins(app, &settings);
     let (saved, previous_page_zoom, previous_ui_zoom) = {
         let state = app.state::<SettingsState>();
@@ -1086,6 +1229,19 @@ pub fn toolbar_order(saved: &[String], available: &[String]) -> Vec<String> {
         }
     }
     ordered
+}
+
+/// The Prices tool is Shopping now. A saved pin maps across, and a second copy is dropped.
+fn map_retired_tools(ids: &[String]) -> Vec<String> {
+    ids.iter()
+        .map(|id| {
+            if id == "price" {
+                "shopping".to_string()
+            } else {
+                id.clone()
+            }
+        })
+        .collect()
 }
 
 fn toolbar_hidden(ids: &[String]) -> Vec<String> {
@@ -1403,5 +1559,71 @@ mod tests {
         assert_eq!(loaded.window_backdrop, "none");
         let current = super::BrowserSettings::default().normalize();
         assert_eq!(current.clone().normalize(), current);
+    }
+
+    #[test]
+    fn a_plaintext_assistant_key_migrates_and_is_not_written_back() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"assistantEndpoint":"https://openrouter.ai/api/v1","assistantModel":"openai/gpt-4o-mini","assistantKey":"sk-secret-value","theme":"zinc"}"#,
+        )
+        .expect("settings parse");
+        assert_eq!(loaded.legacy_assistant_key.as_deref(), Some("sk-secret-value"));
+        let mut loaded = loaded.normalize();
+        assert_eq!(loaded.ai_provider, "custom");
+        assert_eq!(loaded.ai_providers.custom.endpoint, "https://openrouter.ai/api/v1");
+        assert_eq!(loaded.ai_providers.custom.model, "openai/gpt-4o-mini");
+        assert_eq!(loaded.ai_providers.local.endpoint, "http://127.0.0.1:11434/v1");
+        loaded.legacy_assistant_key = None;
+        let saved = serde_json::to_string(&loaded).expect("settings json");
+        assert!(!saved.contains("sk-secret-value"));
+        assert!(!saved.contains("assistantKey"));
+        assert!(!saved.contains("assistantEndpoint"));
+        assert!(!saved.contains("assistantModel"));
+        let again: super::BrowserSettings = serde_json::from_str(&saved).expect("round trip");
+        let again = again.normalize();
+        assert_eq!(again.ai_provider, "custom");
+        assert_eq!(again.ai_providers.custom.endpoint, loaded.ai_providers.custom.endpoint);
+        assert!(again.legacy_assistant_key.is_none());
+    }
+
+    #[test]
+    fn a_localhost_assistant_endpoint_becomes_the_local_provider() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"assistantEndpoint":"http://127.0.0.1:11434/v1","assistantModel":"llama3.2"}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.ai_provider, "local");
+        assert_eq!(loaded.ai_providers.local.model, "llama3.2");
+        assert_eq!(loaded.ai_providers.custom.endpoint, "");
+    }
+
+    #[test]
+    fn an_unknown_provider_falls_back_to_local() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"aiProvider":"retired"}"#).expect("settings parse");
+        assert_eq!(loaded.normalize().ai_provider, "local");
+    }
+
+    #[test]
+    fn a_saved_price_pin_becomes_one_shopping_pin() {
+        let mut settings = super::BrowserSettings::default();
+        settings.toolbar_order = vec!["price".into(), "reading".into()];
+        settings.hidden_toolbar_extensions = vec!["price".into(), "shopping".into()];
+        let settings = settings.normalize();
+        assert_eq!(
+            settings.toolbar_order,
+            vec!["shopping".to_string(), "reading".to_string()]
+        );
+        assert_eq!(
+            settings.hidden_toolbar_extensions,
+            vec!["shopping".to_string()]
+        );
+        let mut both = super::BrowserSettings::default();
+        both.toolbar_order = vec!["price".into(), "shopping".into(), "reading".into()];
+        assert_eq!(
+            both.normalize().toolbar_order,
+            vec!["shopping".to_string(), "reading".to_string()]
+        );
     }
 }

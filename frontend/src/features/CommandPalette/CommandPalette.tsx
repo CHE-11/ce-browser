@@ -44,6 +44,34 @@ type Ranked = { hit: Hit; matches: readonly FuseResultMatch[] };
 const MAX_HITS = 14;
 const GROUP_BOOST: Partial<Record<Hit["group"], number>> = { Action: 0.08, Tab: 0.06, Setting: 0.04, Tool: 0.04 };
 
+type PaletteFilter = {
+  key: string;
+  label: string;
+  group: Hit["group"];
+};
+
+/** A leading letter, alone or followed by a space, limits the palette to one group. */
+const PALETTE_FILTERS: readonly PaletteFilter[] = [
+  { key: "b", label: "Bookmarks", group: "Bookmark" },
+  { key: "t", label: "Tabs", group: "Tab" },
+  { key: "h", label: "History", group: "History" },
+  { key: "s", label: "Settings", group: "Setting" },
+  { key: "a", label: "Actions", group: "Action" },
+  { key: "e", label: "Extensions", group: "Extension" },
+  { key: "w", label: "Workspaces", group: "Workspace" },
+  { key: "r", label: "Recent", group: "Recently closed" },
+  { key: "p", label: "Tools", group: "Tool" },
+];
+
+function parsePaletteQuery(query: string): { filter: PaletteFilter | null; text: string } {
+  const raw = query.replace(/^\s+/, "");
+  const filter = PALETTE_FILTERS.find((item) => item.key === raw.slice(0, 1).toLowerCase()) ?? null;
+  if (filter && (raw.length === 1 || raw[1] === " ")) {
+    return { filter, text: raw.slice(1).trim() };
+  }
+  return { filter: null, text: query.trim() };
+}
+
 function closedLabel(entry: ClosedEntry) {
   if (entry.kind === "group") {
     return `Reopen group ${entry.group?.name.trim() || "without a name"} (${entry.tabs.length} tabs)`;
@@ -235,29 +263,31 @@ export function CommandPalette() {
     return [...actions, ...tabs, ...reopen, ...workspaces, ...settingsHits, ...tools, ...extensionHits, ...pages];
   }, [active, bookmarks, closed, extensions, history, settings, snapshot.windowTabs, snapshot.workspace, snapshot.workspaces]);
 
-  const fuse = useMemo(
-    () =>
-      new Fuse(all, {
-        keys: [
-          { name: "title", weight: 0.7 },
-          { name: "hint", weight: 0.15 },
-          { name: "keywords", weight: 0.15 },
-        ],
-        threshold: 0.4,
-        ignoreLocation: true,
-        includeScore: true,
-        includeMatches: true,
-        minMatchCharLength: 1,
-      }),
-    [all],
-  );
+  const parsed = useMemo(() => parsePaletteQuery(query), [query]);
+
+  const fuse = useMemo(() => {
+    const source = parsed.filter ? all.filter((hit) => hit.group === parsed.filter?.group) : all;
+    return new Fuse(source, {
+      keys: [
+        { name: "title", weight: 0.7 },
+        { name: "hint", weight: 0.15 },
+        { name: "keywords", weight: 0.15 },
+      ],
+      threshold: 0.4,
+      ignoreLocation: true,
+      includeScore: true,
+      includeMatches: true,
+      minMatchCharLength: 1,
+    });
+  }, [all, parsed.filter]);
 
   const ranked = useMemo<Ranked[]>(() => {
-    const text = query.trim();
+    const text = parsed.text;
     if (!text) {
-      const firsts = all.filter((hit) => hit.group === "Action").slice(0, 8);
-      const recent = all.filter((hit) => hit.group === "Recently closed").slice(0, 3);
-      return [...firsts, ...recent].map((hit) => ({ hit, matches: [] }));
+      const shown = parsed.filter
+        ? all.filter((hit) => hit.group === parsed.filter?.group).slice(0, MAX_HITS)
+        : [...all.filter((hit) => hit.group === "Action").slice(0, 8), ...all.filter((hit) => hit.group === "Recently closed").slice(0, 3)];
+      return shown.map((hit) => ({ hit, matches: [] }));
     }
     const lower = text.toLowerCase();
     const scored = fuse.search(text, { limit: 60 }).map((result) => {
@@ -268,24 +298,27 @@ export function CommandPalette() {
     });
     scored.sort((left, right) => right.score - left.score);
     const matched = scored.slice(0, MAX_HITS).map(({ hit, matches }) => ({ hit, matches }));
-    const extra = textHits
-      .filter((hit) => !matched.some((item) => item.hit.id === `history-${hit.id}`))
-      .map((hit) => ({
-        hit: {
-          id: `history-${hit.id}`,
-          title: hit.title || hit.url,
-          hint: hit.snippet || hit.url,
-          group: "History" as const,
-          run: () => createTab(hit.url),
-        },
-        matches: [],
-      }));
+    const extra =
+      parsed.filter && parsed.filter.group !== "History"
+        ? []
+        : textHits
+            .filter((hit) => !matched.some((item) => item.hit.id === `history-${hit.id}`))
+            .map((hit) => ({
+              hit: {
+                id: `history-${hit.id}`,
+                title: hit.title || hit.url,
+                hint: hit.snippet || hit.url,
+                group: "History" as const,
+                run: () => createTab(hit.url),
+              },
+              matches: [],
+            }));
     return [...matched, ...extra].slice(0, MAX_HITS);
-  }, [all, fuse, query, textHits]);
+  }, [all, fuse, parsed.filter, parsed.text, textHits]);
 
   useEffect(() => {
-    const needle = query.trim();
-    if (needle.length < 2) {
+    const needle = parsed.text;
+    if ((parsed.filter && parsed.filter.group !== "History") || needle.length < 2) {
       setTextHits([]);
       return;
     }
@@ -307,7 +340,7 @@ export function CommandPalette() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [query]);
+  }, [parsed.filter, parsed.text]);
 
   useEffect(() => {
     setSelected(0);
@@ -333,16 +366,33 @@ export function CommandPalette() {
     void pending.catch(() => undefined);
   };
 
+  const applyFilter = (filter: PaletteFilter) => {
+    const next = parsed.filter?.key === filter.key ? "" : `${filter.key} `;
+    setQuery(next);
+    requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input) {
+        return;
+      }
+      input.focus();
+      input.setSelectionRange(next.length, next.length);
+    });
+  };
+
   return (
     <PopupFrame id="command-palette" width={560} maxHeight={2000} className="flex flex-col">
       <input
         id="command-palette-input"
         ref={inputRef}
+        type="search"
         value={query}
-        placeholder="Search actions, tabs, settings, tools and bookmarks"
+        spellCheck={false}
+        autoComplete="off"
+        placeholder={parsed.filter ? `Search ${parsed.filter.label.toLowerCase()}` : "Search actions, tabs, settings, tools and bookmarks"}
         aria-label="Command palette"
         aria-controls="command-palette-list"
-        className="h-12 shrink-0 border-b border-zinc-800 bg-transparent px-4 text-sm outline-none"
+        aria-describedby="command-palette-filters"
+        className="h-12 shrink-0 border-b border-zinc-800 bg-transparent px-4 text-sm outline-none [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown") {
@@ -362,7 +412,7 @@ export function CommandPalette() {
       <div id="command-palette-list" ref={listRef} role="listbox" aria-label="Results" className="max-h-93 overflow-y-auto p-1.5">
         {ranked.length === 0 ? (
           <div id="command-palette-empty" className="px-3 py-4 text-sm text-zinc-500">
-            No matches.
+            {parsed.filter ? `No matching ${parsed.filter.label.toLowerCase()}.` : "No matches."}
           </div>
         ) : (
           ranked.map(({ hit, matches }, index) => (
@@ -392,6 +442,36 @@ export function CommandPalette() {
             </button>
           ))
         )}
+      </div>
+      <div id="command-palette-filters" role="group" aria-label="Search filters" className="flex shrink-0 flex-wrap items-center justify-center gap-x-0.5 gap-y-0.5 border-t border-zinc-800 px-2 py-1">
+        {PALETTE_FILTERS.map((filter) => {
+          const active = parsed.filter?.key === filter.key;
+          return (
+            <button
+              id={`command-palette-filter-${filter.key}`}
+              key={filter.key}
+              type="button"
+              aria-pressed={active}
+              className={cn(
+                "flex items-center gap-1 rounded px-1 py-0.5 text-[10px]",
+                active ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-300",
+              )}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => applyFilter(filter)}
+            >
+              <kbd
+                id={`command-palette-filter-${filter.key}-key`}
+                className={cn(
+                  "rounded border px-0.5 font-sans leading-none",
+                  active ? "border-sky-800 bg-sky-950 text-sky-300" : "border-zinc-700 bg-zinc-800 text-zinc-300",
+                )}
+              >
+                {filter.key}
+              </kbd>
+              <span id={`command-palette-filter-${filter.key}-label`}>{filter.label}</span>
+            </button>
+          );
+        })}
       </div>
     </PopupFrame>
   );

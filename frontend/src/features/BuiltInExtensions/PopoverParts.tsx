@@ -7,9 +7,10 @@ type PopoverHeaderProps = {
   icon: ReactNode;
   title: string;
   subtitle: string;
+  action?: ReactNode;
 };
 
-export function PopoverHeader({ id, icon, title, subtitle }: PopoverHeaderProps) {
+export function PopoverHeader({ id, icon, title, subtitle, action }: PopoverHeaderProps) {
   return (
     <div id={id} className="flex items-center gap-3 px-4 pb-2 pt-3.5">
       <span
@@ -26,6 +27,7 @@ export function PopoverHeader({ id, icon, title, subtitle }: PopoverHeaderProps)
           {subtitle}
         </p>
       </div>
+      {action ? <div id={`${id}-action`}>{action}</div> : null}
     </div>
   );
 }

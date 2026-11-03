@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdblockStats,
+  AiKeyStatus,
   BackdropSupport,
   Board,
   BoardFolder,
@@ -14,6 +15,8 @@ import type {
   ExternalBrowser,
   RewriteRule,
   ProductPrice,
+  PriceCheckProgress,
+  TrackedPricePatch,
   ReadingStats,
   ShoppingDeals,
   SiteCookie,
@@ -455,8 +458,64 @@ export function checkPrices() {
   return invoke<ProductPrice[]>("check_prices");
 }
 
-export function findDeals(id: number) {
-  return invoke<ShoppingDeals>("find_deals", { id });
+export function untrackPrice(id: string) {
+  return invoke<ProductPrice[]>("untrack_price", { id });
+}
+
+export function checkPrice(id: string) {
+  return invoke<ProductPrice[]>("check_price", { id });
+}
+
+export function previewPriceUrl(url: string) {
+  return invoke<ProductPrice>("preview_price_url", { url });
+}
+
+export function addPriceUrl(url: string) {
+  return invoke<ProductPrice[]>("add_price_url", { url });
+}
+
+export function updateTrackedPrice(patch: TrackedPricePatch) {
+  return invoke<ProductPrice[]>("update_tracked_price", { patch });
+}
+
+export function onPricesChanged(handler: (items: ProductPrice[]) => void): Promise<UnlistenFn> {
+  return listen<ProductPrice[]>("prices-changed", (event) => handler(event.payload));
+}
+
+export function onPriceCheckProgress(handler: (progress: PriceCheckProgress) => void): Promise<UnlistenFn> {
+  return listen<PriceCheckProgress>("prices-check-progress", (event) => handler(event.payload));
+}
+
+export function findDeals(id: number, force = false) {
+  return invoke<ShoppingDeals>("find_deals", { id, force });
+}
+
+export function findDealsForProduct(url: string, title: string, force = false) {
+  return invoke<ShoppingDeals>("find_deals_for_product", { url, title, force });
+}
+
+export function setCouponFeedback(key: string, code: string, action: "tried" | "worked" | "failed") {
+  return invoke<ShoppingDeals>("set_coupon_feedback", { key, code, action });
+}
+
+export function aiKeyStatus(provider: string) {
+  return invoke<AiKeyStatus>("ai_key_status", { provider });
+}
+
+export function setAiKey(provider: string, key: string) {
+  return invoke<AiKeyStatus>("set_ai_key", { provider, key });
+}
+
+export function clearAiKey(provider: string) {
+  return invoke<AiKeyStatus>("clear_ai_key", { provider });
+}
+
+export function testAiConnection() {
+  return invoke<void>("test_ai_connection");
+}
+
+export function listAiModels() {
+  return invoke<string[]>("list_ai_models");
 }
 
 export function installSite(id: number) {

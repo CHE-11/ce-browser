@@ -289,6 +289,8 @@ pub(crate) fn strip_sync_settings(bytes: &[u8]) -> Result<Vec<u8>, String> {
     };
     if let Some(object) = value.as_object_mut() {
         object.insert("syncFolder".into(), Value::String(String::new()));
+        object.remove("assistantKey");
+        object.remove("legacyAssistantKey");
         for key in [
             "syncRevision",
             "syncBookmarksRevision",
@@ -402,7 +404,7 @@ mod tests {
         assert_eq!(value["syncFolder"], "");
         assert_eq!(value["syncRevision"], 0);
         assert_eq!(value["theme"], "zinc");
-        assert_eq!(value["assistantKey"], "secret");
+        assert!(value.get("assistantKey").is_none());
     }
 
     #[test]

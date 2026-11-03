@@ -12,7 +12,7 @@ type ToolButtonProps = {
   activeTab: TabInfo | undefined;
   /** When the page is already translated, a click reloads it. */
   restore?: boolean;
-  /** Password does not need a website open. */
+  /** Password, media, and shopping do not need a website open. */
   needsPage?: boolean;
   /** Count drawn on the top-right of the icon. Hidden at zero. */
   badge?: number;

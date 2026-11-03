@@ -1,5 +1,6 @@
 mod accelerator;
 mod accent;
+mod ai;
 mod adblock;
 mod answer;
 mod backdrop;
@@ -27,12 +28,14 @@ mod page_rules;
 mod paths;
 mod peek;
 mod popup;
+mod prices;
 mod print;
 mod privacy;
 mod profile_archive;
 mod profile_icons;
 mod profiles;
 mod rewrite;
+mod secrets;
 mod session;
 mod settings;
 mod shopping;
@@ -1258,6 +1261,34 @@ async fn check_prices(app: AppHandle) -> Result<Vec<tools::ProductPrice>, String
     blocking(move || tools::check_prices(&app)).await
 }
 
+#[tauri::command]
+fn untrack_price(app: AppHandle, id: String) -> Result<Vec<tools::ProductPrice>, String> {
+    prices::untrack_price(&app, &id)
+}
+
+#[tauri::command]
+async fn check_price(app: AppHandle, id: String) -> Result<Vec<tools::ProductPrice>, String> {
+    blocking(move || prices::check_price(&app, &id)).await
+}
+
+#[tauri::command]
+async fn preview_price_url(url: String) -> Result<tools::ProductPrice, String> {
+    blocking(move || prices::preview_url(&url)).await
+}
+
+#[tauri::command]
+async fn add_price_url(app: AppHandle, url: String) -> Result<Vec<tools::ProductPrice>, String> {
+    blocking(move || prices::add_url(&app, &url)).await
+}
+
+#[tauri::command]
+fn update_tracked_price(
+    app: AppHandle,
+    patch: prices::TrackedPricePatch,
+) -> Result<Vec<tools::ProductPrice>, String> {
+    prices::update_tracked(&app, patch)
+}
+
 // Boards: pins saved from pages, on boards inside folders.
 
 #[tauri::command]
@@ -1392,8 +1423,55 @@ async fn save_pin_image(app: AppHandle, id: String, path: String) -> Result<(), 
 }
 
 #[tauri::command]
-async fn find_deals(app: AppHandle, id: u32) -> Result<shopping::ShoppingDeals, String> {
-    blocking(move || shopping::find_deals(&app, id)).await
+async fn find_deals(app: AppHandle, id: u32, force: Option<bool>) -> Result<shopping::ShoppingDeals, String> {
+    blocking(move || shopping::find_deals(&app, id, force.unwrap_or(false))).await
+}
+
+#[tauri::command]
+async fn find_deals_for_product(
+    app: AppHandle,
+    url: String,
+    title: String,
+    force: Option<bool>,
+) -> Result<shopping::ShoppingDeals, String> {
+    blocking(move || shopping::find_deals_for_product(&app, &url, &title, force.unwrap_or(false))).await
+}
+
+#[tauri::command]
+fn set_coupon_feedback(
+    app: AppHandle,
+    key: String,
+    code: String,
+    action: String,
+) -> Result<shopping::ShoppingDeals, String> {
+    shopping::set_coupon_feedback(&app, &key, &code, &action)
+}
+
+#[tauri::command]
+fn ai_key_status(app: AppHandle, provider: String) -> secrets::AiKeyStatus {
+    secrets::status(&app, &provider)
+}
+
+#[tauri::command]
+fn set_ai_key(app: AppHandle, provider: String, key: String) -> Result<secrets::AiKeyStatus, String> {
+    secrets::store_key(&app, &provider, &key)?;
+    Ok(secrets::status(&app, &provider))
+}
+
+#[tauri::command]
+fn clear_ai_key(app: AppHandle, provider: String) -> Result<secrets::AiKeyStatus, String> {
+    secrets::clear_key(&app, &provider)?;
+    Ok(secrets::status(&app, &provider))
+}
+
+#[tauri::command]
+async fn test_ai_connection(app: AppHandle) -> Result<(), String> {
+    blocking(move || ai::test_connection(&app)).await
+}
+
+#[tauri::command]
+async fn list_ai_models(app: AppHandle) -> Result<Vec<String>, String> {
+    blocking(move || ai::list_models(&app)).await
 }
 
 #[tauri::command]
@@ -1768,6 +1846,7 @@ pub fn run() {
             build_window(&handle)?;
             system::start(&handle);
             update::start(&handle);
+            prices::start(&handle);
             extension_store::start(&handle);
 
             tauri::async_runtime::spawn(async move {
@@ -2009,6 +2088,11 @@ pub fn run() {
             list_prices,
             track_price,
             check_prices,
+            untrack_price,
+            check_price,
+            preview_price_url,
+            add_price_url,
+            update_tracked_price,
             list_boards,
             create_board_folder,
             rename_board_folder,
@@ -2032,6 +2116,13 @@ pub fn run() {
             copy_pin_image,
             save_pin_image,
             find_deals,
+            find_deals_for_product,
+            set_coupon_feedback,
+            ai_key_status,
+            set_ai_key,
+            clear_ai_key,
+            test_ai_connection,
+            list_ai_models,
             install_site,
             open_default_apps,
             set_device,

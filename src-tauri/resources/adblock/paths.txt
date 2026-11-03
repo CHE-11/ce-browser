@@ -1,0 +1,7 @@
+# Tracking URLs on hosts that cannot be blocked wholesale.
+# One host and path prefix per line: the host must match exactly, and the path must start with the rest.
+# Lines starting with # are ignored.
+
+www.google.com/pagead/
+www.google.com/ccm/
+www.google.com/ads/ga-audiences

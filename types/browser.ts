@@ -131,16 +131,88 @@ export type ReadingStats = {
   ease: number;
 };
 
+export type AiProviderId = "openai" | "claude" | "custom" | "local";
+
+export type AiProviderSlot = {
+  endpoint: string;
+  model: string;
+};
+
+export type AiProviders = {
+  openai: AiProviderSlot;
+  claude: AiProviderSlot;
+  custom: AiProviderSlot;
+  local: AiProviderSlot;
+};
+
+/** Whether a provider key is saved. The key itself never crosses the bridge. */
+export type AiKeyStatus = {
+  hasKey: boolean;
+  /** Last four characters, when a saved key could be read. */
+  hint: string;
+  /** A matching environment variable is set and no saved key is in use. */
+  fromEnv: boolean;
+  /** Ciphertext is present but this Windows user cannot read it. */
+  unreadable: boolean;
+};
+
+export type PricePoint = {
+  at: number;
+  price: number;
+  currency: string;
+  availability: string;
+};
+
 export type ProductPrice = {
+  id: string;
   url: string;
   title: string;
   price: number;
   currency: string;
   availability: string;
+  imageUrl: string;
+  store: string;
+  trackedAt: number;
+  lastCheckedAt: number;
+  lastError: string;
+  /** `fetch` or `tab` when the last check succeeded. */
+  lastMethod: string;
+  targetPrice: number | null;
+  alertOnDrop: boolean;
+  alertBelowTarget: boolean;
+  alertBackInStock: boolean;
+  alertDropArmed: boolean;
+  alertTargetArmed: boolean;
+  alertStockArmed: boolean;
+  checkIntervalHours: number;
+  paused: boolean;
+  note: string;
+  tags: string[];
+  listPrice: number | null;
+  history: PricePoint[];
   previousPrice: number | null;
   previousAvailability: string;
   dropped: boolean;
   stockChanged: boolean;
+};
+
+export type PriceCheckProgress = {
+  checked: number;
+  total: number;
+  done: boolean;
+};
+
+export type TrackedPricePatch = {
+  id: string;
+  targetPrice?: number | null;
+  clearTarget?: boolean;
+  alertOnDrop?: boolean;
+  alertBelowTarget?: boolean;
+  alertBackInStock?: boolean;
+  checkIntervalHours?: number;
+  paused?: boolean;
+  note?: string;
+  tags?: string[];
 };
 
 export type SearchResult = {
@@ -154,6 +226,10 @@ export type Coupon = {
   description: string;
   /** Search result that shows the code. */
   source: string;
+  expiry: string;
+  triedAt: number;
+  worked: boolean;
+  failed: boolean;
 };
 
 export type Offer = {
@@ -162,6 +238,11 @@ export type Offer = {
   currency: string;
   url: string;
   note: string;
+  verified: boolean;
+  variantMismatch: boolean;
+  shipping: string;
+  /** Product image from the other page. Empty until that page is read. */
+  imageUrl: string;
 };
 
 export type ShoppingDeals = {
@@ -176,6 +257,11 @@ export type ShoppingDeals = {
   /** Cheaper offers elsewhere, cheapest first. */
   offers: Offer[];
   sources: SearchResult[];
+  aiAvailable: boolean;
+  checkedAt: number;
+  cached: boolean;
+  /** Canonical product key shared with price tracking. */
+  key: string;
 };
 
 export type StoragePair = {
@@ -322,12 +408,12 @@ export type PopupKind =
   | "network"
   | "translate"
   | "password"
-  | "price"
   | "reading"
   | "shopping"
   | "toast"
   | "tab-search"
   | "tab-switcher"
+  | "tab-overview"
   | "tab-hover"
   | "shortcut-sheet"
   | "unresponsive"
@@ -340,7 +426,7 @@ export type PopupKind =
 /**
  * Where a popup sits against its anchor. `bottom-*` hangs below (or above, near the bottom of
  * the screen), `right-start`/`left-start` sit beside it with matching tops, `point` puts the
- * top-left corner on a click.
+ * top-left corner on a click, and `center` puts the popup in the middle of the window.
  */
 export type PopupPlacement =
   | "bottom-start"
@@ -348,7 +434,8 @@ export type PopupPlacement =
   | "bottom-center"
   | "right-start"
   | "left-start"
-  | "point";
+  | "point"
+  | "center";
 
 /** Logical px in the webview that asks for the popup. */
 export type PopupRect = {
@@ -546,15 +633,16 @@ export type BrowserSettings = {
   translateLanguage: string;
   /** Provider URL. `%s` is the text and `%t` is the language. */
   translateUrl: string;
-  /** OpenAI-compatible base URL. */
-  assistantEndpoint: string;
-  assistantModel: string;
-  /** Kept on this computer. Sync does not copy it. */
-  assistantKey: string;
+  /** Active Shopping summary provider. */
+  aiProvider: AiProviderId;
+  /** Endpoint and model remembered for each provider. Keys are not included. */
+  aiProviders: AiProviders;
   /** DuckDuckGo region for shopping searches, for example `us-en`. */
   shoppingRegion: string;
-  /** Model for the shopping tool. Blank uses `assistantModel`. */
+  /** Model override for Shopping summaries. Blank uses the active provider's model. */
   shoppingModel: string;
+  /** Store hosts added to one extra deal search. Empty skips that query. */
+  shoppingCompetitors: string[];
   /** Restores the window and focuses the address bar. */
   summonHotkey: string;
   /** On battery, background tabs sleep sooner and the visible page stays near 30 frames a second. */

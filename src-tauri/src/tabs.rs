@@ -2488,6 +2488,7 @@ fn retire_webview(app: &AppHandle, label: Option<String>) {
         .and_then(|id| id.parse().ok())
     {
         crate::adblock::forget(id);
+        crate::webview2::forget_early_script(id);
         crate::hang_guard::end_frozen_page(id);
         crate::page_errors::forget_tab(id);
     }

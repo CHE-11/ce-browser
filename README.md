@@ -155,7 +155,6 @@ Drag a pinned icon on the address bar onto another to reorder the built-in tools
 
 **Prices** reads a product price from the page and remembers it in `prices.json`. Check updates a tracked product when that page is open, and marks a lower price or a stock change.
 
-
 **Reading** shows the word count, the minutes at 200 words a minute, and a reading-ease score.
 
 ## System
@@ -171,6 +170,30 @@ ce-browser registers for `http`, `https`, and HTML files. **Make default** opens
 The tray icon lists recent tabs, Show, Quick search, and Quit. Clicking it shows the window.
 
 **Battery saver** is on by default. On battery, background tabs sleep after a few seconds and the visible page stays near 30 frames a second. Plugged in, the normal sleep delay returns.
+
+
+## Internal Pages
+
+These addresses open inside the browser. Type one in the address bar, or open it from a menu.
+- `ce://newtab` is a new tab. Ctrl+T and the browser menu open it, and the address bar takes focus.
+- `ce://bookmarks` manages bookmark folders. It imports and exports the Netscape HTML format that Chrome, Edge and Firefox use.
+- `ce://boards` shows saved pins in a grid. Folders hold boards. Search covers titles, notes, page text and addresses.
+- `ce://history` lists pages you have opened. You can search it, remove one entry, or clear it.
+- `ce://downloads` keeps the download history. Items can be paused, resumed, cancelled, opened and shown in Explorer.
+- `ce://files` opens the download folder. You can go into a folder, go up, or open another folder. JSON, CSV, Markdown and logs preview in the page. Previews stop at 2 MB.
+- `ce://settings` is the browser settings. A link such as `ce://settings?focus=settings-profiles` opens a section.
+- `ce://extensions` installs an unpacked folder, a `.zip`, or a `.crx`, and turns extensions on or off.
+- `ce://scripts` saves CSS and JavaScript for one site or for every site. `styles.css` still styles the browser itself.
+- `ce://shortcuts` lists every shortcut. Record captures the next key, and a second key within one second makes a chord.
+- `ce://permissions` lists camera, microphone, location and notification requests. Revoke blocks the next request from that site.
+- `ce://rewrites` holds request rules. A rule can block a request, send it to another address, or answer a GET with a local file of up to 8 MB.
+- `ce://storage` lists the cookies and localStorage of the site in the tab. You can add and delete them. `ce://storage?tab=<id>` opens a chosen tab's site.
+- `ce://reader` shows the current article with the same cleanup as Print to PDF. Show original returns to the site.
+- `ce://capture-editor` edits a page capture: pen, arrow, rectangle, text and blur.
+- `ce://print-editor` prepares the current page for PDF: delete content, set the font, margins, orientation, backgrounds, and headers and footers.
+- `ce://shopping` lists tracked product prices. A lower price or a stock change is marked when that page is checked.
+- `ce://whats-new` shows the release notes for the version that is running. A newer version opens it once after an update.
+
 
 ## Data
 

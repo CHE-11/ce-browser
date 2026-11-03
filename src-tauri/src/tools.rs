@@ -4,10 +4,12 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::AppHandle;
 
-use crate::{files, paths, settings, tabs, webview2};
+use crate::{settings, tabs, webview2};
+
+pub use crate::prices::{ProductPrice, check_prices, list_prices, parse_price, read_page_price, track_price};
 
 pub const DEFAULT_TRANSLATE_URL: &str =
     "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=%t&dt=t&q=%s";
@@ -381,335 +383,22 @@ fn plain_text(html: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(default, rename_all = "camelCase")]
-pub struct ProductPrice {
-    pub url: String,
-    pub title: String,
-    pub price: f64,
-    pub currency: String,
-    pub availability: String,
-    pub previous_price: Option<f64>,
-    pub previous_availability: String,
-    pub dropped: bool,
-    pub stock_changed: bool,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-#[serde(default)]
-struct PriceFile {
-    items: Vec<ProductPrice>,
-}
-
-const PRICES: &str = "prices.json";
-
-pub fn parse_price(html: &str) -> Option<ProductPrice> {
-    if let Some(price) = price_from_json_ld(html) {
-        return Some(price);
-    }
-    let amount = meta_content(html, "product:price:amount")?;
-    let price = amount.parse().ok()?;
-    Some(ProductPrice {
-        url: String::new(),
-        title: String::new(),
-        price,
-        currency: meta_content(html, "product:price:currency").unwrap_or_default(),
-        availability: String::new(),
-        previous_price: None,
-        previous_availability: String::new(),
-        dropped: false,
-        stock_changed: false,
-    })
-}
-
-fn price_from_json_ld(html: &str) -> Option<ProductPrice> {
-    let lower = html.to_ascii_lowercase();
-    let mut search = html;
-    let mut search_lower = lower.as_str();
-    while let Some(index) = search_lower.find("application/ld+json") {
-        search = &search[index..];
-        search_lower = &search_lower[index..];
-        let start = search.find('>')? + 1;
-        let end = search_lower[start..].find("</script>")? + start;
-        let json = &search[start..end];
-        if let Some(price) = price_in_json(json) {
-            return Some(price);
-        }
-        search = &search[end..];
-        search_lower = &search_lower[end..];
-    }
-    None
-}
-
-fn price_in_json(json: &str) -> Option<ProductPrice> {
-    let value: serde_json::Value = serde_json::from_str(json.trim()).ok()?;
-    find_product(&value)
-}
-
-fn find_product(value: &serde_json::Value) -> Option<ProductPrice> {
-    if let Some(array) = value.as_array() {
-        for item in array {
-            if let Some(price) = find_product(item) {
-                return Some(price);
-            }
-        }
-    }
-    let object = value.as_object()?;
-    let kind = object
-        .get("@type")
-        .and_then(|item| item.as_str())
-        .unwrap_or("");
-    if kind == "Product" || object.contains_key("offers") {
-        if let Some(offers) = object.get("offers") {
-            let offer = offers
-                .as_array()
-                .and_then(|items| items.first())
-                .unwrap_or(offers);
-            if let Some(price) = offer.get("price").and_then(json_price) {
-                return Some(ProductPrice {
-                    url: String::new(),
-                    title: object
-                        .get("name")
-                        .and_then(|item| item.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    price,
-                    currency: offer
-                        .get("priceCurrency")
-                        .and_then(|item| item.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    availability: offer
-                        .get("availability")
-                        .and_then(|item| item.as_str())
-                        .unwrap_or("")
-                        .rsplit('/')
-                        .next()
-                        .unwrap_or("")
-                        .to_string(),
-                    previous_price: None,
-                    previous_availability: String::new(),
-                    dropped: false,
-                    stock_changed: false,
-                });
-            }
-        }
-    }
-    for item in object.values() {
-        if item.is_object() || item.is_array() {
-            if let Some(price) = find_product(item) {
-                return Some(price);
-            }
-        }
-    }
-    None
-}
-
-fn json_price(value: &serde_json::Value) -> Option<f64> {
-    value
-        .as_f64()
-        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
-}
-
-fn meta_content(html: &str, property: &str) -> Option<String> {
-    let needle = format!("property=\"{property}\"");
-    let index = html
-        .find(&needle)
-        .or_else(|| html.find(&format!("property='{property}'")))?;
-    let rest = &html[index..];
-    let content = rest.find("content=")? + "content=".len();
-    let quote = rest[content..].chars().next()?;
-    if quote != '"' && quote != '\'' {
-        return None;
-    }
-    let start = content + 1;
-    let end = rest[start..].find(quote)? + start;
-    Some(rest[start..end].to_string())
-}
-
-const PRICE_SCRIPT: &str = r#"(function () {
-  var scripts = document.querySelectorAll('script[type="application/ld+json"]');
-  var blocks = [];
-  scripts.forEach(function (script) { blocks.push(script.textContent || ""); });
-  var amount = document.querySelector('meta[property="product:price:amount"]');
-  var currency = document.querySelector('meta[property="product:price:currency"]');
-  return {
-    blocks: blocks,
-    amount: amount ? amount.content : "",
-    currency: currency ? currency.content : "",
-    title: document.title || ""
-  };
-})()"#;
-
-pub fn read_page_price(app: &AppHandle, id: u32) -> Result<ProductPrice, String> {
-    let webview = tabs::page_view(app, id).ok_or("This page is not loaded yet.")?;
-    let url = tabs::tab_page_url(app, id).unwrap_or_default();
-    let value = webview2::evaluate(
-        &webview,
-        PRICE_SCRIPT,
-        Duration::from_secs(8),
-        "Couldn't read a price on this page.",
-    )?;
-    let title = value
-        .get("title")
-        .and_then(|item| item.as_str())
-        .unwrap_or("")
-        .to_string();
-    let mut html = String::new();
-    if let Some(blocks) = value.get("blocks").and_then(|item| item.as_array()) {
-        for block in blocks {
-            if let Some(text) = block.as_str() {
-                html.push_str("<script type=\"application/ld+json\">");
-                html.push_str(text);
-                html.push_str("</script>");
-            }
-        }
-    }
-    if let Some(amount) = value.get("amount").and_then(|item| item.as_str()) {
-        if !amount.is_empty() {
-            html.push_str(&format!(
-                "<meta property=\"product:price:amount\" content=\"{amount}\"><meta property=\"product:price:currency\" content=\"{}\">",
-                value.get("currency").and_then(|item| item.as_str()).unwrap_or("")
-            ));
-        }
-    }
-    let mut price =
-        parse_price(&html).ok_or_else(|| "No product price was found on this page.".to_string())?;
-    price.url = url;
-    if price.title.is_empty() {
-        price.title = title;
-    }
-    Ok(price)
-}
-
-pub fn list_prices(app: &AppHandle) -> Vec<ProductPrice> {
-    let file: PriceFile = files::read_json(&paths::data_file(app, PRICES));
-    file.items
-}
-
-pub fn track_price(app: &AppHandle, id: u32) -> Result<ProductPrice, String> {
-    let price = read_page_price(app, id)?;
-    let mut items = list_prices(app);
-    if let Some(existing) = items.iter_mut().find(|item| item.url == price.url) {
-        existing.previous_price = Some(existing.price);
-        existing.previous_availability = existing.availability.clone();
-        existing.dropped = price.price < existing.price;
-        existing.stock_changed =
-            !price.availability.is_empty() && price.availability != existing.availability;
-        existing.price = price.price;
-        existing.currency = price.currency.clone();
-        existing.availability = price.availability.clone();
-        existing.title = price.title.clone();
-    } else {
-        items.insert(0, price.clone());
-    }
-    save_prices(app, &items)?;
-    Ok(items
-        .into_iter()
-        .find(|item| item.url == price.url)
-        .unwrap_or(price))
-}
-
-pub fn check_prices(app: &AppHandle) -> Result<Vec<ProductPrice>, String> {
-    let mut items = list_prices(app);
-    let open = tabs::snapshot(app)
-        .tabs
-        .into_iter()
-        .filter(|tab| tab.loaded)
-        .map(|tab| tab.id)
-        .collect::<Vec<_>>();
-    for item in &mut items {
-        let Some(id) = open
-            .iter()
-            .copied()
-            .find(|id| tabs::tab_page_url(app, *id).as_deref() == Some(item.url.as_str()))
-        else {
-            continue;
-        };
-        let Ok(fresh) = read_page_price(app, id) else {
-            continue;
-        };
-        item.dropped = fresh.price < item.price;
-        item.stock_changed =
-            !fresh.availability.is_empty() && fresh.availability != item.availability;
-        item.previous_price = Some(item.price);
-        item.previous_availability = item.availability.clone();
-        item.price = fresh.price;
-        item.currency = fresh.currency;
-        item.availability = fresh.availability;
-    }
-    save_prices(app, &items)?;
-    Ok(items)
-}
-
-fn save_prices(app: &AppHandle, items: &[ProductPrice]) -> Result<(), String> {
-    files::write_json(
-        &paths::data_file(app, PRICES),
-        &PriceFile {
-            items: items.to_vec(),
-        },
-    )
-}
 
 pub fn chat_url(endpoint: &str) -> String {
     format!("{}/chat/completions", endpoint.trim().trim_end_matches('/'))
 }
 
-pub fn localhost_endpoint(endpoint: &str) -> bool {
-    let lower = endpoint.to_ascii_lowercase();
-    lower.contains("://127.0.0.1") || lower.contains("://localhost") || lower.contains("://[::1]")
-}
-
-/// Sends one chat request to the assistant endpoint. A blank `model` uses the assistant model.
+/// Sends one Shopping summary request through the active provider.
 pub(crate) fn chat(
+    app: &AppHandle,
     current: &settings::BrowserSettings,
     model: &str,
     system: &str,
     user: &str,
+    json_only: bool,
     timeout: Duration,
 ) -> Result<String, String> {
-    let endpoint = current.assistant_endpoint.trim();
-    if endpoint.is_empty() {
-        return Err("Set an assistant endpoint in Settings, under Tools.".into());
-    }
-    if current.assistant_key.trim().is_empty() && !localhost_endpoint(endpoint) {
-        return Err("This endpoint needs an API key. Add it in Settings, under Tools.".into());
-    }
-    let model = match (model.trim(), current.assistant_model.trim()) {
-        ("", "") => "llama3.2",
-        ("", assistant) => assistant,
-        (chosen, _) => chosen,
-    };
-    let url = chat_url(endpoint);
-    let body = serde_json::json!({
-        "model": model,
-        "messages": [
-            { "role": "system", "content": system },
-            { "role": "user", "content": user }
-        ]
-    });
-    let mut request = ureq::post(&url)
-        .timeout(timeout)
-        .set("Content-Type", "application/json");
-    if !current.assistant_key.trim().is_empty() {
-        request = request.set(
-            "Authorization",
-            &format!("Bearer {}", current.assistant_key.trim()),
-        );
-    }
-    let response = request
-        .send_string(&serde_json::to_string(&body).map_err(|error| error.to_string())?)
-        .map_err(|error| format!("Couldn't reach the assistant. {error}"))?;
-    let text = response.into_string().map_err(|error| error.to_string())?;
-    let value: serde_json::Value =
-        serde_json::from_str(&text).map_err(|error| error.to_string())?;
-    value
-        .pointer("/choices/0/message/content")
-        .and_then(|item| item.as_str())
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| "The assistant returned nothing.".to_string())
+    crate::ai::complete(app, current, model, system, user, json_only, timeout)
 }
 
 #[cfg(test)]

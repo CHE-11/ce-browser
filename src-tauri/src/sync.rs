@@ -513,7 +513,7 @@ fn apply_settings(app: &AppHandle, remote: BrowserSettings) -> Result<(), String
     let current = settings::get(app);
     let mut settings = remote;
     settings.download_dir = current.download_dir;
-    settings.assistant_key = current.assistant_key;
+    settings.legacy_assistant_key = None;
     settings.sync_folder.clone_from(&current.sync_folder);
     settings.sync_revision = current.sync_revision;
     settings.sync_bookmarks_revision = current.sync_bookmarks_revision;
@@ -723,7 +723,7 @@ fn exported(mut settings: BrowserSettings) -> BrowserSettings {
     settings.sync_settings_revision = 0;
     settings.sync_history_revision = 0;
     settings.download_dir.clear();
-    settings.assistant_key.clear();
+    settings.legacy_assistant_key = None;
     settings
 }
 

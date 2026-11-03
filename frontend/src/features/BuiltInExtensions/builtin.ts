@@ -1,4 +1,4 @@
-import { BookOpen, Clapperboard, Eraser, ImageDown, KeyRound, Languages, Layers, LayoutGrid, Printer, Shield, ShoppingCart, SlidersHorizontal, Tags, type LucideIcon } from "lucide-react";
+import { BookOpen, Clapperboard, Eraser, ImageDown, KeyRound, Languages, Layers, LayoutGrid, Printer, Shield, ShoppingCart, SlidersHorizontal, type LucideIcon } from "lucide-react";
 
 export type BuiltinTool = {
   id: string;
@@ -73,15 +73,9 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     icon: KeyRound,
   },
   {
-    id: "price",
-    name: "Prices",
-    description: "Track a product's price and stock.",
-    icon: Tags,
-  },
-  {
     id: "shopping",
     name: "Shopping",
-    description: "Find coupons and better prices for this product.",
+    description: "Track prices and find coupons and better prices for this product.",
     icon: ShoppingCart,
   },
   {
