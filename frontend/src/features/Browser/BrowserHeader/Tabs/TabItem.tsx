@@ -66,26 +66,43 @@ export function TabItem({
     void setTabsMuted([tab.id], !tab.muted);
   };
 
+  const audioIcon = tab.muted ? (
+    <VolumeX id={`${domId}-audio-muted`} className={compact ? "size-2" : "size-3.5"} aria-hidden />
+  ) : (
+    <Volume2 id={`${domId}-audio-playing`} className={cn(compact ? "size-2" : "size-3.5", "text-sky-400")} aria-hidden />
+  );
   const audioButton = showAudio ? (
-    <button
-      id={`${domId}-audio`}
-      type="button"
-      title={tab.muted ? "Unmute tab" : "Mute tab"}
-      aria-label={tab.muted ? `Unmute ${tab.title}` : `Mute ${tab.title}`}
-      className={cn(
-        "inline-flex size-5 shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100",
-        focusRing,
-        compact && "absolute -right-0.5 -top-0.5 size-4 rounded-full bg-zinc-900",
-      )}
-      onMouseDown={(event) => event.stopPropagation()}
-      onClick={toggleMute}
-    >
-      {tab.muted ? (
-        <VolumeX id={`${domId}-audio-muted`} className={compact ? "size-2.5" : "size-3.5"} aria-hidden />
-      ) : (
-        <Volume2 id={`${domId}-audio-playing`} className={cn(compact ? "size-2.5" : "size-3.5", "text-sky-400")} aria-hidden />
-      )}
-    </button>
+    compact ? (
+      <button
+        id={`${domId}-audio`}
+        type="button"
+        title={tab.muted ? "Unmute tab" : "Mute tab"}
+        aria-label={tab.muted ? `Unmute ${tab.title}` : `Mute ${tab.title}`}
+        className={cn(
+          "absolute -right-1.5 -top-1.5 z-10 inline-flex size-3.5 items-center justify-center rounded-full bg-zinc-950 text-zinc-300 ring-1 ring-zinc-700 hover:bg-zinc-800 hover:text-zinc-100",
+          focusRing,
+        )}
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={toggleMute}
+      >
+        {audioIcon}
+      </button>
+    ) : (
+      <button
+        id={`${domId}-audio`}
+        type="button"
+        title={tab.muted ? "Unmute tab" : "Mute tab"}
+        aria-label={tab.muted ? `Unmute ${tab.title}` : `Mute ${tab.title}`}
+        className={cn(
+          "inline-flex size-5 shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100",
+          focusRing,
+        )}
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={toggleMute}
+      >
+        {audioIcon}
+      </button>
+    )
   ) : null;
 
   return (

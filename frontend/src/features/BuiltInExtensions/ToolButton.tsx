@@ -16,7 +16,7 @@ type ToolButtonProps = {
   needsPage?: boolean;
   /** Count drawn on the top-right of the icon. Hidden at zero. */
   badge?: number;
-  /** Control drawn on the top-left of the icon, above the button. */
+  /** Control drawn on the top-right of the icon, above the button. */
   corner?: ReactNode;
 };
 
@@ -52,7 +52,7 @@ export function ToolButton({ id, label, kind, icon, activeTab, restore, needsPag
   return (
     <span id={`address-${id}-slot`} className="relative inline-flex">
       {corner ? (
-        <span id={`address-${id}-corner`} className="absolute top-0 left-0 z-10 -translate-x-1/4 -translate-y-1/4">
+        <span id={`address-${id}-corner`} className="absolute top-0 right-0 z-10 translate-x-1/4 -translate-y-1/4">
           {corner}
         </span>
       ) : null}

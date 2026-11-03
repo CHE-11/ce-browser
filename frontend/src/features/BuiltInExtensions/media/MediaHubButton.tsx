@@ -56,12 +56,11 @@ export function MediaHubButton() {
   return (
     <ToolButton
       id="media-hub"
-      label={count === 0 ? "Media" : `Media, ${count} ${count === 1 ? "item" : "items"}`}
+      label="Media"
       kind="media-hub"
       icon={<Clapperboard id="address-media-hub-icon" aria-hidden />}
       activeTab={undefined}
       needsPage={false}
-      badge={count}
       corner={
         count > 0 ? (
           <button
@@ -87,7 +86,8 @@ export function MediaHubButton() {
               <Volume2 id="address-media-hub-mute-icon" aria-hidden />
             )}
           </button>
-        ) : null
+        ) : 
+        null
       }
     />
   );
