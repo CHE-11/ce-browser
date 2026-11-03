@@ -932,6 +932,29 @@ pub fn page_color(app: &AppHandle) -> Color {
     Color(r, g, b, 255)
 }
 
+/// The Windows app theme. Browser light and dark mode do not change this.
+pub fn windows_uses_light(app: &AppHandle) -> bool {
+    let theme_of = |label: &str| app.get_window(label).and_then(|window| window.theme().ok());
+    if let Some(theme) = theme_of(crate::tabs::WINDOW) {
+        return theme == tauri::Theme::Light;
+    }
+    if app.try_state::<crate::tabs::Tabs>().is_none() {
+        return false;
+    }
+    crate::tabs::browser_labels(app)
+        .iter()
+        .any(|label| theme_of(label) == Some(tauri::Theme::Light))
+}
+
+/// Fill behind a remote page. White in light Windows, `#202124` in dark Windows.
+pub fn site_canvas(app: &AppHandle) -> Color {
+    if windows_uses_light(app) {
+        Color(0xff, 0xff, 0xff, 255)
+    } else {
+        Color(0x20, 0x21, 0x24, 255)
+    }
+}
+
 fn surface_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
     let table: &[(&str, u8, u8, u8)] = if light {
         &[

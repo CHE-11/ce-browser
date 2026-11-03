@@ -28,6 +28,7 @@ const ACCENT_HINT = "Tints the active tab and address bar from the site's theme 
 const PIN_BORDER_LABEL = "Pin tab border";
 const PIN_BORDER_HINT = "Draws the site's theme color or favicon along the top of pinned tabs.";
 const MODE_LABEL = "Mode";
+const MODE_HINT = "Colors the browser. Websites keep their own theme.";
 const BACKDROP_LABEL = "Window backdrop";
 const BACKDROP_HINT = "Mica or Acrylic shows the desktop color through the tab strip and toolbars.";
 const THEME_LABEL = "Theme";
@@ -67,6 +68,7 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
     PIN_BORDER_LABEL,
     PIN_BORDER_HINT,
     MODE_LABEL,
+    MODE_HINT,
     ...COLOR_MODE_OPTIONS.map((option) => option.label),
     BACKDROP_LABEL,
     BACKDROP_HINT,
@@ -113,7 +115,13 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
           onChange={(value) => onUpdate({ pinTabBorder: value })}
         />
       </Row>
-      <Row id="settings-color-mode" setting="colorMode" label={MODE_LABEL} search={COLOR_MODE_OPTIONS.map((option) => option.label)}>
+      <Row
+        id="settings-color-mode"
+        setting="colorMode"
+        label={MODE_LABEL}
+        hint={MODE_HINT}
+        search={COLOR_MODE_OPTIONS.map((option) => option.label)}
+      >
         <div id="settings-color-mode-options" className="flex rounded-md border border-zinc-700 p-0.5">
           {COLOR_MODE_OPTIONS.map((option) => (
             <button

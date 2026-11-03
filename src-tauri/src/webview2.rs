@@ -7,7 +7,7 @@ use tauri::webview::PlatformWebview;
 use tauri::{AppHandle, Webview};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::*;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{E_NOINTERFACE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     ClientToScreen, CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn,
 };
@@ -310,6 +310,36 @@ fn core(platform: &PlatformWebview) -> windows::core::Result<ICoreWebView2> {
     unsafe { platform.controller().CoreWebView2() }
 }
 
+/// Sites follow Windows. The browser theme must not write this profile setting.
+fn pin_profile_scheme(core: &ICoreWebView2, light: bool) {
+    let scheme = if light {
+        COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT
+    } else {
+        COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK
+    };
+    let pinned = (|| unsafe {
+        core.cast::<ICoreWebView2_13>()?
+            .Profile()?
+            .SetPreferredColorScheme(scheme)
+    })();
+    if let Err(error) = pinned {
+        if error.code() != E_NOINTERFACE {
+            eprintln!("WebView2 color scheme: {error}");
+        }
+    }
+}
+
+/// Writes the Windows app theme onto every open WebView2 profile.
+pub fn apply_os_color_scheme(app: &AppHandle, light: bool) {
+    for webview in tabs::open_surface_views(app) {
+        let _ = webview.with_webview(move |platform| {
+            if let Ok(core) = core(&platform) {
+                pin_profile_scheme(&core, light);
+            }
+        });
+    }
+}
+
 pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview) {
     let app = app.clone();
     let _ = webview.with_webview(move |platform| {
@@ -317,6 +347,7 @@ pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview) {
             eprintln!("WebView2 shortcuts for the browser UI: {error}");
         }
         if let Ok(core) = core(&platform) {
+            pin_profile_scheme(&core, crate::settings::windows_uses_light(&app));
             let failed_app = app.clone();
             let mut token = 0i64;
             let handler = ProcessFailedEventHandler::create(Box::new(move |sender, args| {
@@ -766,6 +797,7 @@ pub fn attach_page_hooks(app: &AppHandle, webview: &Webview, id: u32) {
 fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::core::Result<()> {
     let controller = platform.controller();
     let core = core(platform)?;
+    pin_profile_scheme(&core, crate::settings::windows_uses_light(app));
     attach_accelerators(app, &controller, Target::Page)?;
     let mut token = 0i64;
 
@@ -1450,6 +1482,7 @@ fn attach_adblock(
                         return Ok(());
                     }
                     crate::adblock::page_started(&navigation_app, id, &uri);
+                    tabs::paint_document_background(&navigation_app, id, &uri);
                     if let Some(core) = sender {
                         apply_page_settings(&navigation_app, &core, &uri);
                         sync_early_script(&core, id);

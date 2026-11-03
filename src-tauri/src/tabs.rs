@@ -1144,7 +1144,7 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
         .get_window(&window_label)
         .ok_or("The browser window is missing.")?;
     let (_, size) = page_rect(app, &window_label);
-    let color = settings::page_color(app);
+    let color = document_color(app, url.as_str());
     let load_app = app.clone();
     let title_app = app.clone();
     let window_app = app.clone();
@@ -4168,7 +4168,7 @@ pub fn layout(app: &AppHandle, window_label: &str) {
     place_toast(app, window_label);
 }
 
-/// Window and webview fill, so a gap while a page view is created or destroyed matches the page.
+/// Window and chrome fill use the theme. A remote page uses the Windows canvas instead.
 pub fn apply_page_background(app: &AppHandle) {
     let color = settings::page_color(app);
     if app.try_state::<Tabs>().is_none() {
@@ -4198,12 +4198,69 @@ pub fn apply_page_background(app: &AppHandle) {
     if app.try_state::<Tabs>().is_none() {
         return;
     }
-    let labels = with_state(app, |state| state.page_labels());
-    for label in labels {
+    let pages = with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .filter_map(|tab| {
+                tab.webview
+                    .as_ref()
+                    .map(|label| (label.clone(), tab.info.url.clone()))
+            })
+            .collect::<Vec<_>>()
+    });
+    for (label, url) in pages {
         if let Some(webview) = app.get_webview(&label) {
-            let _ = webview.set_background_color(Some(color));
+            let _ = webview.set_background_color(Some(document_color(app, &url)));
         }
     }
+}
+
+/// UI and page webviews. A container tab keeps its own WebView2 profile.
+pub fn open_surface_views(app: &AppHandle) -> Vec<Webview> {
+    if app.try_state::<Tabs>().is_none() {
+        return Vec::new();
+    }
+    let labels = with_state(app, |state| {
+        let mut labels = state.page_labels();
+        for window in &state.windows {
+            labels.push(window.ui.clone());
+        }
+        labels
+    });
+    labels
+        .into_iter()
+        .filter_map(|label| app.get_webview(&label))
+        .collect()
+}
+
+/// The gap around a document. Remote pages use the Windows canvas. App pages use the theme.
+pub fn paint_document_background(app: &AppHandle, id: u32, url: &str) {
+    let Some(webview) = page_view(app, id) else {
+        return;
+    };
+    let _ = webview.set_background_color(Some(document_color(app, url)));
+}
+
+fn document_color(app: &AppHandle, url: &str) -> Color {
+    if remote_document(app, url) {
+        settings::site_canvas(app)
+    } else {
+        settings::page_color(app)
+    }
+}
+
+/// `http`, `https`, and `file` pages. `ce://` pages and extensions keep the browser theme.
+fn remote_document(app: &AppHandle, raw: &str) -> bool {
+    remote_scheme(&paths::display_url(app, raw))
+}
+
+fn remote_scheme(shown: &str) -> bool {
+    if shown.starts_with(paths::INTERNAL_SCHEME) || shown.starts_with("chrome-extension:") {
+        return false;
+    }
+    let scheme = shown.split(':').next().unwrap_or("").to_ascii_lowercase();
+    matches!(scheme.as_str(), "http" | "https" | "file")
 }
 
 pub(crate) fn popup_surface_color(app: &AppHandle) -> Color {
@@ -5708,6 +5765,15 @@ pub fn tab_page_url(app: &AppHandle, id: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_pages_keep_their_own_canvas() {
+        assert!(remote_scheme("https://mail.google.com/"));
+        assert!(remote_scheme("http://example.com"));
+        assert!(remote_scheme("file:///C:/page.html"));
+        assert!(!remote_scheme("ce://settings"));
+        assert!(!remote_scheme("chrome-extension://abc/popup.html"));
+    }
 
     fn tab(id: u32, group: Option<u32>, workspace: &str) -> Tab {
         Tab {

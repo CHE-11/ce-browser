@@ -1940,6 +1940,11 @@ pub fn run() {
                     let label = label.clone();
                     tauri::async_runtime::spawn(async move { tabs::layout(&app, &label) });
                 }
+                WindowEvent::ThemeChanged(theme) => {
+                    let app = window.app_handle().clone();
+                    webview2::apply_os_color_scheme(&app, *theme == tauri::Theme::Light);
+                    tabs::apply_page_background(&app);
+                }
                 WindowEvent::CloseRequested { api, .. } => {
                     let app = window.app_handle().clone();
                     let others = tabs::browser_labels(&app).iter().any(|item| item != &label);
