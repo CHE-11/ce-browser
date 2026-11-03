@@ -39,8 +39,9 @@ pub const GROUP_COLORS: &[&str] = &[
 ];
 /// Chromium args for every WebView2 environment. Setting them replaces wry's defaults,
 /// including `--autoplay-policy=no-user-gesture-required`, so the feature list is repeated here.
-/// A page cannot start video or audio until the user clicks or presses a key on that page.
-/// Selecting the tab does not count.
+/// The flag is not enough on its own. Opening a link hands that click to the new page, and a
+/// muted video can still start. `AUTOPLAY_GUARD_SCRIPT` pauses playback until a click or key
+/// press happens inside the page. Selecting the tab does not count.
 const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=user-gesture-required";
 /// Logical px between the two split panes. The browser UI shows through it as the divider.
 const SPLIT_GAP: f64 = 6.0;
@@ -1150,6 +1151,7 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
     let builder = page_builder(app, id, label, WebviewUrl::External(url))
         .background_color(color)
         .focused(false)
+        .initialization_script(AUTOPLAY_GUARD_SCRIPT)
         .initialization_script(page_background_script(app))
         .initialization_script(PEEK_CLICK_SCRIPT)
         .initialization_script(ZOOM_WHEEL_SCRIPT)
@@ -1251,6 +1253,136 @@ fn page_zoom_for(app: &AppHandle, url: &str) -> f64 {
             .unwrap_or_else(|| settings::get(app).page_zoom_factor())
     }
 }
+
+/// Pauses video and audio that start before the user clicks or presses a key in this document.
+/// The click that opened the tab, and selecting the tab, do not count: both can satisfy
+/// Chromium's autoplay policy without a gesture inside this page.
+const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
+  if (window.__ceAutoplayGuard || !window.HTMLMediaElement || !HTMLMediaElement.prototype) return;
+  window.__ceAutoplayGuard = true;
+  var allowed = false;
+  var nativePlay = HTMLMediaElement.prototype.play;
+  var nativePause = HTMLMediaElement.prototype.pause;
+  var roots = [];
+  var timer = 0;
+  var scan = 0;
+
+  function release() {
+    allowed = true;
+    if (timer) clearInterval(timer);
+    if (scan) clearInterval(scan);
+    timer = 0;
+    scan = 0;
+  }
+  function arm(event) {
+    if (event && event.isTrusted) release();
+  }
+  ["pointerdown", "mousedown", "touchstart", "keydown"].forEach(function (type) {
+    window.addEventListener(type, arm, true);
+  });
+
+  function streamOnly(media) {
+    try {
+      return !!media.srcObject && typeof MediaStream !== "undefined" && media.srcObject instanceof MediaStream && !media.currentSrc && !media.getAttribute("src");
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function stop(media) {
+    if (allowed || !media || media.nodeType !== 1) return;
+    var tag = media.tagName;
+    if (tag !== "VIDEO" && tag !== "AUDIO") return;
+    if (streamOnly(media)) return;
+    try {
+      if (media.autoplay || (media.hasAttribute && media.hasAttribute("autoplay"))) media.autoplay = false;
+      if (!media.paused && !media.ended) nativePause.call(media);
+    } catch (error) {}
+  }
+
+  function watch(root) {
+    if (!root || root.__ceAutoplayWatch) return;
+    try { root.__ceAutoplayWatch = true; } catch (error) { return; }
+    root.addEventListener("play", function (event) { stop(event.target); }, true);
+    root.addEventListener("playing", function (event) { stop(event.target); }, true);
+  }
+
+  function remember(root) {
+    if (!root || roots.indexOf(root) !== -1) return;
+    roots.push(root);
+    watch(root);
+  }
+
+  function discover(root, depth) {
+    if (allowed || !root || depth > 6 || !root.querySelectorAll) return;
+    remember(root);
+    var nodes;
+    try { nodes = root.querySelectorAll("*"); } catch (error) { return; }
+    for (var n = 0; n < nodes.length; n++) {
+      if (nodes[n].shadowRoot) discover(nodes[n].shadowRoot, depth + 1);
+    }
+  }
+
+  function tick() {
+    if (allowed) {
+      release();
+      return;
+    }
+    for (var i = 0; i < roots.length; i++) {
+      var media;
+      try { media = roots[i].querySelectorAll("video, audio"); } catch (error) { continue; }
+      for (var n = 0; n < media.length; n++) stop(media[n]);
+    }
+  }
+
+  HTMLMediaElement.prototype.play = function () {
+    if (!allowed && !streamOnly(this)) {
+      var media = this;
+      try { media.autoplay = false; } catch (error) {}
+      queueMicrotask(function () { stop(media); });
+      var rejected = Promise.reject(new DOMException("Playback needs a click in the page.", "NotAllowedError"));
+      rejected.catch(function () {});
+      return rejected;
+    }
+    return nativePlay.apply(this, arguments);
+  };
+
+  var autoplay = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "autoplay");
+  if (autoplay && autoplay.get && autoplay.set) {
+    Object.defineProperty(HTMLMediaElement.prototype, "autoplay", {
+      configurable: true,
+      enumerable: autoplay.enumerable,
+      get: function () { return autoplay.get.call(this); },
+      set: function (value) { autoplay.set.call(this, !!value && allowed); }
+    });
+  }
+
+  var nativeAttach = Element.prototype.attachShadow;
+  if (nativeAttach) {
+    Element.prototype.attachShadow = function () {
+      var root = nativeAttach.apply(this, arguments);
+      remember(root);
+      return root;
+    };
+  }
+
+  remember(document);
+  window.__ceStopAutoplay = function () {
+    discover(document, 0);
+    tick();
+  };
+  window.__cePlayMedia = function (media) {
+    release();
+    return nativePlay.call(media);
+  };
+  tick();
+  timer = setInterval(tick, 250);
+  scan = setInterval(function () { discover(document, 0); }, 2000);
+  document.addEventListener("DOMContentLoaded", function () {
+    discover(document, 0);
+    tick();
+  });
+})();"#;
 
 /// Ctrl+scroll zooms the page. A site that already handled the wheel, such as a map, is left alone.
 const ZOOM_WHEEL_SCRIPT: &str = r#"(function () {
@@ -4467,6 +4599,12 @@ pub fn update_audio(app: &AppHandle, id: u32, audible: bool) {
     });
     if changed.is_some() {
         emit_tabs(app);
+    }
+    // Muted video never raises this. The page script pauses that on its own.
+    if audible && changed.is_some() {
+        if let Some(webview) = page_view(app, id) {
+            let _ = webview.eval("if (window.__ceStopAutoplay) window.__ceStopAutoplay()");
+        }
     }
 }
 

@@ -287,7 +287,10 @@ pub fn control(
         r#"(function () {{
           var el = document.querySelectorAll("video, audio")[{index}];
           if (!el) return false;
-          if ({action:?} === "play") el.play();
+          if ({action:?} === "play") {{
+            if (typeof window.__cePlayMedia === "function") window.__cePlayMedia(el);
+            else el.play();
+          }}
           else if ({action:?} === "pause") el.pause();
           else if ({action:?} === "seek") el.currentTime = {time};
           else if ({action:?} === "mute") el.muted = true;
