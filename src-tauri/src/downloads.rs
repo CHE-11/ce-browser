@@ -118,6 +118,40 @@ pub fn list(app: &AppHandle) -> Vec<DownloadItem> {
     with_state(app, |state| state.items.clone())
 }
 
+/// A file this browser wrote itself, such as a saved PDF. It joins the profile's download list.
+pub fn record_completed(app: &AppHandle, url: &str, path: &Path, mime_type: &str) {
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "download".to_string());
+    let bytes = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+    let now = now_ms();
+    with_state(app, |state| {
+        let id = state.next_id;
+        state.next_id += 1;
+        state.items.insert(
+            0,
+            DownloadItem {
+                id,
+                url: url.to_string(),
+                file_name,
+                path: path.to_string_lossy().into_owned(),
+                mime_type: mime_type.to_string(),
+                total_bytes: Some(bytes),
+                received_bytes: bytes,
+                state: COMPLETED.into(),
+                started_at: now,
+                finished_at: Some(now),
+                can_resume: false,
+                accelerated: false,
+                ranges: Vec::new(),
+            },
+        );
+    });
+    changed(app, true);
+    let _ = app.emit("download-started", ());
+}
+
 fn changed(app: &AppHandle, persist: bool) {
     let items = list(app);
     if persist {

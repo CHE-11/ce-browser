@@ -468,7 +468,21 @@ impl AdblockSettings {
 const PRINT_MODES: &[&str] = &["article", "full"];
 const IMAGE_SIZES: &[&str] = &["original", "large", "medium", "small", "none"];
 const PRINT_FONTS: &[&str] = &["original", "serif", "sans"];
-const PAPER_SIZES: &[&str] = &["letter", "a4", "legal", "tabloid"];
+const PAPER_SIZES: &[&str] = &[
+    "letter",
+    "a4",
+    "legal",
+    "tabloid",
+    "iphone16",
+    "iphone16Plus",
+    "iphone16Pro",
+    "iphone16ProMax",
+    "ipadMini",
+    "ipad",
+    "ipadAir13",
+    "ipadPro11",
+    "ipadPro13",
+];
 const MARGINS: &[&str] = &["none", "narrow", "normal", "wide"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -515,7 +529,7 @@ impl Default for PrintEditorSettings {
             margins: "normal".into(),
             header_footer: false,
             print_backgrounds: true,
-            open_after_save: true,
+            open_after_save: false,
         }
     }
 }
@@ -1478,12 +1492,27 @@ mod tests {
         assert_eq!(loaded.print_editor.paper, "letter");
         assert_eq!(loaded.print_editor.text_size, 150);
         assert!(loaded.print_editor.remove_ads);
+        assert!(!loaded.print_editor.open_after_save);
         assert!(loaded.page_capture.full_page);
         assert_eq!(loaded.page_markdown.scope, "article");
         assert!(loaded.page_markdown.images);
         assert!(loaded.page_markdown.links);
         assert!(loaded.page_markdown.header);
         assert!(loaded.hidden_toolbar_extensions.is_empty());
+    }
+
+    #[test]
+    fn a_device_paper_size_is_kept() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"printEditor":{"paper":"iphone16"}}"#).expect("settings parse");
+        assert_eq!(loaded.normalize().print_editor.paper, "iphone16");
+    }
+
+    #[test]
+    fn an_explicit_open_after_save_is_kept() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"printEditor":{"openAfterSave":true}}"#).expect("settings parse");
+        assert!(loaded.normalize().print_editor.open_after_save);
     }
 
     #[test]

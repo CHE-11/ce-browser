@@ -1683,6 +1683,17 @@ fn save_settings(app: AppHandle, settings: BrowserSettings) -> Result<BrowserSet
     settings::save(&app, settings)
 }
 
+/// Print choices for the active profile. Other settings stay as they are.
+#[tauri::command]
+fn save_print_settings(
+    app: AppHandle,
+    print_editor: settings::PrintEditorSettings,
+) -> Result<BrowserSettings, String> {
+    settings::update(&app, |settings| {
+        settings.print_editor = print_editor;
+    })
+}
+
 /// Settings as a new profile gets them, so the settings page can mark changed values.
 #[tauri::command]
 fn default_settings() -> BrowserSettings {
@@ -2302,6 +2313,7 @@ pub fn run() {
             show_reader_original,
             get_settings,
             save_settings,
+            save_print_settings,
             default_settings,
             backdrop_support,
             update_status,

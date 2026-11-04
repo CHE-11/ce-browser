@@ -1,6 +1,7 @@
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
-import { extractPage, saveSettings, defaultDownloadDir, chooseSavePath, printHtmlToPdf, openSavedFile, printHtmlDialog, showSavedFile } from "@/lib/browser-client";
+import { extractPage, savePrintSettings, defaultDownloadDir, chooseSavePath, printHtmlToPdf, openSavedFile, printHtmlDialog, showSavedFile } from "@/lib/browser-client";
+import { cn } from "@/lib/cn";
 import { useSettings } from "@/lib/use-browser";
 import { ExtractedPage, PrintEditorSettings, PaperSize } from "@type/browser";
 import { CircleAlert, RotateCcw, LoaderCircle, Printer, Undo2, Redo2, ArrowUpToLine, Trash2, Copy, X, PencilLine, MousePointerClick, FileDown, FileCheck, FolderOpen } from "lucide-react";
@@ -11,7 +12,7 @@ import { errorText } from "../use-page-tool";
 import { CleanupKind } from "./cleanup";
 import { FrameEditor } from "./editor-dom";
 import { ContentState, BuiltDocument, contentStateFrom, parsePage, buildDocument, FORMAT_STYLE_ID, formatCss, serializeForPrint, finalizeRendered } from "./print-document";
-import { DEFAULT_PRINT_SETTINGS, contentBox, pdfOptions, MODE_OPTIONS, FONT_OPTIONS, IMAGE_OPTIONS, PAPER_SIZES, MARGIN_OPTIONS } from "./print-options";
+import { DEFAULT_PRINT_SETTINGS, contentBox, pdfOptions, MODE_OPTIONS, FONT_OPTIONS, IMAGE_OPTIONS, PAPER_GROUPS, papersInGroup, paperOptionLabel, MARGIN_OPTIONS } from "./print-options";
 
 
 type PrintEditorProps = {
@@ -142,34 +143,42 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
 
   useEffect(() => () => editorRef.current?.dispose(), []);
 
-  // Remember the choices for next time, including in the quick PDF.
+  // Remember the choices on this profile, including for the quick PDF.
+  const rememberPrintSettings = useCallback(() => {
+    const currentFormat = formatRef.current;
+    const currentHistory = historyRef.current;
+    const current = settingsRef.current;
+    if (!currentFormat || !currentHistory || !current) {
+      return;
+    }
+    const { present } = currentHistory;
+    const next: PrintEditorSettings = {
+      ...currentFormat,
+      mode: present.mode,
+      removeAds: present.removeAds,
+      removeNavigation: present.removeNavigation,
+      removePopups: present.removePopups,
+      removeSocial: present.removeSocial,
+      removeMedia: present.removeMedia,
+    };
+    const saved = current.printEditor as Record<string, unknown>;
+    if ((Object.keys(next) as (keyof PrintEditorSettings)[]).every((key) => next[key] === saved[key])) {
+      return;
+    }
+    void savePrintSettings(next)
+      .then((stored) => {
+        settingsRef.current = stored;
+      })
+      .catch(() => undefined);
+  }, []);
+
   useEffect(() => {
     if (!format || !history) {
       return;
     }
-    const timer = window.setTimeout(() => {
-      const current = settingsRef.current;
-      if (!current) {
-        return;
-      }
-      const { present } = history;
-      const next: PrintEditorSettings = {
-        ...format,
-        mode: present.mode,
-        removeAds: present.removeAds,
-        removeNavigation: present.removeNavigation,
-        removePopups: present.removePopups,
-        removeSocial: present.removeSocial,
-        removeMedia: present.removeMedia,
-      };
-      const saved = current.printEditor as Record<string, unknown>;
-      if ((Object.keys(next) as (keyof PrintEditorSettings)[]).every((key) => next[key] === saved[key])) {
-        return;
-      }
-      void saveSettings({ ...current, printEditor: next }).catch(() => undefined);
-    }, 500);
+    const timer = window.setTimeout(rememberPrintSettings, 500);
     return () => window.clearTimeout(timer);
-  }, [format, history]);
+  }, [format, history, rememberPrintSettings]);
 
   useEffect(() => {
     const doc = frameRef.current?.contentDocument;
@@ -269,6 +278,7 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
     if (!path) {
       return;
     }
+    rememberPrintSettings();
     setBusy("pdf");
     setNotice(null);
     try {
@@ -419,8 +429,11 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
 
   return (
     <main id="print-editor" className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
-      <header id="print-editor-toolbar" className="flex h-14 shrink-0 items-center gap-2 border-b border-zinc-800 px-3">
-        <div id="print-editor-heading" className="flex min-w-0 items-center gap-2.5 pr-2">
+      <header
+        id="print-editor-toolbar"
+        className="grid h-14 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-b border-zinc-800 px-3"
+      >
+        <div id="print-editor-heading" className="flex min-w-0 items-center gap-2.5 justify-self-start pr-3">
           <span
             id="print-editor-heading-icon"
             className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/15 text-sky-300"
@@ -437,97 +450,116 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
           </div>
         </div>
 
-        <ToolbarGroup id="print-editor-history">
-          <IconButton id="print-editor-undo" label="Undo (Ctrl+Z)" disabled={history.past.length === 0} onClick={undo}>
-            <Undo2 id="print-editor-undo-icon" aria-hidden />
-          </IconButton>
-          <IconButton id="print-editor-redo" label="Redo (Ctrl+Y)" disabled={history.future.length === 0} onClick={redo}>
-            <Redo2 id="print-editor-redo-icon" aria-hidden />
-          </IconButton>
-          <IconButton
-            id="print-editor-reset"
-            label="Restore everything you deleted or edited"
-            disabled={present.ops.length === 0}
-            onClick={() => setContent({ ops: [] })}
-          >
-            <RotateCcw id="print-editor-reset-icon" aria-hidden />
-          </IconButton>
-        </ToolbarGroup>
+        <div id="print-editor-toolbar-controls" className="flex items-center justify-center gap-2">
+          <ToolbarGroup id="print-editor-history">
+            <IconButton id="print-editor-undo" label="Undo (Ctrl+Z)" disabled={history.past.length === 0} onClick={undo}>
+              <Undo2 id="print-editor-undo-icon" aria-hidden />
+            </IconButton>
+            <IconButton id="print-editor-redo" label="Redo (Ctrl+Y)" disabled={history.future.length === 0} onClick={redo}>
+              <Redo2 id="print-editor-redo-icon" aria-hidden />
+            </IconButton>
+            <IconButton
+              id="print-editor-reset"
+              label="Restore everything you deleted or edited"
+              disabled={present.ops.length === 0}
+              onClick={() => setContent({ ops: [] })}
+            >
+              <RotateCcw id="print-editor-reset-icon" aria-hidden />
+            </IconButton>
+          </ToolbarGroup>
 
-        <ToolbarGroup id="print-editor-selection">
-          <IconButton
-            id="print-editor-select-parent"
-            label="Select the parent of the selection"
-            disabled={editText}
-            onClick={() => editorRef.current?.selectParent()}
-          >
-            <ArrowUpToLine id="print-editor-select-parent-icon" aria-hidden />
-          </IconButton>
-          <IconButton
-            id="print-editor-delete-selected"
-            label="Delete selected (Delete)"
-            disabled={selectionCount === 0 || editText}
-            onClick={() => editorRef.current?.deleteSelected()}
-          >
-            <Trash2 id="print-editor-delete-selected-icon" aria-hidden />
-          </IconButton>
-          <IconButton
-            id="print-editor-delete-similar"
-            label="Delete everything like the selection (Alt+click)"
-            disabled={selectionCount === 0 || editText}
-            onClick={() => editorRef.current?.deleteSimilar()}
-          >
-            <Copy id="print-editor-delete-similar-icon" aria-hidden />
-          </IconButton>
-          <IconButton
-            id="print-editor-clear-selection"
-            label="Clear selection (Esc)"
-            disabled={selectionCount === 0}
-            onClick={() => editorRef.current?.clearSelection()}
-          >
-            <X id="print-editor-clear-selection-icon" aria-hidden />
-          </IconButton>
-        </ToolbarGroup>
+          <ToolbarGroup id="print-editor-selection" divided>
+            <IconButton
+              id="print-editor-select-parent"
+              label="Select the parent of the selection"
+              disabled={editText}
+              onClick={() => editorRef.current?.selectParent()}
+            >
+              <ArrowUpToLine id="print-editor-select-parent-icon" aria-hidden />
+            </IconButton>
+            <IconButton
+              id="print-editor-delete-selected"
+              label="Delete selected (Delete)"
+              disabled={selectionCount === 0 || editText}
+              onClick={() => editorRef.current?.deleteSelected()}
+            >
+              <Trash2 id="print-editor-delete-selected-icon" aria-hidden />
+            </IconButton>
+            <IconButton
+              id="print-editor-delete-similar"
+              label="Delete everything like the selection (Alt+click)"
+              disabled={selectionCount === 0 || editText}
+              onClick={() => editorRef.current?.deleteSimilar()}
+            >
+              <Copy id="print-editor-delete-similar-icon" aria-hidden />
+            </IconButton>
+            <IconButton
+              id="print-editor-clear-selection"
+              label="Clear selection (Esc)"
+              disabled={selectionCount === 0}
+              onClick={() => editorRef.current?.clearSelection()}
+            >
+              <X id="print-editor-clear-selection-icon" aria-hidden />
+            </IconButton>
+          </ToolbarGroup>
 
-        <Button
-          id="print-editor-edit-text"
-          variant={editText ? "primary" : "ghost"}
-          size="sm"
-          aria-pressed={editText}
-          onClick={() => setEditText((value) => !value)}
-        >
-          {editText ? (
-            <PencilLine id="print-editor-edit-text-icon" className="size-4" aria-hidden />
-          ) : (
-            <MousePointerClick id="print-editor-edit-text-icon" className="size-4" aria-hidden />
-          )}
-          {editText ? "Editing text" : "Edit text"}
-        </Button>
+          <Button
+            id="print-editor-edit-text"
+            variant={editText ? "primary" : "ghost"}
+            size="sm"
+            aria-pressed={editText}
+            onClick={() => setEditText((value) => !value)}
+          >
+            {editText ? (
+              <PencilLine id="print-editor-edit-text-icon" className="size-4" aria-hidden />
+            ) : (
+              <MousePointerClick id="print-editor-edit-text-icon" className="size-4" aria-hidden />
+            )}
+            {editText ? "Editing text" : "Edit text"}
+          </Button>
 
-        <div id="print-editor-toolbar-spacer" className="min-w-0 flex-1" />
+          <div id="print-editor-toolbar-actions" className="flex items-center gap-2 border-l border-zinc-800 pl-2">
+            <EditorNotice notice={notice} onDismiss={() => setNotice(null)} />
 
-        <EditorNotice notice={notice} onDismiss={() => setNotice(null)} />
-
-        <Button id="print-editor-print" variant="ghost" disabled={busy !== null} onClick={() => void printPage()}>
-          {busy === "print" ? (
-            <LoaderCircle id="print-editor-print-icon" className="size-4 animate-spin" aria-hidden />
-          ) : (
-            <Printer id="print-editor-print-icon" className="size-4" aria-hidden />
-          )}
-          Print…
-        </Button>
-        <Button id="print-editor-save" variant="primary" disabled={busy !== null} onClick={() => void savePdf()}>
-          {busy === "pdf" ? (
-            <LoaderCircle id="print-editor-save-icon" className="size-4 animate-spin" aria-hidden />
-          ) : (
-            <FileDown id="print-editor-save-icon" className="size-4" aria-hidden />
-          )}
-          {busy === "pdf" ? "Saving…" : "Save PDF"}
-        </Button>
+            <Button id="print-editor-print" variant="ghost" disabled={busy !== null} onClick={() => void printPage()}>
+              {busy === "print" ? (
+                <LoaderCircle id="print-editor-print-icon" className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <Printer id="print-editor-print-icon" className="size-4" aria-hidden />
+              )}
+              Print…
+            </Button>
+            <Button id="print-editor-save" variant="primary" disabled={busy !== null} onClick={() => void savePdf()}>
+              {busy === "pdf" ? (
+                <LoaderCircle id="print-editor-save-icon" className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <FileDown id="print-editor-save-icon" className="size-4" aria-hidden />
+              )}
+              {busy === "pdf" ? "Saving…" : "Save PDF"}
+            </Button>
+          </div>
+        </div>
       </header>
 
       <div id="print-editor-body" className="flex min-h-0 flex-1">
-        <aside id="print-editor-sidebar" className="w-80 shrink-0 overflow-y-auto border-r border-zinc-800 p-3">
+        <section id="print-editor-preview" className="flex min-w-0 flex-1 justify-center overflow-auto bg-zinc-900/60 p-6">
+          <div
+            id="print-editor-sheet"
+            className="h-full shrink-0 rounded-sm bg-white shadow-2xl shadow-black/40 ring-1 ring-black/10"
+            style={{ width: box.width + box.margin * 2, padding: box.margin }}
+          >
+            <iframe
+              id="print-editor-frame"
+              ref={frameRef}
+              title="Print preview"
+              className="block h-full border-0 bg-white"
+              style={{ width: box.width }}
+              onLoad={onFrameLoad}
+            />
+          </div>
+        </section>
+
+        <aside id="print-editor-sidebar" className="w-80 shrink-0 overflow-y-auto border-l border-zinc-800 p-3">
           <SidebarSection id="print-editor-content" title="Content">
             <Segmented
               id="print-editor-mode"
@@ -626,10 +658,14 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
               className="h-8 w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 text-sm text-zinc-100 outline-none focus:border-sky-500"
               onChange={(event) => updateFormat({ paper: event.target.value as PaperSize })}
             >
-              {(Object.keys(PAPER_SIZES) as PaperSize[]).map((paper) => (
-                <option id={`print-editor-paper-${paper}`} key={paper} value={paper}>
-                  {PAPER_SIZES[paper].label} ({PAPER_SIZES[paper].width} × {PAPER_SIZES[paper].height} in)
-                </option>
+              {PAPER_GROUPS.map((group) => (
+                <optgroup id={`print-editor-paper-${group.id}`} key={group.id} label={group.label}>
+                  {papersInGroup(group.id).map((paper) => (
+                    <option id={`print-editor-paper-${paper}`} key={paper} value={paper}>
+                      {paperOptionLabel(paper)}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
             <FieldLabel id="print-editor-orientation-label">Orientation</FieldLabel>
@@ -677,23 +713,6 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
             />
           </SidebarSection>
         </aside>
-
-        <section id="print-editor-preview" className="flex min-w-0 flex-1 justify-center overflow-auto bg-zinc-900/60 p-6">
-          <div
-            id="print-editor-sheet"
-            className="h-full shrink-0 rounded-sm bg-white shadow-2xl shadow-black/40 ring-1 ring-black/10"
-            style={{ width: box.width + box.margin * 2, padding: box.margin }}
-          >
-            <iframe
-              id="print-editor-frame"
-              ref={frameRef}
-              title="Print preview"
-              className="block h-full border-0 bg-white"
-              style={{ width: box.width }}
-              onLoad={onFrameLoad}
-            />
-          </div>
-        </section>
       </div>
 
       <footer
@@ -714,16 +733,16 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
           {autoRemoved} removed automatically · {manualDeleted} deleted by you
         </span>
         <span id="print-editor-status-paper" className="shrink-0">
-          {PAPER_SIZES[format.paper].label} {format.landscape ? "landscape" : "portrait"}
+          {paperOptionLabel(format.paper)} {format.landscape ? "landscape" : "portrait"}
         </span>
       </footer>
     </main>
   );
 }
 
-function ToolbarGroup({ id, children }: { id: string; children: ReactNode }) {
+function ToolbarGroup({ id, children, divided = false }: { id: string; children: ReactNode; divided?: boolean }) {
   return (
-    <div id={id} className="flex items-center gap-0.5 border-l border-zinc-800 pl-2">
+    <div id={id} className={cn("flex items-center gap-0.5", divided && "border-l border-zinc-800 pl-2")}>
       {children}
     </div>
   );

@@ -874,7 +874,20 @@ export type AdblockStats = {
 export type PrintMode = "article" | "full";
 export type PrintImageSize = "original" | "large" | "medium" | "small" | "none";
 export type PrintFont = "original" | "serif" | "sans";
-export type PaperSize = "letter" | "a4" | "legal" | "tabloid";
+export type PaperSize =
+  | "letter"
+  | "a4"
+  | "legal"
+  | "tabloid"
+  | "iphone16"
+  | "iphone16Plus"
+  | "iphone16Pro"
+  | "iphone16ProMax"
+  | "ipadMini"
+  | "ipad"
+  | "ipadAir13"
+  | "ipadPro11"
+  | "ipadPro13";
 export type PrintMargins = "none" | "narrow" | "normal" | "wide";
 
 export type PrintEditorSettings = {

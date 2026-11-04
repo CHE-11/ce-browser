@@ -52,6 +52,7 @@ import type {
   SitePatch,
   UserScript,
   PdfOptions,
+  PrintEditorSettings,
   SyncStatus,
   SyncConflict,
   ImportedProfile,
@@ -1373,6 +1374,11 @@ export function getSettings() {
 
 export function saveSettings(settings: BrowserSettings) {
   return invoke<BrowserSettings>("save_settings", { settings });
+}
+
+/** Writes print choices onto the active profile. */
+export function savePrintSettings(printEditor: PrintEditorSettings) {
+  return invoke<BrowserSettings>("save_print_settings", { printEditor });
 }
 
 export function defaultDownloadDir() {

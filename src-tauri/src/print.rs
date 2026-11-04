@@ -227,7 +227,9 @@ pub fn print_tab_to_pdf(
     let webview =
         tabs::page_view(app, id).ok_or("That tab is closed or its page is not loaded.")?;
     prepare_target(path)?;
-    webview2::print_to_pdf(&webview, path, options.layout())
+    webview2::print_to_pdf(&webview, path, options.layout())?;
+    crate::downloads::record_completed(app, &options.url, path, "application/pdf");
+    Ok(())
 }
 
 pub fn print_html_to_pdf(
@@ -241,6 +243,9 @@ pub fn print_html_to_pdf(
     let result = webview2::print_to_pdf(&webview, path, options.layout());
     let _ = webview.close();
     let _ = std::fs::remove_file(file);
+    if result.is_ok() {
+        crate::downloads::record_completed(app, &options.url, path, "application/pdf");
+    }
     result
 }
 

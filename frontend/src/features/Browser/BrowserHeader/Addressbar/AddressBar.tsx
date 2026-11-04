@@ -568,6 +568,10 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       onDownloadStarted(() => {
         setDownloadFlash(true);
         window.setTimeout(() => setDownloadFlash(false), 1600);
+        const anchor = downloadsRef.current;
+        if (anchor) {
+          void openPopup("downloads", anchor, { focus: false });
+        }
       }),
     ];
     return () => {
