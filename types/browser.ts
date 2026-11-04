@@ -389,6 +389,7 @@ export type BrowserCommand =
 
 export type PopupKind =
   | "downloads"
+  | "history"
   | "bookmark-edit"
   | "bookmark-folder"
   | "bookmarks-bar-menu"
@@ -876,18 +877,36 @@ export type PrintImageSize = "original" | "large" | "medium" | "small" | "none";
 export type PrintFont = "original" | "serif" | "sans";
 export type PaperSize =
   | "letter"
-  | "a4"
   | "legal"
   | "tabloid"
+  | "statement"
+  | "executive"
+  | "folio"
+  | "a3"
+  | "a4"
+  | "a5"
+  | "a6"
+  | "b5"
+  | "photo4x6"
+  | "photo5x7"
+  | "photo8x10"
   | "iphone16"
   | "iphone16Plus"
   | "iphone16Pro"
   | "iphone16ProMax"
+  | "iphoneSe"
+  | "pixel9"
+  | "pixel9ProXl"
+  | "galaxyS24"
+  | "galaxyS24Ultra"
   | "ipadMini"
   | "ipad"
   | "ipadAir13"
   | "ipadPro11"
-  | "ipadPro13";
+  | "ipadPro13"
+  | "galaxyTabS9";
+/** A catalog size, or the one custom size stored beside it. */
+export type PrintPaper = PaperSize | "custom";
 export type PrintMargins = "none" | "narrow" | "normal" | "wide";
 
 export type PrintEditorSettings = {
@@ -905,7 +924,13 @@ export type PrintEditorSettings = {
   font: PrintFont;
   /** Title, source URL and date above the content. */
   showHeader: boolean;
-  paper: PaperSize;
+  paper: PrintPaper;
+  /** Sizes listed in the print editor. Empty means Letter, Tabloid, and Legal. */
+  paperChoices: string[];
+  /** Custom page width in inches. `0` means it is not set. */
+  customWidth: number;
+  /** Custom page height in inches. `0` means it is not set. */
+  customHeight: number;
   landscape: boolean;
   margins: PrintMargins;
   /** WebView2's own header and footer on every page. */

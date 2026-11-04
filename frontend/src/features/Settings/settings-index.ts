@@ -60,6 +60,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { id: "settings-ai-key", label: "AI API key", section: "settings-ai", keywords: "tools token openai anthropic" },
   { id: "settings-translate-language", label: "Translate language", section: "settings-translate", keywords: "tools" },
   { id: "settings-translate-url", label: "Translate provider", section: "settings-translate", keywords: "tools" },
+  { id: "settings-print-papers", label: "PDF page sizes", section: "settings-print", keywords: "print pdf paper letter legal tabloid device iphone ipad custom" },
   { id: "settings-shopping-region", label: "Shopping region", section: "settings-shopping", keywords: "tools coupons deals" },
   { id: "settings-shopping-model", label: "Shopping model", section: "settings-shopping", keywords: "tools ai coupons deals text model" },
   { id: "settings-shopping-competitors", label: "Shopping competitors", section: "settings-shopping", keywords: "tools stores deals" },

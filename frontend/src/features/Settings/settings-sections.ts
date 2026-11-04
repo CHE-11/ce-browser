@@ -15,6 +15,7 @@ export const SETTINGS_SECTIONS = [
   { id: "settings-ai", title: "AI" },
   { id: "settings-shopping", title: "Shopping" },
   { id: "settings-translate", title: "Translate" },
+  { id: "settings-print", title: "Print to PDF" },
 ] as const;
 
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];

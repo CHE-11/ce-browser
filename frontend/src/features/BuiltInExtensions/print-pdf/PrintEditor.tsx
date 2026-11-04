@@ -3,7 +3,7 @@ import { IconButton } from "@/components/IconButton";
 import { extractPage, savePrintSettings, defaultDownloadDir, chooseSavePath, printHtmlToPdf, openSavedFile, printHtmlDialog, showSavedFile } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { useSettings } from "@/lib/use-browser";
-import { ExtractedPage, PrintEditorSettings, PaperSize } from "@type/browser";
+import { ExtractedPage, PrintEditorSettings, PaperSize, PrintPaper } from "@type/browser";
 import { CircleAlert, RotateCcw, LoaderCircle, Printer, Undo2, Redo2, ArrowUpToLine, Trash2, Copy, X, PencilLine, MousePointerClick, FileDown, FileCheck, FolderOpen } from "lucide-react";
 import { useState, useRef, useEffect, useMemo, useCallback, ReactNode } from "react";
 import { Segmented, OptionRow } from "../PopoverParts";
@@ -12,7 +12,7 @@ import { errorText } from "../use-page-tool";
 import { CleanupKind } from "./cleanup";
 import { FrameEditor } from "./editor-dom";
 import { ContentState, BuiltDocument, contentStateFrom, parsePage, buildDocument, FORMAT_STYLE_ID, formatCss, serializeForPrint, finalizeRendered } from "./print-document";
-import { DEFAULT_PRINT_SETTINGS, contentBox, pdfOptions, MODE_OPTIONS, FONT_OPTIONS, IMAGE_OPTIONS, PAPER_GROUPS, papersInGroup, paperOptionLabel, MARGIN_OPTIONS } from "./print-options";
+import { DEFAULT_PRINT_SETTINGS, contentBox, pdfOptions, MODE_OPTIONS, FONT_OPTIONS, IMAGE_OPTIONS, PAPER_GROUPS, PAPER_SIZES, paperOptionLabel, visiblePapers, MARGIN_OPTIONS } from "./print-options";
 
 
 type PrintEditorProps = {
@@ -110,10 +110,46 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
 
   useEffect(() => {
     if (settings && !formatRef.current) {
-      const initial = { ...DEFAULT_PRINT_SETTINGS, ...settings.printEditor };
+      const stored = { ...DEFAULT_PRINT_SETTINGS, ...settings.printEditor };
+      const menu = visiblePapers(stored);
+      const initial = menu.includes(stored.paper) ? stored : { ...stored, paper: menu[0] };
       setFormat(initial);
       setHistory({ past: [], present: contentStateFrom(initial), future: [] });
     }
+  }, [settings]);
+
+  useEffect(() => {
+    const print = settings?.printEditor;
+    if (!print || !formatRef.current) {
+      return;
+    }
+    setFormat((current) => {
+      if (!current) {
+        return current;
+      }
+      const menu = visiblePapers({
+        ...current,
+        paperChoices: print.paperChoices,
+        customWidth: print.customWidth,
+        customHeight: print.customHeight,
+      });
+      const paper = menu.includes(current.paper) ? current.paper : menu[0];
+      if (
+        paper === current.paper &&
+        current.paperChoices === print.paperChoices &&
+        current.customWidth === print.customWidth &&
+        current.customHeight === print.customHeight
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        paper,
+        paperChoices: print.paperChoices,
+        customWidth: print.customWidth,
+        customHeight: print.customHeight,
+      };
+    });
   }, [settings]);
 
   const sourceDoc = useMemo(() => (page ? parsePage(page) : null), [page]);
@@ -160,6 +196,9 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
       removePopups: present.removePopups,
       removeSocial: present.removeSocial,
       removeMedia: present.removeMedia,
+      paperChoices: current.printEditor.paperChoices,
+      customWidth: current.printEditor.customWidth,
+      customHeight: current.printEditor.customHeight,
     };
     const saved = current.printEditor as Record<string, unknown>;
     if ((Object.keys(next) as (keyof PrintEditorSettings)[]).every((key) => next[key] === saved[key])) {
@@ -421,7 +460,15 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
   }
 
   const present = history.present;
-  const box = contentBox(format);
+  const menuSettings = settings?.printEditor ?? format;
+  const paperMenu = visiblePapers({
+    ...format,
+    paperChoices: menuSettings.paperChoices,
+    customWidth: menuSettings.customWidth,
+    customHeight: menuSettings.customHeight,
+  });
+  const selectedPaper = paperMenu.includes(format.paper) ? format.paper : paperMenu[0];
+  const box = contentBox({ ...format, paper: selectedPaper, customWidth: menuSettings.customWidth, customHeight: menuSettings.customHeight });
   const manualDeleted = present.ops.reduce((sum, op) => sum + (op.type === "delete" ? op.ids.length : 0), 0);
   const autoRemoved =
     Object.values(built.stats).reduce((sum, count) => sum + count, 0) + overlaysRemoved;
@@ -517,27 +564,27 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
             )}
             {editText ? "Editing text" : "Edit text"}
           </Button>
+        </div>
 
-          <div id="print-editor-toolbar-actions" className="flex items-center gap-2 border-l border-zinc-800 pl-2">
-            <EditorNotice notice={notice} onDismiss={() => setNotice(null)} />
+        <div id="print-editor-toolbar-actions" className="flex items-center justify-end gap-2 justify-self-end pl-3">
+          <EditorNotice notice={notice} onDismiss={() => setNotice(null)} />
 
-            <Button id="print-editor-print" variant="ghost" disabled={busy !== null} onClick={() => void printPage()}>
-              {busy === "print" ? (
-                <LoaderCircle id="print-editor-print-icon" className="size-4 animate-spin" aria-hidden />
-              ) : (
-                <Printer id="print-editor-print-icon" className="size-4" aria-hidden />
-              )}
-              Print…
-            </Button>
-            <Button id="print-editor-save" variant="primary" disabled={busy !== null} onClick={() => void savePdf()}>
-              {busy === "pdf" ? (
-                <LoaderCircle id="print-editor-save-icon" className="size-4 animate-spin" aria-hidden />
-              ) : (
-                <FileDown id="print-editor-save-icon" className="size-4" aria-hidden />
-              )}
-              {busy === "pdf" ? "Saving…" : "Save PDF"}
-            </Button>
-          </div>
+          <Button id="print-editor-print" variant="ghost" disabled={busy !== null} onClick={() => void printPage()}>
+            {busy === "print" ? (
+              <LoaderCircle id="print-editor-print-icon" className="size-4 animate-spin" aria-hidden />
+            ) : (
+              <Printer id="print-editor-print-icon" className="size-4" aria-hidden />
+            )}
+            Print…
+          </Button>
+          <Button id="print-editor-save" variant="primary" disabled={busy !== null} onClick={() => void savePdf()}>
+            {busy === "pdf" ? (
+              <LoaderCircle id="print-editor-save-icon" className="size-4 animate-spin" aria-hidden />
+            ) : (
+              <FileDown id="print-editor-save-icon" className="size-4" aria-hidden />
+            )}
+            {busy === "pdf" ? "Saving…" : "Save PDF"}
+          </Button>
         </div>
       </header>
 
@@ -654,19 +701,34 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
             <FieldLabel id="print-editor-paper-label">Paper size</FieldLabel>
             <select
               id="print-editor-paper"
-              value={format.paper}
+              value={selectedPaper}
               className="h-8 w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 text-sm text-zinc-100 outline-none focus:border-sky-500"
-              onChange={(event) => updateFormat({ paper: event.target.value as PaperSize })}
+              onChange={(event) => updateFormat({ paper: event.target.value as PrintPaper })}
             >
-              {PAPER_GROUPS.map((group) => (
-                <optgroup id={`print-editor-paper-${group.id}`} key={group.id} label={group.label}>
-                  {papersInGroup(group.id).map((paper) => (
-                    <option id={`print-editor-paper-${paper}`} key={paper} value={paper}>
-                      {paperOptionLabel(paper)}
-                    </option>
-                  ))}
+              {PAPER_GROUPS.map((group) => {
+                const papers = paperMenu.filter(
+                  (paper): paper is PaperSize => paper !== "custom" && PAPER_SIZES[paper].group === group.id,
+                );
+                if (papers.length === 0) {
+                  return null;
+                }
+                return (
+                  <optgroup id={`print-editor-paper-${group.id}`} key={group.id} label={group.label}>
+                    {papers.map((paper) => (
+                      <option id={`print-editor-paper-${paper}`} key={paper} value={paper}>
+                        {paperOptionLabel(paper)}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+              {paperMenu.includes("custom") ? (
+                <optgroup id="print-editor-paper-custom" label="Custom">
+                  <option id="print-editor-paper-custom-option" value="custom">
+                    {paperOptionLabel("custom", menuSettings)}
+                  </option>
                 </optgroup>
-              ))}
+              ) : null}
             </select>
             <FieldLabel id="print-editor-orientation-label">Orientation</FieldLabel>
             <Segmented
@@ -733,7 +795,7 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
           {autoRemoved} removed automatically · {manualDeleted} deleted by you
         </span>
         <span id="print-editor-status-paper" className="shrink-0">
-          {paperOptionLabel(format.paper)} {format.landscape ? "landscape" : "portrait"}
+          {paperOptionLabel(selectedPaper, menuSettings)} {format.landscape ? "landscape" : "portrait"}
         </span>
       </footer>
     </main>

@@ -2004,6 +2004,7 @@ pub fn run() {
                     }
                 }
                 system::apply_launch(&handle);
+                system::open_pending_pdfs(&handle);
                 update::note_version(&handle);
                 let extensions_app = handle.clone();
                 let _ = tauri::async_runtime::spawn_blocking(move || {

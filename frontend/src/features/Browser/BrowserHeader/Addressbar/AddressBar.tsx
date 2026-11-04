@@ -314,6 +314,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const fieldRef = useRef<HTMLDivElement>(null);
   const starRef = useRef<HTMLButtonElement>(null);
   const downloadsRef = useRef<HTMLButtonElement>(null);
+  const historyRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
 
   const [text, setText] = useState(() => addressText(activeTab));
@@ -1073,7 +1074,12 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           </svg>
         ) : null}
       </IconButton>
-      <IconButton id="address-history" label="History" onClick={() => void createTab("ce://history")}>
+      <IconButton
+        id="address-history"
+        ref={historyRef}
+        label="History"
+        onClick={(event) => void openPopup("history", event.currentTarget)}
+      >
         <History id="address-history-icon" aria-hidden />
       </IconButton>
       {toolbarPinned(settings, "media-hub") ? <MediaHubButton /> : null}

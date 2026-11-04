@@ -1770,6 +1770,21 @@ fn attach_adblock(
                     .Request()
                     .map(|request| read_pwstr(|value| request.Uri(value)))
                     .unwrap_or_default();
+                if let Some(bytes) = crate::system::pdf_bytes(&uri)
+                    && let Some(stream) =
+                        windows::Win32::UI::Shell::SHCreateMemStream(Some(&bytes))
+                {
+                    let response = environment.CreateWebResourceResponse(
+                        &stream,
+                        200,
+                        windows::core::w!("OK"),
+                        windows::core::w!(
+                            "Content-Type: application/pdf\r\nAccess-Control-Allow-Origin: *"
+                        ),
+                    )?;
+                    args.SetResponse(&response)?;
+                    return Ok(());
+                }
                 if let Some(hit) = crate::rewrite::find(&uri, &crate::rewrite::list(&request_app)) {
                     match hit {
                         crate::rewrite::RewriteHit::Block => {
@@ -2333,6 +2348,58 @@ fn with_core(
             let _ = work(&core);
         }
     });
+}
+
+/// Drops a staged PDF onto the markup editor's file input once that page has loaded.
+/// The editor only accepts a picked or dropped file, and a remote page cannot read a local path.
+pub fn attach_local_pdf(webview: &Webview, fetch: &str, file_name: &str) {
+    let script = pdf_attach_script(fetch, file_name);
+    let _ = webview.with_webview(move |platform| {
+        let Ok(core) = core(&platform) else {
+            return;
+        };
+        let script = HSTRING::from(script);
+        let _ = unsafe {
+            core.ExecuteScript(&script, None::<&ICoreWebView2ExecuteScriptCompletedHandler>)
+        };
+    });
+}
+
+fn pdf_attach_script(fetch: &str, file_name: &str) -> String {
+    let url = serde_json::to_string(fetch).unwrap_or_else(|_| "\"\"".to_string());
+    let name = serde_json::to_string(file_name).unwrap_or_else(|_| "\"document.pdf\"".to_string());
+    format!(
+        r#"(function() {{
+  if (window.__cePdfBusy) return;
+  window.__cePdfBusy = true;
+  var name = {name};
+  var url = {url};
+  var started = Date.now();
+  function giveUp() {{ window.__cePdfBusy = false; }}
+  function tick() {{
+    var input = document.getElementById("pdf-dropzone-input");
+    if (!input) {{
+      if (Date.now() - started < 20000) setTimeout(tick, 200);
+      else giveUp();
+      return;
+    }}
+    fetch(url).then(function(response) {{
+      if (!response.ok) throw new Error("missing");
+      return response.blob();
+    }}).then(function(blob) {{
+      var file = new File([blob], name, {{ type: "application/pdf" }});
+      var transfer = new DataTransfer();
+      transfer.items.add(file);
+      input.files = transfer.files;
+      input.dispatchEvent(new Event("change", {{ bubbles: true }}));
+    }}).catch(function() {{
+      if (Date.now() - started < 20000) setTimeout(tick, 500);
+      else giveUp();
+    }});
+  }}
+  tick();
+}})();"#
+    )
 }
 
 pub fn set_muted(webview: &Webview, muted: bool) {

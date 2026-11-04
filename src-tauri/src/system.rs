@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -20,18 +20,49 @@ pub enum Launch {
     Url(String),
     App(String),
     Open(String),
+    /// Local PDFs to open in the markup editor. Not kept in `LAUNCH`: those wait until
+    /// session restore has finished so the new tab stays in front.
+    Pdfs(Vec<String>),
+}
+
+const PDF_EDITOR: &str = "https://ce-file-tools.vercel.app/pdf/editor/markup";
+
+struct PendingPdfs {
+    ready: bool,
+    paths: Vec<String>,
+}
+
+#[derive(Clone)]
+struct PdfAttach {
+    dir: PathBuf,
+    /// `https://pdf-<id>.ce-browser.example/document.pdf`. The page fetches this.
+    /// `.example` is a reserved name, so it never hits the network.
+    fetch: String,
+    file_name: String,
 }
 
 static LAUNCH: Mutex<Launch> = Mutex::new(Launch::None);
+static PDF_LAUNCH: Mutex<PendingPdfs> = Mutex::new(PendingPdfs {
+    ready: false,
+    paths: Vec::new(),
+});
+static PDF_ARMED: Mutex<Option<PdfAttach>> = Mutex::new(None);
+static PDF_TABS: Mutex<Vec<(u32, PdfAttach)>> = Mutex::new(Vec::new());
 static TRAY: OnceLock<tauri::tray::TrayIcon> = OnceLock::new();
 static FRAMES_CAPPED: Mutex<bool> = Mutex::new(false);
 
 pub fn read_args() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    *LAUNCH.lock().expect("launch") = launch_from_args(&args);
+    match launch_from_args(&args) {
+        Launch::Pdfs(paths) => {
+            PDF_LAUNCH.lock().expect("pdf launch").paths.extend(paths);
+        }
+        other => *LAUNCH.lock().expect("launch") = other,
+    }
 }
 
 pub fn launch_from_args(args: &[String]) -> Launch {
+    let mut pdfs = Vec::new();
     let mut index = 0;
     while index < args.len() {
         let arg = args[index].as_str();
@@ -51,12 +82,56 @@ pub fn launch_from_args(args: &[String]) -> Launch {
                 return Launch::Open(path.clone());
             }
         }
+        if arg == "--profile" {
+            index += 2;
+            continue;
+        }
+        if arg.starts_with("--profile=") {
+            index += 1;
+            continue;
+        }
         if is_website(arg) {
             return Launch::Url(arg.to_string());
         }
+        if let Some(path) = pdf_argument(arg) {
+            pdfs.push(path);
+        }
         index += 1;
     }
-    Launch::None
+    if pdfs.is_empty() {
+        Launch::None
+    } else {
+        Launch::Pdfs(pdfs)
+    }
+}
+
+/// A command-line PDF from a file association or a `file://` URL. Flags are left alone.
+fn pdf_argument(arg: &str) -> Option<String> {
+    let arg = arg.trim().trim_matches('"');
+    if arg.is_empty() || arg.starts_with('-') {
+        return None;
+    }
+    let path = if arg.len() >= 7 && arg[..7].eq_ignore_ascii_case("file://") {
+        url::Url::parse(arg).ok()?.to_file_path().ok()?
+    } else {
+        PathBuf::from(arg)
+    };
+    let pdf = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"));
+    if !pdf {
+        return None;
+    }
+    Some(path.to_string_lossy().to_string())
+}
+
+pub fn is_pdf_editor(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    parsed.host_str() == Some("ce-file-tools.vercel.app")
+        && parsed.path().trim_end_matches('/') == "/pdf/editor/markup"
 }
 
 pub fn is_website(text: &str) -> bool {
@@ -115,11 +190,16 @@ pub fn power_is_battery(ac_line: u8) -> bool {
 
 pub fn write_handoff(app: &AppHandle) {
     let launch = LAUNCH.lock().expect("launch").clone();
-    if matches!(launch, Launch::None) {
+    let pdfs = PDF_LAUNCH.lock().expect("pdf launch").paths.clone();
+    if matches!(launch, Launch::None) && pdfs.is_empty() {
         return;
     }
+    let mut value = launch_file(&launch);
+    if !pdfs.is_empty() {
+        value["pdfs"] = serde_json::json!(pdfs);
+    }
     let path = paths::root_local_dir(app).join(LAUNCH_FILE);
-    let _ = files::write_json(&path, &launch_file(&launch));
+    let _ = files::write_json(&path, &value);
 }
 
 pub fn start(app: &AppHandle) {
@@ -134,6 +214,7 @@ fn launch_file(launch: &Launch) -> serde_json::Value {
         Launch::Url(url) => serde_json::json!({ "url": url }),
         Launch::App(id) => serde_json::json!({ "app": id }),
         Launch::Open(path) => serde_json::json!({ "open": path }),
+        Launch::Pdfs(paths) => serde_json::json!({ "pdfs": paths }),
         Launch::None => serde_json::json!({}),
     }
 }
@@ -157,7 +238,19 @@ pub fn apply_launch(app: &AppHandle) {
             } else {
                 Launch::None
             };
+            let pdfs = value
+                .get("pdfs")
+                .and_then(|item| item.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .filter_map(pdf_argument)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
             open_launch(app, launch);
+            enqueue_pdfs(app, pdfs);
         }
     }
 }
@@ -168,6 +261,7 @@ fn open_launch(app: &AppHandle, launch: Launch) {
             let _ = tabs::create_tab(app, Some(url), false, None);
             tabs::show_main(app);
         }
+        Launch::Url(_) => {}
         Launch::App(id) => {
             if let Some(site) = find_app(app, &id) {
                 let _ = tabs::open_site_window(app, &site.name, &site.url);
@@ -177,8 +271,163 @@ fn open_launch(app: &AppHandle, launch: Launch) {
         Launch::Open(path) => {
             let _ = crate::files::open_with_default(Path::new(&path));
         }
-        _ => {}
+        Launch::Pdfs(paths) => enqueue_pdfs(app, paths),
+        Launch::None => {}
     }
+}
+
+/// Opens queued PDFs once session restore has finished, so the editor tab stays selected.
+pub fn open_pending_pdfs(app: &AppHandle) {
+    let paths = {
+        let mut pending = PDF_LAUNCH.lock().expect("pdf launch");
+        pending.ready = true;
+        std::mem::take(&mut pending.paths)
+    };
+    open_pdfs(app, &paths);
+}
+
+fn enqueue_pdfs(app: &AppHandle, paths: Vec<String>) {
+    if paths.is_empty() {
+        return;
+    }
+    let mut pending = PDF_LAUNCH.lock().expect("pdf launch");
+    if pending.ready {
+        drop(pending);
+        open_pdfs(app, &paths);
+    } else {
+        pending.paths.extend(paths);
+    }
+}
+
+fn open_pdfs(app: &AppHandle, paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
+    sweep_old_pdfs();
+    let mut opened = false;
+    for path in paths {
+        let attach = match stage_pdf(path) {
+            Ok(attach) => attach,
+            Err(error) => {
+                eprintln!("pdf: {error}");
+                continue;
+            }
+        };
+        let title = attach.file_name.clone();
+        arm_pdf(attach);
+        let url = tabs::resolve(app, PDF_EDITOR);
+        match tabs::open(
+            app,
+            tabs::OpenTab {
+                title: Some(title),
+                ..tabs::OpenTab::new(url)
+            },
+        ) {
+            Ok(_) => opened = true,
+            Err(error) => {
+                eprintln!("pdf: {error}");
+                if let Some(attach) = disarm_pdf() {
+                    let _ = fs::remove_dir_all(attach.dir);
+                }
+            }
+        }
+    }
+    if opened {
+        tabs::show_main(app);
+    }
+}
+
+fn stage_pdf(source: &str) -> Result<PdfAttach, String> {
+    let path = PathBuf::from(source);
+    if !path.is_file() {
+        return Err(format!("Couldn't find {source}."));
+    }
+    let id = rand::random::<u64>();
+    let dir = std::env::temp_dir()
+        .join("ce-browser-pdf")
+        .join(format!("{id:x}"));
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let dest = dir.join("document.pdf");
+    // A hard link keeps one copy of a large file. Another drive has to be copied.
+    if fs::hard_link(&path, &dest).is_err() {
+        fs::copy(&path, &dest).map_err(|error| format!("Couldn't read {source}. {error}"))?;
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("document.pdf")
+        .to_string();
+    Ok(PdfAttach {
+        dir,
+        fetch: format!("https://pdf-{id:x}.ce-browser.example/document.pdf"),
+        file_name,
+    })
+}
+
+fn sweep_old_pdfs() {
+    let root = std::env::temp_dir().join("ce-browser-pdf");
+    let Ok(entries) = fs::read_dir(&root) else {
+        return;
+    };
+    let Some(cutoff) = SystemTime::now().checked_sub(Duration::from_secs(24 * 60 * 60)) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|modified| modified < cutoff);
+        if stale {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+fn arm_pdf(attach: PdfAttach) {
+    *PDF_ARMED.lock().expect("pdf") = Some(attach);
+}
+
+fn disarm_pdf() -> Option<PdfAttach> {
+    PDF_ARMED.lock().expect("pdf").take()
+}
+
+/// The tab just created takes the PDF that was armed for it, before its page starts loading.
+pub fn claim_pdf(id: u32) {
+    if let Some(attach) = disarm_pdf() {
+        PDF_TABS.lock().expect("pdf").push((id, attach));
+    }
+}
+
+/// After the markup editor finishes loading, give it the PDF from this open.
+pub fn attach_open_pdf(app: &AppHandle, id: u32, url: &str) {
+    if !is_pdf_editor(url) {
+        return;
+    }
+    let Some(attach) = PDF_TABS
+        .lock()
+        .expect("pdf")
+        .iter()
+        .find(|(tab, _)| *tab == id)
+        .map(|(_, attach)| attach.clone())
+    else {
+        return;
+    };
+    let Some(webview) = tabs::page_view(app, id) else {
+        return;
+    };
+    crate::webview2::attach_local_pdf(&webview, &attach.fetch, &attach.file_name);
+}
+
+/// Bytes for a PDF fetch from the markup editor. The address only exists inside this app.
+pub fn pdf_bytes(url: &str) -> Option<Vec<u8>> {
+    let path = PDF_TABS.lock().expect("pdf").iter().find_map(|(_, attach)| {
+        same_pdf_url(url, &attach.fetch).then(|| attach.dir.join("document.pdf"))
+    })?;
+    fs::read(path).ok()
+}
+
+fn same_pdf_url(request: &str, fetch: &str) -> bool {
+    request.trim_end_matches('/') == fetch.trim_end_matches('/')
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -504,6 +753,38 @@ pub fn register_browser() -> Result<(), String> {
         ".html",
         "ce-browserHTML",
     )?;
+    set_key(r"Software\Classes\ce-browserPDF", "", "PDF Document")?;
+    set_key(
+        r"Software\Classes\ce-browserPDF",
+        "Content Type",
+        "application/pdf",
+    )?;
+    set_key(
+        r"Software\Classes\ce-browserPDF\DefaultIcon",
+        "",
+        &format!("\"{}\",0", exe.display()),
+    )?;
+    set_key(
+        r"Software\Classes\ce-browserPDF\shell\open\command",
+        "",
+        &command,
+    )?;
+    set_key(
+        r"Software\Classes\.pdf\OpenWithProgids",
+        "ce-browserPDF",
+        "",
+    )?;
+    set_key(
+        r"Software\Clients\StartMenuInternet\ce-browser\Capabilities\FileAssociations",
+        ".pdf",
+        "ce-browserPDF",
+    )?;
+    if let Some(name) = exe.file_name().and_then(|name| name.to_str()) {
+        let apps = format!(r"Software\Classes\Applications\{name}");
+        set_key(&apps, "FriendlyAppName", "ce-browser")?;
+        set_key(&format!(r"{apps}\shell\open\command"), "", &command)?;
+        set_key(&format!(r"{apps}\SupportedTypes"), ".pdf", "")?;
+    }
     set_key(
         r"Software\RegisteredApplications",
         "ce-browser",
@@ -671,7 +952,9 @@ pub const NOTIFY_JS: &str = r#"(function () {
 
 #[cfg(test)]
 mod tests {
-    use super::{Launch, hotkey_mods, is_website, launch_from_args, power_is_battery, site_id};
+    use super::{
+        Launch, hotkey_mods, is_pdf_editor, is_website, launch_from_args, power_is_battery, site_id,
+    };
 
     #[test]
     fn a_site_id_comes_from_the_host() {
@@ -690,6 +973,31 @@ mod tests {
         );
         assert_eq!(launch_from_args(&["ce://settings".into()]), Launch::None);
         assert!(!is_website("ce://settings"));
+    }
+
+    #[test]
+    fn a_command_line_pdf_is_opened_in_the_editor() {
+        assert_eq!(
+            launch_from_args(&["--profile".into(), "default".into(), r"C:\docs\note.PDF".into()]),
+            Launch::Pdfs(vec![r"C:\docs\note.PDF".into()])
+        );
+        assert_eq!(
+            launch_from_args(&["file:///C:/docs/note.pdf".into()]),
+            Launch::Pdfs(vec![r"C:\docs\note.pdf".into()])
+        );
+        assert_eq!(
+            launch_from_args(&[r"--open=C:\docs\note.pdf".into()]),
+            Launch::Open(r"C:\docs\note.pdf".into())
+        );
+        assert!(is_pdf_editor(
+            "https://ce-file-tools.vercel.app/pdf/editor/markup"
+        ));
+        assert!(is_pdf_editor(
+            "https://ce-file-tools.vercel.app/pdf/editor/markup?x=1"
+        ));
+        assert!(!is_pdf_editor(
+            "https://ce-file-tools.vercel.app/pdf/editor"
+        ));
     }
 
     #[test]

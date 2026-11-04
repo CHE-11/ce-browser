@@ -470,19 +470,37 @@ const IMAGE_SIZES: &[&str] = &["original", "large", "medium", "small", "none"];
 const PRINT_FONTS: &[&str] = &["original", "serif", "sans"];
 const PAPER_SIZES: &[&str] = &[
     "letter",
-    "a4",
     "legal",
     "tabloid",
+    "statement",
+    "executive",
+    "folio",
+    "a3",
+    "a4",
+    "a5",
+    "a6",
+    "b5",
+    "photo4x6",
+    "photo5x7",
+    "photo8x10",
     "iphone16",
     "iphone16Plus",
     "iphone16Pro",
     "iphone16ProMax",
+    "iphoneSe",
+    "pixel9",
+    "pixel9ProXl",
+    "galaxyS24",
+    "galaxyS24Ultra",
     "ipadMini",
     "ipad",
     "ipadAir13",
     "ipadPro11",
     "ipadPro13",
+    "galaxyTabS9",
+    "custom",
 ];
+const DEFAULT_PAPER_CHOICES: &[&str] = &["letter", "tabloid", "legal"];
 const MARGINS: &[&str] = &["none", "narrow", "normal", "wide"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -503,6 +521,12 @@ pub struct PrintEditorSettings {
     /// Title, source URL and date above the content.
     pub show_header: bool,
     pub paper: String,
+    /// Sizes listed in the print editor. Empty means Letter, Tabloid, and Legal.
+    pub paper_choices: Vec<String>,
+    /// Custom page width in inches. `0` means it is not set.
+    pub custom_width: f64,
+    /// Custom page height in inches. `0` means it is not set.
+    pub custom_height: f64,
     pub landscape: bool,
     pub margins: String,
     pub header_footer: bool,
@@ -525,6 +549,12 @@ impl Default for PrintEditorSettings {
             font: "original".into(),
             show_header: true,
             paper: "letter".into(),
+            paper_choices: DEFAULT_PAPER_CHOICES
+                .iter()
+                .map(|id| (*id).to_string())
+                .collect(),
+            custom_width: 0.0,
+            custom_height: 0.0,
             landscape: false,
             margins: "normal".into(),
             header_footer: false,
@@ -548,7 +578,36 @@ impl PrintEditorSettings {
         keep(&mut self.paper, PAPER_SIZES, defaults.paper);
         keep(&mut self.margins, MARGINS, defaults.margins);
         self.text_size = ((self.text_size.clamp(70, 150) + 2) / 5) * 5;
+        self.paper_choices = paper_choices(self.paper_choices);
+        self.custom_width = paper_inches(self.custom_width);
+        self.custom_height = paper_inches(self.custom_height);
         self
+    }
+}
+
+fn paper_choices(choices: Vec<String>) -> Vec<String> {
+    let mut kept = Vec::new();
+    for id in choices {
+        if PAPER_SIZES.contains(&id.as_str()) && !kept.iter().any(|item: &String| item == &id) {
+            kept.push(id);
+        }
+    }
+    if kept.is_empty() {
+        DEFAULT_PAPER_CHOICES
+            .iter()
+            .map(|id| (*id).to_string())
+            .collect()
+    } else {
+        kept
+    }
+}
+
+/// `0` is unset. Anything outside 1 to 50 inches is unset too.
+fn paper_inches(value: f64) -> f64 {
+    if value.is_finite() && (1.0..=50.0).contains(&value) {
+        value
+    } else {
+        0.0
     }
 }
 
@@ -1493,6 +1552,16 @@ mod tests {
         assert_eq!(loaded.print_editor.text_size, 150);
         assert!(loaded.print_editor.remove_ads);
         assert!(!loaded.print_editor.open_after_save);
+        assert_eq!(
+            loaded.print_editor.paper_choices,
+            vec![
+                "letter".to_string(),
+                "tabloid".to_string(),
+                "legal".to_string()
+            ]
+        );
+        assert_eq!(loaded.print_editor.custom_width, 0.0);
+        assert_eq!(loaded.print_editor.custom_height, 0.0);
         assert!(loaded.page_capture.full_page);
         assert_eq!(loaded.page_markdown.scope, "article");
         assert!(loaded.page_markdown.images);
@@ -1506,6 +1575,18 @@ mod tests {
         let loaded: super::BrowserSettings =
             serde_json::from_str(r#"{"printEditor":{"paper":"iphone16"}}"#).expect("settings parse");
         assert_eq!(loaded.normalize().print_editor.paper, "iphone16");
+    }
+
+    #[test]
+    fn paper_choices_drop_unknown_ids_and_bad_custom_sizes() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"printEditor":{"paperChoices":["nope","a4","a4"],"customWidth":80,"customHeight":-3}}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.print_editor.paper_choices, vec!["a4".to_string()]);
+        assert_eq!(loaded.print_editor.custom_width, 0.0);
+        assert_eq!(loaded.print_editor.custom_height, 0.0);
     }
 
     #[test]

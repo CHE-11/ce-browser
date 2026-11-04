@@ -25,7 +25,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   },
   {
     id: "webpage-markdown",
-    name: "Webpage to Markdown",
+    name: "To Markdown",
     description: "Convert the current page to Markdown.",
     icon: FileText,
   },

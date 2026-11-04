@@ -45,6 +45,7 @@ import { FindAllPopover } from "@features/FindAll/FindAllPopover";
 import { ShortcutSheet } from "@features/Shortcuts/ShortcutSheet";
 import { NetworkPopover } from "@features/Network/NetworkPopover";
 import { DownloadsPanel } from "@features/Downloads/DownloadsPanel";
+import { HistoryPopover } from "@features/History/HistoryPopover";
 import { MediaGrid } from "@/features/BuiltInExtensions/media/MediaGrid";
 import { MediaHub } from "@/features/BuiltInExtensions/media/MediaHub";
 
@@ -137,6 +138,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
   switch (popup) {
     case "downloads":
       return <DownloadsPanel />;
+    case "history":
+      return <HistoryPopover />;
     case "bookmark-edit":
       return <BookmarkEditor url={params.get("url") ?? ""} title={params.get("title") ?? ""} />;
     case "bookmark-folder":
