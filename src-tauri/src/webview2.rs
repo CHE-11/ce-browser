@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
@@ -1196,6 +1196,17 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                             });
                         }
                     }
+                    Some("ce-mic") => {
+                        let active = message
+                            .get("active")
+                            .and_then(|value| value.as_bool())
+                            .unwrap_or(false);
+                        let token = message
+                            .get("token")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("");
+                        crate::microphone::note_capture(&message_app, id, token, active);
+                    }
                     Some("ce-zoom") => {
                         let change = message
                             .get("change")
@@ -1496,6 +1507,43 @@ pub fn forget_early_script(id: u32) {
         .lock()
         .expect("adblock early script")
         .remove(&id);
+    microphone_scripts()
+        .lock()
+        .expect("microphone script")
+        .remove(&id);
+}
+
+fn microphone_scripts() -> &'static Mutex<HashSet<u32>> {
+    static IDS: std::sync::OnceLock<Mutex<HashSet<u32>>> = std::sync::OnceLock::new();
+    IDS.get_or_init(Default::default)
+}
+
+/// The microphone wrapper is static, so each tab webview installs it once.
+fn install_microphone_script(core: &ICoreWebView2, id: u32) {
+    {
+        let mut ids = microphone_scripts().lock().expect("microphone script");
+        if !ids.insert(id) {
+            return;
+        }
+    }
+    let script = HSTRING::from(crate::microphone::DOCUMENT_SCRIPT);
+    let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(
+        move |result, _script_id| {
+            if result.is_err() {
+                microphone_scripts()
+                    .lock()
+                    .expect("microphone script")
+                    .remove(&id);
+            }
+            Ok(())
+        },
+    ));
+    if unsafe { core.AddScriptToExecuteOnDocumentCreated(&script, &handler) }.is_err() {
+        microphone_scripts()
+            .lock()
+            .expect("microphone script")
+            .remove(&id);
+    }
 }
 
 /// Registers the analytics opt-out script for documents created after this call.
@@ -1562,6 +1610,7 @@ fn attach_adblock(
         }
 
         sync_early_script(core, id);
+        install_microphone_script(core, id);
 
         let environment = platform.environment();
         let request_app = app.clone();

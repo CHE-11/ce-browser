@@ -18,6 +18,9 @@ function stateLabel(state: string) {
   if (state === "allow") {
     return "Allowed";
   }
+  if (state === "session") {
+    return "Allowed this session";
+  }
   if (state === "deny") {
     return "Blocked";
   }

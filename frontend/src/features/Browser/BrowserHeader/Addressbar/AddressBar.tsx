@@ -10,6 +10,7 @@ import {
   House,
   Info,
   Lock,
+  Mic,
   Palette,
   PanelRight,
   Pin,
@@ -29,6 +30,7 @@ import type {
   HistoryItem,
   OmniboxState,
   OmniboxSuggestion,
+  PermissionGrant,
   TabInfo,
 } from "../../../../../../types/browser";
 import {
@@ -39,6 +41,7 @@ import {
   installExtensionFromStore,
   goBack,
   goForward,
+  listPermissions,
   navigate,
   noteTyped,
   omniboxExtra,
@@ -46,9 +49,11 @@ import {
   searchHistory,
   onBrowserCommand,
   onDownloadStarted,
+  onMicrophoneCapture,
   onOmniboxPick,
   onOmniboxReady,
   onOmniboxRemove,
+  onPermissionsChanged,
   onPopupChanged,
   openPopup,
   reload,
@@ -236,6 +241,18 @@ function addressText(tab: TabInfo | undefined) {
   return tab.url;
 }
 
+function pageOrigin(url: string) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return "";
+    }
+    return parsed.origin;
+  } catch {
+    return "";
+  }
+}
+
 export function AddressBar({ snapshot, bookmarks, downloads, history, extensions, settings, windowControls = false }: AddressBarProps) {
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const activeId = activeTab?.id ?? null;
@@ -287,6 +304,8 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const [omnibox, setOmnibox] = useState<OmniboxState>(EMPTY_OMNIBOX);
   const [downloadFlash, setDownloadFlash] = useState(false);
   const [storeBusy, setStoreBusy] = useState(false);
+  const [grants, setGrants] = useState<PermissionGrant[]>([]);
+  const [micCapture, setMicCapture] = useState<ReadonlySet<number>>(() => new Set());
   const omniboxRef = useRef(omnibox);
   const popupOpenRef = useRef(false);
   /** Bumped when the suggestions are dismissed, so a late search result cannot open them again. */
@@ -309,6 +328,11 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
 
   const bookmarkLinks = useMemo(() => flattenBookmarks(bookmarks), [bookmarks]);
   const bookmarked = !!activeTab && bookmarkLinks.some((link) => link.url === activeTab.url);
+  const micOrigin = activeTab ? pageOrigin(activeTab.url) : "";
+  const micGrant = grants.find((grant) => grant.origin === micOrigin && grant.kind === "microphone");
+  const micPermitted = micGrant?.state === "allow" || micGrant?.state === "session";
+  const micLive = activeId !== null && micCapture.has(activeId);
+  const showMicrophone = !!activeTab && !!micOrigin && (micPermitted || micLive);
   const listing = activeTab ? storeListing(activeTab.url) : null;
   const listed = listing ? extensions.find((extension) => extension.id === listing.id) : undefined;
   const storeAction = !listing ? null : listed?.updateVersion ? "update" : listed ? null : "install";
@@ -338,6 +362,34 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       setText(addressText(activeTab));
     }
   }, [activeTab?.url, activeId, editing]);
+
+  useEffect(() => {
+    let closed = false;
+    void listPermissions()
+      .then((next) => {
+        if (!closed) {
+          setGrants(next);
+        }
+      })
+      .catch(() => undefined);
+    const grantsListen = onPermissionsChanged((next) => setGrants(next));
+    const captureListen = onMicrophoneCapture((event) => {
+      setMicCapture((current) => {
+        const next = new Set(current);
+        if (event.active) {
+          next.add(event.tabId);
+        } else {
+          next.delete(event.tabId);
+        }
+        return next;
+      });
+    });
+    return () => {
+      closed = true;
+      void grantsListen.then((stop) => stop());
+      void captureListen.then((stop) => stop());
+    };
+  }, []);
 
   useLayoutEffect(() => {
     if (activeRef.current?.url === "ce://newtab") {
@@ -844,6 +896,30 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
             onClick={runStoreAction}
           >
             {storeBusy ? "Working…" : storeAction === "update" ? "Update" : "Install"}
+          </button>
+        ) : null}
+        {showMicrophone ? (
+          <button
+            id="address-microphone"
+            type="button"
+            title={micLive ? "This site is using your microphone" : "Microphone is allowed on this site"}
+            aria-label={micLive ? "This site is using your microphone" : "Microphone is allowed on this site"}
+            aria-haspopup="dialog"
+            className={cn(
+              "inline-flex size-6 shrink-0 items-center justify-center rounded-full hover:bg-zinc-700",
+              focusRing,
+              micLive ? "text-sky-400" : "text-zinc-400 hover:text-zinc-100",
+            )}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={(event) => {
+              if (!activeTab) {
+                return;
+              }
+              const anchor = fieldRef.current ?? event.currentTarget;
+              void openPopup("site-info", anchor, { params: `id=${activeTab.id}&view=microphone`, placement: "bottom-start" });
+            }}
+          >
+            <Mic id="address-microphone-icon" className="size-3.5" aria-hidden />
           </button>
         ) : null}
         <button

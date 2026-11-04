@@ -797,8 +797,29 @@ export type TabSleepSettings = {
 export type PermissionGrant = {
   origin: string;
   kind: "camera" | "microphone" | "location" | "notifications" | string;
-  /** `allow`, `deny`, or `asked` when the browser prompt was left to run. */
-  state: "allow" | "deny" | "asked" | string;
+  /** `allow` (every visit), `session` (until the browser exits), `deny`, or `asked`. */
+  state: "allow" | "deny" | "session" | "asked" | string;
+  /** WASAPI endpoint id. Empty uses the Windows default capture device. */
+  deviceId: string;
+  /** Friendly name matched against the page's device list. */
+  deviceLabel: string;
+};
+
+export type MicrophoneDevice = {
+  id: string;
+  label: string;
+  isDefault: boolean;
+};
+
+export type MicrophoneLevel = {
+  deviceId: string;
+  /** Peak from 0 to 1. */
+  level: number;
+};
+
+export type MicrophoneCapture = {
+  tabId: number;
+  active: boolean;
 };
 
 export type Container = {

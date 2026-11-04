@@ -219,7 +219,7 @@ function PopupContent({ popup, params }: PopupPageProps) {
     case "unresponsive":
       return <UnresponsivePrompt tabId={Number(params.get("id"))} />;
     case "site-info":
-      return <SiteInfoPanel tabId={Number(params.get("id"))} />;
+      return <SiteInfoPanel tabId={Number(params.get("id"))} initialView={params.get("view") ?? ""} />;
     case "selection-translate":
       return <SelectionTranslatePopover params={params} />;
     case "find-all":

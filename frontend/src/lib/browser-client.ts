@@ -67,6 +67,9 @@ import type {
   OmniboxSuggestion,
   PeekInfo,
   PermissionGrant,
+  MicrophoneCapture,
+  MicrophoneDevice,
+  MicrophoneLevel,
   PopupChange,
   PopupKind,
   PopupPlacement,
@@ -269,8 +272,32 @@ export function listPermissions() {
   return invoke<PermissionGrant[]>("list_permissions");
 }
 
-export function setPermission(origin: string, kind: string, allow: boolean) {
-  return invoke<void>("set_permission", { origin, kind, allow });
+export function setPermission(origin: string, kind: string, allow: boolean, persist?: boolean) {
+  return invoke<void>("set_permission", persist === undefined ? { origin, kind, allow } : { origin, kind, allow, persist });
+}
+
+export function listMicrophones() {
+  return invoke<MicrophoneDevice[]>("list_microphones");
+}
+
+export function watchMicrophone(deviceId: string, epoch: number) {
+  return invoke<void>("watch_microphone", { deviceId, epoch });
+}
+
+export function unwatchMicrophone(epoch: number) {
+  return invoke<void>("unwatch_microphone", { epoch });
+}
+
+export function setMicrophoneDevice(origin: string, deviceId: string, deviceLabel: string) {
+  return invoke<void>("set_microphone_device", { origin, deviceId, deviceLabel });
+}
+
+export function onMicrophoneLevel(handler: (level: MicrophoneLevel) => void): Promise<UnlistenFn> {
+  return listen<MicrophoneLevel>("microphone-level", (event) => handler(event.payload));
+}
+
+export function onMicrophoneCapture(handler: (capture: MicrophoneCapture) => void): Promise<UnlistenFn> {
+  return listen<MicrophoneCapture>("microphone-capture", (event) => handler(event.payload));
 }
 
 export function onPermissionsChanged(handler: (grants: PermissionGrant[]) => void): Promise<UnlistenFn> {

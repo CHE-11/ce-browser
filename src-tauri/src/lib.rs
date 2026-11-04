@@ -21,6 +21,7 @@ mod history_index;
 mod keywords;
 mod library;
 mod media;
+mod microphone;
 mod ocr;
 mod page_errors;
 mod page_menu;
@@ -1045,8 +1046,39 @@ fn list_permissions(app: AppHandle) -> Vec<privacy::PermissionGrant> {
 }
 
 #[tauri::command]
-fn set_permission(app: AppHandle, origin: String, kind: String, allow: bool) -> Result<(), String> {
-    privacy::set_permission(&app, &origin, &kind, allow)
+fn set_permission(
+    app: AppHandle,
+    origin: String,
+    kind: String,
+    allow: bool,
+    persist: Option<bool>,
+) -> Result<(), String> {
+    privacy::set_permission(&app, &origin, &kind, allow, persist)
+}
+
+#[tauri::command]
+async fn list_microphones() -> Result<Vec<microphone::MicrophoneDevice>, String> {
+    blocking(microphone::list).await
+}
+
+#[tauri::command]
+fn watch_microphone(app: AppHandle, device_id: String, epoch: u64) {
+    microphone::watch(app, device_id, epoch);
+}
+
+#[tauri::command]
+fn unwatch_microphone(epoch: u64) {
+    microphone::unwatch(epoch);
+}
+
+#[tauri::command]
+fn set_microphone_device(
+    app: AppHandle,
+    origin: String,
+    device_id: String,
+    device_label: String,
+) -> Result<(), String> {
+    privacy::set_microphone_device(&app, &origin, &device_id, &device_label)
 }
 
 #[tauri::command]
@@ -2129,6 +2161,10 @@ pub fn run() {
             open_extension_options,
             list_permissions,
             set_permission,
+            list_microphones,
+            watch_microphone,
+            unwatch_microphone,
+            set_microphone_device,
             list_containers,
             create_container,
             delete_container,

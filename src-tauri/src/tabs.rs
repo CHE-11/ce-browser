@@ -2611,6 +2611,7 @@ fn retire_webview(app: &AppHandle, label: Option<String>) {
     {
         crate::adblock::forget(id);
         crate::webview2::forget_early_script(id);
+        crate::microphone::forget_tab(app, id);
         crate::hang_guard::end_frozen_page(id);
         crate::page_errors::forget_tab(id);
     }
@@ -3049,6 +3050,26 @@ pub fn restore_closed_list(app: &AppHandle, entries: Vec<ClosedEntry>) {
             }
         }
     });
+}
+
+/// Runs `script` in every open tab whose page origin is `origin` (`https://example.com`).
+pub fn eval_on_origin(app: &AppHandle, origin: &str, script: &str) {
+    if origin.is_empty() || script.is_empty() || app.try_state::<Tabs>().is_none() {
+        return;
+    }
+    let labels = with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .filter(|tab| crate::paths::http_origin(&tab.info.url).as_deref() == Some(origin))
+            .filter_map(|tab| tab.webview.clone())
+            .collect::<Vec<_>>()
+    });
+    for label in labels {
+        if let Some(webview) = app.get_webview(&label) {
+            let _ = webview.eval(script);
+        }
+    }
 }
 
 pub fn page_view(app: &AppHandle, id: u32) -> Option<Webview> {

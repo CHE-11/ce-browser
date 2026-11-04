@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Cookie, ExternalLink, Lock, ShieldAlert, ShieldBan, SlidersHorizontal, TriangleAlert } from "lucide-react";
+import { Cookie, ChevronRight, ExternalLink, Lock, ShieldAlert, ShieldBan, SlidersHorizontal, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/Button";
 import { PopupFrame } from "@/components/PopupFrame";
 import { Skeleton } from "@/components/Skeleton";
@@ -10,9 +10,11 @@ import { formatBytes } from "@/lib/format";
 import { useTabs } from "@/lib/use-browser";
 import { siteKey } from "@features/BuiltInExtensions/page-controls/site";
 import type { PermissionGrant, SiteInfo } from "@type/browser";
+import { MicrophonePanel } from "./MicrophonePanel";
 
 type SiteInfoPanelProps = {
   tabId: number;
+  initialView?: string;
 };
 
 const PERMISSION_LABEL: Record<string, string> = {
@@ -57,12 +59,13 @@ function Fact({ id, label, value }: { id: string; label: string; value: string }
 }
 
 /** Opened from the lock in the address bar: connection, permissions, stored data and blocked requests. */
-export function SiteInfoPanel({ tabId }: SiteInfoPanelProps) {
+export function SiteInfoPanel({ tabId, initialView = "" }: SiteInfoPanelProps) {
   const snapshot = useTabs();
   const tab = snapshot.windowTabs.find((item) => item.id === tabId);
   const [info, setInfo] = useState<SiteInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cleared, setCleared] = useState(false);
+  const [view, setView] = useState(initialView === "microphone" ? "microphone" : "");
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +117,31 @@ export function SiteInfoPanel({ tabId }: SiteInfoPanelProps) {
     void openPopup("page-controls", { x: 0, y: 0 }, { params: params.toString() });
   };
 
+  if (view === "microphone" && !internal) {
+    const grant = info?.permissions.find((item) => item.kind === "microphone") ?? null;
+    return (
+      <MicrophonePanel
+        host={host}
+        origin={info?.origin ?? ""}
+        grant={grant}
+        ready={snapshot.loaded && (!!info || !!error)}
+        onBack={() => setView("")}
+        onGrant={(next) => {
+          setInfo((current) => {
+            if (!current) {
+              return current;
+            }
+            const exists = current.permissions.some((item) => item.kind === "microphone");
+            const permissions = exists
+              ? current.permissions.map((item) => (item.kind === "microphone" ? next : item))
+              : [...current.permissions, next];
+            return { ...current, permissions };
+          });
+        }}
+      />
+    );
+  }
+
   return (
     <PopupFrame id="site-info" width={360} ready={snapshot.loaded}>
       <header id="site-info-header" className="flex flex-col gap-1.5 px-4 pb-3 pt-4">
@@ -162,6 +190,26 @@ export function SiteInfoPanel({ tabId }: SiteInfoPanelProps) {
           ) : (
             <ul id="site-info-permissions-list" className="flex flex-col gap-1">
               {info.permissions.map((grant) => {
+                if (grant.kind === "microphone") {
+                  const allowed = grant.state === "allow" || grant.state === "session";
+                  const label = allowed ? "Allowed" : grant.state === "deny" ? "Blocked" : "Asked";
+                  return (
+                    <li id="site-info-permission-microphone" key="microphone">
+                      <button
+                        id="site-info-permission-microphone-open"
+                        type="button"
+                        className={cn("flex w-full items-center justify-between gap-2 rounded-md px-1 py-1 text-left text-sm hover:bg-zinc-800", focusRing)}
+                        onClick={() => setView("microphone")}
+                      >
+                        <span id="site-info-permission-microphone-label">Microphone</span>
+                        <span id="site-info-permission-microphone-state" className="flex items-center gap-1 text-xs text-zinc-400">
+                          {label}
+                          <ChevronRight id="site-info-permission-microphone-chevron" className="size-3.5" aria-hidden />
+                        </span>
+                      </button>
+                    </li>
+                  );
+                }
                 const allowed = grant.state === "allow";
                 const denied = grant.state === "deny";
                 return (

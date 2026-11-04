@@ -41,7 +41,14 @@ const TRACKING: &[&str] = &[
 pub struct PermissionGrant {
     pub origin: String,
     pub kind: String,
+    /// `allow` (every visit), `session` (until this process exits), `deny`, or `asked`.
     pub state: String,
+    /// WASAPI endpoint id. Empty uses the Windows default capture device.
+    #[serde(default)]
+    pub device_id: String,
+    /// Friendly name matched against the page's `enumerateDevices()` label.
+    #[serde(default)]
+    pub device_label: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -89,8 +96,12 @@ struct PrivacyState {
 pub fn init(app: &AppHandle) {
     let permissions: PermissionFile = files::read_json(&paths::data_file(app, PERMISSIONS));
     let containers: ContainerFile = files::read_json(&paths::data_file(app, CONTAINERS));
+    let (grants, drop_session) = load_grants(permissions.grants);
+    if drop_session {
+        let _ = save_grants(app, &grants);
+    }
     app.manage(PrivacyState {
-        grants: Mutex::new(normalize_grants(permissions.grants)),
+        grants: Mutex::new(grants),
         containers: Mutex::new(normalize_containers(containers.containers)),
         log: Mutex::new(HashMap::new()),
         seeds: Mutex::new(HashMap::new()),
@@ -121,11 +132,7 @@ pub fn note_request(app: &AppHandle, origin: &str, kind: &str) {
     {
         return;
     }
-    grants.push(PermissionGrant {
-        origin,
-        kind,
-        state: "asked".into(),
-    });
+    grants.push(new_grant(origin, kind, "asked"));
     let _ = save_grants(app, &grants);
     let _ = app.emit("permissions-changed", &*grants);
 }
@@ -139,35 +146,115 @@ pub fn decision(app: &AppHandle, origin: &str, kind: &str) -> Option<bool> {
         .expect("permissions")
         .iter()
         .find(|grant| grant.origin == origin && grant.kind == kind)
-        .and_then(|grant| match grant.state.as_str() {
-            "allow" => Some(true),
-            "deny" => Some(false),
-            _ => None,
-        })
+        .and_then(|grant| decided(&grant.state))
 }
 
+/// `persist` omitted or true keeps an allow across launches. `false` allows it until this process exits.
 pub fn set_permission(
     app: &AppHandle,
     origin: &str,
     kind: &str,
     allow: bool,
+    persist: Option<bool>,
 ) -> Result<(), String> {
     let origin = origin_key(origin);
     let kind = kind_key(kind);
     if origin.is_empty() || kind.is_empty() {
         return Err("That permission is not one this browser stores.".into());
     }
+    let next_state = if !allow {
+        "deny"
+    } else if persist == Some(false) {
+        "session"
+    } else {
+        "allow"
+    };
     let guard = state(app);
     let mut grants = guard.grants.lock().expect("permissions");
+    let previous = grants
+        .iter()
+        .find(|grant| grant.origin == origin && grant.kind == kind)
+        .cloned();
     grants.retain(|grant| !(grant.origin == origin && grant.kind == kind));
-    grants.push(PermissionGrant {
-        origin,
-        kind,
-        state: if allow { "allow" } else { "deny" }.into(),
-    });
+    let mut grant = new_grant(origin.clone(), kind.clone(), next_state);
+    if let Some(previous) = previous {
+        grant.device_id = previous.device_id;
+        grant.device_label = previous.device_label;
+    }
+    grants.push(grant);
     save_grants(app, &grants)?;
     let _ = app.emit("permissions-changed", &*grants);
+    drop(grants);
+    if !allow && kind == "microphone" {
+        crate::tabs::eval_on_origin(
+            app,
+            &origin,
+            "if (window.__ceStopMic) window.__ceStopMic();",
+        );
+    }
     Ok(())
+}
+
+/// Remembers which microphone a site should use the next time it captures audio.
+pub fn set_microphone_device(
+    app: &AppHandle,
+    origin: &str,
+    device_id: &str,
+    device_label: &str,
+) -> Result<(), String> {
+    let origin = origin_key(origin);
+    if origin.is_empty() {
+        return Err("That site cannot use the microphone.".into());
+    }
+    let device_id = clamp_text(device_id, 300);
+    let mut device_label = clamp_text(device_label, 200);
+    if device_id.is_empty() {
+        device_label.clear();
+    }
+    let guard = state(app);
+    let mut grants = guard.grants.lock().expect("permissions");
+    let Some(grant) = grants
+        .iter_mut()
+        .find(|grant| grant.origin == origin && grant.kind == "microphone")
+    else {
+        return Err("This site has not asked for the microphone.".into());
+    };
+    grant.device_id = device_id;
+    grant.device_label.clone_from(&device_label);
+    save_grants(app, &grants)?;
+    let _ = app.emit("permissions-changed", &*grants);
+    drop(grants);
+    crate::tabs::eval_on_origin(app, &origin, &microphone_label_script(&device_label));
+    Ok(())
+}
+
+fn decided(state: &str) -> Option<bool> {
+    match state {
+        "allow" | "session" => Some(true),
+        "deny" => Some(false),
+        _ => None,
+    }
+}
+
+fn new_grant(origin: String, kind: String, state: &str) -> PermissionGrant {
+    PermissionGrant {
+        origin,
+        kind,
+        state: state.to_string(),
+        device_id: String::new(),
+        device_label: String::new(),
+    }
+}
+
+fn clamp_text(value: &str, max: usize) -> String {
+    value.trim().chars().take(max).collect()
+}
+
+fn microphone_label_script(label: &str) -> String {
+    let quoted = serde_json::to_string(label).unwrap_or_else(|_| "\"\"".into());
+    format!(
+        "window.__ceMicLabel={quoted};try{{if({quoted})localStorage.setItem(\"ce-microphone\",{quoted});else localStorage.removeItem(\"ce-microphone\");}}catch(e){{}}"
+    )
 }
 
 pub fn containers(app: &AppHandle) -> Vec<Container> {
@@ -554,14 +641,24 @@ fn container_id(name: &str) -> String {
     }
 }
 
+/// Drops `session` grants. A this-visit allow does not survive the next launch.
+fn load_grants(grants: Vec<PermissionGrant>) -> (Vec<PermissionGrant>, bool) {
+    let drop_session = grants.iter().any(|grant| grant.state == "session");
+    (normalize_grants(grants), drop_session)
+}
+
 fn normalize_grants(grants: Vec<PermissionGrant>) -> Vec<PermissionGrant> {
     let mut kept = Vec::new();
     for grant in grants {
+        if grant.state == "session" {
+            continue;
+        }
         let origin = origin_key(&grant.origin);
         let kind = kind_key(&grant.kind);
         let state = match grant.state.as_str() {
             "allow" => "allow",
             "asked" => "asked",
+            "deny" => "deny",
             _ => "deny",
         };
         if origin.is_empty()
@@ -576,6 +673,8 @@ fn normalize_grants(grants: Vec<PermissionGrant>) -> Vec<PermissionGrant> {
             origin,
             kind,
             state: state.into(),
+            device_id: grant.device_id,
+            device_label: grant.device_label,
         });
     }
     kept
@@ -668,6 +767,60 @@ mod tests {
     #[test]
     fn a_clean_url_is_left_alone() {
         assert!(rewrite(&settings(), "https://example.com/a?id=1").is_none());
+    }
+
+    fn grant(origin: &str, kind: &str, state: &str) -> PermissionGrant {
+        PermissionGrant {
+            origin: origin.into(),
+            kind: kind.into(),
+            state: state.into(),
+            device_id: String::new(),
+            device_label: String::new(),
+        }
+    }
+
+    #[test]
+    fn session_grants_do_not_survive_load() {
+        let (grants, dropped) = load_grants(vec![
+            PermissionGrant {
+                device_id: "endpoint".into(),
+                device_label: "Headset".into(),
+                ..grant("https://example.com", "microphone", "session")
+            },
+            grant("https://example.com", "camera", "allow"),
+        ]);
+        assert!(dropped);
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].kind, "camera");
+        let (kept, dropped) = load_grants(vec![grant("https://example.com", "camera", "allow")]);
+        assert!(!dropped);
+        assert_eq!(kept[0].state, "allow");
+    }
+
+    #[test]
+    fn a_saved_microphone_is_kept() {
+        let grants = normalize_grants(vec![PermissionGrant {
+            device_id: "{endpoint}".into(),
+            device_label: "Headset (AirPods)".into(),
+            ..grant("https://example.com/path", "microphone", "allow")
+        }]);
+        assert_eq!(grants[0].origin, "https://example.com");
+        assert_eq!(grants[0].device_id, "{endpoint}");
+        assert_eq!(grants[0].device_label, "Headset (AirPods)");
+    }
+
+    #[test]
+    fn an_unknown_permission_state_is_blocked() {
+        let grants = normalize_grants(vec![grant("https://example.com", "location", "maybe")]);
+        assert_eq!(grants[0].state, "deny");
+    }
+
+    #[test]
+    fn a_session_allow_counts_as_granted() {
+        assert_eq!(decided("session"), Some(true));
+        assert_eq!(decided("allow"), Some(true));
+        assert_eq!(decided("deny"), Some(false));
+        assert_eq!(decided("asked"), None);
     }
 
     #[test]
