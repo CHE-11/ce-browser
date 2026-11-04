@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use tauri::webview::PlatformWebview;
-use tauri::{AppHandle, Webview};
+use tauri::{AppHandle, Manager, Webview};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::*;
 use windows::Win32::Foundation::{E_NOINTERFACE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
@@ -1122,6 +1122,39 @@ pub fn attach_popup_hooks(app: &AppHandle, webview: &Webview, label: &str) {
         if let Ok(core) = core(&platform) {
             let _ = attach_downloads(&app, &core);
         }
+    });
+}
+
+/// `window.close()` and `chrome.windows.remove` ask the webview to close. wry only destroys
+/// the child HWND, which leaves the decorated frame. Close the whole window.
+pub fn close_window_when_requested(app: &AppHandle, label: &str) {
+    let Some(webview) = app.get_webview(label) else {
+        return;
+    };
+    let app = app.clone();
+    let label = label.to_string();
+    let _ = webview.with_webview(move |platform| {
+        let Ok(core) = core(&platform) else {
+            return;
+        };
+        let app = app.clone();
+        let label = label.clone();
+        let mut token = 0i64;
+        let _ = unsafe {
+            core.add_WindowCloseRequested(
+                &WindowCloseRequestedEventHandler::create(Box::new(move |_, _| {
+                    let app = app.clone();
+                    let label = label.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Some(window) = app.get_window(&label) {
+                            let _ = window.close();
+                        }
+                    });
+                    Ok(())
+                })),
+                &mut token,
+            )
+        };
     });
 }
 

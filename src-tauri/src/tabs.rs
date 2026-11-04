@@ -1659,6 +1659,10 @@ pub fn new_window(
 /// A sized `window.open` has to be a top-level window that shares the opener's WebView2
 /// environment. Letting WebView2 build the default popup freezes this process and leaves
 /// a window with no title bar, because every page view here is a child of the browser window.
+///
+/// The window starts at `about:blank`. `SetNewWindow` performs the real navigation, so an
+/// extension popout stays an extension window. Navigating to the target first loads the HTML
+/// without extension APIs, and the passkey page never paints.
 fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewWindowResponse<Wry> {
     let extension = url.scheme() == "chrome-extension";
     let Some(size) = features.size().or_else(|| {
@@ -1667,6 +1671,9 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
             EXTENSION_POPOUT_HEIGHT,
         ))
     }) else {
+        return NewWindowResponse::Deny;
+    };
+    let Ok(blank) = Url::parse("about:blank") else {
         return NewWindowResponse::Deny;
     };
     let factor = if extension {
@@ -1683,7 +1690,7 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
     let environment = features.opener().environment.clone();
     let position = features.position();
     let host = app.clone();
-    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
+    let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(blank))
         .title(if extension { "Extension" } else { "ce-browser" })
         .inner_size(width, height)
         .min_inner_size(240.0 * factor, 160.0 * factor)
@@ -1697,9 +1704,19 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
             .background_color(settings::page_color(app))
             .on_document_title_changed(|window, title| {
                 let title = title.trim();
-                if !title.is_empty() {
-                    let _ = window.set_title(title);
+                if title.is_empty() || title.eq_ignore_ascii_case("about:blank") {
+                    return;
                 }
+                let _ = window.set_title(title);
+            })
+            .on_page_load(move |window, payload| {
+                if !matches!(payload.event(), PageLoadEvent::Finished) {
+                    return;
+                }
+                if !is_extension_url(payload.url().as_str()) {
+                    return;
+                }
+                let _ = window.set_zoom(factor);
             });
     }
     if let Some(position) = position {
@@ -1709,9 +1726,7 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
     }
     match builder.build() {
         Ok(window) => {
-            if extension {
-                let _ = window.set_zoom(factor);
-            }
+            webview2::close_window_when_requested(app, window.label());
             NewWindowResponse::Create { window }
         }
         Err(error) => {
