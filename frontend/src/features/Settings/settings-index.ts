@@ -13,7 +13,6 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { id: "settings-profiles-archive", label: "Profile file", section: "settings-profiles", keywords: "export import backup" },
   { id: "settings-search-engine", label: "Search engine", section: "settings-search", keywords: "google bing duckduckgo" },
   { id: "settings-search-custom", label: "Custom search URL", section: "settings-search" },
-  { id: "settings-gestures", label: "Mouse gestures", section: "settings-search", keywords: "right drag" },
   { id: "settings-keywords", label: "Search keywords", section: "settings-search", keywords: "shortcuts gh yt" },
   { id: "settings-startup-mode", label: "When ce-browser starts", section: "settings-startup", keywords: "restore session" },
   { id: "settings-home-page", label: "Home page", section: "settings-startup" },
@@ -67,6 +66,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { id: "settings-summon", label: "Summon shortcut", section: "settings-system", keywords: "hotkey global" },
   { id: "settings-default-browser", label: "Default browser", section: "settings-system" },
   { id: "settings-battery", label: "Battery saver", section: "settings-system", keywords: "power" },
-  { id: "settings-auto-update", label: "Update automatically", section: "settings-system", keywords: "updates version" },
+  { id: "settings-auto-update", label: "Update automatically", section: "settings-update", keywords: "updates version" },
+  { id: "settings-version", label: "Version", section: "settings-update", keywords: "check for updates what's new" },
   { id: "settings-sync-folder", label: "Sync folder", section: "settings-sync" },
 ];

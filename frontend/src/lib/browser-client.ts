@@ -74,6 +74,7 @@ import type {
   PopupRequest,
   PopupShow,
   ThemePreview,
+  WindowsColorScheme,
   TabGroupColor,
   TabsSnapshot,
   UserStyles,
@@ -1384,6 +1385,14 @@ export async function chooseFolder(title: string, defaultPath?: string) {
 
 export function onSettingsChanged(handler: (settings: BrowserSettings) => void): Promise<UnlistenFn> {
   return listen<BrowserSettings>("settings-changed", (event) => handler(event.payload));
+}
+
+export function getWindowsColorScheme() {
+  return invoke<WindowsColorScheme>("windows_color_scheme");
+}
+
+export function onWindowsColorScheme(handler: (scheme: WindowsColorScheme) => void): Promise<UnlistenFn> {
+  return listen<WindowsColorScheme>("windows-color-scheme", (event) => handler(event.payload));
 }
 
 export function getUserStyles() {

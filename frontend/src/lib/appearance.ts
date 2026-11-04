@@ -283,7 +283,8 @@ type Appearance = {
 let saved: Appearance = { theme: DEFAULT_THEME, colorMode: DEFAULT_COLOR_MODE };
 /** Painted over `saved` while a picker is hovering. Null means show the saved theme. */
 let preview: ThemeId | null = null;
-let listening = false;
+/** Windows app theme. Pages do not use this, and `prefers-color-scheme` is held at light for them. */
+let windowsMode: ResolvedMode = "dark";
 
 export function normalizeTheme(value: string | null | undefined): ThemeId {
   return THEME_IDS.find((theme) => theme === value) ?? DEFAULT_THEME;
@@ -297,10 +298,15 @@ export function resolveMode(colorMode: ColorMode): ResolvedMode {
   if (colorMode === "light" || colorMode === "dark") {
     return colorMode;
   }
-  if (typeof window === "undefined") {
-    return "dark";
+  return windowsMode;
+}
+
+/** Stores the Windows app theme for Match system. Websites are not restyled from it. */
+export function noteWindowsScheme(scheme: "light" | "dark") {
+  windowsMode = scheme;
+  if (saved.colorMode === "system") {
+    paint();
   }
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 function readStored(key: string) {
@@ -328,22 +334,9 @@ function paint() {
   writeAttributes(preview ?? saved.theme, saved.colorMode);
 }
 
-function ensureSystemListener() {
-  if (listening || typeof window === "undefined") {
-    return;
-  }
-  listening = true;
-  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    if (saved.colorMode === "system") {
-      paint();
-    }
-  });
-}
-
 export function applyAppearance(theme: ThemeId, colorMode: ColorMode) {
   saved = { theme, colorMode };
   paint();
-  ensureSystemListener();
 }
 
 function rememberAppearance(theme: ThemeId, colorMode: ColorMode) {
@@ -363,7 +356,6 @@ export function publishAppearance(theme: string, colorMode: string) {
   saved = next;
   rememberAppearance(next.theme, next.colorMode);
   paint();
-  ensureSystemListener();
   return next;
 }
 

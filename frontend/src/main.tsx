@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { applyAppearance, applyFont, readAppearance, readFont } from "./lib/appearance";
-import { getUserStyles, onUserStylesChanged } from "./lib/browser-client";
+import { applyAppearance, applyFont, noteWindowsScheme, readAppearance, readFont } from "./lib/appearance";
+import { getUserStyles, getWindowsColorScheme, onUserStylesChanged, onWindowsColorScheme } from "./lib/browser-client";
 import { useRoute } from "./lib/route";
 import { applyUserStyles } from "./lib/user-styles";
 import { applyZoom, readZoom } from "./lib/zoom";
@@ -31,6 +31,11 @@ const appearance = readAppearance();
 applyAppearance(appearance.theme, appearance.colorMode);
 applyFont(readFont());
 applyZoom(readZoom());
+
+void getWindowsColorScheme()
+  .then((scheme) => noteWindowsScheme(scheme))
+  .catch(() => undefined);
+void onWindowsColorScheme((scheme) => noteWindowsScheme(scheme));
 
 void getUserStyles()
   .then((styles) => applyUserStyles(styles.css))

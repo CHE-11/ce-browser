@@ -431,6 +431,9 @@ export type PopupKind =
   | "board-images"
   | "theme-picker";
 
+/** Windows app theme. Websites do not follow this. */
+export type WindowsColorScheme = "light" | "dark";
+
 /** A theme shown over the saved one. `commit` stores it before the settings file catches up. */
 export type ThemePreview = {
   theme: string | null;
@@ -688,8 +691,6 @@ export type BrowserSettings = {
   httpsOnly: boolean;
   /** Hosts that may stay on `http`. */
   httpsExceptions: string[];
-  /** Right-drag on a page goes back, forward, reloads or closes the tab. */
-  mouseGestures: boolean;
   /** Save page text on this computer so history search can match words from the page. */
   indexPageText: boolean;
   /** Ctrl+Tab order: `strip` follows the tab strip, `recent` goes to the last used tab first. */

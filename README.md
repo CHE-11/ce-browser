@@ -113,8 +113,6 @@ The address bar also answers `2*(3+4)`, `10 km to mi` and `32 f to c`. `10 usd t
 
 `ce://shortcuts` lists every shortcut. Record captures the next key, and a second key within one second makes a chord. Reset one row, or reset all.
 
-Right-drag on a page: left goes back, right goes forward, up reloads, down closes the tab. A right-click without a drag still opens the menu. Settings > Search can turn gestures off.
-
 ## Privacy
 
 Settings > Privacy holds three switches. **Strip tracking parameters** is on by default and removes `utm_*`, `fbclid`, `gclid` and similar from addresses and from links you copy. **Fingerprint shield** adds a little noise to canvas, WebGL and audio reads; each site gets the same noise until the browser exits. **HTTPS-only** loads `http` pages over `https`. Localhost stays on `http`, and a site can be excepted from the page-controls menu or from the list in settings.

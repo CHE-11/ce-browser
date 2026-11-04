@@ -442,7 +442,7 @@ const fn bare(id: &'static str) -> PartSpec {
 const COPY_PARTS: &[PartSpec] = &[
     PartSpec {
         files: &["keywords.json"],
-        settings: &["searchEngine", "customSearchUrl", "mouseGestures"],
+        settings: &["searchEngine", "customSearchUrl"],
         aliases: &[("searchEngine", "searchProvider")],
         ..bare("search")
     },

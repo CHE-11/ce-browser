@@ -263,9 +263,6 @@ pub struct BrowserSettings {
     /// Hosts that may stay on `http`, lowercase and without a leading `www.`.
     #[serde(default)]
     pub https_exceptions: Vec<String>,
-    /// Right-drag on a page goes back, forward, reloads or closes the tab.
-    #[serde(default = "default_true")]
-    pub mouse_gestures: bool,
     /// Save page text on this computer so history search can match words from the page.
     #[serde(default = "default_true")]
     pub index_page_text: bool,
@@ -623,7 +620,6 @@ impl Default for BrowserSettings {
             fingerprint_shield: false,
             https_only: false,
             https_exceptions: Vec::new(),
-            mouse_gestures: true,
             index_page_text: true,
             tab_cycle_order: default_tab_cycle_order(),
             tab_switcher: true,
@@ -967,13 +963,9 @@ pub fn windows_uses_light(app: &AppHandle) -> bool {
         .any(|label| theme_of(label) == Some(tauri::Theme::Light))
 }
 
-/// Fill behind a remote page. White in light Windows, `#202124` in dark Windows.
-pub fn site_canvas(app: &AppHandle) -> Color {
-    if windows_uses_light(app) {
-        Color(0xff, 0xff, 0xff, 255)
-    } else {
-        Color(0x20, 0x21, 0x24, 255)
-    }
+/// Fill behind a remote page. White, so a dark Windows theme does not show through the site.
+pub fn site_canvas() -> Color {
+    Color(0xff, 0xff, 0xff, 255)
 }
 
 fn surface_rgb(theme: &str, light: bool) -> (u8, u8, u8) {

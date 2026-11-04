@@ -60,7 +60,7 @@ mod what_runs;
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager, Webview, Window, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, Webview, Window, WindowEvent};
 
 use adblock::AdblockStats;
 use bookmarks::{BookmarkNode, BookmarkTree};
@@ -1687,6 +1687,15 @@ fn default_download_dir(app: AppHandle) -> String {
 }
 
 #[tauri::command]
+fn windows_color_scheme(app: AppHandle) -> String {
+    if settings::windows_uses_light(&app) {
+        "light".into()
+    } else {
+        "dark".into()
+    }
+}
+
+#[tauri::command]
 fn get_user_styles(app: AppHandle) -> Result<user_styles::UserStyles, String> {
     user_styles::get(&app)
 }
@@ -1942,8 +1951,14 @@ pub fn run() {
                 }
                 WindowEvent::ThemeChanged(theme) => {
                     let app = window.app_handle().clone();
-                    webview2::apply_os_color_scheme(&app, *theme == tauri::Theme::Light);
+                    webview2::apply_site_color_scheme(&app);
                     tabs::apply_page_background(&app);
+                    let scheme = if *theme == tauri::Theme::Light {
+                        "light"
+                    } else {
+                        "dark"
+                    };
+                    let _ = app.emit("windows-color-scheme", scheme);
                 }
                 WindowEvent::CloseRequested { api, .. } => {
                     let app = window.app_handle().clone();
@@ -2211,6 +2226,7 @@ pub fn run() {
             install_update,
             release_notes,
             default_download_dir,
+            windows_color_scheme,
             get_user_styles,
             save_user_styles,
             reload_user_styles,

@@ -125,7 +125,6 @@ Windows desktop browser built on Tauri 2 and WebView2. Each tab is its own page 
 ## Productivity
 
 - Keyboard shortcut editor at `ce://shortcuts`, including chords, with per-row and reset-all
-- Mouse gestures: right-drag left for back, right for forward, up to reload, down to close the tab
 - Ad blocker for ads and trackers, with a pause list per site
 - Translate replaces article text on the page through a configurable provider; the default needs no key
 - Password generator on this computer, with length and character types, copied to the clipboard

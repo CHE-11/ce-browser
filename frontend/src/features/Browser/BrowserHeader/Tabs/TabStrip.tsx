@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, LayoutGrid, Plus } from "lucide-react";
-import { createEphemeralTab, createTab, openPopup, zoomTab } from "@/lib/browser-client";
+import { createEphemeralTab, createTab, openPopup } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { useTabDrag } from "@/lib/tab-drag";
 import { useTabMotion } from "@/lib/tab-motion";
 import { buildTabRows } from "@/lib/tab-rows";
 import { useSettings, type WindowTabsState } from "@/lib/use-browser";
-import { zoomWheelStep } from "@/lib/zoom";
 import { IconButton } from "@/components/IconButton";
 import { openTabOverview } from "./TabOverview";
 import { TabRowsView } from "./TabRowsView";
@@ -47,9 +46,6 @@ export function TabStrip({ snapshot }: TabStripProps) {
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const overflowing = useOverflow(scroller);
   const lastActive = useRef<number | null>(null);
-  const activeId = useRef(snapshot.activeId);
-  const zoomBucket = useRef(0);
-  activeId.current = snapshot.activeId;
   const rows = useMemo(
     () => buildTabRows(shown.tabs, shown.groups, shown.activeId, shown.split),
     [shown.tabs, shown.groups, shown.activeId, shown.split],
@@ -62,15 +58,8 @@ export function TabStrip({ snapshot }: TabStripProps) {
     const onWheel = (event: WheelEvent) => {
       if (event.ctrlKey) {
         event.preventDefault();
-        const stepped = zoomWheelStep(zoomBucket.current, event.deltaY, event.deltaMode);
-        zoomBucket.current = stepped.bucket;
-        const id = activeId.current;
-        if (id !== null && stepped.change) {
-          void zoomTab(id, stepped.change);
-        }
         return;
       }
-      zoomBucket.current = 0;
       if (scroller.scrollWidth <= scroller.clientWidth) {
         return;
       }

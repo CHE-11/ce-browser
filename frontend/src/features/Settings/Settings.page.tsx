@@ -21,6 +21,7 @@ import { StartupSection } from "./sections/StartupSection";
 import { SyncSection } from "./sections/SyncSection";
 import { SystemSection } from "./sections/SystemSection";
 import { TabsSection } from "./sections/TabsSection";
+import { UpdateSection } from "./sections/UpdateSection";
 import { ToolsSection } from "./sections/tools/ToolsSection";
 
 export function SettingsPage() {
@@ -148,7 +149,7 @@ export function SettingsPage() {
           />
           <SystemSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <TabsSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
-          
+          <UpdateSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <ToolsSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
   
         </div>

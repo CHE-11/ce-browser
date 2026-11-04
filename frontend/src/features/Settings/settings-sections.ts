@@ -10,6 +10,7 @@ export const SETTINGS_SECTIONS = [
   { id: "settings-sync", title: "Sync" },
   { id: "settings-system", title: "System" },
   { id: "settings-tabs", title: "Tabs" },
+  { id: "settings-update", title: "Update" },
   { id: "settings-adblock", title: "Ad blocker" },
   { id: "settings-ai", title: "AI" },
   { id: "settings-shopping", title: "Shopping" },

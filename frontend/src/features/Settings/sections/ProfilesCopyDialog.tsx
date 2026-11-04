@@ -17,7 +17,7 @@ export const PROFILE_COPY_CHOICES: {
   {
     id: "search",
     label: "Search",
-    hint: "Search engine, custom search URL, mouse gestures, and keywords.",
+    hint: "Search engine, custom search URL, and keywords.",
   },
   {
     id: "history",

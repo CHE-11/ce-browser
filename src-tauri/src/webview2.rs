@@ -9,19 +9,19 @@ use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::*;
 use windows::Win32::Foundation::{E_NOINTERFACE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    ClientToScreen, CreateRoundRectRgn, DeleteObject, HGDIOBJ, SetWindowRgn,
+    ClientToScreen, CreateRoundRectRgn, DeleteObject, HGDIOBJ, ScreenToClient, SetWindowRgn,
 };
 use windows::Win32::System::Com::IStream;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
 };
-use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumChildWindows, GA_ROOTOWNER, GWL_EXSTYLE, GetAncestor, GetClientRect, GetForegroundWindow,
-    GetWindowLongPtrW, GetWindowRect, HWND_TOP, SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW,
-    SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, WM_NCACTIVATE,
-    WS_EX_NOACTIVATE,
+    GetWindowLongPtrW, GetWindowRect, HWND_TOP, PostMessageW, SWP_NOACTIVATE, SWP_NOZORDER,
+    SWP_SHOWWINDOW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, WM_APP,
+    WM_CREATE, WM_MOUSEWHEEL, WM_NCACTIVATE, WM_NCDESTROY, WM_PARENTNOTIFY, WS_EX_NOACTIVATE,
 };
 use windows::core::{BOOL, HSTRING, Interface, PWSTR};
 
@@ -310,17 +310,12 @@ fn core(platform: &PlatformWebview) -> windows::core::Result<ICoreWebView2> {
     unsafe { platform.controller().CoreWebView2() }
 }
 
-/// Sites follow Windows. The browser theme must not write this profile setting.
-fn pin_profile_scheme(core: &ICoreWebView2, light: bool) {
-    let scheme = if light {
-        COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT
-    } else {
-        COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK
-    };
+/// Websites stay on the light scheme. A forced dark scheme leaves pages such as Gmail half styled.
+fn pin_profile_scheme(core: &ICoreWebView2) {
     let pinned = (|| unsafe {
         core.cast::<ICoreWebView2_13>()?
             .Profile()?
-            .SetPreferredColorScheme(scheme)
+            .SetPreferredColorScheme(COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT)
     })();
     if let Err(error) = pinned {
         if error.code() != E_NOINTERFACE {
@@ -329,25 +324,27 @@ fn pin_profile_scheme(core: &ICoreWebView2, light: bool) {
     }
 }
 
-/// Writes the Windows app theme onto every open WebView2 profile.
-pub fn apply_os_color_scheme(app: &AppHandle, light: bool) {
+/// Keeps every open profile on the light scheme websites actually style for.
+pub fn apply_site_color_scheme(app: &AppHandle) {
     for webview in tabs::open_surface_views(app) {
-        let _ = webview.with_webview(move |platform| {
+        let _ = webview.with_webview(|platform| {
             if let Ok(core) = core(&platform) {
-                pin_profile_scheme(&core, light);
+                pin_profile_scheme(&core);
             }
         });
     }
 }
 
-pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview) {
+pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview, window: &str) {
     let app = app.clone();
+    let window = window.to_string();
     let _ = webview.with_webview(move |platform| {
+        attach_zoom_wheel(&platform, app.clone(), ZoomKind::Ui(window));
         if let Err(error) = attach_accelerators(&app, &platform.controller(), Target::Ui) {
             eprintln!("WebView2 shortcuts for the browser UI: {error}");
         }
         if let Ok(core) = core(&platform) {
-            pin_profile_scheme(&core, crate::settings::windows_uses_light(&app));
+            pin_profile_scheme(&core);
             let failed_app = app.clone();
             let mut token = 0i64;
             let handler = ProcessFailedEventHandler::create(Box::new(move |sender, args| {
@@ -373,6 +370,232 @@ pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview) {
             }
         }
     });
+}
+
+/// Ctrl+wheel is handled here. With zoom control disabled, WebView2 consumes the gesture and
+/// never delivers a DOM wheel event, so the page script and the header never see it.
+const ZOOM_WHEEL_SUBCLASS: usize = 0x00CE_5A11;
+const WM_ZOOM_SUBCLASS: u32 = WM_APP + 0x5A;
+const WHEEL_NOTCH: i32 = 120;
+
+#[derive(Clone)]
+enum ZoomKind {
+    Page(u32),
+    /// Browser window whose header band changes Browser UI size.
+    Ui(String),
+}
+
+#[derive(Clone)]
+struct ZoomHook {
+    app: AppHandle,
+    kind: ZoomKind,
+}
+
+fn zoom_hooks() -> &'static Mutex<HashMap<isize, ZoomHook>> {
+    static HOOKS: std::sync::OnceLock<Mutex<HashMap<isize, ZoomHook>>> = std::sync::OnceLock::new();
+    HOOKS.get_or_init(Default::default)
+}
+
+fn zoom_buckets() -> &'static Mutex<HashMap<isize, i32>> {
+    static BUCKETS: std::sync::OnceLock<Mutex<HashMap<isize, i32>>> = std::sync::OnceLock::new();
+    BUCKETS.get_or_init(Default::default)
+}
+
+/// One wheel notch is 120. Smaller trackpad deltas add up, and the leftover stays for the next one.
+fn wheel_steps(bucket: i32, delta: i32) -> (i32, i32) {
+    let next = bucket.saturating_add(delta);
+    let steps = next / WHEEL_NOTCH;
+    (next - steps * WHEEL_NOTCH, steps)
+}
+
+fn attach_zoom_wheel(platform: &PlatformWebview, app: AppHandle, kind: ZoomKind) {
+    let mut hwnd = HWND(std::ptr::null_mut());
+    if unsafe { platform.controller().ParentWindow(&mut hwnd) }.is_err() || hwnd.0.is_null() {
+        return;
+    }
+    let host = hwnd.0 as isize;
+    raise_zoom_subclass(hwnd, host, ZoomHook { app, kind });
+    let _ = unsafe { EnumChildWindows(Some(hwnd), Some(subclass_zoom_child), LPARAM(host)) };
+}
+
+fn raise_zoom_subclass(hwnd: HWND, host: isize, hook: ZoomHook) {
+    if hwnd.0.is_null() {
+        return;
+    }
+    // Remove and add so this proc runs before WebView2's own subclass, which swallows Ctrl+wheel.
+    let installed = unsafe {
+        let _ = RemoveWindowSubclass(hwnd, Some(zoom_wheel_proc), ZOOM_WHEEL_SUBCLASS);
+        SetWindowSubclass(
+            hwnd,
+            Some(zoom_wheel_proc),
+            ZOOM_WHEEL_SUBCLASS,
+            host as usize,
+        )
+        .as_bool()
+    };
+    if installed {
+        zoom_hooks()
+            .lock()
+            .expect("zoom wheel")
+            .insert(hwnd.0 as isize, hook);
+    }
+}
+
+unsafe extern "system" fn subclass_zoom_child(child: HWND, host: LPARAM) -> BOOL {
+    let hook = zoom_hooks()
+        .lock()
+        .expect("zoom wheel")
+        .get(&host.0)
+        .cloned();
+    if let Some(hook) = hook {
+        raise_zoom_subclass(child, host.0, hook);
+    }
+    BOOL(1)
+}
+
+fn zoom_hook(host: isize) -> Option<ZoomHook> {
+    zoom_hooks().lock().expect("zoom wheel").get(&host).cloned()
+}
+
+fn push_wheel(host: isize, delta: i32) -> i32 {
+    let mut buckets = zoom_buckets().lock().expect("zoom wheel");
+    let bucket = buckets.entry(host).or_insert(0);
+    let (rest, steps) = wheel_steps(*bucket, delta);
+    *bucket = rest;
+    steps
+}
+
+fn clear_wheel(host: isize) {
+    if let Some(bucket) = zoom_buckets().lock().expect("zoom wheel").get_mut(&host) {
+        *bucket = 0;
+    }
+}
+
+fn ctrl_down(wparam: WPARAM) -> bool {
+    const MK_CONTROL: usize = 0x0008;
+    (wparam.0 & 0xFFFF & MK_CONTROL) != 0 || key_down(VK_CONTROL)
+}
+
+fn wheel_delta(wparam: WPARAM) -> i32 {
+    ((wparam.0 >> 16) as u16) as i16 as i32
+}
+
+fn wheel_cursor(lparam: LPARAM) -> POINT {
+    let packed = lparam.0 as u32;
+    POINT {
+        x: (packed & 0xFFFF) as i16 as i32,
+        y: ((packed >> 16) & 0xFFFF) as i16 as i32,
+    }
+}
+
+/// `height` is the header in CSS pixels. The wheel message carries screen coordinates.
+fn cursor_in_header(host: HWND, lparam: LPARAM, height: f64) -> bool {
+    let mut point = wheel_cursor(lparam);
+    if !unsafe { ScreenToClient(host, &mut point) }.as_bool() {
+        return false;
+    }
+    let css_y = point.y as f64 / hwnd_scale(host);
+    css_y >= 0.0 && css_y < height
+}
+
+fn step_page_zoom(app: &AppHandle, id: u32, steps: i32) {
+    if steps == 0 {
+        return;
+    }
+    let change = if steps > 0 { "in" } else { "out" };
+    for _ in 0..steps.unsigned_abs() {
+        if tabs::zoom(app, id, change).is_err() {
+            break;
+        }
+    }
+}
+
+fn step_ui_zoom(app: &AppHandle, steps: i32) {
+    if steps == 0 {
+        return;
+    }
+    let current = crate::settings::get(app).ui_zoom as i32;
+    let next = (current + steps * 5).clamp(80, 150) as u32;
+    if next == current as u32 {
+        return;
+    }
+    let _ = crate::settings::update(app, |settings| settings.ui_zoom = next);
+}
+
+/// `true` when this notch belongs to page zoom or the browser header, and the message
+/// must not reach WebView2.
+fn on_ctrl_wheel(host: isize, wparam: WPARAM, lparam: LPARAM) -> bool {
+    let Some(hook) = zoom_hook(host) else {
+        return false;
+    };
+    let delta = wheel_delta(wparam);
+    match hook.kind {
+        ZoomKind::Page(id) => {
+            let steps = push_wheel(host, delta);
+            step_page_zoom(&hook.app, id, steps);
+            true
+        }
+        ZoomKind::Ui(window) => {
+            let Some(height) = tabs::header_height(&hook.app, &window) else {
+                return false;
+            };
+            if !cursor_in_header(HWND(host as *mut std::ffi::c_void), lparam, height) {
+                return false;
+            }
+            let steps = push_wheel(host, delta);
+            step_ui_zoom(&hook.app, steps);
+            true
+        }
+    }
+}
+
+unsafe extern "system" fn zoom_wheel_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    host: usize,
+) -> LRESULT {
+    let host_key = host as isize;
+    if message == WM_PARENTNOTIFY && (wparam.0 & 0xFFFF) as u32 == WM_CREATE {
+        let child = HWND(lparam.0 as *mut std::ffi::c_void);
+        if !child.0.is_null()
+            && let Some(hook) = zoom_hook(host_key)
+        {
+            raise_zoom_subclass(child, host_key, hook);
+            let _ = unsafe {
+                PostMessageW(
+                    Some(hwnd),
+                    WM_ZOOM_SUBCLASS,
+                    WPARAM(child.0 as usize),
+                    LPARAM(0),
+                )
+            };
+        }
+    } else if message == WM_ZOOM_SUBCLASS {
+        let child = HWND(wparam.0 as *mut std::ffi::c_void);
+        if let Some(hook) = zoom_hook(host_key) {
+            raise_zoom_subclass(child, host_key, hook);
+        }
+        return LRESULT(0);
+    } else if message == WM_NCDESTROY {
+        zoom_hooks()
+            .lock()
+            .expect("zoom wheel")
+            .remove(&(hwnd.0 as isize));
+        if hwnd.0 as isize == host_key {
+            zoom_buckets().lock().expect("zoom wheel").remove(&host_key);
+        }
+        let _ = unsafe { RemoveWindowSubclass(hwnd, Some(zoom_wheel_proc), ZOOM_WHEEL_SUBCLASS) };
+    } else if message == WM_MOUSEWHEEL {
+        if !ctrl_down(wparam) {
+            clear_wheel(host_key);
+        } else if on_ctrl_wheel(host_key, wparam, lparam) {
+            return LRESULT(0);
+        }
+    }
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
 }
 
 /// The WebView2 environment already created for this profile. A second
@@ -795,9 +1018,10 @@ pub fn attach_page_hooks(app: &AppHandle, webview: &Webview, id: u32) {
 }
 
 fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::core::Result<()> {
+    attach_zoom_wheel(platform, app.clone(), ZoomKind::Page(id));
     let controller = platform.controller();
     let core = core(platform)?;
-    pin_profile_scheme(&core, crate::settings::windows_uses_light(app));
+    pin_profile_scheme(&core);
     attach_accelerators(app, &controller, Target::Page)?;
     let mut token = 0i64;
 
@@ -984,29 +1208,6 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                                 let _ = tabs::zoom(&app, id, &change);
                             });
                         }
-                    }
-                    Some("ce-gesture") => {
-                        if !crate::settings::get(&message_app).mouse_gestures {
-                            return Ok(());
-                        }
-                        let direction = message
-                            .get("direction")
-                            .and_then(|value| value.as_str())
-                            .unwrap_or("");
-                        let app = message_app.clone();
-                        let direction = direction.to_string();
-                        tauri::async_runtime::spawn(async move {
-                            let action = match direction.as_str() {
-                                "left" => Some(crate::shortcuts::Action::Back),
-                                "right" => Some(crate::shortcuts::Action::Forward),
-                                "up" => Some(crate::shortcuts::Action::Reload),
-                                "down" => Some(crate::shortcuts::Action::CloseTab),
-                                _ => None,
-                            };
-                            if let Some(action) = action {
-                                let _ = crate::shortcuts::run(&app, action);
-                            }
-                        });
                     }
                     Some("ce-speed") => {
                         if let Some(speed) = message.get("speed").and_then(|value| value.as_f64()) {
@@ -2429,4 +2630,30 @@ pub fn js_heap_used(webview: &Webview) -> Option<u64> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wheel_steps;
+
+    #[test]
+    fn one_notch_is_one_zoom_step() {
+        assert_eq!(wheel_steps(0, 120), (0, 1));
+        assert_eq!(wheel_steps(0, -120), (0, -1));
+    }
+
+    #[test]
+    fn a_short_delta_waits_for_the_next_notch() {
+        assert_eq!(wheel_steps(0, 100), (100, 0));
+        assert_eq!(wheel_steps(100, 20), (0, 1));
+        assert_eq!(wheel_steps(0, -100), (-100, 0));
+        assert_eq!(wheel_steps(-100, -20), (0, -1));
+        assert_eq!(wheel_steps(50, -30), (20, 0));
+    }
+
+    #[test]
+    fn a_large_delta_takes_several_steps_and_keeps_the_remainder() {
+        assert_eq!(wheel_steps(0, 250), (10, 2));
+        assert_eq!(wheel_steps(0, -250), (-10, -2));
+    }
 }

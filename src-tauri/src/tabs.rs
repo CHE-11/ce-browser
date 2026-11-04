@@ -1429,35 +1429,6 @@ const PEEK_CLICK_SCRIPT: &str = r#"(function () {
     }
     return "";
   }
-  document.addEventListener("mousedown", function (event) {
-    if (event.button !== 2) return;
-    window.__ceGestureStart = { x: event.clientX, y: event.clientY, moved: false };
-  }, true);
-  document.addEventListener("mousemove", function (event) {
-    var start = window.__ceGestureStart;
-    if (!start || (event.buttons & 2) === 0) return;
-    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) >= 80) start.moved = true;
-  }, true);
-  document.addEventListener("contextmenu", function (event) {
-    if (window.__ceGestureDrag || (window.__ceGestureStart && window.__ceGestureStart.moved)) {
-      window.__ceGestureDrag = false;
-      event.preventDefault();
-      event.stopPropagation();
-    }
-  }, true);
-  document.addEventListener("mouseup", function (event) {
-    var start = window.__ceGestureStart;
-    window.__ceGestureStart = null;
-    if (!start || event.button !== 2 || !start.moved) return;
-    window.__ceGestureDrag = true;
-    var dx = event.clientX - start.x;
-    var dy = event.clientY - start.y;
-    if (Math.hypot(dx, dy) < 80) return;
-    var direction = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : (dy < 0 ? "up" : "down");
-    if (window.chrome && window.chrome.webview) {
-      window.chrome.webview.postMessage({ type: "ce-gesture", direction: direction });
-    }
-  }, true);
   document.addEventListener("click", function (event) {
     if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.button !== 0) return;
     var href = linkHref(event);
@@ -1789,7 +1760,7 @@ pub fn create_browser_window(app: &AppHandle, label: &str) -> Result<(), String>
             size,
         )
         .map_err(|error| error.to_string())?;
-    webview2::attach_ui_hooks(app, &ui_view);
+    webview2::attach_ui_hooks(app, &ui_view, label);
     if backdrop {
         crate::backdrop::apply_all(app);
     }
@@ -4072,6 +4043,19 @@ pub fn set_fullscreen(app: &AppHandle, id: u32, fullscreen: bool) {
     });
 }
 
+/// CSS height of the browser header. Ctrl+scroll in that band changes Browser UI size.
+/// Fullscreen covers the window with the page, so the header is not a zoom target.
+pub fn header_height(app: &AppHandle, window: &str) -> Option<f64> {
+    with_state(app, |state| {
+        let chrome = state.chrome(window)?;
+        if chrome.fullscreen || chrome.ui_height < 1.0 {
+            None
+        } else {
+            Some(chrome.ui_height)
+        }
+    })
+}
+
 /// `top` is the header height, `left` the vertical tab sidebar, `right` the tool strip,
 /// and `bottom` the status bar, in CSS pixels. A zero bottom means the bar is hidden.
 pub fn set_ui_insets(app: &AppHandle, window: &str, top: f64, left: f64, right: f64, bottom: f64) {
@@ -4234,7 +4218,7 @@ pub fn open_surface_views(app: &AppHandle) -> Vec<Webview> {
         .collect()
 }
 
-/// The gap around a document. Remote pages use the Windows canvas. App pages use the theme.
+/// The gap around a document. Remote pages stay white. App pages use the theme.
 pub fn paint_document_background(app: &AppHandle, id: u32, url: &str) {
     let Some(webview) = page_view(app, id) else {
         return;
@@ -4244,7 +4228,7 @@ pub fn paint_document_background(app: &AppHandle, id: u32, url: &str) {
 
 fn document_color(app: &AppHandle, url: &str) -> Color {
     if remote_document(app, url) {
-        settings::site_canvas(app)
+        settings::site_canvas()
     } else {
         settings::page_color(app)
     }

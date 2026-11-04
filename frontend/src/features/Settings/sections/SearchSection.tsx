@@ -3,7 +3,6 @@ import { X } from "lucide-react";
 import type { Keyword, SearchEngine } from "@type/browser";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
-import { Toggle } from "@/components/Toggle";
 import { listKeywords, onKeywordsChanged, saveKeywords } from "@/lib/browser-client";
 import { SETTINGS_SECTIONS } from "../settings-sections";
 import {
@@ -34,8 +33,6 @@ const SEARCH_ENGINES: { id: SearchEngine; label: string }[] = [
 const ENGINE_HINT = "Used when the address bar text is not a URL. Kagi and Mojeek do not show ads. Kagi needs an account.";
 const CUSTOM_LABEL = "Custom search URL";
 const CUSTOM_HINT = "Use %s where the query goes.";
-const GESTURE_LABEL = "Mouse gestures";
-const GESTURE_HINT = "Right-drag left to go back, right to go forward, up to reload, down to close the tab.";
 const KEYWORD_LABEL = "Keywords";
 const KEYWORD_HINT = "Type gh react or !gh react in the address bar. Put %s where the query goes.";
 
@@ -68,8 +65,6 @@ export function SearchSection({ settings, query, onUpdate, onMatch }: SettingsSe
     customVisible ? CUSTOM_LABEL : "",
     customVisible ? CUSTOM_HINT : "",
     customVisible ? customDraft : "",
-    GESTURE_LABEL,
-    GESTURE_HINT,
     KEYWORD_LABEL,
     KEYWORD_HINT,
     "Add",
@@ -128,9 +123,6 @@ export function SearchSection({ settings, query, onUpdate, onMatch }: SettingsSe
           />
         </Row>
       ) : null}
-      <Row id="settings-gestures" setting="mouseGestures" label={GESTURE_LABEL} hint={GESTURE_HINT}>
-        <Toggle id="settings-gestures-toggle" checked={settings.mouseGestures} onChange={(mouseGestures) => onUpdate({ mouseGestures })} />
-      </Row>
       <KeywordEditor keywords={keywords} draft={draft} setDraft={setDraft} onSave={save} />
     </Section>
   );
