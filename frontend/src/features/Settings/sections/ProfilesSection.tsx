@@ -10,6 +10,7 @@ import {
   defaultDownloadDir,
   deleteProfile,
   installProfileShortcut,
+  listProfileIconColors,
   listProfileIcons,
   listProfiles,
   openProfile,
@@ -17,6 +18,7 @@ import {
   pinProfileTaskbar,
   saveProfileShortcut,
   setProfileIcon,
+  setProfileIconColor,
   setProfileIconText,
   showSavedFile,
   unpinProfileTaskbar,
@@ -34,7 +36,7 @@ const ARCHIVE_LABEL = "Profile file";
 const ARCHIVE_HINT =
   "Saves this profile's bookmarks, history, extensions, and settings in one encrypted file. Cookies stay on this computer.";
 
-function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], iconOpen: boolean) {
+function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], colors: ProfileIconChoice[], iconOpen: boolean) {
   const terms = [
     profile.name,
     profile.current ? "This window" : "",
@@ -63,6 +65,8 @@ function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], iconO
         ? "This window, the Start menu, and the taskbar button use this icon."
         : "The Start menu and taskbar shortcut update now. That profile's window uses the icon the next time it opens.",
       "Show Icon Text",
+      "Background",
+      ...colors.flatMap((color) => [color.label, color.id]),
       "Choose an image",
       "Image",
       ...icons.flatMap((choice) => [choice.label, choice.id]),
@@ -74,6 +78,7 @@ function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], iconO
 export function ProfilesSection({ settings, query, onError, onMatch, revision }: SettingsSectionProps & { revision: number }) {
   const [profiles, setProfiles] = useState<BrowserProfile[]>([]);
   const [profileIcons, setProfileIcons] = useState<ProfileIconChoice[]>([]);
+  const [iconColors, setIconColors] = useState<ProfileIconChoice[]>([]);
   const [profileName, setProfileName] = useState("");
   const [profileWorking, setProfileWorking] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
@@ -106,6 +111,17 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
           onError(String(reason));
         }
       });
+    void listProfileIconColors()
+      .then((next) => {
+        if (!disposed) {
+          setIconColors(next);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!disposed) {
+          onError(String(reason));
+        }
+      });
     return () => {
       disposed = true;
     };
@@ -130,7 +146,7 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
     "Copy profile",
     "App settings",
     ...PROFILE_COPY_CHOICES.flatMap((choice) => [choice.label, choice.hint]),
-    ...profiles.flatMap((profile) => profileTerms(profile, profileIcons, iconProfile === profile.id)),
+    ...profiles.flatMap((profile) => profileTerms(profile, profileIcons, iconColors, iconProfile === profile.id)),
     confirmText,
     pendingDelete ? "Cancel" : "",
   );
@@ -231,6 +247,7 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
           key={profile.id}
           profile={profile}
           icons={profileIcons}
+          colors={iconColors}
           iconOpen={iconProfile === profile.id}
           working={profileWorking}
           onToggleIcons={() => setIconProfile((current) => (current === profile.id ? null : profile.id))}
@@ -250,6 +267,7 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
           onRemove={() => setPendingDelete(profile.id)}
           onIconText={(enabled) => runProfiles(() => setProfileIconText(profile.id, enabled))}
           onChooseIcon={(iconId, path) => runProfiles(() => setProfileIcon(profile.id, iconId, path))}
+          onChooseColor={(colorId) => runProfiles(() => setProfileIconColor(profile.id, colorId))}
           onPickFile={() =>
             void pickProfileIcon().then((path) => {
               if (path) {
@@ -311,6 +329,7 @@ function downloadProfileShortcut(profile: BrowserProfile, onError: (message: str
 function ProfileCard({
   profile,
   icons,
+  colors,
   iconOpen,
   working,
   onToggleIcons,
@@ -323,10 +342,12 @@ function ProfileCard({
   onRemove,
   onIconText,
   onChooseIcon,
+  onChooseColor,
   onPickFile,
 }: {
   profile: BrowserProfile;
   icons: ProfileIconChoice[];
+  colors: ProfileIconChoice[];
   iconOpen: boolean;
   working: boolean;
   onToggleIcons: () => void;
@@ -339,9 +360,10 @@ function ProfileCard({
   onRemove: () => void;
   onIconText: (enabled: boolean) => void;
   onChooseIcon: (iconId: string, path?: string) => void;
+  onChooseColor: (colorId: string) => void;
   onPickFile: () => void;
 }) {
-  const visible = useSettingVisible(...profileTerms(profile, icons, iconOpen));
+  const visible = useSettingVisible(...profileTerms(profile, icons, colors, iconOpen));
   if (!visible) {
     return null;
   }
@@ -479,6 +501,35 @@ function ProfileCard({
               </span>
             </button>
           </div>
+          {profile.iconId !== "custom" ? (
+            <div id={`settings-profile-${profile.id}-colors`} className="flex flex-col gap-2">
+              <p id={`settings-profile-${profile.id}-colors-label`} className="text-xs text-zinc-400">
+                Background
+              </p>
+              <div id={`settings-profile-${profile.id}-color-row`} className="flex flex-wrap gap-2">
+                {colors.map((color) => {
+                  const selected = profile.iconColor === color.id || (color.id === "default" && !profile.iconColor);
+                  return (
+                    <button
+                      key={color.id}
+                      id={`settings-profile-${profile.id}-color-${color.id}`}
+                      type="button"
+                      title={color.label}
+                      disabled={working}
+                      aria-label={color.label}
+                      className={cn(
+                        "size-8 overflow-hidden rounded-full border",
+                        selected ? "border-sky-500 ring-1 ring-sky-500" : "border-zinc-700 hover:border-zinc-500",
+                      )}
+                      onClick={() => onChooseColor(color.id)}
+                    >
+                      <img id={`settings-profile-${profile.id}-color-${color.id}-image`} src={color.icon} alt="" className="size-full" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

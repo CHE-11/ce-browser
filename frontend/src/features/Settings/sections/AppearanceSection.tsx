@@ -29,7 +29,7 @@ const ACCENT_HINT = "Tints the active tab and address bar from the site's theme 
 const PIN_BORDER_LABEL = "Pin tab border";
 const PIN_BORDER_HINT = "Draws the site's theme color or favicon along the top of pinned tabs.";
 const MODE_LABEL = "Mode";
-const MODE_HINT = "Colors the browser. Websites keep the theme they draw themselves.";
+const MODE_HINT = "Colors the browser. Websites follow Windows light or dark mode when they support it.";
 const BACKDROP_LABEL = "Window backdrop";
 const BACKDROP_HINT = "Mica or Acrylic shows the desktop color through the tab strip and toolbars.";
 const THEME_LABEL = "Theme";
@@ -286,7 +286,7 @@ function ThemePicker({ settings, onUpdate }: { settings: SettingsSectionProps["s
       <div id="settings-theme-label" className="mb-3 text-sm text-zinc-100">
         {THEME_LABEL}
       </div>
-      <div id="settings-theme-grid" className="grid grid-cols-5 gap-2" onMouseLeave={() => void sendThemePreview(null)}>
+      <div id="settings-theme-grid" className="grid grid-cols-5 gap-2">
         {themes.map((theme) => {
           const swatch = theme.swatch[resolved];
           const active = settings.theme === theme.id;
@@ -300,14 +300,6 @@ function ThemePicker({ settings, onUpdate }: { settings: SettingsSectionProps["s
                 "relative flex flex-col overflow-hidden rounded-md border text-left",
                 active ? "border-sky-500 ring-1 ring-sky-500" : "border-zinc-700 hover:border-zinc-500",
               )}
-              onMouseEnter={() => void sendThemePreview(theme.id)}
-              onFocus={() => void sendThemePreview(theme.id)}
-              onBlur={(event) => {
-                const grid = event.currentTarget.parentElement;
-                if (!grid?.contains(event.relatedTarget as Node | null)) {
-                  void sendThemePreview(null);
-                }
-              }}
               onClick={() => {
                 void sendThemePreview(theme.id, true);
                 onUpdate({ theme: theme.id });

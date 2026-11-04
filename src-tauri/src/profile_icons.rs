@@ -29,6 +29,15 @@ struct Preset {
     kind: IconKind,
 }
 
+const COLORS: &[(&str, &str, f32)] = &[
+    ("amber", "Amber", 36.0),
+    ("emerald", "Emerald", 152.0),
+    ("rose", "Rose", 346.0),
+    ("violet", "Violet", 272.0),
+    ("orange", "Orange", 18.0),
+    ("teal", "Teal", 174.0),
+];
+
 const PRESETS: &[Preset] = &[
     Preset {
         id: "default",
@@ -122,6 +131,10 @@ pub fn choices() -> Vec<IconChoice> {
     cached_choices().clone()
 }
 
+pub fn color_choices() -> Vec<IconChoice> {
+    cached_colors().clone()
+}
+
 pub fn preview(id: &str) -> Option<String> {
     cached_choices()
         .iter()
@@ -129,22 +142,60 @@ pub fn preview(id: &str) -> Option<String> {
         .map(|choice| choice.preview.clone())
 }
 
+/// A glyph the icon grid can select. Color names are backgrounds, not icons.
+pub fn is_glyph(id: &str) -> bool {
+    PRESETS.iter().any(|preset| {
+        preset.id == id && matches!(preset.kind, IconKind::Logo(None) | IconKind::Symbol(_, _))
+    })
+}
+
+pub fn is_color(id: &str) -> bool {
+    color_hue(id).is_some()
+}
+
 pub fn render(id: &str) -> Result<RgbaImage, String> {
+    if let Some(hue) = color_hue(id) {
+        return sized(recolor(source(), hue));
+    }
+    render_icon(id, "")
+}
+
+/// Draws `icon_id` on `color_id`. An empty color keeps the icon's own color.
+pub fn render_icon(icon_id: &str, color_id: &str) -> Result<RgbaImage, String> {
+    let icon_id = if icon_id.is_empty() {
+        "default"
+    } else {
+        icon_id
+    };
     let preset = PRESETS
         .iter()
-        .find(|preset| preset.id == id)
+        .find(|preset| preset.id == icon_id && is_glyph(preset.id))
         .ok_or("That icon is not available.")?;
+    let tint = color_hue(color_id);
     let colored = match preset.kind {
-        IconKind::Logo(None) => source().clone(),
-        IconKind::Logo(Some(hue)) => recolor(source(), hue),
-        IconKind::Symbol(symbol, hue) => draw_symbol(symbol, hue),
+        IconKind::Logo(_) => match tint {
+            Some(hue) => recolor(source(), hue),
+            None => source().clone(),
+        },
+        IconKind::Symbol(symbol, hue) => draw_symbol(symbol, tint.unwrap_or(hue)),
     };
+    sized(colored)
+}
+
+fn sized(image: RgbaImage) -> Result<RgbaImage, String> {
     Ok(image::imageops::resize(
-        &colored,
+        &image,
         256,
         256,
         FilterType::Lanczos3,
     ))
+}
+
+fn color_hue(id: &str) -> Option<f32> {
+    COLORS
+        .iter()
+        .find(|(color, _, _)| *color == id)
+        .map(|(_, _, hue)| *hue)
 }
 
 pub fn from_file(path: &Path) -> Result<RgbaImage, String> {
@@ -225,6 +276,7 @@ fn cached_choices() -> &'static Vec<IconChoice> {
     CHOICES.get_or_init(|| {
         PRESETS
             .iter()
+            .filter(|preset| is_glyph(preset.id))
             .filter_map(|preset| {
                 let image = render(preset.id).ok()?;
                 let small = image::imageops::resize(&image, 64, 64, FilterType::Triangle);
@@ -237,6 +289,38 @@ fn cached_choices() -> &'static Vec<IconChoice> {
             })
             .collect()
     })
+}
+
+fn cached_colors() -> &'static Vec<IconChoice> {
+    static COLORS_CACHE: OnceLock<Vec<IconChoice>> = OnceLock::new();
+    COLORS_CACHE.get_or_init(|| {
+        let mut choices = vec![IconChoice {
+            id: "default",
+            label: "Default",
+            preview: swatch_preview(None),
+        }];
+        choices.extend(COLORS.iter().map(|(id, label, hue)| IconChoice {
+            id,
+            label,
+            preview: swatch_preview(Some(*hue)),
+        }));
+        choices
+    })
+}
+
+fn swatch_preview(hue: Option<f32>) -> String {
+    let mut image = RgbaImage::from_pixel(64, 64, Rgba([0, 0, 0, 0]));
+    let color = match hue {
+        Some(hue) => {
+            let [red, green, blue] = hsl_to_rgb(hue, 0.62, 0.46);
+            Rgba([red, green, blue, 255])
+        }
+        None => Rgba([161, 161, 170, 255]),
+    };
+    fill_round_rect(&mut image, 4.0, 4.0, 56.0, 56.0, 16.0, color);
+    encode_png(&image)
+        .map(|png| data_url(&png))
+        .unwrap_or_default()
 }
 
 fn source() -> &'static RgbaImage {
@@ -817,5 +901,17 @@ mod tests {
         let eleven = stamp_name(&image, "AAAAAAAAAAB").unwrap();
         assert_eq!(ten.as_raw(), eleven.as_raw());
         assert_eq!(stamp_name(&image, "   ").unwrap().as_raw(), image.as_raw());
+    }
+
+    #[test]
+    fn a_background_color_changes_the_symbol() {
+        let own = render_icon("heart", "").unwrap();
+        let teal = render_icon("heart", "teal").unwrap();
+        assert!(
+            own.pixels()
+                .zip(teal.pixels())
+                .any(|(left, right)| left.0 != right.0)
+        );
+        assert!(render_icon("nope", "teal").is_err());
     }
 }

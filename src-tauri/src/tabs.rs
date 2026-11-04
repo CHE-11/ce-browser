@@ -38,11 +38,11 @@ pub const GROUP_COLORS: &[&str] = &[
     "grey", "blue", "red", "yellow", "green", "pink", "purple", "cyan", "orange",
 ];
 /// Chromium args for every WebView2 environment. Setting them replaces wry's defaults,
-/// including `--autoplay-policy=no-user-gesture-required`, so the feature list is repeated here.
-/// The flag is not enough on its own. Opening a link hands that click to the new page, and a
-/// muted video can still start. `AUTOPLAY_GUARD_SCRIPT` pauses playback until a click or key
-/// press happens inside the page. Selecting the tab does not count.
-const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=user-gesture-required";
+/// including `--autoplay-policy=no-user-gesture-required`, so that flag is repeated here.
+/// `user-gesture-required` drops speaker audio that starts after the click returns, which
+/// is how a call plays the other person. `AUTOPLAY_GUARD_SCRIPT` is what keeps a page quiet
+/// until a click or key press inside it. Selecting the tab does not count.
+const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
 /// Logical px between the two split panes. The browser UI shows through it as the divider.
 const SPLIT_GAP: f64 = 6.0;
 const MAX_WORKSPACES: usize = 20;
@@ -1256,7 +1256,8 @@ fn page_zoom_for(app: &AppHandle, url: &str) -> f64 {
 
 /// Pauses video and audio that start before the user clicks or presses a key in this document.
 /// The click that opened the tab, and selecting the tab, do not count: both can satisfy
-/// Chromium's autoplay policy without a gesture inside this page.
+/// Chromium's autoplay policy without a gesture inside this page. A gesture also unlocks
+/// frames in the page and audio contexts, so a call can play out of the speakers afterwards.
 const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
   if (window.__ceAutoplayGuard || !window.HTMLMediaElement || !HTMLMediaElement.prototype) return;
   window.__ceAutoplayGuard = true;
@@ -1264,15 +1265,50 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
   var nativePlay = HTMLMediaElement.prototype.play;
   var nativePause = HTMLMediaElement.prototype.pause;
   var roots = [];
+  var contexts = [];
+  var nativeResume = null;
   var timer = 0;
   var scan = 0;
 
-  function release() {
-    allowed = true;
+  function finish() {
     if (timer) clearInterval(timer);
     if (scan) clearInterval(scan);
     timer = 0;
     scan = 0;
+  }
+  function notifyFrames() {
+    var frames = [];
+    function collect(root, depth) {
+      if (!root || depth > 6 || !root.querySelectorAll) return;
+      var found;
+      try { found = root.querySelectorAll("iframe, frame"); } catch (error) { found = []; }
+      for (var i = 0; i < found.length; i++) frames.push(found[i]);
+      var nodes;
+      try { nodes = root.querySelectorAll("*"); } catch (error) { return; }
+      for (var n = 0; n < nodes.length; n++) {
+        if (nodes[n].shadowRoot) collect(nodes[n].shadowRoot, depth + 1);
+      }
+    }
+    collect(document, 0);
+    for (var i = 0; i < frames.length; i++) {
+      try {
+        if (frames[i].contentWindow) frames[i].contentWindow.postMessage({ type: "ce-autoplay-release" }, "*");
+      } catch (error) {}
+    }
+  }
+  function release() {
+    if (allowed) {
+      finish();
+      return;
+    }
+    allowed = true;
+    finish();
+    var pending = contexts;
+    contexts = [];
+    for (var i = 0; i < pending.length; i++) {
+      try { if (nativeResume) nativeResume.call(pending[i]); } catch (error) {}
+    }
+    notifyFrames();
   }
   function arm(event) {
     if (event && event.isTrusted) release();
@@ -1281,9 +1317,33 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
     window.addEventListener(type, arm, true);
   });
 
+  var NativeAudio = window.AudioContext || window.webkitAudioContext;
+  if (NativeAudio && NativeAudio.prototype && NativeAudio.prototype.resume) {
+    nativeResume = NativeAudio.prototype.resume;
+    var WrappedAudio = function AudioContext(options) {
+      var ctx = options === undefined ? new NativeAudio() : new NativeAudio(options);
+      if (!allowed) {
+        try { ctx.suspend(); } catch (error) {}
+        contexts.push(ctx);
+      }
+      return ctx;
+    };
+    WrappedAudio.prototype = NativeAudio.prototype;
+    if (window.AudioContext) window.AudioContext = WrappedAudio;
+    if (window.webkitAudioContext) window.webkitAudioContext = WrappedAudio;
+    NativeAudio.prototype.resume = function () {
+      if (!allowed) {
+        var rejected = Promise.reject(new DOMException("Playback needs a click in the page.", "NotAllowedError"));
+        rejected.catch(function () {});
+        return rejected;
+      }
+      return nativeResume.apply(this, arguments);
+    };
+  }
+
   function streamOnly(media) {
     try {
-      return !!media.srcObject && typeof MediaStream !== "undefined" && media.srcObject instanceof MediaStream && !media.currentSrc && !media.getAttribute("src");
+      return !!media.srcObject && typeof MediaStream !== "undefined" && media.srcObject instanceof MediaStream;
     } catch (error) {
       return false;
     }
@@ -1382,6 +1442,20 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
     discover(document, 0);
     tick();
   });
+  window.addEventListener("message", function (event) {
+    var data = event.data;
+    if (!data || typeof data !== "object") return;
+    if (data.type === "ce-autoplay-query") {
+      if (allowed && event.source && event.source !== window) {
+        try { event.source.postMessage({ type: "ce-autoplay-release" }, "*"); } catch (error) {}
+      }
+      return;
+    }
+    if (data.type === "ce-autoplay-release" && event.source === window.parent && window.parent !== window) release();
+  });
+  if (window.parent && window.parent !== window) {
+    try { window.parent.postMessage({ type: "ce-autoplay-query" }, "*"); } catch (error) {}
+  }
 })();"#;
 
 /// Ctrl+scroll zooms the page. A site that already handled the wheel, such as a map, is left alone.
@@ -4239,7 +4313,7 @@ pub fn open_surface_views(app: &AppHandle) -> Vec<Webview> {
         .collect()
 }
 
-/// The gap around a document. Remote pages stay white. App pages use the theme.
+/// The gap around a document. Remote pages follow Windows. App pages use the theme.
 pub fn paint_document_background(app: &AppHandle, id: u32, url: &str) {
     let Some(webview) = page_view(app, id) else {
         return;
@@ -4249,7 +4323,7 @@ pub fn paint_document_background(app: &AppHandle, id: u32, url: &str) {
 
 fn document_color(app: &AppHandle, url: &str) -> Color {
     if remote_document(app, url) {
-        settings::site_canvas()
+        settings::site_canvas(app)
     } else {
         settings::page_color(app)
     }
@@ -4651,19 +4725,27 @@ pub fn apply_audio_all(app: &AppHandle) {
 }
 
 pub fn update_audio(app: &AppHandle, id: u32, audible: bool) {
-    let changed = with_state(app, |state| {
+    let heard = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
         if tab.info.audible == audible {
             return None;
         }
         tab.info.audible = audible;
-        Some(())
+        // The webview can be left silent after a background mute. Starting playback asks again.
+        if audible && !tab.info.muted {
+            tab.applied_mute = None;
+        }
+        Some(state.tab_window(id))
     });
-    if changed.is_some() {
-        emit_tabs(app);
+    let Some(window) = heard else {
+        return;
+    };
+    if let Some(window) = window {
+        apply_audio(app, &window);
     }
+    emit_tabs(app);
     // Muted video never raises this. The page script pauses that on its own.
-    if audible && changed.is_some() {
+    if audible {
         if let Some(webview) = page_view(app, id) {
             let _ = webview.eval("if (window.__ceStopAutoplay) window.__ceStopAutoplay()");
         }
@@ -4676,6 +4758,7 @@ pub fn set_muted(app: &AppHandle, ids: &[u32], muted: bool) -> Result<(), String
         for id in ids {
             if let Some(tab) = state.tab_mut(*id) {
                 tab.info.muted = muted;
+                tab.applied_mute = None;
                 if !windows.contains(&tab.info.window) {
                     windows.push(tab.info.window.clone());
                 }

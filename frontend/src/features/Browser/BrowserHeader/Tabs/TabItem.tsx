@@ -66,7 +66,9 @@ export function TabItem({
   const showAudio = tab.audible || tab.muted;
   const alert = tabProblemTitle(tab, heavy);
   const accentFill = accent && active ? accentTint(accent, 0.28) : undefined;
-  const backgroundColor = accentFill ?? (active && !quietActive ? ACTIVE_TAB_FILL : undefined);
+  const chromeTab = !vertical && active;
+  const backgroundColor =
+    accentFill ?? (active && !quietActive ? ACTIVE_TAB_FILL : chromeTab && quietActive ? "var(--color-zinc-900)" : undefined);
 
   const toggleMute = (event: MouseEvent) => {
     event.stopPropagation();
@@ -131,6 +133,7 @@ export function TabItem({
         "group relative flex shrink-0 cursor-default select-none items-center gap-2 text-[11px] transition-colors",
         focusRing,
         vertical ? "h-8 w-full rounded-lg px-2" : "h-7.5 rounded-t-lg px-2.5",
+        chromeTab && "tab-curve z-10",
         !vertical && (compact ? "w-9 justify-center px-0" : "min-w-22 shrink"),
         vertical && compact && "w-9 justify-center px-0",
         active

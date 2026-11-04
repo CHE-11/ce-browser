@@ -10,6 +10,7 @@ import { useAppearanceState, useBookmarksState, useExtensions, useTabs } from "@
 import { AddressBarEllipsisMenu } from "@/features/Browser/BrowserHeader/Addressbar/AddressBarEllipsisMenu";
 import { ThemePicker } from "@/features/Browser/BrowserHeader/Addressbar/ThemePicker";
 import { ExtensionPinContextMenu } from "@/features/Browser/BrowserHeader/Addressbar/ExtensionPinContextMenu";
+import { PinContextMenu } from "@/features/Browser/BrowserHeader/Addressbar/PinContextMenu";
 import { BookmarkAdd } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarkAdd";
 import { BookmarkRename } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarkRename";
 import { BookmarkEditor } from "@/features/Browser/BrowserHeader/BookmarksBar/BookmarkEditor";
@@ -200,6 +201,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <ReadingPopover params={params} />;
     case "extension-pin":
       return <ExtensionPinContextMenu extensionId={params.get("id") ?? ""} />;
+    case "pin-menu":
+      return <PinContextMenu url={params.get("url") ?? ""} />;
     case "tab-group":
       return <TabGroupFlyout groupId={Number(params.get("id"))} />;
     case "tab-group-menu":

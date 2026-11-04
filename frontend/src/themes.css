@@ -1082,6 +1082,33 @@ html[data-theme="fog"][data-mode="light"] {
   --app-red-950: #ffebe9;
 }
 
+/* Active tab meets the strip with the same inward bottom corners as Chrome. The size follows --radius-lg, so square themes (line, sharp) stay square. */
+.tab-curve {
+  --tab-curve: var(--radius-lg);
+}
+
+.tab-curve::before,
+.tab-curve::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  z-index: 1;
+  width: calc(var(--tab-curve) * 2);
+  height: var(--tab-curve);
+  background: var(--color-zinc-950);
+  pointer-events: none;
+}
+
+.tab-curve::before {
+  left: calc(var(--tab-curve) * -1);
+  border-bottom-right-radius: var(--tab-curve);
+}
+
+.tab-curve::after {
+  right: calc(var(--tab-curve) * -1);
+  border-bottom-left-radius: var(--tab-curve);
+}
+
 /* Bland chrome. Corners follow --radius-*. Shadows rewrite --tw-shadow on the shadow utilities, because those utilities do not read --shadow-*. --radius-full stays a pill, and borders stay 1px. */
 
 html[data-theme="plain"] {

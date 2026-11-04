@@ -66,6 +66,9 @@ struct ProfileRecord {
     /// First 10 letters of the profile name, drawn at the top of the icon.
     #[serde(default)]
     icon_text: bool,
+    /// Background color id. Empty keeps the icon's own color.
+    #[serde(default)]
+    icon_color: String,
     /// Directory name in the sync folder. Empty until the profile name is used.
     #[serde(default)]
     folder: String,
@@ -80,6 +83,7 @@ impl Default for ProfileRecord {
             icon: String::new(),
             icon_file: String::new(),
             icon_text: false,
+            icon_color: String::new(),
             folder: String::new(),
         }
     }
@@ -105,6 +109,8 @@ pub struct ProfileInfo {
     pub icon: String,
     /// The profile name is drawn on the icon.
     pub icon_text: bool,
+    /// Background color id. Empty keeps the icon's own color.
+    pub icon_color: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -226,6 +232,7 @@ pub fn list(app: &AppHandle) -> Vec<ProfileInfo> {
                 icon_id,
                 icon,
                 icon_text: profile.icon_text,
+                icon_color: profile.icon_color,
                 id: profile.id,
                 name: profile.name,
             }
@@ -234,7 +241,15 @@ pub fn list(app: &AppHandle) -> Vec<ProfileInfo> {
 }
 
 pub fn icon_choices() -> Vec<ProfileIconChoice> {
-    crate::profile_icons::choices()
+    map_icon_choices(crate::profile_icons::choices())
+}
+
+pub fn icon_color_choices() -> Vec<ProfileIconChoice> {
+    map_icon_choices(crate::profile_icons::color_choices())
+}
+
+fn map_icon_choices(choices: Vec<crate::profile_icons::IconChoice>) -> Vec<ProfileIconChoice> {
+    choices
         .into_iter()
         .map(|choice| ProfileIconChoice {
             id: choice.id.to_string(),
@@ -255,38 +270,53 @@ pub fn set_icon(
         return Err("That profile no longer exists.".into());
     };
     let dir = paths::profile_data_dir(app, id);
-    let text = file.profiles[index].icon_text;
-    let name = file.profiles[index].name.clone();
-    let previous = file.profiles[index].icon_file.clone();
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    if icon_id == "default" {
+    if icon_id == "custom" {
+        let source = path
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or("Choose an image file.")?;
+        let image = crate::profile_icons::from_file(Path::new(source))?;
+        store_base(&dir, &image)?;
+        file.profiles[index].icon = "custom".into();
+    } else if icon_id == "default" || icon_id.is_empty() {
         let _ = fs::remove_file(dir.join(ICON_BASE));
         file.profiles[index].icon.clear();
-        if text {
-            let image = crate::profile_icons::render("default")?;
-            let shown = shown_icon(&image, &name, true)?;
-            file.profiles[index].icon_file = store_icon(&dir, &previous, &shown)?;
-        } else {
-            clear_icon_files(&dir, &previous);
-            file.profiles[index].icon_file.clear();
-        }
-    } else {
-        let image = if icon_id == "custom" {
-            let source = path
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or("Choose an image file.")?;
-            let image = crate::profile_icons::from_file(Path::new(source))?;
-            store_base(&dir, &image)?;
-            image
-        } else {
-            let _ = fs::remove_file(dir.join(ICON_BASE));
-            crate::profile_icons::render(icon_id)?
-        };
-        let shown = shown_icon(&image, &name, text)?;
-        file.profiles[index].icon_file = store_icon(&dir, &previous, &shown)?;
+    } else if crate::profile_icons::is_glyph(icon_id) {
+        let _ = fs::remove_file(dir.join(ICON_BASE));
         file.profiles[index].icon = icon_id.to_string();
+    } else {
+        return Err("That icon is not available.".into());
     }
+    rebuild_icon(&mut file.profiles[index], &dir)?;
+    save(app, &file)?;
+    refresh_shell_icons(app, &file.profiles[index])?;
+    Ok(list(app))
+}
+
+pub fn set_icon_color(
+    app: &AppHandle,
+    id: &str,
+    color_id: &str,
+) -> Result<Vec<ProfileInfo>, String> {
+    if !color_id.is_empty() && color_id != "default" && !crate::profile_icons::is_color(color_id) {
+        return Err("That color is not available.".into());
+    }
+    let mut file = load(app);
+    let Some(index) = file.profiles.iter().position(|profile| profile.id == id) else {
+        return Err("That profile no longer exists.".into());
+    };
+    if file.profiles[index].icon == "custom" {
+        return Err("An uploaded image keeps its own background.".into());
+    }
+    file.profiles[index].icon_color = if color_id == "default" {
+        String::new()
+    } else {
+        color_id.to_string()
+    };
+    let dir = paths::profile_data_dir(app, id);
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    rebuild_icon(&mut file.profiles[index], &dir)?;
     save(app, &file)?;
     refresh_shell_icons(app, &file.profiles[index])?;
     Ok(list(app))
@@ -300,16 +330,7 @@ pub fn set_icon_text(app: &AppHandle, id: &str, enabled: bool) -> Result<Vec<Pro
     file.profiles[index].icon_text = enabled;
     let dir = paths::profile_data_dir(app, id);
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    let record = file.profiles[index].clone();
-    match composed_icon(&record, &dir)? {
-        None => {
-            clear_icon_files(&dir, &record.icon_file);
-            file.profiles[index].icon_file.clear();
-        }
-        Some(image) => {
-            file.profiles[index].icon_file = store_icon(&dir, &record.icon_file, &image)?;
-        }
-    }
+    rebuild_icon(&mut file.profiles[index], &dir)?;
     save(app, &file)?;
     refresh_shell_icons(app, &file.profiles[index])?;
     Ok(list(app))
@@ -329,18 +350,38 @@ fn shown_icon(
     }
 }
 
-fn composed_icon(profile: &ProfileRecord, dir: &Path) -> Result<Option<image::RgbaImage>, String> {
-    let base = base_image(profile, dir)?;
-    if profile.icon_text {
-        return Ok(Some(crate::profile_icons::stamp_name(
-            &base,
-            &profile.name,
-        )?));
+fn rebuild_icon(profile: &mut ProfileRecord, dir: &Path) -> Result<(), String> {
+    match composed_icon(profile, dir)? {
+        None => {
+            clear_icon_files(dir, &profile.icon_file);
+            profile.icon_file.clear();
+        }
+        Some(image) => {
+            profile.icon_file = store_icon(dir, &profile.icon_file, &image)?;
+        }
     }
-    if profile.icon.is_empty() || profile.icon == "default" {
+    Ok(())
+}
+
+fn composed_icon(profile: &ProfileRecord, dir: &Path) -> Result<Option<image::RgbaImage>, String> {
+    if profile.icon == "custom" {
+        let base = base_image(profile, dir)?;
+        return Ok(Some(shown_icon(&base, &profile.name, profile.icon_text)?));
+    }
+    let icon_id = if profile.icon.is_empty() {
+        "default"
+    } else {
+        profile.icon.as_str()
+    };
+    let image = crate::profile_icons::render_icon(icon_id, &profile.icon_color)?;
+    let shown = shown_icon(&image, &profile.name, profile.icon_text)?;
+    if (profile.icon.is_empty() || profile.icon == "default")
+        && !profile.icon_text
+        && !crate::profile_icons::is_color(&profile.icon_color)
+    {
         return Ok(None);
     }
-    Ok(Some(base))
+    Ok(Some(shown))
 }
 
 fn base_image(profile: &ProfileRecord, dir: &Path) -> Result<image::RgbaImage, String> {
@@ -363,7 +404,7 @@ fn base_image(profile: &ProfileRecord, dir: &Path) -> Result<image::RgbaImage, S
     } else {
         profile.icon.as_str()
     };
-    crate::profile_icons::render(id)
+    crate::profile_icons::render_icon(id, &profile.icon_color)
 }
 
 fn store_base(dir: &Path, image: &image::RgbaImage) -> Result<(), String> {
@@ -960,7 +1001,11 @@ fn webview_file(name: &str, cookies: bool, logins: bool, site_data: bool) -> boo
 }
 
 fn apply_copied_icon(app: &AppHandle, source: &ProfileRecord, new_id: &str) -> Result<(), String> {
-    if source.icon.is_empty() && source.icon_file.is_empty() && !source.icon_text {
+    if source.icon.is_empty()
+        && source.icon_file.is_empty()
+        && !source.icon_text
+        && source.icon_color.is_empty()
+    {
         return Ok(());
     }
     let mut file = load(app);
@@ -972,6 +1017,7 @@ fn apply_copied_icon(app: &AppHandle, source: &ProfileRecord, new_id: &str) -> R
     record.icon.clone_from(&source.icon);
     record.icon_file.clone_from(&source.icon_file);
     record.icon_text = source.icon_text;
+    record.icon_color.clone_from(&source.icon_color);
     let updated = record.clone();
     save(app, &file)?;
     refresh_shell_icons(app, &updated)
@@ -1306,6 +1352,7 @@ fn load(app: &AppHandle) -> ProfilesFile {
     let mut file: ProfilesFile = crate::sync_conflicts::read_json(app, &registry_path(app));
     ensure_default(&mut file);
     migrate_default(&mut file);
+    migrate_icon_colors(&mut file);
     assign_folders(&mut file);
     file
 }
@@ -1327,6 +1374,16 @@ fn migrate_default(file: &mut ProfilesFile) {
     }
     if record.folder == LEGACY_DEFAULT_NAME && !other_owns_default {
         record.folder = DEFAULT_FOLDER.into();
+    }
+}
+
+/// A colored logo used to be stored as the icon id (`amber`, `rose`, …).
+fn migrate_icon_colors(file: &mut ProfilesFile) {
+    for profile in &mut file.profiles {
+        if profile.icon_color.is_empty() && crate::profile_icons::is_color(&profile.icon) {
+            profile.icon_color.clone_from(&profile.icon);
+            profile.icon.clear();
+        }
     }
 }
 
@@ -1493,7 +1550,7 @@ fn window_icon_bytes(app: &AppHandle) -> Vec<u8> {
         .into_iter()
         .find(|profile| profile.id == id)
         .is_some_and(|profile| {
-            (profile.icon_text || (!profile.icon.is_empty() && profile.icon != "default"))
+            (uses_saved_icon(&profile))
                 && paths::profile_data_dir(app, &id)
                     .join("window-icon.png")
                     .is_file()
@@ -1536,9 +1593,16 @@ fn relaunch_icon(app: &AppHandle, id: &str) -> String {
         .unwrap_or_default()
 }
 
+fn uses_saved_icon(profile: &ProfileRecord) -> bool {
+    profile.icon == "custom"
+        || profile.icon_text
+        || crate::profile_icons::is_color(&profile.icon_color)
+        || (!profile.icon.is_empty() && profile.icon != "default")
+}
+
 fn profile_icon(app: &AppHandle, profile: &ProfileRecord) -> (String, String) {
     let fallback = crate::profile_icons::preview("default").unwrap_or_default();
-    if profile.icon_text {
+    if uses_saved_icon(profile) {
         let png = paths::profile_data_dir(app, &profile.id).join("window-icon.png");
         if let Some(preview) = crate::profile_icons::preview_file(&png) {
             let id = if profile.icon.is_empty() || profile.icon == "default" {
@@ -2191,6 +2255,7 @@ fn read_profiles_file(path: &Path) -> ProfilesFile {
     };
     ensure_default(&mut file);
     migrate_default(&mut file);
+    migrate_icon_colors(&mut file);
     assign_folders(&mut file);
     file
 }

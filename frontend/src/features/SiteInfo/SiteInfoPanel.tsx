@@ -3,7 +3,7 @@ import { Cookie, ChevronRight, ExternalLink, Lock, ShieldAlert, ShieldBan, Slide
 import { Button } from "@/components/Button";
 import { PopupFrame } from "@/components/PopupFrame";
 import { Skeleton } from "@/components/Skeleton";
-import { clearSiteCache, closePopup, createTab, openPopup, setPermission, siteInfo } from "@/lib/browser-client";
+import { clearSiteCache, closePopup, createTab, openPopup, setPermission, setTabsMuted, siteInfo } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { formatBytes } from "@/lib/format";
@@ -23,6 +23,80 @@ const PERMISSION_LABEL: Record<string, string> = {
   location: "Location",
   notifications: "Notifications",
 };
+
+const PERMISSION_ORDER = ["microphone", "camera", "location", "notifications"];
+
+const insetFocus = "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-sky-500";
+
+function permissionRank(kind: string) {
+  const index = PERMISSION_ORDER.indexOf(kind);
+  return index === -1 ? PERMISSION_ORDER.length : index;
+}
+
+function permissionAllowed(state: string) {
+  return state === "allow" || state === "session";
+}
+
+function permissionStatus(state: string) {
+  if (permissionAllowed(state)) {
+    return "Allowed";
+  }
+  if (state === "deny") {
+    return "Blocked";
+  }
+  return "Ask";
+}
+
+function PermissionLine({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+  return (
+    <li id={id} className="grid h-8 grid-cols-[minmax(0,1fr)_9rem] items-center gap-3">
+      <span id={`${id}-label`} className="truncate text-sm text-zinc-100">
+        {label}
+      </span>
+      {children}
+    </li>
+  );
+}
+
+function PermissionChoice({
+  id,
+  label,
+  allowed,
+  denied,
+  blockLabel = "Block",
+  onAllow,
+  onBlock,
+}: {
+  id: string;
+  label: string;
+  allowed: boolean;
+  denied: boolean;
+  blockLabel?: string;
+  onAllow: () => void;
+  onBlock: () => void;
+}) {
+  const choices = [
+    { key: "allow", text: "Allow", on: allowed, pick: onAllow },
+    { key: "block", text: blockLabel, on: denied, pick: onBlock },
+  ];
+  return (
+    <span id={id} role="radiogroup" aria-label={label} className="grid h-7 w-full grid-cols-2 gap-0.5 rounded-md bg-zinc-800 p-0.5">
+      {choices.map((choice) => (
+        <button
+          key={choice.key}
+          id={`${id}-${choice.key}`}
+          type="button"
+          role="radio"
+          aria-checked={choice.on}
+          className={cn(insetFocus, "rounded text-xs font-medium", choice.on ? "bg-zinc-600 text-zinc-50" : "text-zinc-400 hover:text-zinc-100")}
+          onClick={choice.pick}
+        >
+          {choice.text}
+        </button>
+      ))}
+    </span>
+  );
+}
 
 function dateOf(seconds: number) {
   if (!seconds) {
@@ -65,6 +139,7 @@ export function SiteInfoPanel({ tabId, initialView = "" }: SiteInfoPanelProps) {
   const [info, setInfo] = useState<SiteInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cleared, setCleared] = useState(false);
+  const [soundMuted, setSoundMuted] = useState(false);
   const [view, setView] = useState(initialView === "microphone" ? "microphone" : "");
 
   useEffect(() => {
@@ -84,6 +159,10 @@ export function SiteInfoPanel({ tabId, initialView = "" }: SiteInfoPanelProps) {
       cancelled = true;
     };
   }, [tabId]);
+
+  useEffect(() => {
+    setSoundMuted(!!tab?.muted);
+  }, [tab?.id, tab?.muted]);
 
   const host = info?.host || (tab ? siteKey(tab.url) : "");
   const internal = !!tab && tab.url.startsWith("ce://");
@@ -108,6 +187,15 @@ export function SiteInfoPanel({ tabId, initialView = "" }: SiteInfoPanelProps) {
     setInfo({ ...info, permissions: info.permissions.map((item) => (item === grant ? { ...item, state } : item)) });
     void setPermission(grant.origin, grant.kind, allow);
   };
+
+  const setSound = (muted: boolean) => {
+    setSoundMuted(muted);
+    void setTabsMuted([tabId], muted);
+  };
+
+  const permissions = [...(info?.permissions ?? [])].sort(
+    (left, right) => permissionRank(left.kind) - permissionRank(right.kind) || left.kind.localeCompare(right.kind),
+  );
 
   const openPageControls = () => {
     if (!tab) {
@@ -182,60 +270,62 @@ export function SiteInfoPanel({ tabId, initialView = "" }: SiteInfoPanelProps) {
       {!internal ? (
         <Section id="site-info-permissions" title="Permissions">
           {!info ? (
-            <Skeleton id="site-info-permissions-loading" className="h-6 w-full" />
-          ) : info.permissions.length === 0 ? (
-            <p id="site-info-permissions-empty" className="text-xs text-zinc-500">
-              This site hasn't asked for camera, microphone, location or notifications.
-            </p>
+            <Skeleton id="site-info-permissions-loading" className="h-8 w-full" />
           ) : (
             <ul id="site-info-permissions-list" className="flex flex-col gap-1">
-              {info.permissions.map((grant) => {
+              {tab ? (
+                <PermissionLine id="site-info-permission-speakers" label="Speakers">
+                  <PermissionChoice
+                    id="site-info-permission-speakers-choice"
+                    label="Speakers"
+                    blockLabel="Mute"
+                    allowed={!soundMuted}
+                    denied={soundMuted}
+                    onAllow={() => setSound(false)}
+                    onBlock={() => setSound(true)}
+                  />
+                </PermissionLine>
+              ) : null}
+              {permissions.map((grant) => {
+                const label = PERMISSION_LABEL[grant.kind] ?? grant.kind;
                 if (grant.kind === "microphone") {
-                  const allowed = grant.state === "allow" || grant.state === "session";
-                  const label = allowed ? "Allowed" : grant.state === "deny" ? "Blocked" : "Asked";
                   return (
-                    <li id="site-info-permission-microphone" key="microphone">
+                    <PermissionLine id="site-info-permission-microphone" key="microphone" label="Microphone">
                       <button
                         id="site-info-permission-microphone-open"
                         type="button"
-                        className={cn("flex w-full items-center justify-between gap-2 rounded-md px-1 py-1 text-left text-sm hover:bg-zinc-800", focusRing)}
+                        className={cn(
+                          "flex h-7 w-full items-center justify-between rounded-md bg-zinc-800 px-2 text-xs text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100",
+                          insetFocus,
+                        )}
                         onClick={() => setView("microphone")}
                       >
-                        <span id="site-info-permission-microphone-label">Microphone</span>
-                        <span id="site-info-permission-microphone-state" className="flex items-center gap-1 text-xs text-zinc-400">
-                          {label}
-                          <ChevronRight id="site-info-permission-microphone-chevron" className="size-3.5" aria-hidden />
-                        </span>
+                        <span id="site-info-permission-microphone-state">{permissionStatus(grant.state)}</span>
+                        <ChevronRight id="site-info-permission-microphone-chevron" className="size-3.5 shrink-0 text-zinc-500" aria-hidden />
                       </button>
-                    </li>
+                    </PermissionLine>
                   );
                 }
-                const allowed = grant.state === "allow";
-                const denied = grant.state === "deny";
                 return (
-                  <li id={`site-info-permission-${grant.kind}`} key={grant.kind} className="flex items-center justify-between gap-2 text-sm">
-                    <span id={`site-info-permission-${grant.kind}-label`}>{PERMISSION_LABEL[grant.kind] ?? grant.kind}</span>
-                    <span id={`site-info-permission-${grant.kind}-choice`} role="radiogroup" aria-label={PERMISSION_LABEL[grant.kind] ?? grant.kind} className="flex rounded-md border border-zinc-700 p-0.5">
-                      {[
-                        { allow: true, label: "Allow", on: allowed },
-                        { allow: false, label: "Block", on: denied },
-                      ].map((choice) => (
-                        <button
-                          key={choice.label}
-                          id={`site-info-permission-${grant.kind}-${choice.label.toLowerCase()}`}
-                          type="button"
-                          role="radio"
-                          aria-checked={choice.on}
-                          className={cn("rounded px-2 py-0.5 text-xs text-zinc-400 hover:text-zinc-100", focusRing, choice.on && "bg-zinc-700 text-zinc-100")}
-                          onClick={() => updatePermission(grant, choice.allow)}
-                        >
-                          {choice.label}
-                        </button>
-                      ))}
-                    </span>
-                  </li>
+                  <PermissionLine id={`site-info-permission-${grant.kind}`} key={grant.kind} label={label}>
+                    <PermissionChoice
+                      id={`site-info-permission-${grant.kind}-choice`}
+                      label={label}
+                      allowed={permissionAllowed(grant.state)}
+                      denied={grant.state === "deny"}
+                      onAllow={() => updatePermission(grant, true)}
+                      onBlock={() => updatePermission(grant, false)}
+                    />
+                  </PermissionLine>
                 );
               })}
+              {permissions.length === 0 ? (
+                <li id="site-info-permissions-empty">
+                  <p id="site-info-permissions-empty-text" className="text-xs text-zinc-500">
+                    This site hasn't asked for camera, microphone, location or notifications.
+                  </p>
+                </li>
+              ) : null}
             </ul>
           )}
         </Section>

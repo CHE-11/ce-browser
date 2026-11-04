@@ -310,12 +310,12 @@ fn core(platform: &PlatformWebview) -> windows::core::Result<ICoreWebView2> {
     unsafe { platform.controller().CoreWebView2() }
 }
 
-/// Websites stay on the light scheme. A forced dark scheme leaves pages such as Gmail half styled.
+/// `prefers-color-scheme` follows Windows. Sites that do not query it keep the colors they paint.
 fn pin_profile_scheme(core: &ICoreWebView2) {
     let pinned = (|| unsafe {
         core.cast::<ICoreWebView2_13>()?
             .Profile()?
-            .SetPreferredColorScheme(COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT)
+            .SetPreferredColorScheme(COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO)
     })();
     if let Err(error) = pinned {
         if error.code() != E_NOINTERFACE {
@@ -324,7 +324,7 @@ fn pin_profile_scheme(core: &ICoreWebView2) {
     }
 }
 
-/// Keeps every open profile on the light scheme websites actually style for.
+/// Points every open profile at the Windows light or dark scheme.
 pub fn apply_site_color_scheme(app: &AppHandle) {
     for webview in tabs::open_surface_views(app) {
         let _ = webview.with_webview(|platform| {

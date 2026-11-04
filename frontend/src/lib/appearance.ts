@@ -283,7 +283,7 @@ type Appearance = {
 let saved: Appearance = { theme: DEFAULT_THEME, colorMode: DEFAULT_COLOR_MODE };
 /** Painted over `saved` while a picker is hovering. Null means show the saved theme. */
 let preview: ThemeId | null = null;
-/** Windows app theme. Pages do not use this, and `prefers-color-scheme` is held at light for them. */
+/** Windows app theme. Browser chrome uses this only for Match system. Sites read it through `prefers-color-scheme`. */
 let windowsMode: ResolvedMode = "dark";
 
 export function normalizeTheme(value: string | null | undefined): ThemeId {
@@ -301,7 +301,7 @@ export function resolveMode(colorMode: ColorMode): ResolvedMode {
   return windowsMode;
 }
 
-/** Stores the Windows app theme for Match system. Websites are not restyled from it. */
+/** Stores the Windows app theme for Match system. */
 export function noteWindowsScheme(scheme: "light" | "dark") {
   windowsMode = scheme;
   if (saved.colorMode === "system") {

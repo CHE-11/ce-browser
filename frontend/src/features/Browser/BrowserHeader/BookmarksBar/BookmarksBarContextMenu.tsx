@@ -1,8 +1,8 @@
 import { PopupMenu, PopupMenuItem, PopupMenuSeparator, PopupFrame } from "@/components/PopupFrame";
-import { openPopup, addBookmark, closePopup, createTab, deleteBookmark, openFolderAsGroup, openInWindow } from "@/lib/browser-client";
+import { openPopup, addBookmark, closePopup, createTab, deleteBookmark, getSettings, openFolderAsGroup, openInWindow, saveSettings } from "@/lib/browser-client";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { useSettings } from "@/lib/use-browser";
-import { AppWindow, ExternalLink, FolderPlus, Group, Library, PencilLine, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
+import { AppWindow, ExternalLink, FolderPlus, Group, Library, PencilLine, Pin, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
 
 type DividerOrientation = "vertical" | "horizontal";
 
@@ -33,6 +33,19 @@ function deleteLabel(kind: BookmarkMenuTarget["kind"]) {
     return "Delete divider";
   }
   return "Delete bookmark";
+}
+
+/** Same comparison the settings list uses: one trailing slash still matches. */
+function pinKey(url: string) {
+  const trimmed = url.trim();
+  if (!trimmed.endsWith("/")) {
+    return trimmed;
+  }
+  const scheme = trimmed.indexOf("://");
+  if (scheme < 0 || trimmed.length <= scheme + 4) {
+    return trimmed;
+  }
+  return trimmed.slice(0, -1);
 }
 
 export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, target, onDone }: BookmarksBarMenuItemsProps) {
@@ -70,6 +83,19 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, targ
     void openPopup("bookmark-rename", MENU_CORNER, { params: params.toString() });
   };
 
+  const addToStartupPins = async () => {
+    if (!linkUrl) {
+      return;
+    }
+    const base = settings ?? (await getSettings());
+    const url = linkUrl.trim();
+    const key = pinKey(url);
+    if (base.pinnedTabs.some((pin) => pinKey(pin) === key)) {
+      return;
+    }
+    await saveSettings({ ...base, pinnedTabs: [...base.pinnedTabs, url] });
+  };
+
   return (
     <PopupMenu id={`${idPrefix}-items`} label={vertical ? "Bookmarks bar" : "Bookmark folder"}>
       {linkUrl ? (
@@ -87,6 +113,13 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, targ
             label="Open in new window"
             style={itemStyle}
             onClick={() => void openInWindow(linkUrl).finally(onDone)}
+          />
+          <PopupMenuItem
+            id={`${idPrefix}-startup-pin`}
+            icon={<Pin />}
+            label="Add to startup pinned tabs"
+            style={itemStyle}
+            onClick={() => void addToStartupPins().finally(onDone)}
           />
           <PopupMenuSeparator id={`${idPrefix}-open-separator`} />
         </>
@@ -161,7 +194,7 @@ type BookmarksBarMenuProps = {
 
 export function BookmarksBarContextMenu({ parentId, divider, target }: BookmarksBarMenuProps) {
   return (
-    <PopupFrame id="bookmarks-bar-menu" width={240}>
+    <PopupFrame id="bookmarks-bar-menu" width={280}>
       <BookmarksBarContextMenuItems
         idPrefix="bookmarks-bar-menu"
         parentId={parentId}

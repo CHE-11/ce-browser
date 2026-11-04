@@ -20,6 +20,8 @@ import {
   Settings,
   Star,
   TriangleAlert,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import type {
@@ -59,6 +61,7 @@ import {
   reload,
   restorePinnedTabs,
   saveSettings,
+  setTabsMuted,
   showNotice,
   sendOmniboxState,
   splitWith,
@@ -241,6 +244,20 @@ function addressText(tab: TabInfo | undefined) {
   return tab.url;
 }
 
+/**
+ * A selection paints its own color, so `text-transparent` does not hide it. After the field blurs,
+ * that highlight stays on the full URL while the formatted address (scheme omitted) is drawn too.
+ */
+function clearAddressSelection(input: HTMLInputElement | null) {
+  if (!input) {
+    return;
+  }
+  if (input.selectionStart !== input.selectionEnd) {
+    input.setSelectionRange(0, 0);
+  }
+  input.scrollLeft = 0;
+}
+
 function pageOrigin(url: string) {
   try {
     const parsed = new URL(url);
@@ -401,6 +418,15 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     setEditing(false);
   }, [activeId]);
 
+  const wasEditingRef = useRef(false);
+  useLayoutEffect(() => {
+    const wasEditing = wasEditingRef.current;
+    wasEditingRef.current = editing;
+    if (wasEditing && !editing) {
+      clearAddressSelection(inputRef.current);
+    }
+  }, [editing]);
+
   const hideOmnibox = useCallback(() => {
     popupTicket.current += 1;
     omniboxRef.current = EMPTY_OMNIBOX;
@@ -443,6 +469,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
 
   const finishEditing = useCallback(() => {
     typedRef.current = "";
+    clearAddressSelection(inputRef.current);
     setEditing(false);
     dismissSuggestions();
     inputRef.current?.blur();
@@ -819,7 +846,11 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         )}
         <div id="address-input-wrap" className="relative flex min-w-0 flex-1 items-center">
           {emphasis ? (
-            <div id="address-display" aria-hidden className="pointer-events-none absolute inset-0 flex items-center overflow-hidden whitespace-pre text-sm">
+            <div
+              id="address-display"
+              aria-hidden
+              className="pointer-events-none absolute inset-0 z-10 flex items-center overflow-hidden whitespace-pre bg-zinc-800 text-sm"
+            >
               {emphasis.scheme ? (
                 <span id="address-display-scheme" className="text-zinc-500">
                   {emphasis.scheme}
@@ -846,7 +877,8 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           aria-label="Address and search bar"
           className={cn(
             "min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-500",
-            emphasis && "text-transparent caret-transparent",
+            emphasis &&
+              "text-transparent caret-transparent selection:bg-transparent selection:text-transparent [-webkit-text-fill-color:transparent]",
           )}
           onChange={(event) => {
             const inputType = (event.nativeEvent as InputEvent).inputType ?? "";
@@ -864,6 +896,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           onBlur={() => {
             blurTimer.current = window.setTimeout(() => {
               blurTimer.current = null;
+              clearAddressSelection(inputRef.current);
               setEditing(false);
               hideOmnibox();
             }, 250);
@@ -896,6 +929,27 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
             onClick={runStoreAction}
           >
             {storeBusy ? "Working…" : storeAction === "update" ? "Update" : "Install"}
+          </button>
+        ) : null}
+        {activeTab && (activeTab.audible || activeTab.muted) ? (
+          <button
+            id="address-speakers"
+            type="button"
+            title={activeTab.muted ? "Unmute this tab" : "This tab is playing sound"}
+            aria-label={activeTab.muted ? "Unmute this tab" : "Mute this tab"}
+            className={cn(
+              "inline-flex size-6 shrink-0 items-center justify-center rounded-full hover:bg-zinc-700",
+              focusRing,
+              activeTab.muted ? "text-zinc-400 hover:text-zinc-100" : "text-sky-400",
+            )}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => activeId !== null && void setTabsMuted([activeId], !activeTab.muted)}
+          >
+            {activeTab.muted ? (
+              <VolumeX id="address-speakers-icon" className="size-3.5" aria-hidden />
+            ) : (
+              <Volume2 id="address-speakers-icon" className="size-3.5" aria-hidden />
+            )}
           </button>
         ) : null}
         {showMicrophone ? (
@@ -1028,14 +1082,27 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       >
         <Columns2 id="address-split-icon" aria-hidden />
       </IconButton>
-      <IconButton
-        id="address-restore-pins"
-        label={pinLabel}
-        disabled={closedPins.length === 0 || restoringPins}
-        onClick={restorePins}
+      <div
+        id="address-pin-menu-anchor"
+        className="shrink-0"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          const params = new URLSearchParams();
+          if (activeTab?.url) {
+            params.set("url", activeTab.url);
+          }
+          void openPopup("pin-menu", { x: event.clientX, y: event.clientY }, { params: params.toString() });
+        }}
       >
-        <Pin id="address-restore-pins-icon" aria-hidden />
-      </IconButton>
+        <IconButton
+          id="address-restore-pins"
+          label={pinLabel}
+          disabled={closedPins.length === 0 || restoringPins}
+          onClick={restorePins}
+        >
+          <Pin id="address-restore-pins-icon" aria-hidden />
+        </IconButton>
+      </div>
       <IconButton
         id="address-status"
         label="Browser status"

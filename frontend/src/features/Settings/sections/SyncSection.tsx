@@ -21,6 +21,7 @@ const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-sync")!;
 const FOLDER_LABEL = "Folder location";
 const FOLDER_HINT =
   "Profiles are stored in this folder. Selecting a folder uses the profiles already in it. Cookies and the download folder stay on this computer.";
+const LOCKED_HINT = "The Default profile chooses the sync folder. This profile uses that folder.";
 const FILES_HINT = "profiles.json and a folder for each profile (Default, then one per profile name)";
 
 export function SyncSection({
@@ -70,11 +71,14 @@ export function SyncSection({
   }, []);
 
   const shownError = syncError ?? syncState?.error ?? "";
+  const locked = syncState?.editable === false;
+  const folderHint = locked ? LOCKED_HINT : FOLDER_HINT;
   const visible = matchesQuery(
     query,
     section.title,
     FOLDER_LABEL,
-    FOLDER_HINT,
+    folderHint,
+    LOCKED_HINT,
     "Create",
     "Select",
     settings.syncFolder,
@@ -130,16 +134,16 @@ export function SyncSection({
 
   return (
     <Section id={section.id} title={section.title}>
-      <Row id="settings-sync-folder" label={FOLDER_LABEL} hint={FOLDER_HINT} search={["Create", "Select"]}>
-        <Button id="settings-sync-create" size="sm" disabled={syncWorking} onClick={() => pickAndSync("Create a sync folder", createSyncFolder)}>
+      <Row id="settings-sync-folder" label={FOLDER_LABEL} hint={folderHint} search={["Create", "Select", LOCKED_HINT]}>
+        <Button id="settings-sync-create" size="sm" disabled={syncWorking || locked} onClick={() => pickAndSync("Create a sync folder", createSyncFolder)}>
           Create
         </Button>
-        <Button id="settings-sync-select" size="sm" disabled={syncWorking} onClick={() => pickAndSync("Select a sync folder", selectSyncFolder)}>
+        <Button id="settings-sync-select" size="sm" disabled={syncWorking || locked} onClick={() => pickAndSync("Select a sync folder", selectSyncFolder)}>
           Select
         </Button>
       </Row>
       {settings.syncFolder ? (
-        <SyncPath folder={settings.syncFolder} busy={syncWorking} onError={onError} onClear={() => runSync(() => clearSyncFolder())} />
+        <SyncPath folder={settings.syncFolder} busy={syncWorking} locked={locked} onError={onError} onClear={() => runSync(() => clearSyncFolder())} />
       ) : null}
       {shownError ? <SyncError message={shownError} /> : null}
       {settings.syncFolder ? (
@@ -233,11 +237,13 @@ function SyncConflicts({
 function SyncPath({
   folder,
   busy,
+  locked,
   onError,
   onClear,
 }: {
   folder: string;
   busy: boolean;
+  locked: boolean;
   onError: (message: string | null) => void;
   onClear: () => void;
 }) {
@@ -261,7 +267,7 @@ function SyncPath({
           {FILES_HINT}
         </div>
       </div>
-      <Button id="settings-sync-clear" size="sm" variant="ghost" disabled={busy} onClick={onClear}>
+      <Button id="settings-sync-clear" size="sm" variant="ghost" disabled={busy || locked} onClick={onClear}>
         Clear
       </Button>
     </div>

@@ -408,6 +408,7 @@ export type PopupKind =
   | "what-runs"
   | "ad-blocker"
   | "extension-pin"
+  | "pin-menu"
   | "tab-group"
   | "tab-group-menu"
   | "workspaces"
@@ -431,7 +432,7 @@ export type PopupKind =
   | "board-images"
   | "theme-picker";
 
-/** Windows app theme. Websites do not follow this. */
+/** Windows app theme. Sites that support `prefers-color-scheme` follow this. */
 export type WindowsColorScheme = "light" | "dark";
 
 /** A theme shown over the saved one. `commit` stores it before the settings file catches up. */
@@ -1123,6 +1124,8 @@ export type SyncStatus = {
   error: string | null;
   /** True when `error` is a failure to write one of the files in the sync folder. */
   saveError: boolean;
+  /** The Default profile chooses the folder. Other profiles follow it. */
+  editable: boolean;
 };
 
 export type SyncConflict = {
@@ -1220,6 +1223,8 @@ export type BrowserProfile = {
   icon: string;
   /** The first 10 letters of the profile name are drawn on the icon. */
   iconText: boolean;
+  /** Background color id. Empty keeps the icon's own color. */
+  iconColor: string;
 };
 
 export type ProfileIconChoice = {

@@ -99,7 +99,11 @@ pub struct SyncStatus {
     pub error: Option<String>,
     /// True when `error` is a failure to write one of the files in the sync folder.
     pub save_error: bool,
+    /// The Default profile chooses the folder. Other profiles follow it.
+    pub editable: bool,
 }
+
+const SYNC_FOLDER_LOCKED: &str = "Only the Default profile can change the sync folder.";
 
 #[derive(Clone)]
 struct SyncProblem {
@@ -242,6 +246,25 @@ pub fn status(app: &AppHandle) -> SyncStatus {
         folder: active_folder(app),
         error: problem.as_ref().map(|problem| problem.message.clone()),
         save_error: problem.as_ref().is_some_and(|problem| problem.save),
+        editable: sync_folder_editable(&crate::profiles::active_id()),
+    }
+}
+
+/// Create, select, and clear move every profile. Only Default may do that.
+fn require_default_profile() -> Result<(), String> {
+    refuse_sync_change(&crate::profiles::active_id())
+}
+
+fn sync_folder_editable(profile_id: &str) -> bool {
+    profile_id == crate::profiles::DEFAULT_ID
+}
+
+/// Returned before any folder is created, selected, or moved.
+fn refuse_sync_change(profile_id: &str) -> Result<(), String> {
+    if sync_folder_editable(profile_id) {
+        Ok(())
+    } else {
+        Err(SYNC_FOLDER_LOCKED.into())
     }
 }
 
@@ -290,6 +313,7 @@ fn attach_folder(app: &AppHandle, appdata: &Path) -> bool {
 }
 
 pub fn create(app: &AppHandle, raw: &str) -> Result<SyncStatus, String> {
+    require_default_profile()?;
     let _lock = operation_lock();
     let folder = target_folder(app, raw, false)?;
     relocate_into(app, &folder)?;
@@ -302,6 +326,7 @@ pub fn create(app: &AppHandle, raw: &str) -> Result<SyncStatus, String> {
 }
 
 pub fn select(app: &AppHandle, raw: &str) -> Result<SyncStatus, String> {
+    require_default_profile()?;
     let _lock = operation_lock();
     let folder = target_folder(app, raw, true)?;
     if !crate::profiles::sync_has_profile_settings(&folder) {
@@ -321,6 +346,7 @@ pub fn select(app: &AppHandle, raw: &str) -> Result<SyncStatus, String> {
 }
 
 pub fn clear(app: &AppHandle) -> Result<SyncStatus, String> {
+    require_default_profile()?;
     let _lock = operation_lock();
     if let Some(folder) = paths::storage_root() {
         crate::profiles::transfer_sync_to_appdata(&folder, &paths::root_data_dir(app))?;
@@ -1147,5 +1173,13 @@ mod tests {
             r"Could not read D:\share\bookmarks.json: The system cannot find the file specified. (os error 2)"
         ));
         assert!(!is_save_error(r"The sync folder is missing: D:\share"));
+    }
+
+    #[test]
+    fn a_non_default_profile_is_rejected_before_the_sync_folder_moves() {
+        let error = refuse_sync_change("work").unwrap_err();
+        assert_eq!(error, SYNC_FOLDER_LOCKED);
+        assert!(refuse_sync_change(crate::profiles::DEFAULT_ID).is_ok());
+        assert!(!sync_folder_editable("work"));
     }
 }

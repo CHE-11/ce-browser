@@ -916,6 +916,7 @@ pub fn init(app: &AppHandle) {
         }
     }
     loaded.pinned_tabs = canonicalize_pins(app, &loaded);
+    apply_shared_sync_folder(&mut loaded);
     crate::adblock::configure(&loaded.adblock);
     app.manage(SettingsState(Mutex::new(loaded)));
     crate::sync_conflicts::note(app, &paths::data_file(app, FILE));
@@ -963,9 +964,13 @@ pub fn windows_uses_light(app: &AppHandle) -> bool {
         .any(|label| theme_of(label) == Some(tauri::Theme::Light))
 }
 
-/// Fill behind a remote page. White, so a dark Windows theme does not show through the site.
-pub fn site_canvas() -> Color {
-    Color(0xff, 0xff, 0xff, 255)
+/// Fill behind a remote page. Matches Windows so a dark site is not framed in white.
+pub fn site_canvas(app: &AppHandle) -> Color {
+    if windows_uses_light(app) {
+        Color(0xff, 0xff, 0xff, 255)
+    } else {
+        Color(0x20, 0x21, 0x24, 255)
+    }
 }
 
 fn surface_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
@@ -1106,9 +1111,7 @@ pub fn reload(app: &AppHandle) {
         }
     }
     loaded.pinned_tabs = canonicalize_pins(app, &loaded);
-    if let Some(root) = paths::storage_root() {
-        loaded.sync_folder = root.to_string_lossy().into_owned();
-    }
+    apply_shared_sync_folder(&mut loaded);
     crate::adblock::configure(&loaded.adblock);
     let (previous_page_zoom, previous_ui_zoom) = {
         let state = app.state::<SettingsState>();
@@ -1162,11 +1165,16 @@ pub fn store(
         let _ = crate::secrets::store_key(app, &settings.ai_provider, &key);
     }
     settings.pinned_tabs = canonicalize_pins(app, &settings);
+    if crate::profiles::active_id() != crate::profiles::DEFAULT_ID {
+        apply_shared_sync_folder(&mut settings);
+    }
     let (saved, previous_page_zoom, previous_ui_zoom) = {
         let state = app.state::<SettingsState>();
         let mut guard = state.0.lock().expect("settings lock");
         if keep_sync {
-            settings.sync_folder.clone_from(&guard.sync_folder);
+            if crate::profiles::active_id() == crate::profiles::DEFAULT_ID {
+                settings.sync_folder.clone_from(&guard.sync_folder);
+            }
             settings.sync_revision = guard.sync_revision;
             settings.sync_bookmarks_revision = guard.sync_bookmarks_revision;
             settings.sync_extensions_revision = guard.sync_extensions_revision;
@@ -1191,6 +1199,19 @@ pub fn store(
     crate::tabs::apply_audio_all(app);
     crate::tabs::place_all_toasts(app);
     Ok(saved)
+}
+
+/// The sync folder belongs to the Default profile. A storage root already chosen on this
+/// computer replaces whatever this file stored. Another profile with no shared folder
+/// drops a path of its own so it cannot point somewhere else.
+fn apply_shared_sync_folder(loaded: &mut BrowserSettings) {
+    if let Some(root) = paths::storage_root() {
+        loaded.sync_folder = root.to_string_lossy().into_owned();
+        return;
+    }
+    if crate::profiles::active_id() != crate::profiles::DEFAULT_ID {
+        loaded.sync_folder.clear();
+    }
 }
 
 /// A stored `syncFile` points at one json file. The folder beside that file is the sync folder.

@@ -1868,6 +1868,11 @@ fn list_profile_icons() -> Vec<ProfileIconChoice> {
 }
 
 #[tauri::command]
+fn list_profile_icon_colors() -> Vec<ProfileIconChoice> {
+    profiles::icon_color_choices()
+}
+
+#[tauri::command]
 fn set_profile_icon(
     app: AppHandle,
     id: String,
@@ -1875,6 +1880,21 @@ fn set_profile_icon(
     path: Option<String>,
 ) -> Result<Vec<ProfileInfo>, String> {
     let profiles = profiles::set_icon(&app, &id, &icon_id, path.as_deref());
+    if id == profiles::active_id() {
+        if let Some(window) = app.get_window(tabs::WINDOW) {
+            profiles::apply_window_icon(&app, &window);
+        }
+    }
+    profiles
+}
+
+#[tauri::command]
+fn set_profile_icon_color(
+    app: AppHandle,
+    id: String,
+    color_id: String,
+) -> Result<Vec<ProfileInfo>, String> {
+    let profiles = profiles::set_icon_color(&app, &id, &color_id);
     if id == profiles::active_id() {
         if let Some(window) = app.get_window(tabs::WINDOW) {
             profiles::apply_window_icon(&app, &window);
@@ -2306,7 +2326,9 @@ pub fn run() {
             save_profile_shortcut,
             delete_profile,
             list_profile_icons,
+            list_profile_icon_colors,
             set_profile_icon,
+            set_profile_icon_color,
             set_profile_icon_text,
             pin_profile_taskbar,
             unpin_profile_taskbar
