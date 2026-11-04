@@ -231,7 +231,7 @@ export function SiteInfoPanel({ tabId, initialView = "" }: SiteInfoPanelProps) {
   }
 
   return (
-    <PopupFrame id="site-info" width={360} ready={snapshot.loaded}>
+    <PopupFrame id="site-info" width={360} maxHeight={2000} ready={snapshot.loaded}>
       <header id="site-info-header" className="flex flex-col gap-1.5 px-4 pb-3 pt-4">
         <h2 id="site-info-host" className="truncate text-sm font-semibold text-zinc-100" title={info?.url}>
           {host || tab?.title || "This page"}
