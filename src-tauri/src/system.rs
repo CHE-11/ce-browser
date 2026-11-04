@@ -420,9 +420,13 @@ pub fn attach_open_pdf(app: &AppHandle, id: u32, url: &str) {
 
 /// Bytes for a PDF fetch from the markup editor. The address only exists inside this app.
 pub fn pdf_bytes(url: &str) -> Option<Vec<u8>> {
-    let path = PDF_TABS.lock().expect("pdf").iter().find_map(|(_, attach)| {
-        same_pdf_url(url, &attach.fetch).then(|| attach.dir.join("document.pdf"))
-    })?;
+    let path = PDF_TABS
+        .lock()
+        .expect("pdf")
+        .iter()
+        .find_map(|(_, attach)| {
+            same_pdf_url(url, &attach.fetch).then(|| attach.dir.join("document.pdf"))
+        })?;
     fs::read(path).ok()
 }
 
@@ -978,7 +982,11 @@ mod tests {
     #[test]
     fn a_command_line_pdf_is_opened_in_the_editor() {
         assert_eq!(
-            launch_from_args(&["--profile".into(), "default".into(), r"C:\docs\note.PDF".into()]),
+            launch_from_args(&[
+                "--profile".into(),
+                "default".into(),
+                r"C:\docs\note.PDF".into()
+            ]),
             Launch::Pdfs(vec![r"C:\docs\note.PDF".into()])
         );
         assert_eq!(

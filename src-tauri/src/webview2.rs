@@ -18,10 +18,12 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, GA_ROOTOWNER, GWL_EXSTYLE, GetAncestor, GetClientRect, GetForegroundWindow,
-    GetWindowLongPtrW, GetWindowRect, HWND_TOP, PostMessageW, SWP_NOACTIVATE, SWP_NOZORDER,
-    SWP_SHOWWINDOW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, WM_APP,
-    WM_CREATE, WM_MOUSEWHEEL, WM_NCACTIVATE, WM_NCDESTROY, WM_PARENTNOTIFY, WS_EX_NOACTIVATE,
+    CallNextHookEx, EnumChildWindows, GA_PARENT, GA_ROOT, GA_ROOTOWNER, GWL_EXSTYLE, GetAncestor,
+    GetClientRect, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, HC_ACTION, HWND_TOP,
+    IsChild, IsWindowVisible, MSLLHOOKSTRUCT, PostMessageW, SWP_NOACTIVATE, SWP_NOZORDER,
+    SWP_SHOWWINDOW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
+    SetWindowsHookExW, WH_MOUSE_LL, WM_APP, WM_CREATE, WM_MOUSEWHEEL, WM_NCACTIVATE, WM_NCDESTROY,
+    WM_PARENTNOTIFY, WS_EX_NOACTIVATE, WindowFromPoint,
 };
 use windows::core::{BOOL, HSTRING, Interface, PWSTR};
 
@@ -363,7 +365,10 @@ pub(crate) fn forget_page_scheme(id: u32) {
 }
 
 fn same_site(host: &str, name: &str) -> bool {
-    host == name || host.strip_suffix(name).is_some_and(|prefix| prefix.ends_with('.'))
+    host == name
+        || host
+            .strip_suffix(name)
+            .is_some_and(|prefix| prefix.ends_with('.'))
 }
 
 /// Gmail paints only part of a page for `prefers-color-scheme: dark`: the header stays light
@@ -470,7 +475,10 @@ fn note_scheme_result(id: u32, want: bool, applied: bool, resume: bool) {
             hold.applied = want;
         }
     }
-    if !applied && resume && let Ok(mut skips) = scheme_skips().lock() {
+    if !applied
+        && resume
+        && let Ok(mut skips) = scheme_skips().lock()
+    {
         skips.insert(id);
     }
 }
@@ -514,8 +522,13 @@ pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview, window: &str) {
 
 /// Ctrl+wheel is handled here. With zoom control disabled, WebView2 consumes the gesture and
 /// never delivers a DOM wheel event, so the page script and the header never see it.
+/// The wheel often lands on a WebView2 window this process cannot subclass, or on the chrome
+/// webview that sits under a hit-test-transparent page. A low-level hook sees the notch first
+/// and chooses the target from the cursor.
 const ZOOM_WHEEL_SUBCLASS: usize = 0x00CE_5A11;
+const ZOOM_SINK_SUBCLASS: usize = 0x00CE_5A12;
 const WM_ZOOM_SUBCLASS: u32 = WM_APP + 0x5A;
+const WM_ZOOM_WHEEL: u32 = WM_APP + 0x5B;
 const WHEEL_NOTCH: i32 = 120;
 
 #[derive(Clone)]
@@ -529,6 +542,56 @@ enum ZoomKind {
 struct ZoomHook {
     app: AppHandle,
     kind: ZoomKind,
+    /// WRY container. Its client area matches the webview.
+    host: isize,
+    /// Top-level browser window that owns this webview.
+    root: isize,
+}
+
+struct QueuedZoom {
+    app: AppHandle,
+    root: isize,
+    /// `0` changes Browser UI size. Any other value is a tab id.
+    id: u32,
+    steps: i32,
+}
+
+struct ZoomHit {
+    app: AppHandle,
+    /// Bucket for partial wheel notches.
+    bucket: isize,
+    root: isize,
+    id: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WheelBand {
+    Header,
+    Page,
+    Other,
+}
+
+/// `top`/`left`/`right`/`bottom` are the chrome insets in CSS pixels.
+fn wheel_band(
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    top: f64,
+    left: f64,
+    right: f64,
+    bottom: f64,
+) -> WheelBand {
+    if x < 0.0 || y < 0.0 || x >= width || y >= height {
+        return WheelBand::Other;
+    }
+    if top > 0.0 && y < top {
+        return WheelBand::Header;
+    }
+    if x >= left && y >= top && x < width - right && y < height - bottom {
+        return WheelBand::Page;
+    }
+    WheelBand::Other
 }
 
 fn zoom_hooks() -> &'static Mutex<HashMap<isize, ZoomHook>> {
@@ -548,36 +611,71 @@ fn wheel_steps(bucket: i32, delta: i32) -> (i32, i32) {
     (next - steps * WHEEL_NOTCH, steps)
 }
 
+fn zoom_queue() -> &'static Mutex<Vec<QueuedZoom>> {
+    static QUEUE: std::sync::OnceLock<Mutex<Vec<QueuedZoom>>> = std::sync::OnceLock::new();
+    QUEUE.get_or_init(Default::default)
+}
+
+fn zoom_sinks() -> &'static Mutex<HashSet<isize>> {
+    static SINKS: std::sync::OnceLock<Mutex<HashSet<isize>>> = std::sync::OnceLock::new();
+    SINKS.get_or_init(Default::default)
+}
+
+fn zoom_hook_ready() -> &'static AtomicBool {
+    static READY: AtomicBool = AtomicBool::new(false);
+    &READY
+}
+
+fn hwnd_of(value: isize) -> HWND {
+    HWND(value as *mut std::ffi::c_void)
+}
+
 fn attach_zoom_wheel(platform: &PlatformWebview, app: AppHandle, kind: ZoomKind) {
     let mut hwnd = HWND(std::ptr::null_mut());
     if unsafe { platform.controller().ParentWindow(&mut hwnd) }.is_err() || hwnd.0.is_null() {
         return;
     }
     let host = hwnd.0 as isize;
-    raise_zoom_subclass(hwnd, host, ZoomHook { app, kind });
+    let root_hwnd = unsafe { GetAncestor(hwnd, GA_ROOT) };
+    let root = if root_hwnd.0.is_null() {
+        host
+    } else {
+        root_hwnd.0 as isize
+    };
+    raise_zoom_subclass(
+        hwnd,
+        host,
+        ZoomHook {
+            app,
+            kind,
+            host,
+            root,
+        },
+    );
     let _ = unsafe { EnumChildWindows(Some(hwnd), Some(subclass_zoom_child), LPARAM(host)) };
+    let _ = ensure_zoom_sink(root);
+    install_zoom_hook();
 }
 
 fn raise_zoom_subclass(hwnd: HWND, host: isize, hook: ZoomHook) {
     if hwnd.0.is_null() {
         return;
     }
+    // The hook is recorded even when the subclass cannot be installed. Hit testing only
+    // needs the container, and WebView2's render window often belongs to another process.
+    zoom_hooks()
+        .lock()
+        .expect("zoom wheel")
+        .insert(hwnd.0 as isize, hook);
     // Remove and add so this proc runs before WebView2's own subclass, which swallows Ctrl+wheel.
-    let installed = unsafe {
+    unsafe {
         let _ = RemoveWindowSubclass(hwnd, Some(zoom_wheel_proc), ZOOM_WHEEL_SUBCLASS);
-        SetWindowSubclass(
+        let _ = SetWindowSubclass(
             hwnd,
             Some(zoom_wheel_proc),
             ZOOM_WHEEL_SUBCLASS,
             host as usize,
-        )
-        .as_bool()
-    };
-    if installed {
-        zoom_hooks()
-            .lock()
-            .expect("zoom wheel")
-            .insert(hwnd.0 as isize, hook);
+        );
     }
 }
 
@@ -628,14 +726,306 @@ fn wheel_cursor(lparam: LPARAM) -> POINT {
     }
 }
 
-/// `height` is the header in CSS pixels. The wheel message carries screen coordinates.
-fn cursor_in_header(host: HWND, lparam: LPARAM, height: f64) -> bool {
-    let mut point = wheel_cursor(lparam);
+/// Screen point converted into the webview's CSS pixel space, plus the client size.
+fn client_css(host: HWND, point: POINT) -> Option<(f64, f64, f64, f64)> {
+    let mut point = point;
     if !unsafe { ScreenToClient(host, &mut point) }.as_bool() {
+        return None;
+    }
+    let mut rect = RECT::default();
+    if unsafe { GetClientRect(host, &mut rect) }.is_err() {
+        return None;
+    }
+    let scale = hwnd_scale(host);
+    if scale <= f64::EPSILON {
+        return None;
+    }
+    Some((
+        point.x as f64 / scale,
+        point.y as f64 / scale,
+        rect.right as f64 / scale,
+        rect.bottom as f64 / scale,
+    ))
+}
+
+fn hit_page(hook: ZoomHook, id: u32) -> ZoomHit {
+    ZoomHit {
+        app: hook.app,
+        bucket: hook.host,
+        root: hook.root,
+        id,
+    }
+}
+
+fn hit_ui(hook: ZoomHook) -> ZoomHit {
+    ZoomHit {
+        app: hook.app,
+        bucket: hook.host,
+        root: hook.root,
+        id: 0,
+    }
+}
+
+fn ancestor_host(point: POINT) -> Option<ZoomHook> {
+    let mut hwnd = unsafe { WindowFromPoint(point) };
+    for _ in 0..32 {
+        if hwnd.0.is_null() {
+            return None;
+        }
+        if let Some(hook) = zoom_hook(hwnd.0 as isize) {
+            return Some(hook);
+        }
+        let parent = unsafe { GetAncestor(hwnd, GA_PARENT) };
+        if parent.0.is_null() || parent == hwnd {
+            return None;
+        }
+        hwnd = parent;
+    }
+    None
+}
+
+fn over_browser(point: POINT) -> bool {
+    let hit = unsafe { WindowFromPoint(point) };
+    if hit.0.is_null() {
         return false;
     }
-    let css_y = point.y as f64 / hwnd_scale(host);
-    css_y >= 0.0 && css_y < height
+    let root = unsafe { GetAncestor(hit, GA_ROOT) };
+    if root.0.is_null() {
+        return false;
+    }
+    let root = root.0 as isize;
+    zoom_hooks()
+        .lock()
+        .ok()
+        .is_some_and(|hooks| hooks.values().any(|hook| hook.root == root))
+}
+
+/// The container under `point`. `page` selects tab webviews; otherwise the browser UI webview.
+fn host_containing(point: POINT, page: bool) -> Option<ZoomHook> {
+    let candidates = {
+        let hooks = zoom_hooks().lock().ok()?;
+        hooks
+            .iter()
+            .filter(|(key, hook)| {
+                **key == hook.host
+                    && match hook.kind {
+                        ZoomKind::Page(_) => page,
+                        ZoomKind::Ui(_) => !page,
+                    }
+            })
+            .map(|(key, hook)| (*key, hook.clone()))
+            .collect::<Vec<_>>()
+    };
+    let mut best: Option<(i32, ZoomHook)> = None;
+    for (key, hook) in candidates {
+        let hwnd = hwnd_of(key);
+        if !unsafe { IsWindowVisible(hwnd) }.as_bool() {
+            continue;
+        }
+        let mut rect = RECT::default();
+        if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
+            continue;
+        }
+        if point.x < rect.left
+            || point.x >= rect.right
+            || point.y < rect.top
+            || point.y >= rect.bottom
+        {
+            continue;
+        }
+        let area = (rect.right - rect.left).saturating_mul(rect.bottom - rect.top);
+        if area <= 0 {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(best_area, _)| area < *best_area) {
+            best = Some((area, hook));
+        }
+    }
+    best.map(|(_, hook)| hook)
+}
+
+fn page_containing(point: POINT) -> Option<ZoomHit> {
+    let hook = host_containing(point, true)?;
+    let ZoomKind::Page(id) = hook.kind else {
+        return None;
+    };
+    Some(hit_page(hook, id))
+}
+
+fn classify_ui(point: POINT, hook: ZoomHook) -> Option<ZoomHit> {
+    // The page view covers this part of the chrome. Hit testing can still land on the UI
+    // webview when the page window does not take the pointer.
+    if let Some(page) = page_containing(point) {
+        return Some(page);
+    }
+    let window = match &hook.kind {
+        ZoomKind::Ui(window) => window.clone(),
+        ZoomKind::Page(_) => return None,
+    };
+    let (top, left, right, bottom) = tabs::page_insets(&hook.app, &window)?;
+    let (x, y, width, height) = client_css(hwnd_of(hook.host), point)?;
+    match wheel_band(x, y, width, height, top, left, right, bottom) {
+        WheelBand::Header => Some(hit_ui(hook)),
+        WheelBand::Page => {
+            let id = tabs::active_in(&hook.app, &window)?;
+            Some(hit_page(hook, id))
+        }
+        WheelBand::Other => None,
+    }
+}
+
+/// A page whose window contains the pointer, including a render child owned by WebView2.
+fn page_at_pointer(point: POINT) -> Option<ZoomHit> {
+    let hook = host_containing(point, true)?;
+    let ZoomKind::Page(id) = hook.kind else {
+        return None;
+    };
+    let hit = unsafe { WindowFromPoint(point) };
+    let host = hwnd_of(hook.host);
+    let on_page = hit == host || (!hit.0.is_null() && unsafe { IsChild(host, hit).as_bool() });
+    if on_page || over_browser(point) {
+        Some(hit_page(hook, id))
+    } else {
+        None
+    }
+}
+
+/// Page under the pointer, or the header when the pointer is on the browser chrome.
+fn classify(point: POINT) -> Option<ZoomHit> {
+    if let Some(hook) = ancestor_host(point) {
+        return match hook.kind {
+            ZoomKind::Page(id) => Some(hit_page(hook, id)),
+            ZoomKind::Ui(_) => classify_ui(point, hook),
+        };
+    }
+    if let Some(page) = page_at_pointer(point) {
+        return Some(page);
+    }
+    if !over_browser(point) {
+        return None;
+    }
+    let hook = host_containing(point, false)?;
+    classify_ui(point, hook)
+}
+
+/// `true` when this notch belongs to a page or the browser header and WebView2 must not see it.
+fn offer_wheel(point: POINT, delta: i32, ctrl: bool) -> bool {
+    let Some(hit) = classify(point) else {
+        return false;
+    };
+    if !ctrl {
+        clear_wheel(hit.bucket);
+        return false;
+    }
+    let steps = push_wheel(hit.bucket, delta);
+    enqueue_zoom(QueuedZoom {
+        app: hit.app,
+        root: hit.root,
+        id: hit.id,
+        steps,
+    });
+    true
+}
+
+fn enqueue_zoom(item: QueuedZoom) {
+    if item.steps == 0 {
+        return;
+    }
+    let root = item.root;
+    zoom_queue().lock().expect("zoom queue").push(item);
+    if !ensure_zoom_sink(root) || !post_zoom(root) {
+        drain_zoom();
+    }
+}
+
+fn post_zoom(root: isize) -> bool {
+    unsafe { PostMessageW(Some(hwnd_of(root)), WM_ZOOM_WHEEL, WPARAM(0), LPARAM(0)).is_ok() }
+}
+
+fn drain_zoom() {
+    let batch = {
+        let mut queue = zoom_queue().lock().expect("zoom queue");
+        std::mem::take(&mut *queue)
+    };
+    for item in batch {
+        if item.id == 0 {
+            step_ui_zoom(&item.app, item.steps);
+        } else {
+            step_page_zoom(&item.app, item.id, item.steps);
+        }
+    }
+}
+
+fn ensure_zoom_sink(root: isize) -> bool {
+    if root == 0 {
+        return false;
+    }
+    let mut sinks = zoom_sinks().lock().expect("zoom sink");
+    if sinks.contains(&root) {
+        return true;
+    }
+    let installed = unsafe {
+        SetWindowSubclass(
+            hwnd_of(root),
+            Some(zoom_sink_proc),
+            ZOOM_SINK_SUBCLASS,
+            root as usize,
+        )
+        .as_bool()
+    };
+    if installed {
+        sinks.insert(root);
+    }
+    installed
+}
+
+unsafe extern "system" fn zoom_sink_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    _root: usize,
+) -> LRESULT {
+    if message == WM_ZOOM_WHEEL {
+        drain_zoom();
+        return LRESULT(0);
+    }
+    if message == WM_NCDESTROY {
+        if let Ok(mut sinks) = zoom_sinks().lock() {
+            sinks.remove(&(hwnd.0 as isize));
+        }
+        let _ = unsafe { RemoveWindowSubclass(hwnd, Some(zoom_sink_proc), ZOOM_SINK_SUBCLASS) };
+    }
+    unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+}
+
+fn install_zoom_hook() {
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    if zoom_hook_ready().load(Ordering::Acquire) || STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    match unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(zoom_ll_proc), None, 0) } {
+        Ok(_hook) => {
+            // `HHOOK` is `Copy` and is not unhooked on drop. The hook stays for the process.
+            zoom_hook_ready().store(true, Ordering::Release);
+        }
+        Err(error) => {
+            STARTED.store(false, Ordering::Release);
+            eprintln!("Ctrl+scroll zoom: {error}");
+        }
+    }
+}
+
+unsafe extern "system" fn zoom_ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32 && wparam.0 as u32 == WM_MOUSEWHEEL && lparam.0 != 0 {
+        let info = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
+        let delta = ((info.mouseData >> 16) as u16) as i16 as i32;
+        if offer_wheel(info.pt, delta, async_key(VK_CONTROL)) {
+            return LRESULT(1);
+        }
+    }
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
 fn step_page_zoom(app: &AppHandle, id: u32, steps: i32) {
@@ -660,33 +1050,6 @@ fn step_ui_zoom(app: &AppHandle, steps: i32) {
         return;
     }
     let _ = crate::settings::update(app, |settings| settings.ui_zoom = next);
-}
-
-/// `true` when this notch belongs to page zoom or the browser header, and the message
-/// must not reach WebView2.
-fn on_ctrl_wheel(host: isize, wparam: WPARAM, lparam: LPARAM) -> bool {
-    let Some(hook) = zoom_hook(host) else {
-        return false;
-    };
-    let delta = wheel_delta(wparam);
-    match hook.kind {
-        ZoomKind::Page(id) => {
-            let steps = push_wheel(host, delta);
-            step_page_zoom(&hook.app, id, steps);
-            true
-        }
-        ZoomKind::Ui(window) => {
-            let Some(height) = tabs::header_height(&hook.app, &window) else {
-                return false;
-            };
-            if !cursor_in_header(HWND(host as *mut std::ffi::c_void), lparam, height) {
-                return false;
-            }
-            let steps = push_wheel(host, delta);
-            step_ui_zoom(&hook.app, steps);
-            true
-        }
-    }
 }
 
 unsafe extern "system" fn zoom_wheel_proc(
@@ -728,10 +1091,10 @@ unsafe extern "system" fn zoom_wheel_proc(
             zoom_buckets().lock().expect("zoom wheel").remove(&host_key);
         }
         let _ = unsafe { RemoveWindowSubclass(hwnd, Some(zoom_wheel_proc), ZOOM_WHEEL_SUBCLASS) };
-    } else if message == WM_MOUSEWHEEL {
-        if !ctrl_down(wparam) {
-            clear_wheel(host_key);
-        } else if on_ctrl_wheel(host_key, wparam, lparam) {
+    } else if message == WM_MOUSEWHEEL && !zoom_hook_ready().load(Ordering::Acquire) {
+        // The low-level hook is the path that runs before WebView2. This is only the fallback
+        // for a window in this process when that hook could not be installed.
+        if offer_wheel(wheel_cursor(lparam), wheel_delta(wparam), ctrl_down(wparam)) {
             return LRESULT(0);
         }
     }
@@ -1804,8 +2167,7 @@ fn attach_adblock(
                     .map(|request| read_pwstr(|value| request.Uri(value)))
                     .unwrap_or_default();
                 if let Some(bytes) = crate::system::pdf_bytes(&uri)
-                    && let Some(stream) =
-                        windows::Win32::UI::Shell::SHCreateMemStream(Some(&bytes))
+                    && let Some(stream) = windows::Win32::UI::Shell::SHCreateMemStream(Some(&bytes))
                 {
                     let response = environment.CreateWebResourceResponse(
                         &stream,
@@ -2928,13 +3290,11 @@ pub fn js_heap_used(webview: &Webview) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{page_keeps_light_scheme, wheel_steps};
+    use super::{WheelBand, page_keeps_light_scheme, wheel_band, wheel_steps};
 
     #[test]
     fn gmail_stays_on_the_light_scheme() {
-        assert!(page_keeps_light_scheme(
-            "https://mail.google.com/mail/u/0/"
-        ));
+        assert!(page_keeps_light_scheme("https://mail.google.com/mail/u/0/"));
         assert!(page_keeps_light_scheme(
             "https://workspace.google.com/intl/en-US/gmail/"
         ));
@@ -2969,5 +3329,33 @@ mod tests {
     fn a_large_delta_takes_several_steps_and_keeps_the_remainder() {
         assert_eq!(wheel_steps(0, 250), (10, 2));
         assert_eq!(wheel_steps(0, -250), (-10, -2));
+    }
+
+    #[test]
+    fn ctrl_wheel_over_the_page_is_page_zoom() {
+        assert_eq!(
+            wheel_band(10.0, 200.0, 800.0, 600.0, 88.0, 0.0, 0.0, 0.0),
+            WheelBand::Page
+        );
+        assert_eq!(
+            wheel_band(10.0, 20.0, 800.0, 600.0, 88.0, 0.0, 0.0, 0.0),
+            WheelBand::Header
+        );
+        assert_eq!(
+            wheel_band(10.0, 200.0, 800.0, 600.0, 88.0, 240.0, 48.0, 22.0),
+            WheelBand::Other
+        );
+        assert_eq!(
+            wheel_band(400.0, 200.0, 800.0, 600.0, 88.0, 240.0, 48.0, 22.0),
+            WheelBand::Page
+        );
+        assert_eq!(
+            wheel_band(400.0, 590.0, 800.0, 600.0, 88.0, 240.0, 48.0, 22.0),
+            WheelBand::Other
+        );
+        assert_eq!(
+            wheel_band(10.0, 10.0, 800.0, 600.0, 0.0, 0.0, 0.0, 0.0),
+            WheelBand::Page
+        );
     }
 }

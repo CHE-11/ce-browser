@@ -4267,17 +4267,33 @@ pub fn set_fullscreen(app: &AppHandle, id: u32, fullscreen: bool) {
     });
 }
 
-/// CSS height of the browser header. Ctrl+scroll in that band changes Browser UI size.
-/// Fullscreen covers the window with the page, so the header is not a zoom target.
-pub fn header_height(app: &AppHandle, window: &str) -> Option<f64> {
-    with_state(app, |state| {
-        let chrome = state.chrome(window)?;
-        if chrome.fullscreen || chrome.ui_height < 1.0 {
-            None
-        } else {
-            Some(chrome.ui_height)
-        }
-    })
+/// Active tab in one browser window. `None` when the tab list is busy, so a mouse hook
+/// can skip the notch instead of waiting on the UI thread.
+pub fn active_in(app: &AppHandle, window: &str) -> Option<u32> {
+    let state = app.try_state::<Tabs>()?;
+    let guard = state.inner().0.try_lock().ok()?;
+    guard.active_of(window)
+}
+
+/// Page area insets in CSS pixels: top, left, right, bottom.
+/// Fullscreen is the whole window. `None` until the header has been measured, or while the
+/// tab list is busy.
+pub fn page_insets(app: &AppHandle, window: &str) -> Option<(f64, f64, f64, f64)> {
+    let state = app.try_state::<Tabs>()?;
+    let guard = state.inner().0.try_lock().ok()?;
+    let chrome = guard.chrome(window)?;
+    if chrome.fullscreen {
+        return Some((0.0, 0.0, 0.0, 0.0));
+    }
+    if chrome.ui_height < 1.0 {
+        return None;
+    }
+    Some((
+        chrome.ui_height,
+        chrome.ui_left,
+        chrome.ui_right,
+        chrome.ui_bottom,
+    ))
 }
 
 /// `top` is the header height, `left` the vertical tab sidebar, `right` the tool strip,

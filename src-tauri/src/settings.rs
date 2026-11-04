@@ -1573,7 +1573,8 @@ mod tests {
     #[test]
     fn a_device_paper_size_is_kept() {
         let loaded: super::BrowserSettings =
-            serde_json::from_str(r#"{"printEditor":{"paper":"iphone16"}}"#).expect("settings parse");
+            serde_json::from_str(r#"{"printEditor":{"paper":"iphone16"}}"#)
+                .expect("settings parse");
         assert_eq!(loaded.normalize().print_editor.paper, "iphone16");
     }
 
@@ -1592,7 +1593,8 @@ mod tests {
     #[test]
     fn an_explicit_open_after_save_is_kept() {
         let loaded: super::BrowserSettings =
-            serde_json::from_str(r#"{"printEditor":{"openAfterSave":true}}"#).expect("settings parse");
+            serde_json::from_str(r#"{"printEditor":{"openAfterSave":true}}"#)
+                .expect("settings parse");
         assert!(loaded.normalize().print_editor.open_after_save);
     }
 
