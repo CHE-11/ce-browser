@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { AppWindow, Calculator, Globe, History, Search, Star, X } from "lucide-react";
+import { AppWindow, Calculator, Code, Globe, History, Search, Star, X } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
-import { PopupFrame } from "@/components/PopupFrame";
-import { onOmniboxState, sendOmniboxReady, sendOmniboxPick, sendOmniboxRemove } from "@/lib/browser-client";
+import { PopupFrame, PopupMenuSeparator } from "@/components/PopupFrame";
+import { closePopup, onOmniboxState, openDevtools, openUiDevtools, sendOmniboxReady, sendOmniboxPick, sendOmniboxRemove } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { OMNIBOX_ROW_HEIGHT } from "@/lib/omnibox";
+import { useTabs } from "@/lib/use-browser";
 import { OmniboxSuggestion, OmniboxState } from "@type/browser";
 
 
@@ -21,6 +22,12 @@ const KIND_LABEL: Record<OmniboxSuggestion["kind"], string> = {
  * view; this view only mirrors its state. */
 export function AddressBarEllipsisMenu() {
   const [state, setState] = useState<OmniboxState>({ suggestions: [], selected: 0 });
+  const snapshot = useTabs();
+  const active = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
+
+  const openTools = (action: () => Promise<unknown>) => {
+    void action().finally(() => void closePopup());
+  };
 
   useEffect(() => {
     const unlisten = onOmniboxState((next) => {
@@ -102,6 +109,36 @@ export function AddressBarEllipsisMenu() {
             </div>
           );
         })}
+      </div>
+      <PopupMenuSeparator id="address-bar-ellipsis-devtools-separator" />
+      <div id="address-bar-ellipsis-devtools" className="flex flex-col gap-0.5 px-1.5 pb-1.5">
+        <button
+          id="address-bar-ellipsis-tauri-devtools"
+          type="button"
+          className="flex h-9 w-full items-center gap-3 rounded-lg px-2.5 text-left text-sm text-zinc-100 hover:bg-zinc-800"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            openTools(openUiDevtools);
+          }}
+        >
+          <AppWindow id="address-bar-ellipsis-tauri-devtools-icon" className="size-4 shrink-0 text-zinc-400" aria-hidden />
+          <span id="address-bar-ellipsis-tauri-devtools-label">Open Tauri Developer Tools</span>
+        </button>
+        <button
+          id="address-bar-ellipsis-web-devtools"
+          type="button"
+          disabled={!active}
+          className="flex h-9 w-full items-center gap-3 rounded-lg px-2.5 text-left text-sm text-zinc-100 hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            if (active) {
+              openTools(() => openDevtools(active.id));
+            }
+          }}
+        >
+          <Code id="address-bar-ellipsis-web-devtools-icon" className="size-4 shrink-0 text-zinc-400" aria-hidden />
+          <span id="address-bar-ellipsis-web-devtools-label">Open Web Developer Tools</span>
+        </button>
       </div>
     </PopupFrame>
   );

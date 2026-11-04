@@ -80,6 +80,7 @@ import { IconButton } from "../../../../components/IconButton";
 import { LoadBar } from "../../../../components/LoadBar";
 import { WindowControls } from "../../../../components/WindowControls";
 import { MediaHubButton } from "../../../BuiltInExtensions/media/MediaHubButton";
+import { ProfileSwitcherButton } from "./ProfileSwitcherButton";
 import { ToolbarEntry } from "../../BrowserBody/VerticalToolbar/VerticalToolbar";
 
 type AddressBarProps = {
@@ -1130,6 +1131,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       <IconButton id="address-settings" label="Settings" onClick={() => void createTab("ce://settings")}>
         <Settings id="address-settings-icon" aria-hidden />
       </IconButton>
+      <ProfileSwitcherButton />
 
       <IconButton
         id="address-menu"

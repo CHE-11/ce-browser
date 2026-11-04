@@ -12,7 +12,100 @@ use crate::{files, paths, settings};
 const PERMISSIONS: &str = "permissions.json";
 const CONTAINERS: &str = "containers.json";
 const MAX_LOG: usize = 300;
-const KINDS: &[&str] = &["camera", "microphone", "location", "notifications"];
+const KINDS: &[&str] = &[
+    "camera",
+    "microphone",
+    "location",
+    "notifications",
+    "clipboard",
+    "midi",
+    "window-management",
+    "local-fonts",
+    "file-system",
+    "autoplay",
+    "sensors",
+    "downloads",
+    "storage",
+];
+
+/// Wraps `navigator.registerProtocolHandler` so the page asks through our prompt.
+pub const PROTOCOL_JS: &str = r#"(function () {
+  if (window.__ceProtocol || !navigator.registerProtocolHandler) return;
+  window.__ceProtocol = true;
+  var native = navigator.registerProtocolHandler.bind(navigator);
+  var queue = [];
+  navigator.registerProtocolHandler = function (scheme, url) {
+    scheme = String(scheme || "");
+    url = String(url || "");
+    try {
+      if (!window.chrome || !window.chrome.webview) throw new Error("no host");
+      window.chrome.webview.postMessage({ type: "ce-protocol", scheme: scheme, url: url });
+      queue.push({ scheme: scheme, url: url });
+    } catch (error) {
+      try { native(scheme, url); } catch (ignored) {}
+    }
+  };
+  window.__ceProtocolFinish = function (allow, scheme, count) {
+    count = count || 1;
+    for (var n = 0; n < count; n++) {
+      var index = -1;
+      for (var i = 0; i < queue.length; i++) {
+        if (queue[i].scheme === scheme) { index = i; break; }
+      }
+      if (index < 0) return;
+      var request = queue.splice(index, 1)[0];
+      if (!allow) continue;
+      try { native(request.scheme, request.url); } catch (error) {}
+    }
+  };
+})();"#;
+
+/// `protocol:mailto` when `scheme` is a handler name we can store. Empty schemes are refused.
+pub fn protocol_kind(scheme: &str) -> Option<String> {
+    let scheme = scheme.trim().to_ascii_lowercase();
+    if scheme.is_empty()
+        || scheme.len() > 64
+        || !scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    {
+        return None;
+    }
+    Some(format!("protocol:{scheme}"))
+}
+
+/// The sentence under "{site} wants to" on the permission prompt.
+pub fn request_label(kind: &str) -> String {
+    let kind = kind.trim().to_ascii_lowercase();
+    if let Some(scheme) = kind.strip_prefix("protocol:") {
+        return match scheme {
+            "mailto" => "Open email links".into(),
+            "webcal" => "Open calendar links".into(),
+            "tel" => "Open phone links".into(),
+            "sms" | "smsto" => "Open text message links".into(),
+            "geo" => "Open map links".into(),
+            "magnet" => "Open magnet links".into(),
+            "irc" | "ircs" => "Open chat links".into(),
+            _ => format!("Open {scheme} links"),
+        };
+    }
+    match kind.as_str() {
+        "camera" => "Use your camera".into(),
+        "microphone" => "Use your microphone".into(),
+        "location" => "Know your location".into(),
+        "notifications" => "Show notifications".into(),
+        "clipboard" => "See text and images on the clipboard".into(),
+        "midi" => "Control MIDI devices".into(),
+        "window-management" => "Manage windows on your screens".into(),
+        "local-fonts" => "Use fonts installed on this device".into(),
+        "file-system" => "Read and change files on this device".into(),
+        "autoplay" => "Play sound".into(),
+        "sensors" => "Use motion sensors".into(),
+        "downloads" => "Download multiple files".into(),
+        "storage" => "Store data on this device".into(),
+        _ => "Use a feature of this site".into(),
+    }
+}
 const REFERRERS: &[&str] = &["default", "none", "origin", "same-origin"];
 
 const TRACKING: &[&str] = &[
@@ -605,10 +698,9 @@ fn origin_key(raw: &str) -> String {
 fn kind_key(raw: &str) -> String {
     let raw = raw.trim().to_ascii_lowercase();
     if KINDS.contains(&raw.as_str()) {
-        raw
-    } else {
-        String::new()
+        return raw;
     }
+    protocol_kind(raw.strip_prefix("protocol:").unwrap_or("")).unwrap_or_default()
 }
 
 pub fn normalize_referrer(raw: &str) -> String {
@@ -807,6 +899,33 @@ mod tests {
         assert_eq!(grants[0].origin, "https://example.com");
         assert_eq!(grants[0].device_id, "{endpoint}");
         assert_eq!(grants[0].device_label, "Headset (AirPods)");
+    }
+
+    #[test]
+    fn a_protocol_handler_grant_is_kept() {
+        let grants = normalize_grants(vec![grant(
+            "https://outlook.live.com/mail",
+            "protocol:mailto",
+            "allow",
+        )]);
+        assert_eq!(grants.len(), 1);
+        assert_eq!(grants[0].origin, "https://outlook.live.com");
+        assert_eq!(grants[0].kind, "protocol:mailto");
+        assert!(
+            normalize_grants(vec![grant(
+                "https://example.com",
+                "protocol:not a scheme",
+                "allow"
+            )])
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn an_email_handler_asks_to_open_email_links() {
+        assert_eq!(request_label("protocol:mailto"), "Open email links");
+        assert_eq!(request_label("camera"), "Use your camera");
+        assert_eq!(request_label("other"), "Use a feature of this site");
     }
 
     #[test]

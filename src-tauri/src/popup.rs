@@ -1033,7 +1033,19 @@ fn park_levels(app: &AppHandle, window: &str, levels: &[Level], keep: Option<&st
     for level in levels {
         let reused = keep == Some(level.label.as_str());
         park(app, window, &level.label, level.extension(), !reused);
+        if level.kind == "permission" {
+            if let Some(id) = permission_prompt_id(&level.params) {
+                crate::webview2::permission_popup_closed(app, id);
+            }
+        }
     }
+}
+
+fn permission_prompt_id(params: &str) -> Option<u64> {
+    params.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (key == "id").then(|| value.parse().ok()).flatten()
+    })
 }
 
 fn blank(app: &AppHandle, label: &str) {

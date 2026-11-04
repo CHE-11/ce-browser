@@ -25,7 +25,7 @@ pub enum Launch {
     Pdfs(Vec<String>),
 }
 
-const PDF_EDITOR: &str = "https://ce-file-tools.vercel.app/pdf/editor/markup";
+const PDF_EDITOR: &str = "https://ce-file-tools.vercel.app/pdf/view-and-markup";
 
 struct PendingPdfs {
     ready: bool,
@@ -1019,13 +1019,13 @@ mod tests {
             Launch::Open(r"C:\docs\note.pdf".into())
         );
         assert!(is_pdf_editor(
-            "https://ce-file-tools.vercel.app/pdf/editor/markup"
+            "https://ce-file-tools.vercel.app/pdf/view-and-markup"
         ));
         assert!(is_pdf_editor(
-            "https://ce-file-tools.vercel.app/pdf/editor/markup?x=1"
+            "https://ce-file-tools.vercel.app/pdf/view-and-markup?x=1"
         ));
         assert!(!is_pdf_editor(
-            "https://ce-file-tools.vercel.app/pdf/editor"
+            "https://ce-file-tools.vercel.app/pdf/view-and-markup"
         ));
     }
 

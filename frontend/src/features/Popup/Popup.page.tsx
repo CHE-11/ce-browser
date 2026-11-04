@@ -8,6 +8,7 @@ import { onPopupHide, onPopupShow, popupCurrent } from "@lib/browser-client";
 import { PopupHostContext, type PopupHostState } from "@lib/popup-host";
 import { useAppearanceState, useBookmarksState, useExtensions, useTabs } from "@lib/use-browser";
 import { AddressBarEllipsisMenu } from "@/features/Browser/BrowserHeader/Addressbar/AddressBarEllipsisMenu";
+import { ProfileSwitcher } from "@/features/Browser/BrowserHeader/Addressbar/ProfileSwitcher";
 import { ThemePicker } from "@/features/Browser/BrowserHeader/Addressbar/ThemePicker";
 import { ExtensionPinContextMenu } from "@/features/Browser/BrowserHeader/Addressbar/ExtensionPinContextMenu";
 import { PinContextMenu } from "@/features/Browser/BrowserHeader/Addressbar/PinContextMenu";
@@ -40,6 +41,7 @@ import { TabSearch } from "@/features/Browser/BrowserHeader/Tabs/TabSearch";
 import { TabSwitcher } from "@/features/Browser/BrowserHeader/Tabs/TabSwitcher";
 import { TabHoverCard } from "@/features/Browser/BrowserHeader/Tabs/TabHoverCard";
 import { UnresponsivePrompt } from "@features/PageRecovery/UnresponsivePrompt";
+import { PermissionPrompt } from "@features/Permissions/PermissionPrompt";
 import { SiteInfoPanel } from "@features/SiteInfo/SiteInfoPanel";
 import { FindAllPopover } from "@features/FindAll/FindAllPopover";
 import { ShortcutSheet } from "@features/Shortcuts/ShortcutSheet";
@@ -227,6 +229,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <TabHoverCard tabId={Number(params.get("id"))} />;
     case "unresponsive":
       return <UnresponsivePrompt tabId={Number(params.get("id"))} />;
+    case "permission":
+      return <PermissionPrompt params={params} />;
     case "site-info":
       return <SiteInfoPanel tabId={Number(params.get("id"))} initialView={params.get("view") ?? ""} />;
     case "selection-translate":
@@ -237,6 +241,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <ShortcutSheet />;
     case "theme-picker":
       return <ThemePicker />;
+    case "profile-switcher":
+      return <ProfileSwitcher />;
     default:
       return <UnknownPopup />;
   }

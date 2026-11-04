@@ -4,15 +4,9 @@ import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonRows } from "@/components/Skeleton";
 import { listPermissions, onPermissionsChanged, setPermission } from "@/lib/browser-client";
+import { permissionLabel } from "@/lib/permission-label";
 import { useAppearanceFromSettings } from "@/lib/use-browser";
 import type { PermissionGrant } from "@type/browser";
-
-const KIND_LABEL: Record<string, string> = {
-  camera: "Camera",
-  microphone: "Microphone",
-  location: "Location",
-  notifications: "Notifications",
-};
 
 function stateLabel(state: string) {
   if (state === "allow") {
@@ -78,7 +72,7 @@ export function PermissionsPage() {
                       {grant.origin}
                     </div>
                     <div id={`${rowId}-kind`} className="text-xs text-zinc-500">
-                      {KIND_LABEL[grant.kind] ?? grant.kind} · {stateLabel(grant.state)}
+                      {permissionLabel(grant.kind)} · {stateLabel(grant.state)}
                     </div>
                   </div>
                   <Button
@@ -86,7 +80,7 @@ export function PermissionsPage() {
                     size="sm"
                     variant="outline"
                     disabled={grant.state === "deny"}
-                    aria-label={`Revoke ${KIND_LABEL[grant.kind] ?? grant.kind} for ${grant.origin}`}
+                    aria-label={`Revoke ${permissionLabel(grant.kind)} for ${grant.origin}`}
                     onClick={() => {
                       void setPermission(grant.origin, grant.kind, false).catch((reason: unknown) => setError(String(reason)));
                     }}

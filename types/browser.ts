@@ -432,7 +432,9 @@ export type PopupKind =
   | "selection-translate"
   | "boards"
   | "board-images"
-  | "theme-picker";
+  | "theme-picker"
+  | "profile-switcher"
+  | "permission";
 
 /** Windows app theme. Sites that support `prefers-color-scheme` follow this. */
 export type WindowsColorScheme = "light" | "dark";

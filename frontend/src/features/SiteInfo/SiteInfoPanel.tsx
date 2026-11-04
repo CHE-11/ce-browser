@@ -9,19 +9,13 @@ import { focusRing } from "@/lib/focus-ring";
 import { formatBytes } from "@/lib/format";
 import { useTabs } from "@/lib/use-browser";
 import { siteKey } from "@features/BuiltInExtensions/page-controls/site";
+import { permissionLabel } from "@/lib/permission-label";
 import type { PermissionGrant, SiteInfo } from "@type/browser";
 import { MicrophonePanel } from "./MicrophonePanel";
 
 type SiteInfoPanelProps = {
   tabId: number;
   initialView?: string;
-};
-
-const PERMISSION_LABEL: Record<string, string> = {
-  camera: "Camera",
-  microphone: "Microphone",
-  location: "Location",
-  notifications: "Notifications",
 };
 
 const PERMISSION_ORDER = ["microphone", "camera", "location", "notifications"];
@@ -287,7 +281,7 @@ export function SiteInfoPanel({ tabId, initialView = "" }: SiteInfoPanelProps) {
                 </PermissionLine>
               ) : null}
               {permissions.map((grant) => {
-                const label = PERMISSION_LABEL[grant.kind] ?? grant.kind;
+                const label = permissionLabel(grant.kind);
                 if (grant.kind === "microphone") {
                   return (
                     <PermissionLine id="site-info-permission-microphone" key="microphone" label="Microphone">

@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -20,10 +19,10 @@ pub const WINDOW: &str = "main";
 pub const UI: &str = "ui";
 const MAX_CLOSED: usize = 25;
 const DEFAULT_UI_HEIGHT: f64 = 84.0;
-/// Extension popouts (`chrome.windows.create`) often arrive with no size. A tab then
-/// shows the popup layout in the corner of the page. This is a typical popout.
-const EXTENSION_POPOUT_WIDTH: f64 = 400.0;
-const EXTENSION_POPOUT_HEIGHT: f64 = 640.0;
+/// Extension popouts (`chrome.windows.create`) often arrive with no size, or with the narrow
+/// toolbar width. A wider frame fits the vault UI.
+const EXTENSION_POPOUT_WIDTH: f64 = 480.0;
+const EXTENSION_POPOUT_HEIGHT: f64 = 680.0;
 /// Restored pinned tabs wait this long, so the selected page loads first.
 const PIN_LOAD_DELAY: Duration = Duration::from_millis(1500);
 /// Gap between two restored pinned tabs starting to load.
@@ -1662,9 +1661,8 @@ pub fn new_window(
 /// a window with no title bar, because every page view here is a child of the browser window.
 ///
 /// The window starts at `about:blank` and is handed to `SetNewWindow` before anything navigates
-/// it. WebView2 then commits the popout. That first document sets the title and leaves the view
-/// blank, so the extension page is loaded again with `Navigate`, the same path the toolbar popup
-/// uses.
+/// it. WebView2 commits the popout. Navigating or resizing from that callback never returns, so
+/// the follow-up runs on a later turn of the main thread.
 fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewWindowResponse<Wry> {
     let extension = url.scheme() == "chrome-extension";
     let Some(size) = features.size().or_else(|| {
@@ -1683,8 +1681,12 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
     } else {
         1.0
     };
-    let width = size.width.max(240.0) * factor;
-    let height = size.height.max(160.0) * factor;
+    let width = if extension {
+        size.width.max(EXTENSION_POPOUT_WIDTH)
+    } else {
+        size.width.max(240.0)
+    } * factor;
+    let height = size.height.max(if extension { 320.0 } else { 160.0 }) * factor;
     let label = with_state(app, |state| {
         state.next_popup += 1;
         format!("script-{}", state.next_popup)
@@ -1695,7 +1697,10 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(blank))
         .title(if extension { "Extension" } else { "ce-browser" })
         .inner_size(width, height)
-        .min_inner_size(240.0 * factor, 160.0 * factor)
+        .min_inner_size(
+            (if extension { 420.0 } else { 240.0 }) * factor,
+            (if extension { 320.0 } else { 160.0 }) * factor,
+        )
         .decorations(true)
         .shadow(true)
         .focused(true)
@@ -1703,9 +1708,6 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
         .with_environment(environment)
         .on_new_window(move |url, features| new_window(&host, None, url, features));
     if extension {
-        let target = url.clone();
-        let nav_app = app.clone();
-        let opened = Arc::new(AtomicBool::new(false));
         builder = builder
             .background_color(settings::page_color(app))
             .on_document_title_changed(|window, title| {
@@ -1714,28 +1716,6 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
                     return;
                 }
                 let _ = window.set_title(title);
-            })
-            .on_page_load(move |window, payload| {
-                if !matches!(payload.event(), PageLoadEvent::Finished) {
-                    return;
-                }
-                let loaded = payload.url();
-                if loaded.as_str().starts_with("about:blank") {
-                    return;
-                }
-                if let Some(webview) = nav_app.get_webview(window.label()) {
-                    webview2::fill_client_area(&webview);
-                }
-                // `SetNewWindow` paints nothing. One normal navigation after that shows the page.
-                if !opened.swap(true, Ordering::Relaxed) {
-                    if same_popout(&loaded, &target) {
-                        let _ = window.reload();
-                    } else {
-                        let _ = window.navigate(target.clone());
-                    }
-                    return;
-                }
-                let _ = window.set_zoom(factor);
             });
     }
     if let Some(position) = position {
@@ -1747,7 +1727,8 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
         Ok(window) => {
             webview2::close_window_when_requested(app, window.label());
             if extension {
-                open_extension_popout(app, window.label(), url);
+                let _ = window.set_zoom(factor);
+                open_extension_popout(app, window.label(), url, width, height);
             }
             NewWindowResponse::Create { window }
         }
@@ -1758,18 +1739,33 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
     }
 }
 
-/// If `SetNewWindow` never leaves `about:blank`, load the extension page. A popout that did
-/// load still gets its view sized, in case the first layout ran while the frame had no client area.
-fn open_extension_popout(app: &AppHandle, label: &str, target: Url) {
+/// Sizes the popout after `SetNewWindow` has returned. The page lays out against a zero-size view
+/// until the frame is resized, so this nudges the window once the document is up. Navigating from
+/// the navigation callback freezes the UI thread, so the blank-page load is here too.
+fn open_extension_popout(app: &AppHandle, label: &str, target: Url, width: f64, height: f64) {
     let app = app.clone();
     let label = label.to_string();
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(400));
-        let host = app.clone();
-        let _ = app.run_on_main_thread(move || {
-            let Some(webview) = host.get_webview(&label) else {
-                return;
-            };
+        std::thread::sleep(Duration::from_millis(250));
+        settle_extension_popout(&app, &label, Some(target), width, height);
+        std::thread::sleep(Duration::from_millis(500));
+        settle_extension_popout(&app, &label, None, width, height);
+    });
+}
+
+fn settle_extension_popout(
+    app: &AppHandle,
+    label: &str,
+    target: Option<Url>,
+    width: f64,
+    height: f64,
+) {
+    let host = app.clone();
+    let label = label.to_string();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(target) = target
+            && let Some(webview) = host.get_webview(&label)
+        {
             webview2::fill_client_area(&webview);
             let blank = webview
                 .url()
@@ -1778,16 +1774,23 @@ fn open_extension_popout(app: &AppHandle, label: &str, target: Url) {
             if blank {
                 let _ = webview.navigate(target);
             }
+        }
+        let Some(window) = host.get_window(&label) else {
+            return;
+        };
+        let _ = window.set_size(LogicalSize::new(width + 1.0, height));
+        let again = host.clone();
+        let label = label.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(40));
+            let window_host = again.clone();
+            let _ = again.run_on_main_thread(move || {
+                if let Some(window) = window_host.get_window(&label) {
+                    let _ = window.set_size(LogicalSize::new(width, height));
+                }
+            });
         });
     });
-}
-
-fn same_popout(loaded: &Url, target: &Url) -> bool {
-    loaded.scheme() == target.scheme()
-        && loaded.host_str() == target.host_str()
-        && loaded.path().trim_end_matches('/') == target.path().trim_end_matches('/')
-        && loaded.query() == target.query()
-        && loaded.fragment() == target.fragment()
 }
 
 /// Screen position that puts a `width` by `height` window over the browser the user is in.
@@ -2453,6 +2456,43 @@ pub fn show_unresponsive(app: &AppHandle, id: u32) -> Result<(), String> {
                 height: 116.0,
             },
             placement: "bottom-center".into(),
+            focus: true,
+            child: false,
+            min_width: 0.0,
+        },
+    )
+    .map(|_| ())
+}
+
+/// Asks for a permission just under the toolbar, over the page that requested it.
+pub fn show_permission_prompt(app: &AppHandle, id: u32, params: &str) -> Result<(), String> {
+    let window = with_state(app, |state| state.tab_window(id)).ok_or("That tab is not open.")?;
+    if crate::popup::kind(app, &window).as_deref() == Some("permission") {
+        return Err("open".into());
+    }
+    let handle = app
+        .get_window(&window)
+        .ok_or("The browser window is missing.")?;
+    let ui = with_state(app, |state| {
+        state.chrome(&window).map(|chrome| chrome.ui.clone())
+    })
+    .and_then(|label| app.get_webview(&label))
+    .ok_or("The browser window is missing.")?;
+    let (position, _) = page_area(app, &window);
+    let scale = handle.scale_factor().unwrap_or(1.0);
+    crate::popup::open(
+        app,
+        &ui,
+        crate::popup::PopupRequest {
+            kind: "permission".into(),
+            params: params.to_string(),
+            anchor: crate::popup::PopupRect {
+                x: f64::from(position.x) / scale + 16.0,
+                y: f64::from(position.y) / scale,
+                width: 1.0,
+                height: 1.0,
+            },
+            placement: "bottom-start".into(),
             focus: true,
             child: false,
             min_width: 0.0,
@@ -4263,6 +4303,16 @@ fn apply_extension_popout_zoom(app: &AppHandle, zoom: f64, ratio: f64) {
 
 pub fn open_devtools(app: &AppHandle, id: u32) {
     if let Some(webview) = page_view(app, id) {
+        webview.open_devtools();
+    }
+}
+
+/// Developer tools for the browser chrome of `window`, the React UI webview.
+pub fn open_ui_devtools(app: &AppHandle, window: &str) {
+    let label = with_state(app, |state| {
+        state.chrome(window).map(|chrome| chrome.ui.clone())
+    });
+    if let Some(webview) = label.and_then(|label| app.get_webview(&label)) {
         webview.open_devtools();
     }
 }

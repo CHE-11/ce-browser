@@ -376,6 +376,8 @@ pub fn injection(app: &AppHandle, url: &str) -> String {
     script.push('\n');
     script.push_str(&crate::privacy::fingerprint_script(app, url));
     script.push('\n');
+    script.push_str(crate::privacy::PROTOCOL_JS);
+    script.push('\n');
     script.push_str(ERROR_JS);
     script.push('\n');
     script.push_str(THEME_JS);

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::webview::PlatformWebview;
 use tauri::{AppHandle, Manager, Webview};
@@ -1800,6 +1800,18 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                             });
                         }
                     }
+                    Some("ce-protocol") => {
+                        let scheme = message
+                            .get("scheme")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let source = read_pwstr(|value| args.Source(value));
+                        let app = message_app.clone();
+                        let _ = message_app.run_on_main_thread(move || {
+                            on_protocol(&app, id, &source, &scheme);
+                        });
+                    }
                     Some("ce-speed") => {
                         if let Some(speed) = message.get("speed").and_then(|value| value.as_f64()) {
                             let app = message_app.clone();
@@ -2091,6 +2103,10 @@ pub fn forget_early_script(id: u32) {
         .lock()
         .expect("microphone script")
         .remove(&id);
+    protocol_scripts()
+        .lock()
+        .expect("protocol script")
+        .remove(&id);
 }
 
 fn microphone_scripts() -> &'static Mutex<HashSet<u32>> {
@@ -2099,6 +2115,39 @@ fn microphone_scripts() -> &'static Mutex<HashSet<u32>> {
 }
 
 /// The microphone wrapper is static, so each tab webview installs it once.
+fn protocol_scripts() -> &'static Mutex<HashSet<u32>> {
+    static IDS: std::sync::OnceLock<Mutex<HashSet<u32>>> = std::sync::OnceLock::new();
+    IDS.get_or_init(Default::default)
+}
+
+/// Asks the page to report `registerProtocolHandler` before the site's own scripts run.
+fn install_protocol_script(core: &ICoreWebView2, id: u32) {
+    {
+        let mut ids = protocol_scripts().lock().expect("protocol script");
+        if !ids.insert(id) {
+            return;
+        }
+    }
+    let script = HSTRING::from(crate::privacy::PROTOCOL_JS);
+    let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(
+        move |result, _script_id| {
+            if result.is_err() {
+                protocol_scripts()
+                    .lock()
+                    .expect("protocol script")
+                    .remove(&id);
+            }
+            Ok(())
+        },
+    ));
+    if unsafe { core.AddScriptToExecuteOnDocumentCreated(&script, &handler) }.is_err() {
+        protocol_scripts()
+            .lock()
+            .expect("protocol script")
+            .remove(&id);
+    }
+}
+
 fn install_microphone_script(core: &ICoreWebView2, id: u32) {
     {
         let mut ids = microphone_scripts().lock().expect("microphone script");
@@ -2191,6 +2240,7 @@ fn attach_adblock(
 
         sync_early_script(core, id);
         install_microphone_script(core, id);
+        install_protocol_script(core, id);
 
         let environment = platform.environment();
         let request_app = app.clone();
@@ -2420,19 +2470,7 @@ fn attach_adblock(
                 let uri = read_pwstr(|value| args.Uri(value));
                 let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
                 args.PermissionKind(&mut kind)?;
-                let Some(name) = permission_name(kind) else {
-                    return Ok(());
-                };
-                if let Some(allow) = crate::privacy::decision(&permission_app, &uri, name) {
-                    args.SetState(if allow {
-                        COREWEBVIEW2_PERMISSION_STATE_ALLOW
-                    } else {
-                        COREWEBVIEW2_PERMISSION_STATE_DENY
-                    })?;
-                } else {
-                    crate::privacy::note_request(&permission_app, &uri, name);
-                }
-                Ok(())
+                on_permission(&permission_app, id, &uri, kind, &args)
             })),
             &mut token,
         )?;
@@ -2440,18 +2478,362 @@ fn attach_adblock(
     Ok(())
 }
 
-fn permission_name(kind: COREWEBVIEW2_PERMISSION_KIND) -> Option<&'static str> {
+fn permission_name(kind: COREWEBVIEW2_PERMISSION_KIND) -> &'static str {
     if kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA {
-        Some("camera")
+        "camera"
     } else if kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE {
-        Some("microphone")
+        "microphone"
     } else if kind == COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION {
-        Some("location")
+        "location"
     } else if kind == COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS {
-        Some("notifications")
+        "notifications"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ {
+        "clipboard"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_OTHER_SENSORS {
+        "sensors"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_MULTIPLE_AUTOMATIC_DOWNLOADS {
+        "downloads"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_FILE_READ_WRITE {
+        "file-system"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_AUTOPLAY {
+        "autoplay"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_LOCAL_FONTS {
+        "local-fonts"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_MIDI_SYSTEM_EXCLUSIVE_MESSAGES {
+        "midi"
+    } else if kind == COREWEBVIEW2_PERMISSION_KIND_WINDOW_MANAGEMENT {
+        "window-management"
+    } else if kind.0 == 13 {
+        "storage"
     } else {
-        None
+        "other"
     }
+}
+
+/// A permission the user has not answered. WebView2 requests keep their deferral on the main
+/// thread. Protocol requests call back into the page when the user answers.
+struct PendingPrompt {
+    id: u64,
+    tab: u32,
+    origin: String,
+    kind: String,
+    host: String,
+    label: String,
+    shown: bool,
+    /// Further identical protocol requests waiting on this same answer.
+    extras: u32,
+    scheme: Option<String>,
+    web: Option<
+        MainThread<(
+            ICoreWebView2PermissionRequestedEventArgs,
+            ICoreWebView2Deferral,
+        )>,
+    >,
+}
+
+struct AutoAllow {
+    tab: u32,
+    origin: String,
+    at: Instant,
+}
+
+struct PermissionPrompts {
+    next: u64,
+    pending: Vec<PendingPrompt>,
+    auto: Vec<AutoAllow>,
+}
+
+fn prompts() -> &'static Mutex<PermissionPrompts> {
+    static PROMPTS: std::sync::OnceLock<Mutex<PermissionPrompts>> = std::sync::OnceLock::new();
+    PROMPTS.get_or_init(|| {
+        Mutex::new(PermissionPrompts {
+            next: 1,
+            pending: Vec::new(),
+            auto: Vec::new(),
+        })
+    })
+}
+
+fn on_permission(
+    app: &AppHandle,
+    tab: u32,
+    uri: &str,
+    kind: COREWEBVIEW2_PERMISSION_KIND,
+    args: &ICoreWebView2PermissionRequestedEventArgs,
+) -> windows::core::Result<()> {
+    let name = permission_name(kind);
+    let origin = origin_of(app, tab, uri);
+    let allowed = !origin.is_empty() && crate::privacy::decision(app, uri, name) == Some(true);
+    let auto = name == "other" && take_auto(tab, &origin);
+    if allowed || auto {
+        hide_default_permission_ui(args);
+        let _ = unsafe { args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW) };
+        save_permission_choice(args, true);
+        return Ok(());
+    }
+    if !origin.is_empty() && crate::privacy::decision(app, uri, name) == Some(false) {
+        hide_default_permission_ui(args);
+        let _ = unsafe { args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY) };
+        save_permission_choice(args, true);
+        return Ok(());
+    }
+    let deferral = unsafe { args.GetDeferral()? };
+    hide_default_permission_ui(args);
+    let held = MainThread::new((args.clone(), deferral));
+    let host = site_host(if origin.is_empty() { uri } else { &origin });
+    let label = crate::privacy::request_label(name);
+    if name != "other" {
+        crate::privacy::note_request(app, uri, name);
+    }
+    let mut guard = prompts().lock().expect("permission prompts");
+    let id = guard.next;
+    guard.next += 1;
+    guard.pending.push(PendingPrompt {
+        id,
+        tab,
+        origin,
+        kind: name.to_string(),
+        host,
+        label,
+        shown: false,
+        extras: 0,
+        scheme: None,
+        web: Some(held),
+    });
+    drop(guard);
+    let later = app.clone();
+    let _ = app.run_on_main_thread(move || present_next(&later));
+    Ok(())
+}
+
+fn on_protocol(app: &AppHandle, tab: u32, source: &str, scheme: &str) {
+    let Some(kind) = crate::privacy::protocol_kind(scheme) else {
+        finish_protocol(app, tab, false, scheme, 1);
+        return;
+    };
+    let origin = origin_of(app, tab, source);
+    if origin.is_empty() {
+        finish_protocol(app, tab, false, scheme, 1);
+        return;
+    }
+    if let Some(allow) = crate::privacy::decision(app, &origin, &kind) {
+        if allow {
+            arm_auto(tab, &origin);
+        }
+        finish_protocol(app, tab, allow, scheme, 1);
+        return;
+    }
+    {
+        let mut guard = prompts().lock().expect("permission prompts");
+        if let Some(existing) = guard
+            .pending
+            .iter_mut()
+            .find(|item| item.tab == tab && item.kind == kind)
+        {
+            existing.extras += 1;
+            return;
+        }
+        let id = guard.next;
+        guard.next += 1;
+        guard.pending.push(PendingPrompt {
+            id,
+            tab,
+            origin: origin.clone(),
+            kind: kind.clone(),
+            host: site_host(&origin),
+            label: crate::privacy::request_label(&kind),
+            shown: false,
+            extras: 0,
+            scheme: Some(scheme.to_string()),
+            web: None,
+        });
+    }
+    crate::privacy::note_request(app, &origin, &kind);
+    let later = app.clone();
+    let _ = app.run_on_main_thread(move || present_next(&later));
+}
+
+/// Records the user's choice and, for a protocol handler, tells the page to finish registering.
+pub fn answer_permission(app: &AppHandle, id: u64, choice: &str) {
+    let Some(prompt) = take_prompt(id) else {
+        return;
+    };
+    let choice = match choice {
+        "allow" | "block" => choice.to_string(),
+        _ => "dismiss".into(),
+    };
+    let later = app.clone();
+    let _ = app.run_on_main_thread(move || settle(&later, prompt, &choice));
+}
+
+/// The prompt window went away. An answer that already arrived is left alone.
+pub fn permission_popup_closed(app: &AppHandle, id: u64) {
+    let prompt = take_prompt(id);
+    let later = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(prompt) = prompt {
+            settle(&later, prompt, "dismiss");
+        }
+        present_next(&later);
+    });
+}
+
+fn take_prompt(id: u64) -> Option<PendingPrompt> {
+    let mut guard = prompts().lock().expect("permission prompts");
+    let index = guard.pending.iter().position(|item| item.id == id)?;
+    Some(guard.pending.remove(index))
+}
+
+fn present_next(app: &AppHandle) {
+    let next = {
+        let mut guard = prompts().lock().expect("permission prompts");
+        let Some(item) = guard.pending.iter_mut().find(|item| !item.shown) else {
+            return;
+        };
+        item.shown = true;
+        let params = format!(
+            "id={}&host={}&label={}&kind={}",
+            item.id,
+            form_escape(&item.host),
+            form_escape(&item.label),
+            form_escape(&item.kind),
+        );
+        Some((item.id, item.tab, params))
+    };
+    let Some((id, tab, params)) = next else {
+        return;
+    };
+    if let Err(error) = tabs::show_permission_prompt(app, tab, &params) {
+        if error == "open" {
+            if let Some(item) = prompts()
+                .lock()
+                .expect("permission prompts")
+                .pending
+                .iter_mut()
+                .find(|item| item.id == id)
+            {
+                item.shown = false;
+            }
+            return;
+        }
+        if let Some(prompt) = take_prompt(id) {
+            settle(app, prompt, "dismiss");
+        }
+        present_next(app);
+    }
+}
+
+fn settle(app: &AppHandle, prompt: PendingPrompt, choice: &str) {
+    let allow = choice == "allow";
+    let persist = choice != "dismiss";
+    if persist && !prompt.origin.is_empty() && prompt.kind != "other" {
+        let _ =
+            crate::privacy::set_permission(app, &prompt.origin, &prompt.kind, allow, Some(true));
+    }
+    if let Some(held) = prompt.web {
+        let (args, deferral) = held.into_inner();
+        unsafe {
+            if persist {
+                save_permission_choice(&args, true);
+            }
+            let _ = args.SetState(if allow {
+                COREWEBVIEW2_PERMISSION_STATE_ALLOW
+            } else {
+                COREWEBVIEW2_PERMISSION_STATE_DENY
+            });
+            let _ = deferral.Complete();
+        }
+    }
+    if let Some(scheme) = &prompt.scheme {
+        if allow {
+            arm_auto(prompt.tab, &prompt.origin);
+        }
+        finish_protocol(app, prompt.tab, allow, scheme, prompt.extras + 1);
+    }
+}
+
+fn finish_protocol(app: &AppHandle, tab: u32, allow: bool, scheme: &str, count: u32) {
+    let scheme = serde_json::to_string(scheme).unwrap_or_else(|_| "\"\"".into());
+    let script = format!(
+        "if (window.__ceProtocolFinish) window.__ceProtocolFinish({allow}, {scheme}, {count});"
+    );
+    if let Some(webview) = tabs::page_view(app, tab) {
+        let _ = webview.eval(&script);
+    }
+}
+
+fn arm_auto(tab: u32, origin: &str) {
+    if origin.is_empty() {
+        return;
+    }
+    prompts()
+        .lock()
+        .expect("permission prompts")
+        .auto
+        .push(AutoAllow {
+            tab,
+            origin: origin.to_string(),
+            at: Instant::now(),
+        });
+}
+
+fn take_auto(tab: u32, origin: &str) -> bool {
+    if origin.is_empty() {
+        return false;
+    }
+    let mut guard = prompts().lock().expect("permission prompts");
+    let now = Instant::now();
+    guard
+        .auto
+        .retain(|item| now.saturating_duration_since(item.at) < Duration::from_secs(2));
+    let Some(index) = guard
+        .auto
+        .iter()
+        .position(|item| item.tab == tab && item.origin == origin)
+    else {
+        return false;
+    };
+    guard.auto.remove(index);
+    true
+}
+
+fn hide_default_permission_ui(args: &ICoreWebView2PermissionRequestedEventArgs) {
+    if let Ok(args2) = args.cast::<ICoreWebView2PermissionRequestedEventArgs2>() {
+        let _ = unsafe { args2.SetHandled(true) };
+    }
+}
+
+fn save_permission_choice(args: &ICoreWebView2PermissionRequestedEventArgs, save: bool) {
+    if let Ok(args3) = args.cast::<ICoreWebView2PermissionRequestedEventArgs3>() {
+        let _ = unsafe { args3.SetSavesInProfile(save) };
+    }
+}
+
+fn origin_of(app: &AppHandle, tab: u32, source: &str) -> String {
+    crate::paths::http_origin(source)
+        .or_else(|| tabs::tab_page_url(app, tab).and_then(|url| crate::paths::http_origin(&url)))
+        .unwrap_or_default()
+}
+
+fn site_host(raw: &str) -> String {
+    url::Url::parse(raw)
+        .ok()
+        .and_then(|url| url.host_str().map(ToString::to_string))
+        .filter(|host| !host.is_empty())
+        .unwrap_or_else(|| "This site".into())
+}
+
+fn form_escape(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 fn apply_referrer(

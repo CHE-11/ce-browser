@@ -26,6 +26,7 @@ import {
   createTab,
   getSettings,
   openDevtools,
+  openUiDevtools,
   installedBrowsers,
   installUpdate,
   openInBrowser,
@@ -165,9 +166,15 @@ export function AppMenu() {
           </IconButton>
         </div>
         <PopupMenuItem
+          id="app-menu-tauri-devtools"
+          icon={<AppWindow />}
+          label="Open Tauri Developer Tools"
+          onClick={run(openUiDevtools)}
+        />
+        <PopupMenuItem
           id="app-menu-devtools"
           icon={<Code />}
-          label="Developer tools"
+          label="Open Web Developer Tools"
           shortcut="F12"
           disabled={!active}
           onClick={run(async () => {

@@ -277,6 +277,10 @@ export function setPermission(origin: string, kind: string, allow: boolean, pers
   return invoke<void>("set_permission", persist === undefined ? { origin, kind, allow } : { origin, kind, allow, persist });
 }
 
+export function answerPermission(id: number, choice: "allow" | "block" | "dismiss") {
+  return invoke<void>("answer_permission", { id, choice });
+}
+
 export function listMicrophones() {
   return invoke<MicrophoneDevice[]>("list_microphones");
 }
@@ -802,6 +806,11 @@ export function clearFind(id: number) {
 
 export function openDevtools(id: number) {
   return invoke<void>("open_devtools", { id });
+}
+
+/** Developer tools for this window's browser chrome, the Tauri UI webview. */
+export function openUiDevtools() {
+  return invoke<void>("open_ui_devtools");
 }
 
 export function onTabsChanged(handler: (snapshot: TabsSnapshot) => void): Promise<UnlistenFn> {
@@ -1526,6 +1535,10 @@ export async function pickSyncFolder(title: string) {
 
 export function listProfiles() {
   return invoke<BrowserProfile[]>("list_profiles");
+}
+
+export function onProfilesChanged(handler: (profiles: BrowserProfile[]) => void): Promise<UnlistenFn> {
+  return listen<BrowserProfile[]>("profiles-changed", (event) => handler(event.payload));
 }
 
 export function createProfile(name: string) {

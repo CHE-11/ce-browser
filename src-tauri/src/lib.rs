@@ -541,6 +541,12 @@ async fn open_devtools(app: AppHandle, id: u32) {
 }
 
 #[tauri::command]
+async fn open_ui_devtools(app: AppHandle, window: Window) {
+    let label = browser_window(&window);
+    tabs::open_ui_devtools(&app, &label);
+}
+
+#[tauri::command]
 async fn open_popup(
     app: AppHandle,
     webview: Webview,
@@ -1060,6 +1066,11 @@ fn set_permission(
     persist: Option<bool>,
 ) -> Result<(), String> {
     privacy::set_permission(&app, &origin, &kind, allow, persist)
+}
+
+#[tauri::command]
+fn answer_permission(app: AppHandle, id: u64, choice: String) {
+    webview2::answer_permission(&app, id, &choice);
 }
 
 #[tauri::command]
@@ -1820,8 +1831,13 @@ async fn import_profile_archive(
     path: String,
     password: String,
 ) -> Result<profile_archive::ImportedProfile, String> {
-    blocking(move || profile_archive::import_archive(&app, std::path::Path::new(&path), &password))
-        .await
+    let notify = app.clone();
+    let imported = blocking(move || {
+        profile_archive::import_archive(&app, std::path::Path::new(&path), &password)
+    })
+    .await?;
+    let _ = notify.emit("profiles-changed", profiles::list(&notify));
+    Ok(imported)
 }
 
 #[tauri::command]
@@ -1839,6 +1855,11 @@ async fn check_bookmark_health(
     blocking(move || bookmark_health::check(&app)).await
 }
 
+fn publish_profiles(app: &AppHandle, profiles: Vec<ProfileInfo>) -> Vec<ProfileInfo> {
+    let _ = app.emit("profiles-changed", &profiles);
+    profiles
+}
+
 #[tauri::command]
 fn list_profiles(app: AppHandle) -> Vec<ProfileInfo> {
     profiles::list(&app)
@@ -1846,7 +1867,7 @@ fn list_profiles(app: AppHandle) -> Vec<ProfileInfo> {
 
 #[tauri::command]
 fn create_profile(app: AppHandle, name: String) -> Result<Vec<ProfileInfo>, String> {
-    profiles::create(&app, &name)
+    profiles::create(&app, &name).map(|profiles| publish_profiles(&app, profiles))
 }
 
 #[tauri::command]
@@ -1856,7 +1877,10 @@ async fn copy_profile(
     name: String,
     parts: Vec<String>,
 ) -> Result<Vec<ProfileInfo>, String> {
-    blocking(move || profiles::copy(&app, &id, &name, &parts)).await
+    let notify = app.clone();
+    blocking(move || profiles::copy(&app, &id, &name, &parts))
+        .await
+        .map(|profiles| publish_profiles(&notify, profiles))
 }
 
 #[tauri::command]
@@ -1866,7 +1890,7 @@ fn open_profile(id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn install_profile_shortcut(app: AppHandle, id: String) -> Result<Vec<ProfileInfo>, String> {
-    profiles::install_shortcut_for(&app, &id)
+    profiles::install_shortcut_for(&app, &id).map(|profiles| publish_profiles(&app, profiles))
 }
 
 #[tauri::command]
@@ -1876,7 +1900,10 @@ fn save_profile_shortcut(app: AppHandle, id: String, path: String) -> Result<(),
 
 #[tauri::command]
 async fn delete_profile(app: AppHandle, id: String) -> Result<Vec<ProfileInfo>, String> {
-    blocking(move || profiles::delete(&app, &id)).await
+    let notify = app.clone();
+    blocking(move || profiles::delete(&app, &id))
+        .await
+        .map(|profiles| publish_profiles(&notify, profiles))
 }
 
 #[tauri::command]
@@ -1902,7 +1929,7 @@ fn set_profile_icon(
             profiles::apply_window_icon(&app, &window);
         }
     }
-    profiles
+    profiles.map(|profiles| publish_profiles(&app, profiles))
 }
 
 #[tauri::command]
@@ -1917,7 +1944,7 @@ fn set_profile_icon_color(
             profiles::apply_window_icon(&app, &window);
         }
     }
-    profiles
+    profiles.map(|profiles| publish_profiles(&app, profiles))
 }
 
 #[tauri::command]
@@ -1932,17 +1959,17 @@ fn set_profile_icon_text(
             profiles::apply_window_icon(&app, &window);
         }
     }
-    profiles
+    profiles.map(|profiles| publish_profiles(&app, profiles))
 }
 
 #[tauri::command]
 fn pin_profile_taskbar(app: AppHandle, id: String) -> Result<Vec<ProfileInfo>, String> {
-    profiles::pin_taskbar(&app, &id)
+    profiles::pin_taskbar(&app, &id).map(|profiles| publish_profiles(&app, profiles))
 }
 
 #[tauri::command]
 fn unpin_profile_taskbar(app: AppHandle, id: String) -> Result<Vec<ProfileInfo>, String> {
-    profiles::unpin_taskbar(&app, &id)
+    profiles::unpin_taskbar(&app, &id).map(|profiles| publish_profiles(&app, profiles))
 }
 
 fn build_window(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -2154,6 +2181,7 @@ pub fn run() {
             clear_find,
             find_in_tabs,
             open_devtools,
+            open_ui_devtools,
             open_popup,
             close_popup,
             popup_measured,
@@ -2221,6 +2249,7 @@ pub fn run() {
             open_extension_options,
             list_permissions,
             set_permission,
+            answer_permission,
             list_microphones,
             watch_microphone,
             unwatch_microphone,
