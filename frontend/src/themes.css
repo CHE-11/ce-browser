@@ -1082,7 +1082,7 @@ html[data-theme="fog"][data-mode="light"] {
   --app-red-950: #ffebe9;
 }
 
-/* Active tab meets the strip with the same inward bottom corners as Chrome. The size follows --radius-lg, so square themes (line, sharp) stay square. */
+/* Active tab meets the strip with the same inward bottom corners as Chrome. The ears use the tab fill and sit behind it. The size follows --radius-lg, so square themes (line, sharp) stay square. */
 .tab-curve {
   --tab-curve: var(--radius-lg);
 }
@@ -1092,21 +1092,20 @@ html[data-theme="fog"][data-mode="light"] {
   content: "";
   position: absolute;
   bottom: 0;
-  z-index: 1;
-  width: calc(var(--tab-curve) * 2);
+  z-index: -1;
+  width: var(--tab-curve);
   height: var(--tab-curve);
-  background: var(--color-zinc-950);
   pointer-events: none;
 }
 
 .tab-curve::before {
   left: calc(var(--tab-curve) * -1);
-  border-bottom-right-radius: var(--tab-curve);
+  background: radial-gradient(circle at 0 0, transparent var(--tab-curve), var(--tab-fill) calc(var(--tab-curve) + 0.5px));
 }
 
 .tab-curve::after {
   right: calc(var(--tab-curve) * -1);
-  border-bottom-left-radius: var(--tab-curve);
+  background: radial-gradient(circle at 100% 0, transparent var(--tab-curve), var(--tab-fill) calc(var(--tab-curve) + 0.5px));
 }
 
 /* Bland chrome. Corners follow --radius-*. Shadows rewrite --tw-shadow on the shadow utilities, because those utilities do not read --shadow-*. --radius-full stays a pill, and borders stay 1px. */

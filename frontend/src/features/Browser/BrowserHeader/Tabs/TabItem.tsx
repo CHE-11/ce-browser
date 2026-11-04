@@ -152,7 +152,7 @@ export function TabItem({
       style={{
         viewTransitionName: `tab-${tab.id}`,
         ...(!vertical && !compact ? { width: tabWidth } : null),
-        ...(backgroundColor ? { backgroundColor } : null),
+        ...(backgroundColor ? { backgroundColor, "--tab-fill": backgroundColor } : null),
         ...(accent && vertical ? { boxShadow: `inset 3px 0 0 ${accent}` } : null),
         ...(pinBorder ? { boxShadow: `inset 0 2px 0 ${pinBorder}` } : null),
       }}
