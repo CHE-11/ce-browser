@@ -63,6 +63,9 @@ struct ProfileRecord {
     /// File name of the generated `.ico` inside the profile folder.
     #[serde(default)]
     icon_file: String,
+    /// First 10 letters of the profile name, drawn at the top of the icon.
+    #[serde(default)]
+    icon_text: bool,
     /// Directory name in the sync folder. Empty until the profile name is used.
     #[serde(default)]
     folder: String,
@@ -76,6 +79,7 @@ impl Default for ProfileRecord {
             shortcut: String::new(),
             icon: String::new(),
             icon_file: String::new(),
+            icon_text: false,
             folder: String::new(),
         }
     }
@@ -99,6 +103,8 @@ pub struct ProfileInfo {
     pub icon_id: String,
     /// PNG data URL of the icon used for this profile.
     pub icon: String,
+    /// The profile name is drawn on the icon.
+    pub icon_text: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -219,6 +225,7 @@ pub fn list(app: &AppHandle) -> Vec<ProfileInfo> {
                 start_menu: Path::new(&profile.shortcut).is_file(),
                 icon_id,
                 icon,
+                icon_text: profile.icon_text,
                 id: profile.id,
                 name: profile.name,
             }
@@ -248,41 +255,136 @@ pub fn set_icon(
         return Err("That profile no longer exists.".into());
     };
     let dir = paths::profile_data_dir(app, id);
+    let text = file.profiles[index].icon_text;
+    let name = file.profiles[index].name.clone();
+    let previous = file.profiles[index].icon_file.clone();
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     if icon_id == "default" {
-        clear_icon_files(&dir, &file.profiles[index].icon_file);
+        let _ = fs::remove_file(dir.join(ICON_BASE));
         file.profiles[index].icon.clear();
-        file.profiles[index].icon_file.clear();
+        if text {
+            let image = crate::profile_icons::render("default")?;
+            let shown = shown_icon(&image, &name, true)?;
+            file.profiles[index].icon_file = store_icon(&dir, &previous, &shown)?;
+        } else {
+            clear_icon_files(&dir, &previous);
+            file.profiles[index].icon_file.clear();
+        }
     } else {
         let image = if icon_id == "custom" {
             let source = path
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or("Choose an image file.")?;
-            crate::profile_icons::from_file(Path::new(source))?
+            let image = crate::profile_icons::from_file(Path::new(source))?;
+            store_base(&dir, &image)?;
+            image
         } else {
+            let _ = fs::remove_file(dir.join(ICON_BASE));
             crate::profile_icons::render(icon_id)?
         };
-        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-        let png = crate::profile_icons::encode_png(&image)?;
-        let ico = crate::profile_icons::encode_ico(&image)?;
-        let ico_name = format!("window-icon-{}.ico", icon_stamp());
-        let png_path = dir.join("window-icon.png");
-        let ico_path = dir.join(&ico_name);
-        fs::write(&ico_path, ico).map_err(|error| error.to_string())?;
-        if let Err(error) = fs::write(&png_path, &png) {
-            let _ = fs::remove_file(&ico_path);
-            return Err(error.to_string());
-        }
-        let previous = file.profiles[index].icon_file.clone();
-        if is_owned_icon_name(&previous) && previous != ico_name {
-            let _ = fs::remove_file(dir.join(previous));
-        }
+        let shown = shown_icon(&image, &name, text)?;
+        file.profiles[index].icon_file = store_icon(&dir, &previous, &shown)?;
         file.profiles[index].icon = icon_id.to_string();
-        file.profiles[index].icon_file = ico_name;
     }
     save(app, &file)?;
     refresh_shell_icons(app, &file.profiles[index])?;
     Ok(list(app))
+}
+
+pub fn set_icon_text(app: &AppHandle, id: &str, enabled: bool) -> Result<Vec<ProfileInfo>, String> {
+    let mut file = load(app);
+    let Some(index) = file.profiles.iter().position(|profile| profile.id == id) else {
+        return Err("That profile no longer exists.".into());
+    };
+    file.profiles[index].icon_text = enabled;
+    let dir = paths::profile_data_dir(app, id);
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let record = file.profiles[index].clone();
+    match composed_icon(&record, &dir)? {
+        None => {
+            clear_icon_files(&dir, &record.icon_file);
+            file.profiles[index].icon_file.clear();
+        }
+        Some(image) => {
+            file.profiles[index].icon_file = store_icon(&dir, &record.icon_file, &image)?;
+        }
+    }
+    save(app, &file)?;
+    refresh_shell_icons(app, &file.profiles[index])?;
+    Ok(list(app))
+}
+
+const ICON_BASE: &str = "window-icon-base.png";
+
+fn shown_icon(
+    image: &image::RgbaImage,
+    name: &str,
+    text: bool,
+) -> Result<image::RgbaImage, String> {
+    if text {
+        crate::profile_icons::stamp_name(image, name)
+    } else {
+        Ok(image.clone())
+    }
+}
+
+fn composed_icon(profile: &ProfileRecord, dir: &Path) -> Result<Option<image::RgbaImage>, String> {
+    let base = base_image(profile, dir)?;
+    if profile.icon_text {
+        return Ok(Some(crate::profile_icons::stamp_name(
+            &base,
+            &profile.name,
+        )?));
+    }
+    if profile.icon.is_empty() || profile.icon == "default" {
+        return Ok(None);
+    }
+    Ok(Some(base))
+}
+
+fn base_image(profile: &ProfileRecord, dir: &Path) -> Result<image::RgbaImage, String> {
+    if profile.icon == "custom" {
+        let base = dir.join(ICON_BASE);
+        let path = if base.is_file() {
+            base
+        } else {
+            let displayed = dir.join("window-icon.png");
+            if displayed.is_file() {
+                let bytes = fs::read(&displayed).map_err(|error| error.to_string())?;
+                fs::write(dir.join(ICON_BASE), &bytes).map_err(|error| error.to_string())?;
+            }
+            dir.join(ICON_BASE)
+        };
+        return crate::profile_icons::read_png(&path);
+    }
+    let id = if profile.icon.is_empty() {
+        "default"
+    } else {
+        profile.icon.as_str()
+    };
+    crate::profile_icons::render(id)
+}
+
+fn store_base(dir: &Path, image: &image::RgbaImage) -> Result<(), String> {
+    let png = crate::profile_icons::encode_png(image)?;
+    fs::write(dir.join(ICON_BASE), png).map_err(|error| error.to_string())
+}
+
+fn store_icon(dir: &Path, previous: &str, image: &image::RgbaImage) -> Result<String, String> {
+    let png = crate::profile_icons::encode_png(image)?;
+    let ico = crate::profile_icons::encode_ico(image)?;
+    let ico_name = format!("window-icon-{}.ico", icon_stamp());
+    let ico_path = dir.join(&ico_name);
+    fs::write(&ico_path, ico).map_err(|error| error.to_string())?;
+    if let Err(error) = fs::write(dir.join("window-icon.png"), png) {
+        let _ = fs::remove_file(&ico_path);
+        return Err(error.to_string());
+    }
+    if is_owned_icon_name(previous) && previous != ico_name {
+        let _ = fs::remove_file(dir.join(previous));
+    }
+    Ok(ico_name)
 }
 
 pub fn pin_taskbar(app: &AppHandle, id: &str) -> Result<Vec<ProfileInfo>, String> {
@@ -367,7 +469,7 @@ pub fn create(app: &AppHandle, name: &str) -> Result<Vec<ProfileInfo>, String> {
     Ok(list(app))
 }
 
-/// Creates the profile folder and Start menu item without opening a window.
+/// Creates the profile folder, its open shortcut, and the Start menu item without opening a window.
 pub fn create_closed(app: &AppHandle, name: &str) -> Result<String, String> {
     let name = name.trim();
     if name.is_empty() {
@@ -390,6 +492,12 @@ pub fn create_closed(app: &AppHandle, name: &str) -> Result<String, String> {
             return Err(error);
         }
     };
+    if let Err(error) = install_profile_link(&data_dir, &id, name, None) {
+        let _ = fs::remove_dir_all(&data_dir);
+        let _ = fs::remove_dir_all(paths::profile_webview_dir(app, &id));
+        let _ = fs::remove_file(&shortcut);
+        return Err(error);
+    }
     file.profiles.push(ProfileRecord {
         id: id.clone(),
         name: name.to_string(),
@@ -602,7 +710,7 @@ const COPY_PARTS: &[PartSpec] = &[
         ..bare("window")
     },
     PartSpec {
-        files: &["window-icon.png"],
+        files: &["window-icon.png", "window-icon-base.png"],
         icon: true,
         ..bare("icon")
     },
@@ -852,7 +960,7 @@ fn webview_file(name: &str, cookies: bool, logins: bool, site_data: bool) -> boo
 }
 
 fn apply_copied_icon(app: &AppHandle, source: &ProfileRecord, new_id: &str) -> Result<(), String> {
-    if source.icon.is_empty() && source.icon_file.is_empty() {
+    if source.icon.is_empty() && source.icon_file.is_empty() && !source.icon_text {
         return Ok(());
     }
     let mut file = load(app);
@@ -863,6 +971,7 @@ fn apply_copied_icon(app: &AppHandle, source: &ProfileRecord, new_id: &str) -> R
         .ok_or("That profile no longer exists.")?;
     record.icon.clone_from(&source.icon);
     record.icon_file.clone_from(&source.icon_file);
+    record.icon_text = source.icon_text;
     let updated = record.clone();
     save(app, &file)?;
     refresh_shell_icons(app, &updated)
@@ -887,6 +996,36 @@ fn copy_file(from: &Path, to: &Path) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     fs::copy(from, to).map_err(|error| format!("Could not copy {}: {error}", from.display()))?;
+    Ok(())
+}
+
+/// Writes a shortcut that opens `id` to `path`.
+pub fn save_shortcut(app: &AppHandle, id: &str, path: &Path) -> Result<(), String> {
+    let profile = load(app)
+        .profiles
+        .into_iter()
+        .find(|profile| profile.id == id)
+        .ok_or("That profile no longer exists.")?;
+    let mut path = path.to_path_buf();
+    if path.as_os_str().is_empty() {
+        return Err("Choose where to save the shortcut.".into());
+    }
+    if path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_none_or(|extension| !extension.eq_ignore_ascii_case("lnk"))
+    {
+        path.set_extension("lnk");
+    }
+    let icon = owned_icon(app, &profile.id, &profile.icon_file);
+    write_shell_link(
+        &path,
+        &profile_arguments(&profile.id),
+        &profile.name,
+        icon.as_deref(),
+        &app_model_id(&profile.id),
+    )?;
+    notify_item(&path);
     Ok(())
 }
 
@@ -1237,18 +1376,43 @@ fn unique_id(file: &ProfilesFile, name: &str) -> String {
     id
 }
 
+/// Shortcut written beside a profile's json files. Opens that profile.
+const PROFILE_LINK: &str = "ce-browser.lnk";
+
 fn install_shortcut(id: &str, name: &str, icon: Option<&Path>) -> Result<PathBuf, String> {
     let label = if id == DEFAULT_ID {
         "ce-browser.lnk".to_string()
     } else {
         format!("ce-browser {name}.lnk")
     };
-    let arguments = if id == DEFAULT_ID {
+    let arguments = profile_arguments(id);
+    install_link(&label, &arguments, name, icon, &app_model_id(id))
+}
+
+/// Writes `ce-browser.lnk` into the profile folder, next to its json files.
+fn install_profile_link(
+    dir: &Path,
+    id: &str,
+    name: &str,
+    icon: Option<&Path>,
+) -> Result<(), String> {
+    write_shell_link(
+        &dir.join(PROFILE_LINK),
+        &profile_arguments(id),
+        name,
+        icon,
+        &app_model_id(id),
+    )?;
+    notify_item(&dir.join(PROFILE_LINK));
+    Ok(())
+}
+
+fn profile_arguments(id: &str) -> String {
+    if id == DEFAULT_ID {
         String::new()
     } else {
         format!("--profile {id}")
-    };
-    install_link(&label, &arguments, name, icon, &app_model_id(id))
+    }
 }
 
 pub fn install_link(
@@ -1258,9 +1422,23 @@ pub fn install_link(
     icon: Option<&Path>,
     model: &str,
 ) -> Result<PathBuf, String> {
-    com_init();
     let programs = programs_dir()?;
     let path = files::unique_path(&programs, file_name);
+    write_shell_link(&path, arguments, description, icon, model)?;
+    Ok(path)
+}
+
+fn write_shell_link(
+    path: &Path,
+    arguments: &str,
+    description: &str,
+    icon: Option<&Path>,
+    model: &str,
+) -> Result<(), String> {
+    com_init();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
     let exe = paths::launch_exe().map_err(|error| error.to_string())?;
     let exe_text = exe.display().to_string();
     unsafe {
@@ -1287,7 +1465,7 @@ pub fn install_link(
         file.Save(&HSTRING::from(path.as_os_str()), true)
             .map_err(win_err)?;
     }
-    Ok(path)
+    Ok(())
 }
 
 fn programs_dir() -> Result<PathBuf, String> {
@@ -1315,8 +1493,7 @@ fn window_icon_bytes(app: &AppHandle) -> Vec<u8> {
         .into_iter()
         .find(|profile| profile.id == id)
         .is_some_and(|profile| {
-            !profile.icon.is_empty()
-                && profile.icon != "default"
+            (profile.icon_text || (!profile.icon.is_empty() && profile.icon != "default"))
                 && paths::profile_data_dir(app, &id)
                     .join("window-icon.png")
                     .is_file()
@@ -1361,6 +1538,17 @@ fn relaunch_icon(app: &AppHandle, id: &str) -> String {
 
 fn profile_icon(app: &AppHandle, profile: &ProfileRecord) -> (String, String) {
     let fallback = crate::profile_icons::preview("default").unwrap_or_default();
+    if profile.icon_text {
+        let png = paths::profile_data_dir(app, &profile.id).join("window-icon.png");
+        if let Some(preview) = crate::profile_icons::preview_file(&png) {
+            let id = if profile.icon.is_empty() || profile.icon == "default" {
+                "default"
+            } else {
+                profile.icon.as_str()
+            };
+            return (id.into(), preview);
+        }
+    }
     if profile.icon == "custom" {
         let png = paths::profile_data_dir(app, &profile.id).join("window-icon.png");
         if let Some(preview) = crate::profile_icons::preview_file(&png) {
@@ -1383,6 +1571,10 @@ fn refresh_shell_icons(app: &AppHandle, profile: &ProfileRecord) -> Result<(), S
         if path.is_file() {
             update_link_icon(&path, icon.as_deref())?;
         }
+    }
+    let folder_link = paths::profile_data_dir(app, &profile.id).join(PROFILE_LINK);
+    if folder_link.is_file() {
+        update_link_icon(&folder_link, icon.as_deref())?;
     }
     if let Some(dir) = taskbar_dir() {
         for path in matching_shortcuts(&dir, &profile.id) {
@@ -1416,16 +1608,29 @@ fn update_link_icon(link_path: &Path, icon: Option<&Path>) -> Result<(), String>
     Ok(())
 }
 
-/// Points Start menu and taskbar shortcuts made by a dev build, an exe that no longer exists,
-/// or the exe that ran before `moved_from` was replaced by this one, at this exe. Taskbar files
-/// are never deleted: the pin opens through whichever file Windows chose, and nothing here can
-/// tell which one that is.
-pub fn repair_shortcuts(moved_from: Option<PathBuf>) {
+/// Points Start menu, taskbar, and profile-folder shortcuts made by a dev build, an exe that no
+/// longer exists, or the exe that ran before `moved_from` was replaced by this one, at this exe.
+/// Taskbar files are never deleted: the pin opens through whichever file Windows chose, and
+/// nothing here can tell which one that is.
+pub fn repair_shortcuts(moved_from: Option<PathBuf>, data_root: &Path) {
     let Ok(exe) = paths::launch_exe() else {
         return;
     };
     let dirs = [programs_dir().ok(), taskbar_dir()];
-    for path in dirs.iter().flatten().flat_map(|dir| link_files(dir)) {
+    let mut links: Vec<PathBuf> = dirs
+        .iter()
+        .flatten()
+        .flat_map(|dir| link_files(dir))
+        .collect();
+    if let Ok(entries) = fs::read_dir(data_root) {
+        for entry in entries.flatten() {
+            let link = entry.path().join(PROFILE_LINK);
+            if link.is_file() {
+                links.push(link);
+            }
+        }
+    }
+    for path in links {
         if let Err(error) = retarget_link(&path, &exe, moved_from.as_deref()) {
             eprintln!("shortcut repair: {error}");
         }
@@ -1522,6 +1727,7 @@ fn owned_icon(app: &AppHandle, id: &str, icon_file: &str) -> Option<PathBuf> {
 
 fn clear_icon_files(dir: &Path, icon_file: &str) {
     let _ = fs::remove_file(dir.join("window-icon.png"));
+    let _ = fs::remove_file(dir.join(ICON_BASE));
     if is_owned_icon_name(icon_file) {
         let _ = fs::remove_file(dir.join(icon_file));
     }
@@ -1737,6 +1943,7 @@ pub(crate) const PROFILE_FILES: &[&str] = &[
     "boards.json",
     "stats.json",
     "window-icon.png",
+    "window-icon-base.png",
     "history-text.json",
 ];
 
@@ -1901,6 +2108,11 @@ fn move_loose_profile(from_dir: &Path, to_dir: &Path, overwrite: bool) -> Result
     for name in PROFILE_FILES.iter().chain(PROFILE_DIRS) {
         move_entry(&from_dir.join(name), &to_dir.join(name), overwrite)?;
     }
+    move_entry(
+        &from_dir.join(PROFILE_LINK),
+        &to_dir.join(PROFILE_LINK),
+        overwrite,
+    )?;
     let Ok(entries) = fs::read_dir(from_dir) else {
         return Ok(());
     };

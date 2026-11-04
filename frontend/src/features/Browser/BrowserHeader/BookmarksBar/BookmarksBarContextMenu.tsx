@@ -2,7 +2,7 @@ import { PopupMenu, PopupMenuItem, PopupMenuSeparator, PopupFrame } from "@/comp
 import { openPopup, addBookmark, closePopup, createTab, deleteBookmark, openFolderAsGroup, openInWindow } from "@/lib/browser-client";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { useSettings } from "@/lib/use-browser";
-import { AppWindow, ExternalLink, FolderPlus, Group, PencilLine, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
+import { AppWindow, ExternalLink, FolderPlus, Group, Library, PencilLine, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
 
 type DividerOrientation = "vertical" | "horizontal";
 
@@ -141,6 +141,14 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, targ
           />
         </>
       ) : null}
+      <PopupMenuSeparator id={`${idPrefix}-manager-separator`} />
+      <PopupMenuItem
+        id={`${idPrefix}-manager`}
+        icon={<Library />}
+        label="Bookmarks Manager"
+        style={itemStyle}
+        onClick={() => void createTab("ce://bookmarks").finally(onDone)}
+      />
     </PopupMenu>
   );
 }

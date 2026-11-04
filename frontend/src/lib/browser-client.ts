@@ -1534,6 +1534,10 @@ export function installProfileShortcut(id: string) {
   return invoke<BrowserProfile[]>("install_profile_shortcut", { id });
 }
 
+export function saveProfileShortcut(id: string, path: string) {
+  return invoke<void>("save_profile_shortcut", { id, path });
+}
+
 export function deleteProfile(id: string) {
   return invoke<BrowserProfile[]>("delete_profile", { id });
 }
@@ -1544,6 +1548,10 @@ export function listProfileIcons() {
 
 export function setProfileIcon(id: string, iconId: string, path?: string) {
   return invoke<BrowserProfile[]>("set_profile_icon", { id, iconId, path });
+}
+
+export function setProfileIconText(id: string, enabled: boolean) {
+  return invoke<BrowserProfile[]>("set_profile_icon_text", { id, enabled });
 }
 
 export function pinProfileTaskbar(id: string) {

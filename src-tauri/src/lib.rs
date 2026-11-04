@@ -1853,6 +1853,11 @@ fn install_profile_shortcut(app: AppHandle, id: String) -> Result<Vec<ProfileInf
 }
 
 #[tauri::command]
+fn save_profile_shortcut(app: AppHandle, id: String, path: String) -> Result<(), String> {
+    profiles::save_shortcut(&app, &id, std::path::Path::new(&path))
+}
+
+#[tauri::command]
 async fn delete_profile(app: AppHandle, id: String) -> Result<Vec<ProfileInfo>, String> {
     blocking(move || profiles::delete(&app, &id)).await
 }
@@ -1870,6 +1875,21 @@ fn set_profile_icon(
     path: Option<String>,
 ) -> Result<Vec<ProfileInfo>, String> {
     let profiles = profiles::set_icon(&app, &id, &icon_id, path.as_deref());
+    if id == profiles::active_id() {
+        if let Some(window) = app.get_window(tabs::WINDOW) {
+            profiles::apply_window_icon(&app, &window);
+        }
+    }
+    profiles
+}
+
+#[tauri::command]
+fn set_profile_icon_text(
+    app: AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<Vec<ProfileInfo>, String> {
+    let profiles = profiles::set_icon_text(&app, &id, enabled);
     if id == profiles::active_id() {
         if let Some(window) = app.get_window(tabs::WINDOW) {
             profiles::apply_window_icon(&app, &window);
@@ -1907,7 +1927,8 @@ pub fn run() {
             profiles::init(&handle);
             if !tauri::is_dev() {
                 let moved_from = update::record_exe(&handle);
-                std::thread::spawn(move || profiles::repair_shortcuts(moved_from));
+                let data_root = paths::data_root(&handle);
+                std::thread::spawn(move || profiles::repair_shortcuts(moved_from, &data_root));
             }
             if let Err(error) = profiles::set_process_identity() {
                 eprintln!("profile identity: {error}");
@@ -2282,9 +2303,11 @@ pub fn run() {
             copy_profile,
             open_profile,
             install_profile_shortcut,
+            save_profile_shortcut,
             delete_profile,
             list_profile_icons,
             set_profile_icon,
+            set_profile_icon_text,
             pin_profile_taskbar,
             unpin_profile_taskbar
         ])

@@ -13,6 +13,9 @@ import { groupColorClasses } from "@/lib/tab-rows";
 import { TabInfo } from "@type/browser";
 import { TabAlertDot } from "./TabAlertDot";
 
+/** These palettes already separate the strip (zinc-950) from the active tab. The rest keep those two steps too close. */
+const QUIET_TAB_THEMES = new Set(["nord", "fog", "solarized"]);
+const ACTIVE_TAB_FILL = "color-mix(in oklab, var(--app-zinc-950) 65%, var(--app-zinc-50))";
 
 type TabItemProps = {
   tab: TabInfo;
@@ -53,6 +56,7 @@ export function TabItem({
   onDragOver,
 }: TabItemProps) {
   const settings = useSettings();
+  const quietActive = QUIET_TAB_THEMES.has(settings?.theme ?? document.documentElement.dataset.theme ?? "");
   const hoverPreview = settings?.tabHoverPreview !== false;
   const tabWidth = settings?.tabWidth ?? TAB_SIZE.width;
   const accent = settings?.siteAccent && tab.accent && !tab.pinned ? tab.accent : null;
@@ -61,6 +65,8 @@ export function TabItem({
   const vertical = orientation === "vertical";
   const showAudio = tab.audible || tab.muted;
   const alert = tabProblemTitle(tab, heavy);
+  const accentFill = accent && active ? accentTint(accent, 0.28) : undefined;
+  const backgroundColor = accentFill ?? (active && !quietActive ? ACTIVE_TAB_FILL : undefined);
 
   const toggleMute = (event: MouseEvent) => {
     event.stopPropagation();
@@ -127,8 +133,12 @@ export function TabItem({
         vertical ? "h-8 w-full rounded-lg px-2" : "h-7.5 rounded-t-lg px-2.5",
         !vertical && (compact ? "w-9 justify-center px-0" : "min-w-22 shrink"),
         vertical && compact && "w-9 justify-center px-0",
-        active ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200",
-        !vertical && active && "bg-zinc-900",
+        active
+          ? quietActive
+            ? "bg-zinc-800 text-zinc-100"
+            : "text-zinc-50"
+          : "text-zinc-400 hover:bg-zinc-900/60 hover:text-zinc-200",
+        quietActive && !vertical && active && "bg-zinc-900",
         grouped && !active && "bg-zinc-800 text-zinc-100",
         !tab.loaded && !active && "opacity-80",
         tab.sleeping && !active && "opacity-55",
@@ -139,12 +149,8 @@ export function TabItem({
       style={{
         viewTransitionName: `tab-${tab.id}`,
         ...(!vertical && !compact ? { width: tabWidth } : null),
-        ...(accent
-          ? {
-              backgroundColor: active ? accentTint(accent, 0.28) : undefined,
-              ...(vertical ? { boxShadow: `inset 3px 0 0 ${accent}` } : null),
-            }
-          : null),
+        ...(backgroundColor ? { backgroundColor } : null),
+        ...(accent && vertical ? { boxShadow: `inset 3px 0 0 ${accent}` } : null),
         ...(pinBorder ? { boxShadow: `inset 0 2px 0 ${pinBorder}` } : null),
       }}
       onMouseDown={(event) => {

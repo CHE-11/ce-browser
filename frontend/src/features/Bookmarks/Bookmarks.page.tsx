@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
 import { faviconKey, hostOf } from "@/lib/format";
 import { parseRoute, useRoute } from "@/lib/route";
 import { BookmarkDropPlace, useAppearanceFromSettings, useBookmarks, useSiteFavicons, findFolder, bookmarkRootsOf, bookmarkContains, BOOKMARK_DRAG_TYPE, bookmarkDropPlace, findBookmarkParent, listFolders } from "@/lib/use-browser";
-import { ChevronRight, Columns3, Search, SearchX, LayoutGrid, List, Type, Upload, Download, Plus, FolderOpen, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, PencilLine, Link2, SeparatorHorizontal } from "lucide-react";
+import { ChevronRight, Columns3, Search, SearchX, LayoutGrid, List, Type, Plus, FolderOpen, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, PencilLine, Link2, SeparatorHorizontal } from "lucide-react";
 import { useRef, useState, useEffect, useMemo, useCallback, type DragEvent, type MouseEvent } from "react";
 import { BookmarkHealthProgress, BookmarkHealthReport, BookmarkNode, BookmarkTree } from "../../../../types/browser";
 
@@ -386,28 +386,30 @@ export function BookmarksPage() {
         <IconButton id="bookmarks-page-health" label="Check links" disabled={healthRunning} onClick={checkLinks}>
           <Link2 id="bookmarks-page-health-icon" aria-hidden />
         </IconButton>
-        <IconButton
+        <Button
           id="bookmarks-page-import"
-          label="Import"
+          size="xs"
+          variant="ghost"
           onClick={() =>
             void importBookmarksHtml()
               .then((count) => count !== null && setStatus(`Imported ${count} bookmarks into Other bookmarks.`))
               .catch((reason: unknown) => setStatus(String(reason)))
           }
         >
-          <Upload id="bookmarks-page-import-icon" aria-hidden />
-        </IconButton>
-        <IconButton
+          Import
+        </Button>
+        <Button
           id="bookmarks-page-export"
-          label="Export"
+          size="xs"
+          variant="ghost"
           onClick={() =>
             void exportBookmarksHtml()
               .then((saved) => saved && setStatus("Bookmarks exported."))
               .catch((reason: unknown) => setStatus(String(reason)))
           }
         >
-          <Download id="bookmarks-page-export-icon" aria-hidden />
-        </IconButton>
+          Export
+        </Button>
         {selected && !results ? (
           <>
             <IconButton id="bookmarks-page-add-link" label="Add bookmark" onClick={() => setEditor({ mode: "add-link", parentId: selected.id })}>
@@ -871,7 +873,7 @@ function BookmarkColumnRow({
       title={node.url ?? node.title}
       className={cn(
         "mx-1 flex h-8 cursor-default items-center gap-2 rounded-md px-2 text-left select-none",
-        active ? "bg-sky-900 text-zinc-50" : "hover:bg-zinc-900",
+        active ? "bg-sky-950 text-sky-300" : "hover:bg-zinc-900",
         chosen && !active && "bg-sky-950/60 ring-1 ring-inset ring-sky-800",
         dropClass,
       )}
@@ -899,7 +901,7 @@ function BookmarkColumnRow({
         </span>
       )}
       {folder ? (
-        <ChevronRight id={`${domId}-chevron`} className={cn("size-3.5 shrink-0", active ? "text-zinc-200" : "text-zinc-600")} aria-hidden />
+        <ChevronRight id={`${domId}-chevron`} className={cn("size-3.5 shrink-0", active ? "text-sky-300" : "text-zinc-600")} aria-hidden />
       ) : null}
     </div>
   );

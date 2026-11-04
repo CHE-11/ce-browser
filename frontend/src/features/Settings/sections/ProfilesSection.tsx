@@ -5,7 +5,9 @@ import type { BrowserProfile, ProfileIconChoice } from "@type/browser";
 import { Button } from "@/components/Button";
 import { cn } from "@/lib/cn";
 import {
+  chooseSavePath,
   createProfile,
+  defaultDownloadDir,
   deleteProfile,
   installProfileShortcut,
   listProfileIcons,
@@ -13,7 +15,10 @@ import {
   openProfile,
   pickProfileIcon,
   pinProfileTaskbar,
+  saveProfileShortcut,
   setProfileIcon,
+  setProfileIconText,
+  showSavedFile,
   unpinProfileTaskbar,
 } from "@/lib/browser-client";
 import { SETTINGS_SECTIONS } from "../settings-sections";
@@ -24,7 +29,7 @@ import { PROFILE_COPY_CHOICES, ProfilesCopyDialog, type ProfileCopyRequest } fro
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-profiles")!;
 
 const NEW_PROFILE_HINT =
-  "Each profile has its own bookmarks, history, extensions, and settings, kept in a folder named after the profile (Default for the first one) in the sync folder or in app data. Its icon is used for a separate Start menu item and taskbar button.";
+  "Each profile has its own bookmarks, history, extensions, and settings, kept in a folder named after the profile (Default for the first one) in the sync folder or in app data. A ce-browser shortcut in that folder opens the profile. Its icon is used for a separate Start menu item and taskbar button.";
 const ARCHIVE_LABEL = "Profile file";
 const ARCHIVE_HINT =
   "Saves this profile's bookmarks, history, extensions, and settings in one encrypted file. Cookies stay on this computer.";
@@ -44,6 +49,7 @@ function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], iconO
     terms.push("Open");
   }
   terms.push("Copy");
+  terms.push("Shortcut");
   terms.push(profile.taskbar ? "Unpin" : "Pin to taskbar");
   if (!profile.startMenu) {
     terms.push("Add to Start");
@@ -56,6 +62,7 @@ function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], iconO
       profile.current
         ? "This window, the Start menu, and the taskbar button use this icon."
         : "The Start menu and taskbar shortcut update now. That profile's window uses the icon the next time it opens.",
+      "Show Icon Text",
       "Choose an image",
       "Image",
       ...icons.flatMap((choice) => [choice.label, choice.id]),
@@ -238,8 +245,10 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
           }
           onPin={() => runProfiles(() => pinProfileTaskbar(profile.id))}
           onUnpin={() => runProfiles(() => unpinProfileTaskbar(profile.id))}
+          onDownloadShortcut={() => downloadProfileShortcut(profile, onError)}
           onShortcut={() => runProfiles(() => installProfileShortcut(profile.id))}
           onRemove={() => setPendingDelete(profile.id)}
+          onIconText={(enabled) => runProfiles(() => setProfileIconText(profile.id, enabled))}
           onChooseIcon={(iconId, path) => runProfiles(() => setProfileIcon(profile.id, iconId, path))}
           onPickFile={() =>
             void pickProfileIcon().then((path) => {
@@ -279,6 +288,26 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
   );
 }
 
+function shortcutFileName(name: string) {
+  const cleaned = name.replace(/[<>:"/\\|?*]/g, " ").replace(/\s+/g, " ").trim();
+  return `ce-browser ${cleaned || "profile"}.lnk`;
+}
+
+function downloadProfileShortcut(profile: BrowserProfile, onError: (message: string | null) => void) {
+  onError(null);
+  const fileName = shortcutFileName(profile.name);
+  void defaultDownloadDir()
+    .catch(() => "")
+    .then((folder) => chooseSavePath(folder ? `${folder}\\${fileName}` : fileName, "Shortcut", ["lnk"]))
+    .then((path) => {
+      if (!path) {
+        return;
+      }
+      return saveProfileShortcut(profile.id, path).then(() => showSavedFile(path));
+    })
+    .catch((reason: unknown) => onError(String(reason)));
+}
+
 function ProfileCard({
   profile,
   icons,
@@ -289,8 +318,10 @@ function ProfileCard({
   onCopy,
   onPin,
   onUnpin,
+  onDownloadShortcut,
   onShortcut,
   onRemove,
+  onIconText,
   onChooseIcon,
   onPickFile,
 }: {
@@ -303,8 +334,10 @@ function ProfileCard({
   onCopy: () => void;
   onPin: () => void;
   onUnpin: () => void;
+  onDownloadShortcut: () => void;
   onShortcut: () => void;
   onRemove: () => void;
+  onIconText: (enabled: boolean) => void;
   onChooseIcon: (iconId: string, path?: string) => void;
   onPickFile: () => void;
 }) {
@@ -352,6 +385,9 @@ function ProfileCard({
           <Button id={`settings-profile-${profile.id}-copy-button`} size="sm" disabled={working} onClick={onCopy}>
             Copy
           </Button>
+          <Button id={`settings-profile-${profile.id}-download-shortcut`} size="sm" disabled={working} onClick={onDownloadShortcut}>
+            Shortcut
+          </Button>
           {profile.taskbar ? (
             <Button id={`settings-profile-${profile.id}-unpin`} size="sm" disabled={working} onClick={onUnpin}>
               Unpin
@@ -389,6 +425,16 @@ function ProfileCard({
               ? "This window, the Start menu, and the taskbar button use this icon."
               : "The Start menu and taskbar shortcut update now. That profile's window uses the icon the next time it opens."}
           </p>
+          <label id={`settings-profile-${profile.id}-icon-text`} className="flex items-center gap-2 text-xs text-zinc-300">
+            <input
+              id={`settings-profile-${profile.id}-icon-text-input`}
+              type="checkbox"
+              checked={profile.iconText}
+              disabled={working}
+              onChange={(event) => onIconText(event.target.checked)}
+            />
+            Show Icon Text
+          </label>
           <div id={`settings-profile-${profile.id}-icon-grid`} className="grid grid-cols-4 gap-2 sm:grid-cols-8">
             {icons.map((choice) => {
               const selected = profile.iconId === choice.id;

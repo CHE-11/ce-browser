@@ -1218,6 +1218,8 @@ export type BrowserProfile = {
   iconId: string;
   /** PNG data URL of the icon used for the window, Start menu, and taskbar. */
   icon: string;
+  /** The first 10 letters of the profile name are drawn on the icon. */
+  iconText: boolean;
 };
 
 export type ProfileIconChoice = {
