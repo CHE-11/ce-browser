@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -1660,9 +1661,10 @@ pub fn new_window(
 /// environment. Letting WebView2 build the default popup freezes this process and leaves
 /// a window with no title bar, because every page view here is a child of the browser window.
 ///
-/// The window starts at `about:blank`. `SetNewWindow` performs the real navigation, so an
-/// extension popout stays an extension window. Navigating to the target first loads the HTML
-/// without extension APIs, and the passkey page never paints.
+/// The window starts at `about:blank` and is handed to `SetNewWindow` before anything navigates
+/// it. WebView2 then commits the popout. That first document sets the title and leaves the view
+/// blank, so the extension page is loaded again with `Navigate`, the same path the toolbar popup
+/// uses.
 fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewWindowResponse<Wry> {
     let extension = url.scheme() == "chrome-extension";
     let Some(size) = features.size().or_else(|| {
@@ -1697,9 +1699,13 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
         .decorations(true)
         .shadow(true)
         .focused(true)
+        .browser_extensions_enabled(true)
         .with_environment(environment)
         .on_new_window(move |url, features| new_window(&host, None, url, features));
     if extension {
+        let target = url.clone();
+        let nav_app = app.clone();
+        let opened = Arc::new(AtomicBool::new(false));
         builder = builder
             .background_color(settings::page_color(app))
             .on_document_title_changed(|window, title| {
@@ -1713,7 +1719,20 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
                 if !matches!(payload.event(), PageLoadEvent::Finished) {
                     return;
                 }
-                if !is_extension_url(payload.url().as_str()) {
+                let loaded = payload.url();
+                if loaded.as_str().starts_with("about:blank") {
+                    return;
+                }
+                if let Some(webview) = nav_app.get_webview(window.label()) {
+                    webview2::fill_client_area(&webview);
+                }
+                // `SetNewWindow` paints nothing. One normal navigation after that shows the page.
+                if !opened.swap(true, Ordering::Relaxed) {
+                    if same_popout(&loaded, &target) {
+                        let _ = window.reload();
+                    } else {
+                        let _ = window.navigate(target.clone());
+                    }
                     return;
                 }
                 let _ = window.set_zoom(factor);
@@ -1727,6 +1746,9 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
     match builder.build() {
         Ok(window) => {
             webview2::close_window_when_requested(app, window.label());
+            if extension {
+                open_extension_popout(app, window.label(), url);
+            }
             NewWindowResponse::Create { window }
         }
         Err(error) => {
@@ -1734,6 +1756,38 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
             NewWindowResponse::Deny
         }
     }
+}
+
+/// If `SetNewWindow` never leaves `about:blank`, load the extension page. A popout that did
+/// load still gets its view sized, in case the first layout ran while the frame had no client area.
+fn open_extension_popout(app: &AppHandle, label: &str, target: Url) {
+    let app = app.clone();
+    let label = label.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(400));
+        let host = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            let Some(webview) = host.get_webview(&label) else {
+                return;
+            };
+            webview2::fill_client_area(&webview);
+            let blank = webview
+                .url()
+                .ok()
+                .is_none_or(|current| current.as_str().starts_with("about:blank"));
+            if blank {
+                let _ = webview.navigate(target);
+            }
+        });
+    });
+}
+
+fn same_popout(loaded: &Url, target: &Url) -> bool {
+    loaded.scheme() == target.scheme()
+        && loaded.host_str() == target.host_str()
+        && loaded.path().trim_end_matches('/') == target.path().trim_end_matches('/')
+        && loaded.query() == target.query()
+        && loaded.fragment() == target.fragment()
 }
 
 /// Screen position that puts a `width` by `height` window over the browser the user is in.

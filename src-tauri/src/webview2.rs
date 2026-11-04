@@ -1488,6 +1488,50 @@ pub fn attach_popup_hooks(app: &AppHandle, webview: &Webview, label: &str) {
     });
 }
 
+/// Sizes the webview to its window. A popout created for `SetNewWindow` can keep a zero-size
+/// view, so the frame stays the background color after the document has loaded.
+pub fn fill_client_area(webview: &Webview) {
+    let _ = webview.with_webview(|platform| {
+        let controller = platform.controller();
+        unsafe {
+            let mut parent = HWND::default();
+            if controller.ParentWindow(&mut parent).is_err() || parent.0.is_null() {
+                return;
+            }
+            let host = GetAncestor(parent, GA_ROOT);
+            let window = if host.0.is_null() { parent } else { host };
+            let mut rect = RECT::default();
+            if GetClientRect(window, &mut rect).is_err() {
+                return;
+            }
+            let width = rect.right - rect.left;
+            let height = rect.bottom - rect.top;
+            if width <= 0 || height <= 0 {
+                return;
+            }
+            if parent.0 != window.0 {
+                let _ = SetWindowPos(
+                    parent,
+                    None,
+                    0,
+                    0,
+                    width,
+                    height,
+                    SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                );
+            }
+            let _ = controller.SetBounds(RECT {
+                left: 0,
+                top: 0,
+                right: width,
+                bottom: height,
+            });
+            let _ = controller.SetIsVisible(true);
+            let _ = controller.NotifyParentWindowPositionChanged();
+        }
+    });
+}
+
 /// `window.close()` and `chrome.windows.remove` ask the webview to close. wry only destroys
 /// the child HWND, which leaves the decorated frame. Close the whole window.
 pub fn close_window_when_requested(app: &AppHandle, label: &str) {

@@ -1,6 +1,6 @@
 [package]
 name = "ce-browser"
-version = "0.1.36"
+version = "0.1.37"
 description = "Tabbed WebView2 browser"
 authors = ["you"]
 edition = "2024"
