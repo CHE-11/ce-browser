@@ -44,6 +44,8 @@ pub enum Action {
     ShortcutSheet,
     SleepTab,
     SleepOtherTabs,
+    /// Opens the thumbnail switcher, or moves its highlight by this many tabs.
+    TabSwitcher(isize),
     /// The first half of a two-key shortcut. The key is swallowed.
     ChordWait,
 }
@@ -106,6 +108,10 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
         Action::ReopenTab => tabs::reopen_closed(app).map(|_| ()),
         Action::NextTab | Action::PreviousTab => {
             let step = if action == Action::NextTab { 1 } else { -1 };
+            if popup::kind(app, &window).as_deref() == Some("tab-switcher") {
+                popup::emit_to_top(app, &window, "tab-switcher-step", step);
+                return Ok(());
+            }
             let settings = settings::get(app);
             if settings.tab_cycle_order != "recent" {
                 return tabs::cycle(app, step);
@@ -113,16 +119,11 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             if !settings.tab_switcher {
                 return tabs::cycle_recent(app, step);
             }
-            if popup::kind(app, &window).as_deref() == Some("tab-switcher") {
-                popup::emit_to_top(app, &window, "tab-switcher-step", step);
-            } else {
-                let command = if step > 0 {
-                    "tab-switcher"
-                } else {
-                    "tab-switcher-back"
-                };
-                tabs::send_command(app, &window, command);
-            }
+            show_tab_switcher(app, &window, step);
+            Ok(())
+        }
+        Action::TabSwitcher(step) => {
+            show_tab_switcher(app, &window, step);
             Ok(())
         }
         Action::SelectTab(index) => tabs::select_index(app, Some(index)),
@@ -222,6 +223,20 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
     }
 }
 
+/// Opens the thumbnail switcher, or moves the highlight when it is already open.
+fn show_tab_switcher(app: &AppHandle, window: &str, step: isize) {
+    if popup::kind(app, window).as_deref() == Some("tab-switcher") {
+        popup::emit_to_top(app, window, "tab-switcher-step", step);
+        return;
+    }
+    let command = if step > 0 {
+        "tab-switcher"
+    } else {
+        "tab-switcher-back"
+    };
+    tabs::send_command(app, window, command);
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ShortcutBinding {
@@ -245,7 +260,7 @@ fn category_of(action: &str) -> &'static str {
     match action {
         "new-tab" | "new-window" | "close-tab" | "close-f4" | "reopen-tab" | "next-tab"
         | "previous-tab" | "next-page" | "previous-page" | "last-tab" | "tab-search"
-        | "sleep-tab" | "sleep-other-tabs" => "Tabs",
+        | "tab-switcher" | "tab-switcher-back" | "sleep-tab" | "sleep-other-tabs" => "Tabs",
         "focus-address"
         | "alt-focus"
         | "focus-f6"
@@ -528,6 +543,8 @@ fn action_from(action: &str) -> Option<Action> {
         "shortcut-sheet" => Action::ShortcutSheet,
         "sleep-tab" => Action::SleepTab,
         "sleep-other-tabs" => Action::SleepOtherTabs,
+        "tab-switcher" => Action::TabSwitcher(1),
+        "tab-switcher-back" => Action::TabSwitcher(-1),
         _ => return None,
     })
 }
@@ -561,6 +578,12 @@ pub fn defaults() -> Vec<ShortcutBinding> {
         bind("reopen-tab", "Reopen closed tab", "ctrl+shift+t"),
         bind("next-tab", "Next tab", "ctrl+tab"),
         bind("previous-tab", "Previous tab", "ctrl+shift+tab"),
+        bind("tab-switcher", "Tab switcher", "ctrl+backquote"),
+        bind(
+            "tab-switcher-back",
+            "Tab switcher, previous",
+            "ctrl+shift+backquote",
+        ),
         bind("last-tab", "Last tab", "ctrl+9"),
         bind("focus-address", "Focus address bar", "ctrl+l"),
         bind("alt-focus", "Focus address bar", "alt+d"),
@@ -611,6 +634,14 @@ mod tests {
     #[test]
     fn slash_and_brackets_have_names() {
         assert_eq!(
+            chord_token(0xC0, true, false, false).as_deref(),
+            Some("ctrl+backquote")
+        );
+        assert_eq!(
+            chord_token(0xC0, true, true, false).as_deref(),
+            Some("ctrl+shift+backquote")
+        );
+        assert_eq!(
             chord_token(0xBF, true, false, false).as_deref(),
             Some("ctrl+slash")
         );
@@ -636,6 +667,22 @@ mod tests {
         )
         .expect("older file");
         assert_eq!(old.bindings[0].keys, vec!["ctrl+g".to_string()]);
+    }
+
+    #[test]
+    fn ctrl_backquote_opens_the_tab_switcher() {
+        let rows = effective(&[]);
+        let forward = rows
+            .iter()
+            .find(|row| row.action == "tab-switcher")
+            .expect("switcher");
+        assert_eq!(forward.keys, vec!["ctrl+backquote".to_string()]);
+        assert_eq!(forward.category, "Tabs");
+        let back = rows
+            .iter()
+            .find(|row| row.action == "tab-switcher-back")
+            .expect("switcher back");
+        assert_eq!(back.keys, vec!["ctrl+shift+backquote".to_string()]);
     }
 
     #[test]

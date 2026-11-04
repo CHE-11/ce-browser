@@ -335,6 +335,146 @@ pub fn apply_site_color_scheme(app: &AppHandle) {
     }
 }
 
+#[derive(Default)]
+struct SchemeHold {
+    /// Light override currently installed on this tab. False follows the profile scheme.
+    applied: bool,
+    /// Override requested and not yet confirmed.
+    pending: Option<bool>,
+}
+
+fn scheme_holds() -> &'static Mutex<HashMap<u32, SchemeHold>> {
+    static HOLDS: std::sync::OnceLock<Mutex<HashMap<u32, SchemeHold>>> = std::sync::OnceLock::new();
+    HOLDS.get_or_init(Default::default)
+}
+
+fn scheme_skips() -> &'static Mutex<HashSet<u32>> {
+    static SKIPS: std::sync::OnceLock<Mutex<HashSet<u32>>> = std::sync::OnceLock::new();
+    SKIPS.get_or_init(Default::default)
+}
+
+pub(crate) fn forget_page_scheme(id: u32) {
+    if let Ok(mut holds) = scheme_holds().lock() {
+        holds.remove(&id);
+    }
+    if let Ok(mut skips) = scheme_skips().lock() {
+        skips.remove(&id);
+    }
+}
+
+fn same_site(host: &str, name: &str) -> bool {
+    host == name || host.strip_suffix(name).is_some_and(|prefix| prefix.ends_with('.'))
+}
+
+/// Gmail paints only part of a page for `prefers-color-scheme: dark`: the header stays light
+/// while the body and headings switch. Those pages stay on the light scheme. Gmail's own theme
+/// still applies. Every other site follows Windows.
+pub(crate) fn page_keeps_light_scheme(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return false;
+    }
+    let host = parsed
+        .host_str()
+        .unwrap_or("")
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    if same_site(&host, "mail.google.com") || same_site(&host, "gmail.com") {
+        return true;
+    }
+    let gmail_page = parsed
+        .path_segments()
+        .is_some_and(|mut segments| segments.any(|segment| segment.eq_ignore_ascii_case("gmail")));
+    gmail_page && (same_site(&host, "workspace.google.com") || same_site(&host, "google.com"))
+}
+
+fn scheme_matches(id: u32, want: bool) -> bool {
+    let Ok(holds) = scheme_holds().lock() else {
+        return true;
+    };
+    match holds.get(&id) {
+        None => !want,
+        Some(hold) => hold.pending.unwrap_or(hold.applied) == want,
+    }
+}
+
+/// Installs the light override before a Gmail document is parsed, and clears it for every
+/// other page. A redirect is left alone so a form post still completes. Returns true when
+/// this navigation was cancelled and will be started again once the override is in place.
+fn defer_page_scheme(
+    id: u32,
+    core: &ICoreWebView2,
+    args: &ICoreWebView2NavigationStartingEventArgs,
+    uri: &str,
+) -> bool {
+    if scheme_skips()
+        .lock()
+        .is_ok_and(|mut skips| skips.remove(&id))
+    {
+        return false;
+    }
+    let want = page_keeps_light_scheme(uri);
+    if scheme_matches(id, want) {
+        return false;
+    }
+    let redirected = read_bool(|value| unsafe { args.IsRedirected(value) });
+    if redirected || unsafe { args.SetCancel(true) }.is_err() {
+        request_page_scheme(id, core, want, None);
+        return false;
+    }
+    request_page_scheme(id, core, want, Some(uri.to_string()));
+    true
+}
+
+fn request_page_scheme(id: u32, core: &ICoreWebView2, want: bool, resume: Option<String>) {
+    if let Ok(mut holds) = scheme_holds().lock() {
+        holds.entry(id).or_default().pending = Some(want);
+    }
+    let params = if want {
+        r#"{"features":[{"name":"prefers-color-scheme","value":"light"}]}"#
+    } else {
+        r#"{"features":[]}"#
+    };
+    let resume_core = resume.as_ref().map(|_| MainThread::new(core.clone()));
+    let resume_now = resume.clone();
+    let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, _| {
+        note_scheme_result(id, want, result.is_ok(), resume.is_some());
+        if result.is_err() {
+            eprintln!("WebView2 color scheme: {result:?}");
+        }
+        if let (Some(uri), Some(core)) = (resume, resume_core) {
+            let _ = unsafe { core.into_inner().Navigate(&HSTRING::from(uri)) };
+        }
+        Ok(())
+    }));
+    let method = windows::core::w!("Emulation.setEmulatedMedia");
+    let params = HSTRING::from(params);
+    if let Err(error) = unsafe { core.CallDevToolsProtocolMethod(method, &params, &handler) } {
+        note_scheme_result(id, want, false, resume_now.is_some());
+        eprintln!("WebView2 color scheme: {error}");
+        if let Some(uri) = resume_now {
+            let _ = unsafe { core.Navigate(&HSTRING::from(uri)) };
+        }
+    }
+}
+
+fn note_scheme_result(id: u32, want: bool, applied: bool, resume: bool) {
+    if let Ok(mut holds) = scheme_holds().lock()
+        && let Some(hold) = holds.get_mut(&id)
+        && hold.pending == Some(want)
+    {
+        hold.pending = None;
+        if applied {
+            hold.applied = want;
+        }
+    }
+    if !applied && resume && let Ok(mut skips) = scheme_skips().lock() {
+        skips.insert(id);
+    }
+}
+
 pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview, window: &str) {
     let app = app.clone();
     let window = window.to_string();
@@ -1719,6 +1859,11 @@ fn attach_adblock(
             &NavigationStartingEventHandler::create(Box::new(move |sender, args| {
                 if let Some(args) = args {
                     let uri = read_pwstr(|value| args.Uri(value));
+                    if let Some(core) = &sender
+                        && defer_page_scheme(id, core, &args, &uri)
+                    {
+                        return Ok(());
+                    }
                     crate::page_errors::note_navigation(id, &uri);
                     tabs::navigation_started(&navigation_app, id);
                     tabs::clear_errors(&navigation_app, id);
@@ -2683,7 +2828,27 @@ pub fn js_heap_used(webview: &Webview) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::wheel_steps;
+    use super::{page_keeps_light_scheme, wheel_steps};
+
+    #[test]
+    fn gmail_stays_on_the_light_scheme() {
+        assert!(page_keeps_light_scheme(
+            "https://mail.google.com/mail/u/0/"
+        ));
+        assert!(page_keeps_light_scheme(
+            "https://workspace.google.com/intl/en-US/gmail/"
+        ));
+        assert!(page_keeps_light_scheme(
+            "https://www.google.com/gmail/about/"
+        ));
+        assert!(!page_keeps_light_scheme("https://workspace.google.com/"));
+        assert!(!page_keeps_light_scheme(
+            "https://www.google.com/search?q=gmail"
+        ));
+        assert!(!page_keeps_light_scheme("https://accounts.google.com/"));
+        assert!(!page_keeps_light_scheme("https://example.com/gmail"));
+        assert!(!page_keeps_light_scheme("not a url"));
+    }
 
     #[test]
     fn one_notch_is_one_zoom_step() {

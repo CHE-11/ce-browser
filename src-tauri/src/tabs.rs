@@ -2834,6 +2834,7 @@ fn close_tab_inner(app: &AppHandle, id: u32) -> Result<Option<ClosedTab>, String
         });
         state.end_split_with(id);
         let tab = state.tabs.remove(index);
+        crate::webview2::forget_page_scheme(id);
         state.normalize_groups();
         let remembered = (tab.info.url != paths::NEW_TAB && !tab.info.ephemeral && !tab.shelf)
             .then(|| ClosedTab {
@@ -4323,7 +4324,11 @@ pub fn paint_document_background(app: &AppHandle, id: u32, url: &str) {
 
 fn document_color(app: &AppHandle, url: &str) -> Color {
     if remote_document(app, url) {
-        settings::site_canvas(app)
+        if crate::webview2::page_keeps_light_scheme(url) {
+            Color(0xff, 0xff, 0xff, 255)
+        } else {
+            settings::site_canvas(app)
+        }
     } else {
         settings::page_color(app)
     }

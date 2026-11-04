@@ -1,16 +1,18 @@
 use std::collections::HashMap;
-use std::io::Cursor;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use base64::Engine;
-use image::ImageFormat;
+use image::codecs::jpeg::JpegEncoder;
+use image::{ExtendedColorType, ImageEncoder, ImageFormat};
 use tauri::AppHandle;
 
 use crate::{tabs, webview2};
 
-const WIDTH: u32 = 320;
-const HEIGHT: u32 = 200;
+/// Fits a 16:10 card on a high-density display. The switcher draws each card at about 180 CSS pixels.
+const WIDTH: u32 = 960;
+const HEIGHT: u32 = 600;
+const JPEG_QUALITY: u8 = 90;
 const FAILURE: &str = "Couldn't capture the tab.";
 
 /// JPEG data URLs by tab id. Kept in memory only.
@@ -35,9 +37,8 @@ pub fn capture(app: &AppHandle, id: u32) -> Option<String> {
     let webview = tabs::page_view(app, id)?;
     let params = serde_json::json!({
         "format": "jpeg",
-        "quality": 70,
+        "quality": JPEG_QUALITY,
         "fromSurface": true,
-        "optimizeForSpeed": true,
     })
     .to_string();
     let response = webview2::call_cdp_json(
@@ -57,13 +58,24 @@ pub fn capture(app: &AppHandle, id: u32) -> Option<String> {
     Some(url)
 }
 
-/// JPEG bytes from the page, made small enough for a hover card, as a data URL.
+/// JPEG bytes from the page, kept sharp enough for the tab switcher, as a data URL.
 fn shrink(bytes: &[u8]) -> Option<String> {
     let image = image::load_from_memory_with_format(bytes, ImageFormat::Jpeg).ok()?;
-    let small = image.thumbnail(WIDTH, HEIGHT).to_rgb8();
+    let small = if image.width() <= WIDTH && image.height() <= HEIGHT {
+        image.to_rgb8()
+    } else {
+        image
+            .resize(WIDTH, HEIGHT, image::imageops::FilterType::Lanczos3)
+            .to_rgb8()
+    };
     let mut out = Vec::new();
-    small
-        .write_to(&mut Cursor::new(&mut out), ImageFormat::Jpeg)
+    JpegEncoder::new_with_quality(&mut out, JPEG_QUALITY)
+        .write_image(
+            small.as_raw(),
+            small.width(),
+            small.height(),
+            ExtendedColorType::Rgb8,
+        )
         .ok()?;
     Some(format!(
         "data:image/jpeg;base64,{}",
@@ -87,6 +99,7 @@ pub fn thumbnail(app: &AppHandle, id: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::shrink;
+    use base64::Engine;
     use image::{ImageFormat, RgbImage};
     use std::io::Cursor;
 
@@ -96,7 +109,26 @@ mod tests {
         RgbImage::new(1600, 900)
             .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg)
             .expect("encode");
-        let url = shrink(&bytes).expect("thumbnail");
+        let image = decode(&shrink(&bytes).expect("thumbnail"));
+        assert_eq!((image.width(), image.height()), (960, 540));
+    }
+
+    #[test]
+    fn a_small_capture_is_not_enlarged() {
+        let mut bytes = Vec::new();
+        RgbImage::new(200, 120)
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg)
+            .expect("encode");
+        let image = decode(&shrink(&bytes).expect("thumbnail"));
+        assert_eq!((image.width(), image.height()), (200, 120));
+    }
+
+    fn decode(url: &str) -> image::DynamicImage {
         assert!(url.starts_with("data:image/jpeg;base64,"));
+        let encoded = url.split_once(',').expect("comma").1;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .expect("decode");
+        image::load_from_memory_with_format(&bytes, ImageFormat::Jpeg).expect("jpeg")
     }
 }

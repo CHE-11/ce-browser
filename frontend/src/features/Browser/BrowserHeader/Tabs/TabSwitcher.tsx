@@ -15,7 +15,7 @@ type TabSwitcherProps = {
   params: URLSearchParams;
 };
 
-/** Ctrl+Tab overlay: tabs in recent-use order with thumbnails. Releasing Ctrl selects the highlighted tab. */
+/** Ctrl+` or Ctrl+Tab overlay: tabs in recent-use order with thumbnails. Releasing Ctrl selects the highlighted tab. */
 export function TabSwitcher({ params }: TabSwitcherProps) {
   const snapshot = useTabs();
   const firstStep = Number(params.get("step")) < 0 ? -1 : 1;
