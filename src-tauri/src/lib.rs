@@ -706,6 +706,11 @@ async fn save_page_markdown(app: AppHandle, id: u32, path: String) -> Result<(),
 }
 
 #[tauri::command]
+fn write_text_file(path: String, text: String) -> Result<(), String> {
+    files::write_text_file(&PathBuf::from(path), &text)
+}
+
+#[tauri::command]
 async fn ocr_visible(app: AppHandle, id: u32) -> Result<String, String> {
     blocking(move || ocr::recognize_visible(&app, id)).await
 }
@@ -2156,6 +2161,7 @@ pub fn run() {
             download_page_media,
             save_page_html,
             save_page_markdown,
+            write_text_file,
             ocr_visible,
             ocr_region,
             extract_page,

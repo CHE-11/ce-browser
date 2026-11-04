@@ -1,4 +1,4 @@
-import { BookOpen, Clapperboard, Eraser, ImageDown, KeyRound, Languages, Layers, LayoutGrid, Printer, Shield, ShoppingCart, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { BookOpen, Clapperboard, Eraser, FileText, ImageDown, KeyRound, Languages, Layers, LayoutGrid, Printer, Shield, ShoppingCart, SlidersHorizontal, type LucideIcon } from "lucide-react";
 
 export type BuiltinTool = {
   id: string;
@@ -22,6 +22,12 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Save page as PNG",
     description: "Save or copy the page as an image.",
     icon: ImageDown,
+  },
+  {
+    id: "webpage-markdown",
+    name: "Webpage to Markdown",
+    description: "Convert the current page to Markdown.",
+    icon: FileText,
   },
   {
     id: "boards",

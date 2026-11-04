@@ -171,6 +171,9 @@ pub struct BrowserSettings {
     /// Last choices in the Page to PNG popover.
     #[serde(default)]
     pub page_capture: PageCaptureSettings,
+    /// Last choices in the Webpage to Markdown popover.
+    #[serde(default)]
+    pub page_markdown: PageMarkdownSettings,
     /// Extension ids left off the toolbars. An older file omits this, so every extension stays pinned.
     #[serde(default)]
     pub hidden_toolbar_extensions: Vec<String>,
@@ -553,6 +556,37 @@ impl Default for PageCaptureSettings {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PageMarkdownSettings {
+    /// `article` keeps the main content. `page` keeps the whole document.
+    pub scope: String,
+    pub images: bool,
+    pub links: bool,
+    /// Title and source URL above the content.
+    pub header: bool,
+}
+
+impl Default for PageMarkdownSettings {
+    fn default() -> Self {
+        Self {
+            scope: "article".into(),
+            images: true,
+            links: true,
+            header: true,
+        }
+    }
+}
+
+impl PageMarkdownSettings {
+    fn normalize(mut self) -> Self {
+        if self.scope != "article" && self.scope != "page" {
+            self.scope = "article".into();
+        }
+        self
+    }
+}
+
 impl Default for BrowserSettings {
     fn default() -> Self {
         Self {
@@ -589,6 +623,7 @@ impl Default for BrowserSettings {
             sync_history_revision: 0,
             print_editor: PrintEditorSettings::default(),
             page_capture: PageCaptureSettings::default(),
+            page_markdown: PageMarkdownSettings::default(),
             hidden_toolbar_extensions: Vec::new(),
             toolbar_order: Vec::new(),
             vertical_toolbar: true,
@@ -726,6 +761,7 @@ impl BrowserSettings {
         self.ui_zoom = ((self.ui_zoom.clamp(80, 150) + 2) / 5) * 5;
         self.page_zoom = snap_page_zoom(self.page_zoom);
         self.print_editor = self.print_editor.normalize();
+        self.page_markdown = self.page_markdown.normalize();
         self.hidden_toolbar_extensions =
             toolbar_hidden(&map_retired_tools(&self.hidden_toolbar_extensions));
         self.toolbar_order = toolbar_hidden(&map_retired_tools(&self.toolbar_order));
@@ -1443,7 +1479,24 @@ mod tests {
         assert_eq!(loaded.print_editor.text_size, 150);
         assert!(loaded.print_editor.remove_ads);
         assert!(loaded.page_capture.full_page);
+        assert_eq!(loaded.page_markdown.scope, "article");
+        assert!(loaded.page_markdown.images);
+        assert!(loaded.page_markdown.links);
+        assert!(loaded.page_markdown.header);
         assert!(loaded.hidden_toolbar_extensions.is_empty());
+    }
+
+    #[test]
+    fn a_bad_markdown_scope_falls_back_to_article() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"searchEngine":"bing","pageMarkdown":{"scope":"nope","images":false}}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.page_markdown.scope, "article");
+        assert!(!loaded.page_markdown.images);
+        assert!(loaded.page_markdown.links);
+        assert!(loaded.page_markdown.header);
     }
 
     #[test]

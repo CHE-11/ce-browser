@@ -743,7 +743,7 @@ const COPY_PARTS: &[PartSpec] = &[
         ..bare("passwords")
     },
     PartSpec {
-        settings: &["printEditor", "pageCapture"],
+        settings: &["printEditor", "pageCapture", "pageMarkdown"],
         ..bare("print")
     },
     PartSpec {

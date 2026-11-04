@@ -32,6 +32,7 @@ import { ReadingPopover } from "@features/BuiltInExtensions/reading/Reading";
 import { ShoppingPopover } from "@/features/BuiltInExtensions/shopping/ShoppingPopover";
 import { TranslatePopover } from "@features/BuiltInExtensions/translate/Translate";
 import { SelectionTranslatePopover } from "@features/BuiltInExtensions/translate/SelectionTranslate";
+import { WebpageMarkdownPopover } from "@features/BuiltInExtensions/webpage-markdown/WebpageMarkdownPopover";
 import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
 import { CommandPalette } from "@features/CommandPalette/CommandPalette";
 import { TabOverview } from "@/features/Browser/BrowserHeader/Tabs/TabOverview";
@@ -175,6 +176,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <PrintPdfPopover params={params} />;
     case "page-capture":
       return <PageCapturePopover params={params} />;
+    case "webpage-markdown":
+      return <WebpageMarkdownPopover params={params} />;
     case "boards":
       return <BoardsPopover params={params} />;
     case "board-images":

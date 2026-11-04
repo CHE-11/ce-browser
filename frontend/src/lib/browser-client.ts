@@ -1027,6 +1027,10 @@ export function savePageMarkdown(id: number, path: string) {
   return invoke<void>("save_page_markdown", { id, path });
 }
 
+export function writeTextFile(path: string, text: string) {
+  return invoke<void>("write_text_file", { path, text });
+}
+
 export function ocrVisible(id: number) {
   return invoke<string>("ocr_visible", { id });
 }

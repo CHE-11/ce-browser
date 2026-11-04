@@ -4,6 +4,7 @@ import { BoardsButton } from "./boards/BoardsButton";
 import { PageControlsButton } from "./page-controls/PageControlsButton";
 import { ClearCacheButton } from "./clear-cache/ClearCacheButton";
 import { PageCaptureButton } from "./page-capture/PageCaptureButton";
+import { WebpageMarkdownButton } from "./webpage-markdown/WebpageMarkdownButton";
 import { PasswordButton } from "./password/Password";
 import { MediaHubButton } from "./media/MediaHubButton";
 import { PrintPdfButton } from "./print-pdf/PrintPdfButton";
@@ -19,6 +20,8 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <PrintPdfButton activeTab={activeTab} settings={settings} />;
     case "page-capture":
       return <PageCaptureButton activeTab={activeTab} settings={settings} />;
+    case "webpage-markdown":
+      return <WebpageMarkdownButton activeTab={activeTab} settings={settings} />;
     case "boards":
       return <BoardsButton activeTab={activeTab} />;
     case "media-hub":

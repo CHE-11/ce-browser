@@ -1256,17 +1256,25 @@ fn page_zoom_for(app: &AppHandle, url: &str) -> f64 {
 
 /// Pauses video and audio that start before the user clicks or presses a key in this document.
 /// The click that opened the tab, and selecting the tab, do not count: both can satisfy
-/// Chromium's autoplay policy without a gesture inside this page. A gesture also unlocks
-/// frames in the page and audio contexts, so a call can play out of the speakers afterwards.
+/// Chromium's autoplay policy without a gesture inside this page.
+///
+/// A call plays the dial tone from the click, then the other person through an `AudioContext`
+/// or a frame that did not receive that click. `suspend()` stays in progress after it is called,
+/// and `resume()` while the context is still running does nothing, so the context was left
+/// suspended and the answered call was silent. Resume waits until that suspend finishes.
+/// Ringback and the microphone resume that context. Ordinary video stays paused until a click.
 const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
   if (window.__ceAutoplayGuard || !window.HTMLMediaElement || !HTMLMediaElement.prototype) return;
   window.__ceAutoplayGuard = true;
   var allowed = false;
+  var audioLive = false;
   var nativePlay = HTMLMediaElement.prototype.play;
   var nativePause = HTMLMediaElement.prototype.pause;
   var roots = [];
   var contexts = [];
+  var resumeWaiters = [];
   var nativeResume = null;
+  var nativeSuspend = null;
   var timer = 0;
   var scan = 0;
 
@@ -1296,6 +1304,33 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
       } catch (error) {}
     }
   }
+  function notifyParent() {
+    if (!window.parent || window.parent === window) return;
+    try { window.parent.postMessage({ type: "ce-autoplay-release-up" }, "*"); } catch (error) {}
+  }
+  function resumeContext(ctx) {
+    if (!nativeResume) return Promise.resolve();
+    var pending = ctx.__ceSuspend;
+    ctx.__ceSuspend = null;
+    var run = function () { return nativeResume.call(ctx); };
+    if (pending && pending.then) return pending.then(run, run);
+    return run();
+  }
+  function resumeParked() {
+    audioLive = true;
+    var pending = contexts.slice();
+    for (var i = 0; i < pending.length; i++) {
+      try {
+        var resumed = resumeContext(pending[i]);
+        if (resumed && resumed.catch) resumed.catch(function () {});
+      } catch (error) {}
+    }
+    var waiting = resumeWaiters;
+    resumeWaiters = [];
+    for (var n = 0; n < waiting.length; n++) {
+      try { waiting[n](); } catch (error) {}
+    }
+  }
   function release() {
     if (allowed) {
       finish();
@@ -1303,47 +1338,58 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
     }
     allowed = true;
     finish();
-    var pending = contexts;
-    contexts = [];
-    for (var i = 0; i < pending.length; i++) {
-      try { if (nativeResume) nativeResume.call(pending[i]); } catch (error) {}
-    }
+    resumeParked();
     notifyFrames();
+    notifyParent();
   }
   function arm(event) {
     if (event && event.isTrusted) release();
   }
-  ["pointerdown", "mousedown", "touchstart", "keydown"].forEach(function (type) {
+  ["pointerdown", "mousedown", "touchstart", "keydown", "click"].forEach(function (type) {
     window.addEventListener(type, arm, true);
   });
 
   var NativeAudio = window.AudioContext || window.webkitAudioContext;
-  if (NativeAudio && NativeAudio.prototype && NativeAudio.prototype.resume) {
+  if (NativeAudio && NativeAudio.prototype && NativeAudio.prototype.resume && NativeAudio.prototype.suspend) {
     nativeResume = NativeAudio.prototype.resume;
+    nativeSuspend = NativeAudio.prototype.suspend;
+    function park(ctx) {
+      if (contexts.indexOf(ctx) === -1) contexts.push(ctx);
+      var op;
+      try { op = nativeSuspend.call(ctx); } catch (error) { op = Promise.resolve(); }
+      if (!op || !op.then) op = Promise.resolve();
+      ctx.__ceSuspend = op;
+      op.then(function () {
+        if (allowed) return nativeResume.call(ctx);
+      }).catch(function () {});
+    }
     var WrappedAudio = function AudioContext(options) {
       var ctx = options === undefined ? new NativeAudio() : new NativeAudio(options);
-      if (!allowed) {
-        try { ctx.suspend(); } catch (error) {}
-        contexts.push(ctx);
-      }
+      if (!allowed && !audioLive) park(ctx);
       return ctx;
     };
     WrappedAudio.prototype = NativeAudio.prototype;
     if (window.AudioContext) window.AudioContext = WrappedAudio;
     if (window.webkitAudioContext) window.webkitAudioContext = WrappedAudio;
     NativeAudio.prototype.resume = function () {
-      if (!allowed) {
-        var rejected = Promise.reject(new DOMException("Playback needs a click in the page.", "NotAllowedError"));
-        rejected.catch(function () {});
-        return rejected;
+      var ctx = this;
+      if (!allowed && !audioLive) {
+        return new Promise(function (resolve, reject) {
+          resumeWaiters.push(function () {
+            resumeContext(ctx).then(resolve, reject);
+          });
+        });
       }
-      return nativeResume.apply(this, arguments);
+      return resumeContext(ctx);
     };
   }
 
   function streamOnly(media) {
     try {
-      return !!media.srcObject && typeof MediaStream !== "undefined" && media.srcObject instanceof MediaStream;
+      var value = media && media.srcObject;
+      if (!value) return false;
+      if (typeof MediaStream !== "undefined" && value instanceof MediaStream) return true;
+      return typeof value.getTracks === "function";
     } catch (error) {
       return false;
     }
@@ -1363,8 +1409,12 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
   function watch(root) {
     if (!root || root.__ceAutoplayWatch) return;
     try { root.__ceAutoplayWatch = true; } catch (error) { return; }
-    root.addEventListener("play", function (event) { stop(event.target); }, true);
-    root.addEventListener("playing", function (event) { stop(event.target); }, true);
+    function onPlay(event) {
+      if (streamOnly(event.target)) resumeParked();
+      else stop(event.target);
+    }
+    root.addEventListener("play", onPlay, true);
+    root.addEventListener("playing", onPlay, true);
   }
 
   function remember(root) {
@@ -1396,13 +1446,27 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
   }
 
   HTMLMediaElement.prototype.play = function () {
-    if (!allowed && !streamOnly(this)) {
+    if (streamOnly(this)) {
+      resumeParked();
+      return nativePlay.apply(this, arguments);
+    }
+    if (!allowed) {
       var media = this;
-      try { media.autoplay = false; } catch (error) {}
-      queueMicrotask(function () { stop(media); });
-      var rejected = Promise.reject(new DOMException("Playback needs a click in the page.", "NotAllowedError"));
-      rejected.catch(function () {});
-      return rejected;
+      media.__ceWantPlay = true;
+      var settled = new Promise(function (resolve, reject) {
+        queueMicrotask(function () {
+          if (streamOnly(media) || allowed) {
+            if (streamOnly(media)) resumeParked();
+            try { nativePlay.call(media).then(resolve, reject); } catch (error) { reject(error); }
+            return;
+          }
+          try { media.autoplay = false; } catch (error) {}
+          stop(media);
+          reject(new DOMException("Playback needs a click in the page.", "NotAllowedError"));
+        });
+      });
+      settled.catch(function () {});
+      return settled;
     }
     return nativePlay.apply(this, arguments);
   };
@@ -1413,8 +1477,46 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
       configurable: true,
       enumerable: autoplay.enumerable,
       get: function () { return autoplay.get.call(this); },
-      set: function (value) { autoplay.set.call(this, !!value && allowed); }
+      set: function (value) {
+        if (value) this.__ceWantAutoplay = true;
+        if (value && streamOnly(this)) resumeParked();
+        autoplay.set.call(this, !!value && (allowed || streamOnly(this)));
+      }
     });
+  }
+
+  var srcObject = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "srcObject");
+  if (srcObject && srcObject.get && srcObject.set) {
+    Object.defineProperty(HTMLMediaElement.prototype, "srcObject", {
+      configurable: true,
+      enumerable: srcObject.enumerable,
+      get: function () { return srcObject.get.call(this); },
+      set: function (value) {
+        srcObject.set.call(this, value);
+        if (!streamOnly(this)) return;
+        var wanted = this.__ceWantPlay || this.__ceWantAutoplay;
+        resumeParked();
+        if (!wanted) return;
+        this.__ceWantPlay = false;
+        try {
+          var started = nativePlay.call(this);
+          if (started && started.catch) started.catch(function () {});
+        } catch (error) {}
+      }
+    });
+  }
+
+  var devices = navigator.mediaDevices;
+  if (devices && devices.getUserMedia) {
+    var nativeCapture = devices.getUserMedia.bind(devices);
+    devices.getUserMedia = function (constraints) {
+      return nativeCapture(constraints).then(function (stream) {
+        try {
+          if (stream && stream.getAudioTracks && stream.getAudioTracks().length) resumeParked();
+        } catch (error) {}
+        return stream;
+      });
+    };
   }
 
   var nativeAttach = Element.prototype.attachShadow;
@@ -1451,7 +1553,12 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
       }
       return;
     }
-    if (data.type === "ce-autoplay-release" && event.source === window.parent && window.parent !== window) release();
+    if (data.type === "ce-autoplay-release" && event.source === window.parent && window.parent !== window) {
+      release();
+      return;
+    }
+    var fromChild = event.source && event.source !== window && event.source.parent === window;
+    if (data.type === "ce-autoplay-release-up" && fromChild && event.origin === location.origin) release();
   });
   if (window.parent && window.parent !== window) {
     try { window.parent.postMessage({ type: "ce-autoplay-query" }, "*"); } catch (error) {}

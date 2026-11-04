@@ -132,6 +132,20 @@ pub fn read_json<T: serde::de::DeserializeOwned + Default>(path: &Path) -> T {
     }
 }
 
+/// Writes UTF-8 text to an absolute path, creating parent folders when needed.
+pub fn write_text_file(path: &Path, text: &str) -> Result<(), String> {
+    if !path.is_absolute() {
+        return Err("Choose a full file path.".into());
+    }
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
+        }
+    }
+    fs::write(path, text).map_err(|error| format!("Could not write {}: {error}", path.display()))
+}
+
 pub fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)

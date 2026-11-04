@@ -403,6 +403,7 @@ export type PopupKind =
   | "extension"
   | "print-pdf"
   | "page-capture"
+  | "webpage-markdown"
   | "media-hub"
   | "media-grid"
   | "what-runs"
@@ -637,6 +638,8 @@ export type BrowserSettings = {
   printEditor: PrintEditorSettings;
   /** Last choices in the Page to PNG popover. */
   pageCapture: PageCaptureSettings;
+  /** Last choices in the Webpage to Markdown popover. */
+  pageMarkdown: PageMarkdownSettings;
   /** Extension ids left off the toolbars. Empty means every enabled extension stays pinned. */
   hiddenToolbarExtensions: string[];
   /** Order of pinned toolbar icons. Empty keeps the built-in order, then extensions. */
@@ -905,6 +908,17 @@ export type PageCaptureSettings = {
   loadLazy: boolean;
 };
 
+/** `article` keeps the main content. `page` keeps the whole document. */
+export type MarkdownScope = "article" | "page";
+
+export type PageMarkdownSettings = {
+  scope: MarkdownScope;
+  images: boolean;
+  links: boolean;
+  /** Title and source URL above the content. */
+  header: boolean;
+};
+
 export type RecordingStatus = {
   running: boolean;
   secondsLeft: number;
@@ -990,6 +1004,18 @@ export type PageToolRequest =
       tabId: number;
       title: string;
       url: string;
+    }
+  | {
+      tool: "webpage-markdown";
+      action: "download" | "copy";
+      window: string;
+      tabId: number;
+      title: string;
+      url: string;
+      scope: MarkdownScope;
+      images: boolean;
+      links: boolean;
+      header: boolean;
     }
   | {
       tool: "boards";
