@@ -19,7 +19,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2;
 
 use crate::accelerator::{self, ByteRange, CHUNK_BYTES, CONNECTIONS, MIN_BYTES};
 use crate::webview2::{self, MainThread, read_bool, read_pwstr};
-use crate::{files, paths, settings, tabs};
+use crate::{files, paths, popup, settings, system, tabs};
 
 const FILE: &str = "downloads.json";
 const MAX_HISTORY: usize = 500;
@@ -543,12 +543,23 @@ fn item(app: &AppHandle, id: u32) -> Result<DownloadItem, String> {
     .ok_or_else(|| "That download is not in the list.".to_string())
 }
 
-pub fn open(app: &AppHandle, id: u32) -> Result<(), String> {
+pub fn open(app: &AppHandle, id: u32, window: &str) -> Result<(), String> {
     let item = item(app, id)?;
     if item.state != COMPLETED {
         return Err("The download has not finished.".into());
     }
+    let owner = popup::owner_of(window);
+    if is_pdf(&item.path) {
+        return system::open_pdf_in_window(app, &item.path, &owner);
+    }
     files::open_with_default(Path::new(&item.path))
+}
+
+fn is_pdf(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
 }
 
 pub fn show_in_folder(app: &AppHandle, id: u32) -> Result<(), String> {

@@ -913,8 +913,9 @@ async fn cancel_download(app: AppHandle, id: u32) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn open_download(app: AppHandle, id: u32) -> Result<(), String> {
-    blocking(move || downloads::open(&app, id)).await
+async fn open_download(app: AppHandle, window: Window, id: u32) -> Result<(), String> {
+    let label = window.label().to_string();
+    blocking(move || downloads::open(&app, id, &label)).await
 }
 
 #[tauri::command]

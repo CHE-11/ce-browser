@@ -299,6 +299,15 @@ fn enqueue_pdfs(app: &AppHandle, paths: Vec<String>) {
     }
 }
 
+/// Opens one PDF in `window`. A download clicked in a browser window stays in that window.
+pub fn open_pdf_in_window(app: &AppHandle, path: &str, window: &str) -> Result<(), String> {
+    let path = pdf_argument(path).ok_or_else(|| "That file is not a PDF.".to_string())?;
+    sweep_old_pdfs();
+    open_one_pdf(app, &path, Some(window))?;
+    reveal_window(app, Some(window));
+    Ok(())
+}
+
 fn open_pdfs(app: &AppHandle, paths: &[String]) {
     if paths.is_empty() {
         return;
@@ -306,35 +315,47 @@ fn open_pdfs(app: &AppHandle, paths: &[String]) {
     sweep_old_pdfs();
     let mut opened = false;
     for path in paths {
-        let attach = match stage_pdf(path) {
-            Ok(attach) => attach,
-            Err(error) => {
-                eprintln!("pdf: {error}");
-                continue;
-            }
-        };
-        let title = attach.file_name.clone();
-        arm_pdf(attach);
-        let url = tabs::resolve(app, PDF_EDITOR);
-        match tabs::open(
-            app,
-            tabs::OpenTab {
-                title: Some(title),
-                ..tabs::OpenTab::new(url)
-            },
-        ) {
-            Ok(_) => opened = true,
-            Err(error) => {
-                eprintln!("pdf: {error}");
-                if let Some(attach) = disarm_pdf() {
-                    let _ = fs::remove_dir_all(attach.dir);
-                }
-            }
+        match open_one_pdf(app, path, None) {
+            Ok(()) => opened = true,
+            Err(error) => eprintln!("pdf: {error}"),
         }
     }
     if opened {
-        tabs::show_main(app);
+        reveal_window(app, None);
     }
+}
+
+fn open_one_pdf(app: &AppHandle, path: &str, window: Option<&str>) -> Result<(), String> {
+    let attach = stage_pdf(path)?;
+    let title = attach.file_name.clone();
+    arm_pdf(attach);
+    let url = tabs::resolve(app, PDF_EDITOR);
+    let mut tab = tabs::OpenTab::new(url);
+    tab.title = Some(title);
+    if let Some(window) = window {
+        tab.window = window.to_string();
+    }
+    if let Err(error) = tabs::open(app, tab) {
+        if let Some(attach) = disarm_pdf() {
+            let _ = fs::remove_dir_all(attach.dir);
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn reveal_window(app: &AppHandle, window: Option<&str>) {
+    let Some(label) = window.filter(|label| tabs::is_browser_label(label)) else {
+        tabs::show_main(app);
+        return;
+    };
+    let Some(browser) = app.get_window(label) else {
+        tabs::show_main(app);
+        return;
+    };
+    let _ = browser.unminimize();
+    let _ = browser.show();
+    let _ = browser.set_focus();
 }
 
 fn stage_pdf(source: &str) -> Result<PdfAttach, String> {
