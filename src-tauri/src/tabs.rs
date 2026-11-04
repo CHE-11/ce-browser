@@ -1149,6 +1149,8 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
     let title_app = app.clone();
     let window_app = app.clone();
     let builder = page_builder(app, id, label, WebviewUrl::External(url))
+        // Tauri's handler consumes file drops on Windows. The page needs them for its own drop zones.
+        .disable_drag_drop_handler()
         .background_color(color)
         .focused(false)
         .initialization_script(AUTOPLAY_GUARD_SCRIPT)
