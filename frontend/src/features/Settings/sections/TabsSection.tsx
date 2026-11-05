@@ -17,9 +17,13 @@ const LAYOUT_LABEL = "Tab layout";
 const LAYOUT_HINT = "Vertical tabs sit in a sidebar left of the page.";
 const WIDTH_LABEL = "Default tab width";
 const WIDTH_HINT = "Width of a horizontal tab, in pixels. Tabs shrink when the strip is full.";
-const MENU_TEXT_LABEL = "Tab menu text size";
+const ITEM_TEXT_LABEL = "Tab item text size";
+const ITEM_TEXT_HINT = "In rem. 1rem is the browser's base text size.";
+const ITEM_PADDING_LABEL = "Tab item padding";
+const ITEM_PADDING_HINT = "Side padding in rem. Top and bottom get half.";
+const MENU_TEXT_LABEL = "Tab context menu text size";
 const MENU_TEXT_HINT = "In rem. 1rem is the browser's base text size.";
-const MENU_PADDING_LABEL = "Tab menu padding";
+const MENU_PADDING_LABEL = "Tab context menu padding";
 const MENU_PADDING_HINT = "Side padding in rem. Top and bottom get half.";
 const CYCLE_LABEL = "Ctrl+Tab order";
 const CYCLE_HINT = "Recently used goes to the tab you used last, then the one before it.";
@@ -56,6 +60,10 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
     LAYOUT_HINT,
     WIDTH_LABEL,
     WIDTH_HINT,
+    ITEM_TEXT_LABEL,
+    ITEM_TEXT_HINT,
+    ITEM_PADDING_LABEL,
+    ITEM_PADDING_HINT,
     MENU_TEXT_LABEL,
     MENU_TEXT_HINT,
     MENU_PADDING_LABEL,
@@ -134,6 +142,30 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
         step={1}
         unit="px"
         onChange={(tabWidth) => onUpdate({ tabWidth })}
+      />
+      <SizeSetting
+        id="settings-tab-item-text-size"
+        setting="tabItemTextSize"
+        label={ITEM_TEXT_LABEL}
+        hint={ITEM_TEXT_HINT}
+        value={settings.tabItemTextSize ?? TAB_SIZE.itemText}
+        fallback={TAB_SIZE.itemText}
+        limits={TAB_SIZE.text}
+        step={TAB_SIZE.step}
+        unit="rem"
+        onChange={(tabItemTextSize) => onUpdate({ tabItemTextSize })}
+      />
+      <SizeSetting
+        id="settings-tab-item-padding"
+        setting="tabItemPadding"
+        label={ITEM_PADDING_LABEL}
+        hint={ITEM_PADDING_HINT}
+        value={settings.tabItemPadding ?? TAB_SIZE.itemPadding}
+        fallback={TAB_SIZE.itemPadding}
+        limits={TAB_SIZE.padding}
+        step={TAB_SIZE.step}
+        unit="rem"
+        onChange={(tabItemPadding) => onUpdate({ tabItemPadding })}
       />
       <SizeSetting
         id="settings-tab-menu-text-size"
@@ -236,7 +268,7 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
   );
 }
 
-type SizeSettingKey = "tabWidth" | "tabMenuTextSize" | "tabMenuPadding";
+type SizeSettingKey = "tabWidth" | "tabItemTextSize" | "tabItemPadding" | "tabMenuTextSize" | "tabMenuPadding";
 
 /** An exact size. Saves on blur or Enter. */
 function SizeSetting({

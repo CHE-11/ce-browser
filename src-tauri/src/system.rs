@@ -127,11 +127,14 @@ fn pdf_argument(arg: &str) -> Option<String> {
 }
 
 pub fn is_pdf_editor(url: &str) -> bool {
-    let Ok(parsed) = url::Url::parse(url) else {
+    let Ok(page) = url::Url::parse(url) else {
         return false;
     };
-    parsed.host_str() == Some("ce-file-tools.vercel.app")
-        && parsed.path().trim_end_matches('/') == "/pdf/editor/markup"
+    let Ok(editor) = url::Url::parse(PDF_EDITOR) else {
+        return false;
+    };
+    page.host_str() == editor.host_str()
+        && page.path().trim_end_matches('/') == editor.path().trim_end_matches('/')
 }
 
 pub fn is_website(text: &str) -> bool {
@@ -1024,8 +1027,9 @@ mod tests {
         assert!(is_pdf_editor(
             "https://ce-file-tools.vercel.app/pdf/view-and-markup?x=1"
         ));
+        assert!(!is_pdf_editor("https://ce-file-tools.vercel.app/convert"));
         assert!(!is_pdf_editor(
-            "https://ce-file-tools.vercel.app/pdf/view-and-markup"
+            "https://example.com/pdf/view-and-markup"
         ));
     }
 

@@ -6,7 +6,7 @@ import { accentTint } from "@/lib/accent";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { tabProblemTitle, type HeavyTab } from "@/lib/tab-alert";
-import { TAB_SIZE } from "@/lib/tab-size";
+import { TAB_SIZE, tabItemStyle } from "@/lib/tab-size";
 import { useSettings } from "@/lib/use-browser";
 import { hoverTab, leaveTab } from "@/lib/tab-hover";
 import { groupColorClasses } from "@/lib/tab-rows";
@@ -59,6 +59,7 @@ export function TabItem({
   const quietActive = QUIET_TAB_THEMES.has(settings?.theme ?? document.documentElement.dataset.theme ?? "");
   const hoverPreview = settings?.tabHoverPreview !== false;
   const tabWidth = settings?.tabWidth ?? TAB_SIZE.width;
+  const itemStyle = compact ? null : tabItemStyle(settings?.tabItemTextSize, settings?.tabItemPadding);
   const accent = settings?.siteAccent && tab.accent && !tab.pinned ? tab.accent : null;
   const pinBorder = (settings?.pinTabBorder ?? true) && tab.pinned ? tab.accent : null;
   const domId = `tab-${tab.id}`;
@@ -130,9 +131,9 @@ export function TabItem({
       }}
       onMouseLeave={() => leaveTab()}
       className={cn(
-        "group relative flex shrink-0 cursor-default select-none items-center gap-2 text-[11px] transition-colors",
+        "group relative flex shrink-0 cursor-default select-none items-center gap-2 transition-colors",
         focusRing,
-        vertical ? "h-8 w-full rounded-lg px-2" : "h-7.5 rounded-t-lg px-2.5",
+        vertical ? "min-h-8 w-full rounded-lg" : "min-h-7.5 rounded-t-lg",
         chromeTab && "tab-curve z-10",
         !vertical && (compact ? "w-9 justify-center px-0" : "min-w-22 shrink"),
         vertical && compact && "w-9 justify-center px-0",
@@ -151,6 +152,7 @@ export function TabItem({
       )}
       style={{
         viewTransitionName: `tab-${tab.id}`,
+        ...(itemStyle ?? null),
         ...(!vertical && !compact ? { width: tabWidth } : null),
         ...(backgroundColor ? { backgroundColor, "--tab-fill": backgroundColor } : null),
         ...(accent && vertical ? { boxShadow: `inset 3px 0 0 ${accent}` } : null),

@@ -297,6 +297,12 @@ pub struct BrowserSettings {
     /// Preferred width of a horizontal tab, in CSS pixels. Tabs shrink when the strip is full.
     #[serde(default = "default_tab_width")]
     pub tab_width: u32,
+    /// Text size of a tab title, in rem.
+    #[serde(default = "default_tab_item_text_size")]
+    pub tab_item_text_size: f32,
+    /// Side padding of a tab, in rem. Top and bottom get half.
+    #[serde(default = "default_tab_item_padding")]
+    pub tab_item_padding: f32,
     /// Text size of the tab context menu, in rem.
     #[serde(default = "default_tab_menu_text_size")]
     pub tab_menu_text_size: f32,
@@ -749,6 +755,8 @@ impl Default for BrowserSettings {
             tab_switcher: true,
             tab_hover_preview: true,
             tab_width: default_tab_width(),
+            tab_item_text_size: default_tab_item_text_size(),
+            tab_item_padding: default_tab_item_padding(),
             tab_menu_text_size: default_tab_menu_text_size(),
             tab_menu_padding: default_tab_menu_padding(),
             window_backdrop: default_backdrop(),
@@ -831,6 +839,16 @@ impl BrowserSettings {
             defaults.bookmarks_bar_menu_padding,
         );
         self.tab_width = self.tab_width.clamp(TAB_WIDTH_PX.0, TAB_WIDTH_PX.1);
+        self.tab_item_text_size = rem_in(
+            self.tab_item_text_size,
+            BOOKMARK_TEXT_REM,
+            defaults.tab_item_text_size,
+        );
+        self.tab_item_padding = rem_in(
+            self.tab_item_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.tab_item_padding,
+        );
         self.tab_menu_text_size = rem_in(
             self.tab_menu_text_size,
             BOOKMARK_TEXT_REM,
@@ -1392,6 +1410,14 @@ fn default_tab_width() -> u32 {
     220
 }
 
+fn default_tab_item_text_size() -> f32 {
+    0.6875
+}
+
+fn default_tab_item_padding() -> f32 {
+    0.625
+}
+
 fn default_tab_menu_text_size() -> f32 {
     0.875
 }
@@ -1665,6 +1691,8 @@ mod tests {
         assert!(loaded.peek_on_shift_click);
         assert!(loaded.tab_hover_preview);
         assert_eq!(loaded.tab_width, 220);
+        assert_eq!(loaded.tab_item_text_size, 0.6875);
+        assert_eq!(loaded.tab_item_padding, 0.625);
         assert_eq!(loaded.tab_menu_text_size, 0.875);
         assert_eq!(loaded.tab_menu_padding, 0.625);
         assert!(loaded.tab_sleep.enabled);
@@ -1730,13 +1758,15 @@ mod tests {
     #[test]
     fn tab_settings_out_of_range_fall_back() {
         let loaded: super::BrowserSettings = serde_json::from_str(
-            r#"{"tabLayout":"diagonal","verticalTabsWidth":9000,"tabWidth":9000,"tabMenuTextSize":9,"tabMenuPadding":-1,"tabSleep":{"minutes":1,"neverSleepSites":["https://www.Mail.example.com/inbox","mail.example.com",""]}}"#,
+            r#"{"tabLayout":"diagonal","verticalTabsWidth":9000,"tabWidth":9000,"tabItemTextSize":9,"tabItemPadding":-1,"tabMenuTextSize":9,"tabMenuPadding":-1,"tabSleep":{"minutes":1,"neverSleepSites":["https://www.Mail.example.com/inbox","mail.example.com",""]}}"#,
         )
         .expect("settings parse");
         let loaded = loaded.normalize();
         assert_eq!(loaded.tab_layout, "horizontal");
         assert_eq!(loaded.vertical_tabs_width, 400);
         assert_eq!(loaded.tab_width, 480);
+        assert_eq!(loaded.tab_item_text_size, 1.5);
+        assert_eq!(loaded.tab_item_padding, 0.0);
         assert_eq!(loaded.tab_menu_text_size, 1.5);
         assert_eq!(loaded.tab_menu_padding, 0.0);
         assert_eq!(loaded.tab_sleep.minutes, 5);

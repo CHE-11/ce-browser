@@ -84,7 +84,7 @@ export function TabStrip({ snapshot }: TabStripProps) {
   }, [snapshot.activeId, rows]);
 
   return (
-    <div id="tab-strip" className="flex h-9 shrink-0 items-stretch bg-zinc-950">
+    <div id="tab-strip" className="flex min-h-9 shrink-0 items-stretch bg-zinc-950">
       <div id="tab-strip-overview" className="flex shrink-0 items-end pb-1 pl-2">
         <IconButton
           id="tab-strip-overview-button"

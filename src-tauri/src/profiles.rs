@@ -678,6 +678,8 @@ const COPY_PARTS: &[PartSpec] = &[
             "tabSwitcher",
             "tabHoverPreview",
             "tabWidth",
+            "tabItemTextSize",
+            "tabItemPadding",
             "tabMenuTextSize",
             "tabMenuPadding",
         ],

@@ -721,6 +721,10 @@ export type BrowserSettings = {
   tabHoverPreview: boolean;
   /** Preferred width of a horizontal tab, in CSS pixels. Tabs shrink when the strip is full. */
   tabWidth: number;
+  /** Text size of a tab title, in rem. */
+  tabItemTextSize: number;
+  /** Side padding of a tab, in rem. Top and bottom get half. */
+  tabItemPadding: number;
   /** Text size of the tab context menu, in rem. */
   tabMenuTextSize: number;
   /** Side padding of rows in the tab context menu, in rem. Top and bottom get half. */
