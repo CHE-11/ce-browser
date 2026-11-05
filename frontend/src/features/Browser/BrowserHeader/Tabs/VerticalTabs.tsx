@@ -7,8 +7,9 @@ import { focusRing } from "../../../../lib/focus-ring";
 import { useTabDrag } from "../../../../lib/tab-drag";
 import { useTabMotion } from "../../../../lib/tab-motion";
 import { buildTabRows } from "../../../../lib/tab-rows";
-import type { WindowTabsState } from "../../../../lib/use-browser";
+import { usePageRules, type WindowTabsState } from "../../../../lib/use-browser";
 import { zoomWheelStep } from "../../../../lib/zoom";
+import { pageZoomDisabled } from "../../../BuiltInExtensions/page-controls/site";
 import { IconButton } from "../../../../components/IconButton";
 import { openTabOverview } from "./TabOverview";
 import { TabRowsView } from "./TabRowsView";
@@ -26,9 +27,14 @@ const MAX_WIDTH = 400;
 /** Tabs in a sidebar left of the pages. Its width is reported to the backend as the page inset. */
 export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function VerticalTabs({ snapshot, settings }, ref) {
   const collapsed = settings.verticalTabsCollapsed;
+  const rules = usePageRules();
   const activeId = useRef(snapshot.activeId);
+  const tabs = useRef(snapshot.tabs);
+  const pageRules = useRef(rules);
   const zoomBucket = useRef(0);
   activeId.current = snapshot.activeId;
+  tabs.current = snapshot.tabs;
+  pageRules.current = rules;
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
   const drag = useTabDrag(snapshot.tabs, "y");
@@ -56,9 +62,14 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
         return;
       }
       event.preventDefault();
+      const id = activeId.current;
+      const tab = tabs.current.find((item) => item.id === id);
+      if (tab && pageZoomDisabled(pageRules.current, tab.url)) {
+        zoomBucket.current = 0;
+        return;
+      }
       const stepped = zoomWheelStep(zoomBucket.current, event.deltaY, event.deltaMode);
       zoomBucket.current = stepped.bucket;
-      const id = activeId.current;
       if (id !== null && stepped.change) {
         void zoomTab(id, stepped.change);
       }

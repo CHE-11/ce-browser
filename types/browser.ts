@@ -350,6 +350,10 @@ export type SiteControl = {
   referrer: ReferrerMode;
   /** Page zoom in percent remembered for this site. Zero follows the default page zoom. */
   zoom: number;
+  /** Ctrl+scroll over the page does not zoom this site. Older files omit this. */
+  pageZoomDomain: boolean;
+  /** Full addresses on this site where Ctrl+scroll over the page does not zoom. */
+  pageZoomUrls: string[];
 };
 
 export type ReferrerMode = "default" | "none" | "origin" | "same-origin";
@@ -386,6 +390,15 @@ export type SitePatch = {
   referrer?: ReferrerMode;
   /** Percent. Zero forgets the site's zoom. */
   zoom?: number;
+  /** Ctrl+scroll over the page does not zoom this site. */
+  pageZoomDomain?: boolean;
+  /**
+   * When set, `pageUrl` is added to or removed from the full-address list.
+   * `true` turns page zoom off for that address.
+   */
+  pageZoomUrl?: boolean;
+  /** Full page address used with `pageZoomUrl`. */
+  pageUrl?: string;
 };
 
 export type PeekInfo = {

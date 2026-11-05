@@ -12,6 +12,8 @@ export const EMPTY_SITE: SiteControl = {
   hidden: [],
   referrer: "default",
   zoom: 0,
+  pageZoomDomain: false,
+  pageZoomUrls: [],
 };
 
 /** Host of an http(s) page, without a leading `www.`. */
@@ -59,6 +61,36 @@ export function siteActive(site: SiteControl) {
     site.blockFonts ||
     site.hidden.length > 0 ||
     site.referrer !== "default" ||
-    (site.zoom ?? 0) !== 0
+    (site.zoom ?? 0) !== 0 ||
+    site.pageZoomDomain === true ||
+    (site.pageZoomUrls ?? []).length > 0
   );
+}
+
+/** Address without a hash or a trailing slash. Empty when `url` is not http(s). */
+export function pageAddress(url: string | undefined) {
+  if (!url) {
+    return "";
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return "";
+    }
+    parsed.hash = "";
+    const text = parsed.toString();
+    return text.endsWith("/") ? text.slice(0, -1) : text;
+  } catch {
+    return "";
+  }
+}
+
+/** Ctrl+scroll over the page does not zoom when the domain or this address is locked. */
+export function pageZoomDisabled(rules: PageRules | null, url: string | undefined) {
+  const site = controlFor(rules, siteKey(url));
+  if (site.pageZoomDomain) {
+    return true;
+  }
+  const address = pageAddress(url);
+  return address !== "" && (site.pageZoomUrls ?? []).includes(address);
 }

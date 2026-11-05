@@ -15,6 +15,8 @@ const MAX_CODE: usize = 64 * 1024;
 const MAX_HIDDEN: usize = 200;
 const MAX_SELECTOR: usize = 800;
 const MAX_AGENT: usize = 256;
+const MAX_ZOOM_URLS: usize = 40;
+const MAX_PAGE_ADDRESS: usize = 2000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
@@ -55,6 +57,10 @@ pub struct SiteControl {
     /// Page zoom in percent remembered for this site. Zero follows the default page zoom.
     /// Older files omit this.
     pub zoom: u32,
+    /// Ctrl+scroll over the page does not zoom this site. Older files omit this.
+    pub page_zoom_domain: bool,
+    /// Full page addresses where Ctrl+scroll over the page does not zoom.
+    pub page_zoom_urls: Vec<String>,
 }
 
 impl Default for SiteControl {
@@ -71,6 +77,8 @@ impl Default for SiteControl {
             hidden: Vec::new(),
             referrer: "default".into(),
             zoom: 0,
+            page_zoom_domain: false,
+            page_zoom_urls: Vec::new(),
         }
     }
 }
@@ -86,6 +94,7 @@ impl SiteControl {
         if self.zoom != 0 {
             self.zoom = self.zoom.clamp(25, 300);
         }
+        self.page_zoom_urls = clean_page_urls(self.page_zoom_urls);
         self
     }
 
@@ -105,6 +114,8 @@ impl SiteControl {
             || !self.hidden.is_empty()
             || self.referrer != "default"
             || self.zoom != 0
+            || self.page_zoom_domain
+            || !self.page_zoom_urls.is_empty()
     }
 }
 
@@ -168,6 +179,12 @@ pub struct SitePatch {
     pub referrer: Option<String>,
     /// Percent. Zero forgets the site's zoom.
     pub zoom: Option<u32>,
+    /// Ctrl+scroll over the page does not zoom this site.
+    pub page_zoom_domain: Option<bool>,
+    /// When set, `page_url` is added to or removed from the full-address list.
+    pub page_zoom_url: Option<bool>,
+    /// Full page address used with `page_zoom_url`.
+    pub page_url: Option<String>,
 }
 
 struct RulesState {
@@ -250,6 +267,25 @@ pub fn update_site(app: &AppHandle, host: &str, patch: SitePatch) -> Result<Page
     }
     if let Some(value) = patch.zoom {
         site.zoom = value;
+    }
+    if let Some(value) = patch.page_zoom_domain {
+        site.page_zoom_domain = value;
+    }
+    if let Some(enabled) = patch.page_zoom_url {
+        let address = patch
+            .page_url
+            .as_deref()
+            .map(page_address)
+            .unwrap_or_default();
+        if !address.is_empty() {
+            if enabled {
+                if !site.page_zoom_urls.contains(&address) {
+                    site.page_zoom_urls.push(address);
+                }
+            } else {
+                site.page_zoom_urls.retain(|item| item != &address);
+            }
+        }
     }
     if patch.clear_hidden == Some(true) {
         site.hidden.clear();
@@ -439,6 +475,38 @@ pub fn remember_zoom(app: &AppHandle, page_url: &str, percent: u32) {
     let _ = app.emit("page-rules-changed", &rules);
 }
 
+/// `true` when Ctrl+scroll over the page must not change zoom for `url`.
+pub fn page_zoom_disabled(app: &AppHandle, url: &str) -> bool {
+    zoom_disabled_in(&get(app), url)
+}
+
+/// Same check as `page_zoom_disabled`. A busy rules lock returns false so a mouse hook
+/// does not wait on the UI thread.
+pub fn try_page_zoom_disabled(app: &AppHandle, url: &str) -> bool {
+    let Some(rules) = app.try_state::<RulesState>() else {
+        return false;
+    };
+    let Ok(guard) = rules.rules.try_lock() else {
+        return false;
+    };
+    zoom_disabled_in(&guard, url)
+}
+
+fn zoom_disabled_in(rules: &PageRules, url: &str) -> bool {
+    let host = settings::sleep_site_key(url);
+    if host.is_empty() {
+        return false;
+    }
+    let Some(site) = best_control(&host, &rules.sites) else {
+        return false;
+    };
+    if site.page_zoom_domain {
+        return true;
+    }
+    let address = page_address(url);
+    !address.is_empty() && site.page_zoom_urls.iter().any(|item| item == &address)
+}
+
 /// Zoom stored for the site of `url` as a factor, or `None` to use the default.
 pub fn zoom_for(app: &AppHandle, url: &str) -> Option<f64> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
@@ -557,6 +625,41 @@ fn snap_speed(value: f64) -> f64 {
     } else {
         snapped
     }
+}
+
+/// http(s) address without a hash or a trailing slash. Empty for anything else.
+fn page_address(raw: &str) -> String {
+    let Ok(mut url) = url::Url::parse(raw.trim()) else {
+        return String::new();
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return String::new();
+    }
+    url.set_fragment(None);
+    let mut text = url.to_string();
+    if text.ends_with('/') {
+        text.pop();
+    }
+    if text.is_empty() || text.len() > MAX_PAGE_ADDRESS {
+        String::new()
+    } else {
+        text
+    }
+}
+
+fn clean_page_urls(urls: Vec<String>) -> Vec<String> {
+    let mut kept = Vec::new();
+    for raw in urls {
+        let address = page_address(&raw);
+        if address.is_empty() || kept.iter().any(|item| item == &address) {
+            continue;
+        }
+        kept.push(address);
+        if kept.len() >= MAX_ZOOM_URLS {
+            break;
+        }
+    }
+    kept
 }
 
 fn clean_selectors(selectors: Vec<String>) -> Vec<String> {
@@ -1161,5 +1264,56 @@ mod tests {
         assert_eq!(site.video_speed, 4.0);
         assert_eq!(rules.scripts[0].hosts, vec!["news.example.com".to_string()]);
         assert_eq!(rules.scripts[0].id, "notes");
+    }
+
+    #[test]
+    fn a_page_address_drops_the_hash_and_a_trailing_slash() {
+        assert_eq!(
+            page_address("https://Example.com/docs/#top"),
+            "https://example.com/docs"
+        );
+        assert_eq!(page_address("https://example.com/"), "https://example.com");
+        assert_eq!(
+            page_address("https://example.com/a?b=1"),
+            "https://example.com/a?b=1"
+        );
+        assert_eq!(page_address("ce://settings"), "");
+    }
+
+    #[test]
+    fn page_zoom_can_be_locked_for_a_domain_or_one_address() {
+        let saved: PageRules =
+            serde_json::from_str(r#"{"sites":{"example.com":{"cleanPage":true}}}"#).unwrap();
+        let saved = saved.normalize();
+        assert!(!saved.sites["example.com"].page_zoom_domain);
+        assert!(saved.sites["example.com"].page_zoom_urls.is_empty());
+
+        let domain = SiteControl {
+            page_zoom_domain: true,
+            ..SiteControl::default()
+        };
+        assert!(domain.active());
+        let rules = PageRules {
+            sites: HashMap::from([("example.com".into(), domain)]),
+            ..PageRules::default()
+        };
+        assert!(zoom_disabled_in(&rules, "https://www.example.com/any"));
+        assert!(!zoom_disabled_in(&rules, "https://other.test/"));
+
+        let address = SiteControl {
+            page_zoom_urls: vec!["https://example.com/docs#section".into()],
+            ..SiteControl::default()
+        }
+        .normalize();
+        assert_eq!(
+            address.page_zoom_urls,
+            vec!["https://example.com/docs".to_string()]
+        );
+        let rules = PageRules {
+            sites: HashMap::from([("example.com".into(), address)]),
+            ..PageRules::default()
+        };
+        assert!(zoom_disabled_in(&rules, "https://example.com/docs#section"));
+        assert!(!zoom_disabled_in(&rules, "https://example.com/other"));
     }
 }

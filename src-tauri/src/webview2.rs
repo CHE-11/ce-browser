@@ -19,8 +19,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, EnumChildWindows, GA_PARENT, GA_ROOT, GA_ROOTOWNER, GWL_EXSTYLE, GetAncestor,
-    GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, HC_ACTION, HWND_TOP,
-    IsChild, IsWindowVisible, MSLLHOOKSTRUCT, PostMessageW, SWP_NOACTIVATE, SWP_NOZORDER,
+    GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, HC_ACTION,
+    HWND_TOP, IsChild, IsWindowVisible, MSLLHOOKSTRUCT, PostMessageW, SWP_NOACTIVATE, SWP_NOZORDER,
     SWP_SHOWWINDOW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
     SetWindowsHookExW, WH_MOUSE_LL, WM_APP, WM_CREATE, WM_MOUSEWHEEL, WM_NCACTIVATE, WM_NCDESTROY,
     WM_PARENTNOTIFY, WS_EX_NOACTIVATE, WindowFromPoint,
@@ -952,6 +952,15 @@ fn offer_wheel(point: POINT, delta: i32, ctrl: bool) -> bool {
     if !ctrl {
         clear_wheel(hit.bucket);
         return false;
+    }
+    // A site can turn page zoom off for the domain or for one address. The notch is still
+    // taken, so WebView2 does not zoom the page on its own.
+    if hit.id != 0
+        && let Some(url) = tabs::try_tab_url(&hit.app, hit.id)
+        && crate::page_rules::try_page_zoom_disabled(&hit.app, &url)
+    {
+        clear_wheel(hit.bucket);
+        return true;
     }
     let steps = push_wheel(hit.bucket, delta);
     enqueue_zoom(QueuedZoom {
@@ -1913,6 +1922,11 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                             let app = message_app.clone();
                             let change = change.to_string();
                             tauri::async_runtime::spawn(async move {
+                                if tabs::tab_page_url(&app, id).is_some_and(|url| {
+                                    crate::page_rules::page_zoom_disabled(&app, &url)
+                                }) {
+                                    return;
+                                }
                                 let _ = tabs::zoom(&app, id, &change);
                             });
                         }

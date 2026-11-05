@@ -6873,6 +6873,16 @@ pub fn tab_page_url(app: &AppHandle, id: u32) -> Option<String> {
     })
 }
 
+/// The tab's current address. `None` when the tab list is busy, so a mouse hook can skip
+/// the lookup instead of waiting on the UI thread.
+pub fn try_tab_url(app: &AppHandle, id: u32) -> Option<String> {
+    let state = app.try_state::<Tabs>()?;
+    let guard = state.inner().0.try_lock().ok()?;
+    guard
+        .index_of(id)
+        .map(|index| guard.tabs[index].info.url.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

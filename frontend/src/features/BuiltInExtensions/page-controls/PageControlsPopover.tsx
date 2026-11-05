@@ -3,7 +3,7 @@ import { SlidersHorizontal } from "lucide-react";
 
 import { OptionRow, PopoverHeader } from "../PopoverParts";
 import { readPopoverTab } from "../shared";
-import { controlFor, siteKey } from "./site";
+import { controlFor, pageAddress, siteKey } from "./site";
 import { PopupFrame } from "@/components/PopupFrame";
 import { cn } from "@/lib/cn";
 import { focusRow } from "@/lib/focus-ring";
@@ -49,6 +49,8 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
   const snapshot = useTabs();
   const live = snapshot.tabs.find((item) => item.id === tab.id);
   const site = controlFor(rules, host);
+  const pageUrl = live?.url || tab.url;
+  const address = pageAddress(pageUrl);
   const [agent, setAgent] = useState(site.userAgent);
   const [error, setError] = useState<string | null>(null);
 
@@ -199,6 +201,22 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
             </option>
           </select>
         </label>
+        <OptionRow
+          id="page-controls-zoom-domain"
+          label="Page Zoom on Domain"
+          hint="Ctrl+scroll over the page does not zoom this site"
+          checked={site.pageZoomDomain === true}
+          disabled={!host}
+          onChange={(pageZoomDomain) => apply({ pageZoomDomain })}
+        />
+        <OptionRow
+          id="page-controls-zoom-url"
+          label="Page Zoom on Full URL"
+          hint="Ctrl+scroll over the page does not zoom this address"
+          checked={address !== "" && (site.pageZoomUrls ?? []).includes(address)}
+          disabled={address === ""}
+          onChange={(pageZoomUrl) => apply({ pageZoomUrl, pageUrl })}
+        />
         <OptionRow
           id="page-controls-https"
           label="Allow http on this site"

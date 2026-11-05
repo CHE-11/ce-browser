@@ -171,10 +171,10 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
           </p>
         ) : null}
         <div id="bookmark-editor-actions" className="flex justify-end gap-[0.5em]">
-          <Button id="bookmark-editor-remove" className="h-[2.15em] px-[0.8em] text-[length:1em]" variant="ghost" disabled={!bookmark} onClick={() => void remove()}>
+          <Button id="bookmark-editor-remove" className="h-[2.15em] px-[0.8em] text-[1em]" variant="ghost" disabled={!bookmark} onClick={() => void remove()}>
             Remove
           </Button>
-          <Button id="bookmark-editor-done" className="h-[2.15em] px-[0.8em] text-[length:1em]" type="submit" variant="primary" disabled={!bookmark || !place}>
+          <Button id="bookmark-editor-done" className="h-[2.15em] px-[0.8em] text-[1em]" type="submit" variant="primary" disabled={!bookmark || !place}>
             Done
           </Button>
         </div>
