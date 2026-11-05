@@ -1697,7 +1697,11 @@ fn get_settings(app: AppHandle) -> BrowserSettings {
 
 #[tauri::command]
 fn save_settings(app: AppHandle, settings: BrowserSettings) -> Result<BrowserSettings, String> {
-    settings::save(&app, settings)
+    let saved = settings::save(&app, settings)?;
+    if let Err(error) = system::register_browser(&app) {
+        eprintln!("file handlers: {error}");
+    }
+    Ok(saved)
 }
 
 /// Print choices for the active profile. Other settings stay as they are.
@@ -2037,7 +2041,7 @@ pub fn run() {
                     }
                 }
                 system::apply_launch(&handle);
-                system::open_pending_pdfs(&handle);
+                system::open_pending_files(&handle);
                 update::note_version(&handle);
                 let extensions_app = handle.clone();
                 let _ = tauri::async_runtime::spawn_blocking(move || {

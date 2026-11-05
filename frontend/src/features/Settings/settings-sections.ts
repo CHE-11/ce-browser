@@ -3,6 +3,7 @@ export const SETTINGS_SECTIONS = [
   { id: "settings-appearance", title: "Appearance" },
   { id: "settings-bookmarks", title: "Bookmarks" },
   { id: "settings-downloads", title: "Downloads" },
+  { id: "settings-file-handlers", title: "File Handlers" },
   { id: "settings-privacy", title: "Privacy" },
   { id: "settings-search", title: "Search" },
 

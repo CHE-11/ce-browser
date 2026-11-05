@@ -150,15 +150,22 @@ pub fn init(app: &AppHandle) {
         let _ = save(app, &file);
     }
     let requested = REQUESTED.lock().expect("profile args").clone();
-    let id = if !requested.is_empty() && file.profiles.iter().any(|profile| profile.id == requested)
-    {
+    let explicit =
+        !requested.is_empty() && file.profiles.iter().any(|profile| profile.id == requested);
+    let mut id = if explicit {
         requested
     } else {
         DEFAULT_ID.to_string()
     };
+    if !explicit
+        && let Some(routed) = crate::system::launch_profile(app)
+        && file.profiles.iter().any(|profile| profile.id == routed)
+    {
+        id = routed;
+    }
     let _ = ACTIVE.set(id.clone());
     if !hold_profile_mutex(&id) {
-        crate::system::write_handoff(app);
+        crate::system::write_handoff(app, &id);
         focus_profile_window(&id);
         std::process::exit(0);
     }
@@ -724,7 +731,7 @@ const COPY_PARTS: &[PartSpec] = &[
         ..bare("translate")
     },
     PartSpec {
-        settings: &["summonHotkey", "batterySaver", "autoUpdate"],
+        settings: &["summonHotkey", "batterySaver", "autoUpdate", "fileHandlers"],
         ..bare("system")
     },
     PartSpec {
@@ -1095,10 +1102,18 @@ pub fn install_shortcut_for(app: &AppHandle, id: &str) -> Result<Vec<ProfileInfo
 }
 
 pub fn open(id: &str) -> Result<(), String> {
+    launch(id, &[])
+}
+
+/// Starts `id` and passes `extra` after `--profile`, such as a file path.
+pub fn launch(id: &str, extra: &[String]) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
-    Command::new(exe)
-        .arg("--profile")
-        .arg(id)
+    let mut command = Command::new(exe);
+    command.arg("--profile").arg(id);
+    for arg in extra {
+        command.arg(arg);
+    }
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -1201,6 +1216,22 @@ fn profile_child_dir(path: &Path, id: &str, data_root: &Path) -> bool {
         .canonicalize()
         .unwrap_or_else(|_| data_root.to_path_buf());
     parent == root
+}
+
+pub fn ids(app: &AppHandle) -> Vec<String> {
+    load(app)
+        .profiles
+        .into_iter()
+        .map(|profile| profile.id)
+        .collect()
+}
+
+pub fn is_open(id: &str) -> bool {
+    profile_is_open(id)
+}
+
+pub fn focus(id: &str) {
+    focus_profile_window(id);
 }
 
 /// Folder of a profile inside the data root.

@@ -1088,8 +1088,8 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
         }
         id
     });
-    if crate::system::is_pdf_editor(tab.url.as_str()) {
-        crate::system::claim_pdf(id);
+    if crate::system::handler_matches(tab.url.as_str(), &crate::settings::get(app).file_handlers) {
+        crate::system::claim_file(id);
     }
     let is_active = lock(app).active_of(&window) == Some(id);
     if is_active {
@@ -1190,7 +1190,7 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
             if finished {
                 remember_visit(&load_app, id);
                 place_pages(&load_app, &owner, false);
-                crate::system::attach_open_pdf(&load_app, id, payload.url().as_str());
+                crate::system::attach_open_file(&load_app, id, payload.url().as_str());
             }
             let active = lock(&load_app).active_of(&owner) == Some(id);
             // The new page view takes focus as soon as it starts loading. Take it back

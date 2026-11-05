@@ -59,6 +59,11 @@ export function useSettingChanged(paths: SettingPath[] | undefined) {
   return { changed, reset: () => onUpdate(resetPatch(settings, defaults, paths)) };
 }
 
+/** Settings a new profile gets, once the settings page has loaded them. */
+export function useDefaultSettings() {
+  return useContext(SettingsValuesContext)?.defaults ?? null;
+}
+
 /** A row of mutually exclusive buttons. */
 export function Segmented<T extends string>({
   id,

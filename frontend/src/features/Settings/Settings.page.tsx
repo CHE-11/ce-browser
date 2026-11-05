@@ -11,6 +11,7 @@ import { SETTINGS_INDEX } from "./settings-index";
 import { AppearanceSection } from "./sections/AppearanceSection";
 import { BookmarksSection } from "./sections/BookmarksSection";
 import { DownloadsSection } from "./sections/DownloadsSection";
+import { FileHandlersSection } from "./sections/FileHandlersSection";
 import { PrivacySection } from "./sections/PrivacySection";
 import { ProfilesSection } from "./sections/ProfilesSection";
 import { SearchSection } from "./sections/SearchSection";
@@ -136,6 +137,7 @@ export function SettingsPage() {
           <AppearanceSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <BookmarksSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <DownloadsSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
+          <FileHandlersSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <PrivacySection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <SearchSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />
           <StartupSection settings={settings} query={query} onUpdate={update} onError={onError} onMatch={onMatch} />

@@ -610,17 +610,10 @@ pub fn open(app: &AppHandle, id: u32, window: &str) -> Result<(), String> {
         return Err("The download has not finished.".into());
     }
     let owner = popup::owner_of(window);
-    if is_pdf(&item.path) {
-        return system::open_pdf_in_window(app, &item.path, &owner);
+    if system::has_handler(app, &item.path) {
+        return system::open_file_in_window(app, &item.path, &owner);
     }
     files::open_with_default(Path::new(&item.path))
-}
-
-fn is_pdf(path: &str) -> bool {
-    Path::new(path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
 }
 
 pub fn show_in_folder(app: &AppHandle, id: u32) -> Result<(), String> {

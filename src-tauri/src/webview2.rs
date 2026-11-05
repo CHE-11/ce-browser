@@ -2260,16 +2260,19 @@ fn attach_adblock(
                     .Request()
                     .map(|request| read_pwstr(|value| request.Uri(value)))
                     .unwrap_or_default();
-                if let Some(bytes) = crate::system::pdf_bytes(&uri)
-                    && let Some(stream) = windows::Win32::UI::Shell::SHCreateMemStream(Some(&bytes))
+                if let Some(file) = crate::system::file_bytes(&uri)
+                    && let Some(stream) =
+                        windows::Win32::UI::Shell::SHCreateMemStream(Some(&file.bytes))
                 {
+                    let headers = HSTRING::from(format!(
+                        "Content-Type: {}\r\nAccess-Control-Allow-Origin: *",
+                        file.content_type
+                    ));
                     let response = environment.CreateWebResourceResponse(
                         &stream,
                         200,
                         windows::core::w!("OK"),
-                        windows::core::w!(
-                            "Content-Type: application/pdf\r\nAccess-Control-Allow-Origin: *"
-                        ),
+                        &headers,
                     )?;
                     args.SetResponse(&response)?;
                     return Ok(());
@@ -3171,10 +3174,16 @@ fn with_core(
     });
 }
 
-/// Drops a staged PDF onto the markup editor's file input once that page has loaded.
-/// The editor only accepts a picked or dropped file, and a remote page cannot read a local path.
-pub fn attach_local_pdf(webview: &Webview, fetch: &str, file_name: &str) {
-    let script = pdf_attach_script(fetch, file_name);
+/// Drops a staged file onto the handler page's file input once that page has loaded.
+/// The page only accepts a picked or dropped file, and a remote page cannot read a local path.
+pub fn attach_local_file(
+    webview: &Webview,
+    fetch: &str,
+    file_name: &str,
+    input_id: &str,
+    content_type: &str,
+) {
+    let script = file_attach_script(fetch, file_name, input_id, content_type);
     let _ = webview.with_webview(move |platform| {
         let Ok(core) = core(&platform) else {
             return;
@@ -3186,19 +3195,28 @@ pub fn attach_local_pdf(webview: &Webview, fetch: &str, file_name: &str) {
     });
 }
 
-fn pdf_attach_script(fetch: &str, file_name: &str) -> String {
+fn file_attach_script(fetch: &str, file_name: &str, input_id: &str, content_type: &str) -> String {
     let url = serde_json::to_string(fetch).unwrap_or_else(|_| "\"\"".to_string());
-    let name = serde_json::to_string(file_name).unwrap_or_else(|_| "\"document.pdf\"".to_string());
+    let name = serde_json::to_string(file_name).unwrap_or_else(|_| "\"document\"".to_string());
+    let mime = serde_json::to_string(content_type)
+        .unwrap_or_else(|_| "\"application/octet-stream\"".to_string());
+    let input = serde_json::to_string(input_id).unwrap_or_else(|_| "\"\"".to_string());
     format!(
         r#"(function() {{
-  if (window.__cePdfBusy) return;
-  window.__cePdfBusy = true;
+  if (window.__ceFileBusy) return;
+  window.__ceFileBusy = true;
   var name = {name};
   var url = {url};
+  var mime = {mime};
+  var inputId = {input};
   var started = Date.now();
-  function giveUp() {{ window.__cePdfBusy = false; }}
+  function giveUp() {{ window.__ceFileBusy = false; }}
+  function findInput() {{
+    if (inputId) return document.getElementById(inputId);
+    return document.querySelector('input[type="file"]');
+  }}
   function tick() {{
-    var input = document.getElementById("pdf-dropzone-input");
+    var input = findInput();
     if (!input) {{
       if (Date.now() - started < 20000) setTimeout(tick, 200);
       else giveUp();
@@ -3208,7 +3226,7 @@ fn pdf_attach_script(fetch: &str, file_name: &str) -> String {
       if (!response.ok) throw new Error("missing");
       return response.blob();
     }}).then(function(blob) {{
-      var file = new File([blob], name, {{ type: "application/pdf" }});
+      var file = new File([blob], name, {{ type: mime }});
       var transfer = new DataTransfer();
       transfer.items.add(file);
       input.files = transfer.files;

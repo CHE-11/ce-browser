@@ -20,49 +20,57 @@ pub enum Launch {
     Url(String),
     App(String),
     Open(String),
-    /// Local PDFs to open in the markup editor. Not kept in `LAUNCH`: those wait until
+    /// Local files to open with a file handler. Not kept in `LAUNCH`: those wait until
     /// session restore has finished so the new tab stays in front.
-    Pdfs(Vec<String>),
+    Files(Vec<String>),
 }
 
-const PDF_EDITOR: &str = "https://ce-file-tools.vercel.app/pdf/view-and-markup";
-
-struct PendingPdfs {
+struct PendingFiles {
     ready: bool,
     paths: Vec<String>,
 }
 
 #[derive(Clone)]
-struct PdfAttach {
+struct FileAttach {
     dir: PathBuf,
-    /// `https://pdf-<id>.ce-browser.example/document.pdf`. The page fetches this.
+    /// `https://file-<id>.ce-browser.example/document.<ext>`. The page fetches this.
     /// `.example` is a reserved name, so it never hits the network.
     fetch: String,
     file_name: String,
+    staged: PathBuf,
+    content_type: String,
+    input_id: String,
+    editor_url: String,
+}
+
+/// Bytes for a file fetch from a handler page.
+pub struct ServedFile {
+    pub bytes: Vec<u8>,
+    pub content_type: String,
 }
 
 static LAUNCH: Mutex<Launch> = Mutex::new(Launch::None);
-static PDF_LAUNCH: Mutex<PendingPdfs> = Mutex::new(PendingPdfs {
+static FILE_LAUNCH: Mutex<PendingFiles> = Mutex::new(PendingFiles {
     ready: false,
     paths: Vec::new(),
 });
-static PDF_ARMED: Mutex<Option<PdfAttach>> = Mutex::new(None);
-static PDF_TABS: Mutex<Vec<(u32, PdfAttach)>> = Mutex::new(Vec::new());
+static FILE_ARMED: Mutex<Option<FileAttach>> = Mutex::new(None);
+static FILE_TABS: Mutex<Vec<(u32, FileAttach)>> = Mutex::new(Vec::new());
 static TRAY: OnceLock<tauri::tray::TrayIcon> = OnceLock::new();
 static FRAMES_CAPPED: Mutex<bool> = Mutex::new(false);
 
 pub fn read_args() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match launch_from_args(&args) {
-        Launch::Pdfs(paths) => {
-            PDF_LAUNCH.lock().expect("pdf launch").paths.extend(paths);
+        Launch::Files(paths) => {
+            FILE_LAUNCH.lock().expect("file launch").paths.extend(paths);
         }
         other => *LAUNCH.lock().expect("launch") = other,
     }
 }
 
 pub fn launch_from_args(args: &[String]) -> Launch {
-    let mut pdfs = Vec::new();
+    let mut files = Vec::new();
     let mut index = 0;
     while index < args.len() {
         let arg = args[index].as_str();
@@ -93,20 +101,20 @@ pub fn launch_from_args(args: &[String]) -> Launch {
         if is_website(arg) {
             return Launch::Url(arg.to_string());
         }
-        if let Some(path) = pdf_argument(arg) {
-            pdfs.push(path);
+        if let Some(path) = file_argument(arg) {
+            files.push(path);
         }
         index += 1;
     }
-    if pdfs.is_empty() {
+    if files.is_empty() {
         Launch::None
     } else {
-        Launch::Pdfs(pdfs)
+        Launch::Files(files)
     }
 }
 
-/// A command-line PDF from a file association or a `file://` URL. Flags are left alone.
-fn pdf_argument(arg: &str) -> Option<String> {
+/// A command-line file from a file association or a `file://` URL. Flags are left alone.
+pub fn file_argument(arg: &str) -> Option<String> {
     let arg = arg.trim().trim_matches('"');
     if arg.is_empty() || arg.starts_with('-') {
         return None;
@@ -116,25 +124,67 @@ fn pdf_argument(arg: &str) -> Option<String> {
     } else {
         PathBuf::from(arg)
     };
-    let pdf = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"));
-    if !pdf {
+    let extension = path.extension().and_then(|ext| ext.to_str())?;
+    if clean_launch_extension(extension).is_none() {
         return None;
     }
     Some(path.to_string_lossy().to_string())
 }
 
-pub fn is_pdf_editor(url: &str) -> bool {
-    let Ok(page) = url::Url::parse(url) else {
+fn clean_launch_extension(extension: &str) -> Option<String> {
+    let text = extension
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    if (1..=16).contains(&text.len())
+        && text
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        Some(text)
+    } else {
+        None
+    }
+}
+
+/// Host and path match. A query string on the loaded page is ignored.
+pub fn pages_match(page: &str, editor: &str) -> bool {
+    let Ok(page) = url::Url::parse(page) else {
         return false;
     };
-    let Ok(editor) = url::Url::parse(PDF_EDITOR) else {
+    let Ok(editor) = url::Url::parse(editor) else {
         return false;
     };
     page.host_str() == editor.host_str()
         && page.path().trim_end_matches('/') == editor.path().trim_end_matches('/')
+}
+
+pub fn handler_matches(url: &str, handlers: &[settings::FileHandler]) -> bool {
+    handlers
+        .iter()
+        .any(|handler| pages_match(url, &handler.url))
+}
+
+pub fn content_type(extension: &str) -> &'static str {
+    match extension.to_ascii_lowercase().as_str() {
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "txt" => "text/plain",
+        "htm" | "html" => "text/html",
+        "css" => "text/css",
+        "csv" => "text/csv",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "mp3" => "audio/mpeg",
+        "mp4" => "video/mp4",
+        "wav" => "audio/wav",
+        "zip" => "application/zip",
+        _ => "application/octet-stream",
+    }
 }
 
 pub fn is_website(text: &str) -> bool {
@@ -191,22 +241,25 @@ pub fn power_is_battery(ac_line: u8) -> bool {
     ac_line == 0
 }
 
-pub fn write_handoff(app: &AppHandle) {
+pub fn write_handoff(app: &AppHandle, profile: &str) {
     let launch = LAUNCH.lock().expect("launch").clone();
-    let pdfs = PDF_LAUNCH.lock().expect("pdf launch").paths.clone();
-    if matches!(launch, Launch::None) && pdfs.is_empty() {
+    let files = FILE_LAUNCH.lock().expect("file launch").paths.clone();
+    if matches!(launch, Launch::None) && files.is_empty() {
         return;
     }
     let mut value = launch_file(&launch);
-    if !pdfs.is_empty() {
-        value["pdfs"] = serde_json::json!(pdfs);
+    if !files.is_empty() {
+        value["files"] = serde_json::json!(files);
+    }
+    if !profile.is_empty() {
+        value["profile"] = serde_json::json!(profile);
     }
     let path = paths::root_local_dir(app).join(LAUNCH_FILE);
     let _ = files::write_json(&path, &value);
 }
 
 pub fn start(app: &AppHandle) {
-    let _ = register_browser();
+    let _ = register_browser(app);
     start_hotkey(app.clone());
     let _ = install_tray(app);
     apply_launch(app);
@@ -217,7 +270,7 @@ fn launch_file(launch: &Launch) -> serde_json::Value {
         Launch::Url(url) => serde_json::json!({ "url": url }),
         Launch::App(id) => serde_json::json!({ "app": id }),
         Launch::Open(path) => serde_json::json!({ "open": path }),
-        Launch::Pdfs(paths) => serde_json::json!({ "pdfs": paths }),
+        Launch::Files(paths) => serde_json::json!({ "files": paths }),
         Launch::None => serde_json::json!({}),
     }
 }
@@ -228,10 +281,18 @@ pub fn apply_launch(app: &AppHandle) {
         std::mem::replace(&mut *guard, Launch::None)
     };
     open_launch(app, pending);
+    enqueue_files(app, &take_routed_files(app));
     let path = paths::root_local_dir(app).join(LAUNCH_FILE);
     if let Ok(text) = fs::read_to_string(&path) {
-        let _ = fs::remove_file(&path);
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+            let owner = value
+                .get("profile")
+                .and_then(|item| item.as_str())
+                .unwrap_or("");
+            if !owner.is_empty() && owner != profiles::active_id() {
+                return;
+            }
+            let _ = fs::remove_file(&path);
             let launch = if let Some(url) = value.get("url").and_then(|item| item.as_str()) {
                 Launch::Url(url.to_string())
             } else if let Some(id) = value.get("app").and_then(|item| item.as_str()) {
@@ -241,19 +302,11 @@ pub fn apply_launch(app: &AppHandle) {
             } else {
                 Launch::None
             };
-            let pdfs = value
-                .get("pdfs")
-                .and_then(|item| item.as_array())
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|item| item.as_str())
-                        .filter_map(pdf_argument)
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+            let queued = queued_files(&value);
             open_launch(app, launch);
-            enqueue_pdfs(app, pdfs);
+            enqueue_files(app, &queued);
+        } else {
+            let _ = fs::remove_file(&path);
         }
     }
 }
@@ -274,53 +327,233 @@ fn open_launch(app: &AppHandle, launch: Launch) {
         Launch::Open(path) => {
             let _ = crate::files::open_with_default(Path::new(&path));
         }
-        Launch::Pdfs(paths) => enqueue_pdfs(app, paths),
+        Launch::Files(paths) => enqueue_files(app, &paths),
         Launch::None => {}
     }
 }
 
-/// Opens queued PDFs once session restore has finished, so the editor tab stays selected.
-pub fn open_pending_pdfs(app: &AppHandle) {
+/// Opens queued files once session restore has finished, so the handler tab stays selected.
+pub fn open_pending_files(app: &AppHandle) {
     let paths = {
-        let mut pending = PDF_LAUNCH.lock().expect("pdf launch");
+        let mut pending = FILE_LAUNCH.lock().expect("file launch");
         pending.ready = true;
         std::mem::take(&mut pending.paths)
     };
-    open_pdfs(app, &paths);
+    open_files(app, &paths);
 }
 
-fn enqueue_pdfs(app: &AppHandle, paths: Vec<String>) {
+fn enqueue_files(app: &AppHandle, paths: &[String]) {
     if paths.is_empty() {
         return;
     }
-    let mut pending = PDF_LAUNCH.lock().expect("pdf launch");
+    let mut pending = FILE_LAUNCH.lock().expect("file launch");
     if pending.ready {
         drop(pending);
-        open_pdfs(app, &paths);
+        open_files(app, paths);
     } else {
-        pending.paths.extend(paths);
+        pending.paths.extend(paths.iter().cloned());
     }
 }
 
-/// Opens one PDF in `window`. A download clicked in a browser window stays in that window.
-pub fn open_pdf_in_window(app: &AppHandle, path: &str, window: &str) -> Result<(), String> {
-    let path = pdf_argument(path).ok_or_else(|| "That file is not a PDF.".to_string())?;
-    sweep_old_pdfs();
-    open_one_pdf(app, &path, Some(window))?;
+/// Files handed to this profile by another process.
+fn take_routed_files(app: &AppHandle) -> Vec<String> {
+    let path = paths::root_local_dir(app).join(routed_file_name(&profiles::active_id()));
+    let Ok(text) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let _ = fs::remove_file(&path);
+    serde_json::from_str::<serde_json::Value>(&text)
+        .map(|value| queued_files(&value))
+        .unwrap_or_default()
+}
+
+fn queued_files(value: &serde_json::Value) -> Vec<String> {
+    value
+        .get("files")
+        .or_else(|| value.get("pdfs"))
+        .and_then(|item| item.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .filter_map(file_argument)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn routed_file_name(profile: &str) -> String {
+    let safe: String = profile
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
+        .collect();
+    format!("open-{safe}.json")
+}
+
+/// Sends files to a profile that is already open. That profile reads them on its next launch check.
+fn handoff_paths(app: &AppHandle, profile: &str, paths: &[String]) {
+    let path = paths::root_local_dir(app).join(routed_file_name(profile));
+    let mut files = fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .map(|value| queued_files(&value))
+        .unwrap_or_default();
+    for item in paths {
+        if !files.iter().any(|existing| existing == item) {
+            files.push(item.clone());
+        }
+    }
+    let _ = files::write_json(&path, &serde_json::json!({ "files": files }));
+}
+
+pub fn pending_files() -> Vec<String> {
+    FILE_LAUNCH.lock().expect("file launch").paths.clone()
+}
+
+/// Profile this process should become when a file is opened and no `--profile` was passed.
+/// A selected handler wins. Otherwise an already open profile is used, preferring the default.
+pub fn launch_profile(app: &AppHandle) -> Option<String> {
+    let files = pending_files();
+    if files.is_empty() {
+        return None;
+    }
+    if let Some(profile) = files.iter().find_map(|path| selected_profile(app, path)) {
+        return Some(profile);
+    }
+    let ids = profiles::ids(app);
+    if ids
+        .iter()
+        .any(|id| id == profiles::DEFAULT_ID && profiles::is_open(id))
+    {
+        return Some(profiles::DEFAULT_ID.to_string());
+    }
+    ids.into_iter().find(|id| profiles::is_open(id))
+}
+
+fn selected_profile(app: &AppHandle, path: &str) -> Option<String> {
+    let extension = Path::new(path).extension().and_then(|ext| ext.to_str())?;
+    let handler = chosen_handler(app, extension)?;
+    if handler.profile.is_empty() {
+        None
+    } else {
+        Some(handler.profile)
+    }
+}
+
+/// The handler row that names a profile for this extension. The default profile's row wins.
+fn chosen_handler(app: &AppHandle, extension: &str) -> Option<settings::FileHandler> {
+    let ids = profiles::ids(app);
+    let groups = ids
+        .iter()
+        .map(|id| (id.clone(), profile_handlers(app, id)))
+        .collect::<Vec<_>>();
+    let views = groups
+        .iter()
+        .map(|(id, handlers)| (id.as_str(), handlers.as_slice()))
+        .collect::<Vec<_>>();
+    chosen_handler_in(&views, extension, &ids)
+}
+
+fn profile_handlers(app: &AppHandle, id: &str) -> Vec<settings::FileHandler> {
+    let path = paths::profile_data_dir(app, id).join("settings.json");
+    let Ok(text) = fs::read_to_string(path) else {
+        return settings::default_file_handlers();
+    };
+    serde_json::from_str::<settings::BrowserSettings>(&text)
+        .map(|settings| settings.normalize().file_handlers)
+        .unwrap_or_default()
+}
+
+/// `groups` is `(profile that stored the row, that profile's handlers)`, default profile first when it is first.
+pub fn chosen_handler_in(
+    groups: &[(&str, &[settings::FileHandler])],
+    extension: &str,
+    known: &[String],
+) -> Option<settings::FileHandler> {
+    let extension = extension
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    let mut first = None;
+    for (owner, handlers) in groups {
+        let Some(handler) = handlers
+            .iter()
+            .find(|handler| handler.extension == extension)
+        else {
+            continue;
+        };
+        if handler.profile.is_empty() || !known.iter().any(|id| id == &handler.profile) {
+            continue;
+        }
+        if *owner == profiles::DEFAULT_ID {
+            return Some(handler.clone());
+        }
+        if first.is_none() {
+            first = Some(handler.clone());
+        }
+    }
+    first
+}
+
+fn deliver(app: &AppHandle, profile: &str, path: &str) -> Result<(), String> {
+    if profiles::is_open(profile) {
+        handoff_paths(app, profile, &[path.to_string()]);
+        profiles::focus(profile);
+        return Ok(());
+    }
+    profiles::launch(profile, &[path.to_string()])
+}
+
+fn handler_for_path(app: &AppHandle, path: &str) -> Option<settings::FileHandler> {
+    let extension = Path::new(path).extension().and_then(|ext| ext.to_str())?;
+    if let Some(handler) = chosen_handler(app, extension) {
+        return Some(handler);
+    }
+    settings::get(app).handler_for(extension).cloned()
+}
+
+/// True when this profile opens that file type in a tab.
+pub fn has_handler(app: &AppHandle, path: &str) -> bool {
+    handler_for_path(app, path).is_some()
+}
+
+/// Opens one handled file in `window`. A download clicked in a browser window stays in that window.
+pub fn open_file_in_window(app: &AppHandle, path: &str, window: &str) -> Result<(), String> {
+    let path = file_argument(path).ok_or_else(|| "That file can't be opened here.".to_string())?;
+    if let Some(profile) = selected_profile(app, &path)
+        && profile != profiles::active_id()
+    {
+        return deliver(app, &profile, &path);
+    }
+    let handler = handler_for_path(app, &path)
+        .ok_or_else(|| "No file handler is set for that type.".to_string())?;
+    sweep_old_files();
+    open_one_file(app, &path, &handler, Some(window))?;
     reveal_window(app, Some(window));
     Ok(())
 }
 
-fn open_pdfs(app: &AppHandle, paths: &[String]) {
+fn open_files(app: &AppHandle, paths: &[String]) {
     if paths.is_empty() {
         return;
     }
-    sweep_old_pdfs();
+    sweep_old_files();
     let mut opened = false;
     for path in paths {
-        match open_one_pdf(app, path, None) {
+        if let Some(profile) = selected_profile(app, path)
+            && profile != profiles::active_id()
+        {
+            if let Err(error) = deliver(app, &profile, path) {
+                eprintln!("file: {error}");
+            }
+            continue;
+        }
+        let Some(handler) = handler_for_path(app, path) else {
+            continue;
+        };
+        match open_one_file(app, path, &handler, None) {
             Ok(()) => opened = true,
-            Err(error) => eprintln!("pdf: {error}"),
+            Err(error) => eprintln!("file: {error}"),
         }
     }
     if opened {
@@ -328,18 +561,23 @@ fn open_pdfs(app: &AppHandle, paths: &[String]) {
     }
 }
 
-fn open_one_pdf(app: &AppHandle, path: &str, window: Option<&str>) -> Result<(), String> {
-    let attach = stage_pdf(path)?;
+fn open_one_file(
+    app: &AppHandle,
+    path: &str,
+    handler: &settings::FileHandler,
+    window: Option<&str>,
+) -> Result<(), String> {
+    let attach = stage_file(path, handler)?;
     let title = attach.file_name.clone();
-    arm_pdf(attach);
-    let url = tabs::resolve(app, PDF_EDITOR);
+    arm_file(attach);
+    let url = tabs::resolve(app, &handler.url);
     let mut tab = tabs::OpenTab::new(url);
     tab.title = Some(title);
     if let Some(window) = window {
         tab.window = window.to_string();
     }
     if let Err(error) = tabs::open(app, tab) {
-        if let Some(attach) = disarm_pdf() {
+        if let Some(attach) = disarm_file() {
             let _ = fs::remove_dir_all(attach.dir);
         }
         return Err(error);
@@ -361,35 +599,46 @@ fn reveal_window(app: &AppHandle, window: Option<&str>) {
     let _ = browser.set_focus();
 }
 
-fn stage_pdf(source: &str) -> Result<PdfAttach, String> {
+fn stage_file(source: &str, handler: &settings::FileHandler) -> Result<FileAttach, String> {
     let path = PathBuf::from(source);
     if !path.is_file() {
         return Err(format!("Couldn't find {source}."));
     }
     let id = rand::random::<u64>();
     let dir = std::env::temp_dir()
-        .join("ce-browser-pdf")
+        .join("ce-browser-file")
         .join(format!("{id:x}"));
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    let dest = dir.join("document.pdf");
+    let staged_name = format!("document.{}", handler.extension);
+    let dest = dir.join(&staged_name);
     // A hard link keeps one copy of a large file. Another drive has to be copied.
     if fs::hard_link(&path, &dest).is_err() {
         fs::copy(&path, &dest).map_err(|error| format!("Couldn't read {source}. {error}"))?;
     }
+    let fallback = format!("document.{}", handler.extension);
     let file_name = path
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("document.pdf")
+        .unwrap_or(fallback.as_str())
         .to_string();
-    Ok(PdfAttach {
+    Ok(FileAttach {
         dir,
-        fetch: format!("https://pdf-{id:x}.ce-browser.example/document.pdf"),
+        fetch: format!("https://file-{id:x}.ce-browser.example/{staged_name}"),
         file_name,
+        staged: dest,
+        content_type: content_type(&handler.extension).to_string(),
+        input_id: handler.input_id.clone(),
+        editor_url: handler.url.clone(),
     })
 }
 
-fn sweep_old_pdfs() {
-    let root = std::env::temp_dir().join("ce-browser-pdf");
+fn sweep_old_files() {
+    sweep_old_dir("ce-browser-file");
+    sweep_old_dir("ce-browser-pdf");
+}
+
+fn sweep_old_dir(name: &str) {
+    let root = std::env::temp_dir().join(name);
     let Ok(entries) = fs::read_dir(&root) else {
         return;
     };
@@ -407,54 +656,80 @@ fn sweep_old_pdfs() {
     }
 }
 
-fn arm_pdf(attach: PdfAttach) {
-    *PDF_ARMED.lock().expect("pdf") = Some(attach);
+fn arm_file(attach: FileAttach) {
+    *FILE_ARMED.lock().expect("file") = Some(attach);
 }
 
-fn disarm_pdf() -> Option<PdfAttach> {
-    PDF_ARMED.lock().expect("pdf").take()
+fn disarm_file() -> Option<FileAttach> {
+    FILE_ARMED.lock().expect("file").take()
 }
 
-/// The tab just created takes the PDF that was armed for it, before its page starts loading.
-pub fn claim_pdf(id: u32) {
-    if let Some(attach) = disarm_pdf() {
-        PDF_TABS.lock().expect("pdf").push((id, attach));
+/// The tab just created takes the file that was armed for it, before its page starts loading.
+pub fn claim_file(id: u32) {
+    if let Some(attach) = disarm_file() {
+        FILE_TABS.lock().expect("file").push((id, attach));
     }
 }
 
-/// After the markup editor finishes loading, give it the PDF from this open.
-pub fn attach_open_pdf(app: &AppHandle, id: u32, url: &str) {
-    if !is_pdf_editor(url) {
-        return;
-    }
-    let Some(attach) = PDF_TABS
+/// After a handler page finishes loading, give it the file from this open.
+pub fn attach_open_file(app: &AppHandle, id: u32, url: &str) {
+    let Some(attach) = FILE_TABS
         .lock()
-        .expect("pdf")
+        .expect("file")
         .iter()
         .find(|(tab, _)| *tab == id)
         .map(|(_, attach)| attach.clone())
     else {
         return;
     };
+    if !pages_match(url, &attach.editor_url) {
+        return;
+    }
     let Some(webview) = tabs::page_view(app, id) else {
         return;
     };
-    crate::webview2::attach_local_pdf(&webview, &attach.fetch, &attach.file_name);
+    crate::webview2::attach_local_file(
+        &webview,
+        &attach.fetch,
+        &attach.file_name,
+        &attach.input_id,
+        &attach.content_type,
+    );
 }
 
-/// Bytes for a PDF fetch from the markup editor. The address only exists inside this app.
-pub fn pdf_bytes(url: &str) -> Option<Vec<u8>> {
-    let path = PDF_TABS
+/// Bytes for a file fetch from a handler page. The address only exists inside this app.
+pub fn file_bytes(url: &str) -> Option<ServedFile> {
+    let attach = FILE_TABS
         .lock()
-        .expect("pdf")
+        .expect("file")
         .iter()
-        .find_map(|(_, attach)| {
-            same_pdf_url(url, &attach.fetch).then(|| attach.dir.join("document.pdf"))
-        })?;
-    fs::read(path).ok()
+        .find_map(|(_, attach)| same_file_url(url, &attach.fetch).then(|| attach.clone()))?;
+    let bytes = fs::read(&attach.staged).ok()?;
+    Some(ServedFile {
+        bytes,
+        content_type: header_type(&attach.content_type),
+    })
 }
 
-fn same_pdf_url(request: &str, fetch: &str) -> bool {
+fn header_type(content_type: &str) -> String {
+    let clean: String = content_type
+        .chars()
+        .filter(|character| {
+            character.is_ascii_alphanumeric()
+                || *character == '/'
+                || *character == '-'
+                || *character == '+'
+                || *character == '.'
+        })
+        .collect();
+    if clean.is_empty() {
+        "application/octet-stream".into()
+    } else {
+        clean
+    }
+}
+
+fn same_file_url(request: &str, fetch: &str) -> bool {
     request.trim_end_matches('/') == fetch.trim_end_matches('/')
 }
 
@@ -741,7 +1016,10 @@ fn xml_escape(text: &str) -> String {
         .replace('"', "&quot;")
 }
 
-pub fn register_browser() -> Result<(), String> {
+const FILE_ASSOCIATIONS: &str =
+    r"Software\Clients\StartMenuInternet\ce-browser\Capabilities\FileAssociations";
+
+pub fn register_browser(app: &AppHandle) -> Result<(), String> {
     let exe = paths::launch_exe().map_err(|error| error.to_string())?;
     let command = format!("\"{}\" \"%1\"", exe.display());
     set_key(r"Software\Classes\ce-browser", "", "ce-browser")?;
@@ -781,44 +1059,102 @@ pub fn register_browser() -> Result<(), String> {
         ".html",
         "ce-browserHTML",
     )?;
-    set_key(r"Software\Classes\ce-browserPDF", "", "PDF Document")?;
-    set_key(
-        r"Software\Classes\ce-browserPDF",
-        "Content Type",
-        "application/pdf",
-    )?;
-    set_key(
-        r"Software\Classes\ce-browserPDF\DefaultIcon",
-        "",
-        &format!("\"{}\",0", exe.display()),
-    )?;
-    set_key(
-        r"Software\Classes\ce-browserPDF\shell\open\command",
-        "",
-        &command,
-    )?;
-    set_key(
-        r"Software\Classes\.pdf\OpenWithProgids",
-        "ce-browserPDF",
-        "",
-    )?;
-    set_key(
-        r"Software\Clients\StartMenuInternet\ce-browser\Capabilities\FileAssociations",
-        ".pdf",
-        "ce-browserPDF",
-    )?;
-    if let Some(name) = exe.file_name().and_then(|name| name.to_str()) {
+    let handlers = settings::get(app).file_handlers.clone();
+    let exe_name = exe
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_string);
+    if let Some(name) = &exe_name {
         let apps = format!(r"Software\Classes\Applications\{name}");
         set_key(&apps, "FriendlyAppName", "ce-browser")?;
         set_key(&format!(r"{apps}\shell\open\command"), "", &command)?;
-        set_key(&format!(r"{apps}\SupportedTypes"), ".pdf", "")?;
     }
+    for handler in &handlers {
+        register_handler(&exe, &command, handler, exe_name.as_deref())?;
+    }
+    prune_file_handlers(&handlers, exe_name.as_deref());
     set_key(
         r"Software\RegisteredApplications",
         "ce-browser",
         r"Software\Clients\StartMenuInternet\ce-browser\Capabilities",
     )?;
     Ok(())
+}
+
+fn handler_progid(extension: &str) -> String {
+    if extension.eq_ignore_ascii_case("pdf") {
+        "ce-browserPDF".into()
+    } else {
+        format!("ce-browser.{extension}")
+    }
+}
+
+fn handler_label(extension: &str) -> String {
+    if extension.eq_ignore_ascii_case("pdf") {
+        "PDF Document".into()
+    } else {
+        format!("{} file", extension.to_ascii_uppercase())
+    }
+}
+
+fn register_handler(
+    exe: &Path,
+    command: &str,
+    handler: &settings::FileHandler,
+    exe_name: Option<&str>,
+) -> Result<(), String> {
+    let progid = handler_progid(&handler.extension);
+    let dot = format!(".{}", handler.extension);
+    let class = format!(r"Software\Classes\{progid}");
+    set_key(&class, "", &handler_label(&handler.extension))?;
+    set_key(&class, "Content Type", content_type(&handler.extension))?;
+    set_key(
+        &format!(r"{class}\DefaultIcon"),
+        "",
+        &format!("\"{}\",0", exe.display()),
+    )?;
+    set_key(&format!(r"{class}\shell\open\command"), "", command)?;
+    set_key(
+        &format!(r"Software\Classes\{dot}\OpenWithProgids"),
+        &progid,
+        "",
+    )?;
+    set_key(FILE_ASSOCIATIONS, &dot, &progid)?;
+    if let Some(name) = exe_name {
+        set_key(
+            &format!(r"Software\Classes\Applications\{name}\SupportedTypes"),
+            &dot,
+            "",
+        )?;
+    }
+    Ok(())
+}
+
+/// Drops Open With and file-association entries for extensions this profile no longer handles.
+fn prune_file_handlers(handlers: &[settings::FileHandler], exe_name: Option<&str>) {
+    let wanted: Vec<String> = handlers
+        .iter()
+        .map(|handler| format!(".{}", handler.extension))
+        .collect();
+    let retired = |name: &str| {
+        !name.eq_ignore_ascii_case(".html")
+            && !wanted.iter().any(|ext| ext.eq_ignore_ascii_case(name))
+    };
+    for (name, value) in list_values(FILE_ASSOCIATIONS) {
+        if !retired(&name) || !value.starts_with("ce-browser") {
+            continue;
+        }
+        delete_value(FILE_ASSOCIATIONS, &name);
+        delete_value(&format!(r"Software\Classes\{name}\OpenWithProgids"), &value);
+    }
+    if let Some(name) = exe_name {
+        let supported = format!(r"Software\Classes\Applications\{name}\SupportedTypes");
+        for (entry, _) in list_values(&supported) {
+            if retired(&entry) {
+                delete_value(&supported, &entry);
+            }
+        }
+    }
 }
 
 pub fn open_default_settings() -> Result<(), String> {
@@ -886,6 +1222,104 @@ fn set_key(path: &str, name: &str, value: &str) -> Result<(), String> {
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn open_key(path: &str, access: u32) -> Option<isize> {
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn RegOpenKeyExW(
+            key: isize,
+            sub: *const u16,
+            options: u32,
+            access: u32,
+            result: *mut isize,
+        ) -> i32;
+    }
+    let sub = wide(path);
+    let mut key = 0isize;
+    let status = unsafe { RegOpenKeyExW(0x8000_0001, sub.as_ptr(), 0, access, &mut key) };
+    if status == 0 { Some(key) } else { None }
+}
+
+fn close_key(key: isize) {
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn RegCloseKey(key: isize) -> i32;
+    }
+    let _ = unsafe { RegCloseKey(key) };
+}
+
+fn list_values(path: &str) -> Vec<(String, String)> {
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn RegEnumValueW(
+            key: isize,
+            index: u32,
+            name: *mut u16,
+            name_len: *mut u32,
+            reserved: *mut u32,
+            kind: *mut u32,
+            data: *mut u8,
+            data_len: *mut u32,
+        ) -> i32;
+    }
+    let Some(key) = open_key(path, 0x20019) else {
+        return Vec::new();
+    };
+    let mut values = Vec::new();
+    let mut index = 0u32;
+    loop {
+        let mut name = vec![0u16; 256];
+        let mut name_len = name.len() as u32;
+        let mut kind = 0u32;
+        let mut data = vec![0u8; 1024];
+        let mut data_len = data.len() as u32;
+        let status = unsafe {
+            RegEnumValueW(
+                key,
+                index,
+                name.as_mut_ptr(),
+                &mut name_len,
+                std::ptr::null_mut(),
+                &mut kind,
+                data.as_mut_ptr(),
+                &mut data_len,
+            )
+        };
+        if status == 234 {
+            index += 1;
+            continue;
+        }
+        if status != 0 {
+            break;
+        }
+        index += 1;
+        if kind != 1 {
+            continue;
+        }
+        let name = String::from_utf16_lossy(&name[..name_len as usize]);
+        let units: Vec<u16> = data[..data_len as usize]
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .take_while(|unit| *unit != 0)
+            .collect();
+        values.push((name, String::from_utf16_lossy(&units)));
+    }
+    close_key(key);
+    values
+}
+
+fn delete_value(path: &str, name: &str) {
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn RegDeleteValueW(key: isize, name: *const u16) -> i32;
+    }
+    let Some(key) = open_key(path, 0x0002) else {
+        return;
+    };
+    let name = wide(name);
+    let _ = unsafe { RegDeleteValueW(key, name.as_ptr()) };
+    close_key(key);
 }
 
 pub fn saver_active(app: &AppHandle) -> bool {
@@ -981,8 +1415,10 @@ pub const NOTIFY_JS: &str = r#"(function () {
 #[cfg(test)]
 mod tests {
     use super::{
-        Launch, hotkey_mods, is_pdf_editor, is_website, launch_from_args, power_is_battery, site_id,
+        Launch, chosen_handler_in, handler_matches, hotkey_mods, is_website, launch_from_args,
+        power_is_battery, site_id,
     };
+    use crate::settings::{FileHandler, default_file_handlers};
 
     #[test]
     fn a_site_id_comes_from_the_host() {
@@ -1004,31 +1440,97 @@ mod tests {
     }
 
     #[test]
-    fn a_command_line_pdf_is_opened_in_the_editor() {
+    fn a_command_line_file_is_queued_for_a_handler() {
         assert_eq!(
             launch_from_args(&[
                 "--profile".into(),
                 "default".into(),
                 r"C:\docs\note.PDF".into()
             ]),
-            Launch::Pdfs(vec![r"C:\docs\note.PDF".into()])
+            Launch::Files(vec![r"C:\docs\note.PDF".into()])
         );
         assert_eq!(
             launch_from_args(&["file:///C:/docs/note.pdf".into()]),
-            Launch::Pdfs(vec![r"C:\docs\note.pdf".into()])
+            Launch::Files(vec![r"C:\docs\note.pdf".into()])
         );
+        assert_eq!(
+            launch_from_args(&[r"C:\docs\photo.png".into()]),
+            Launch::Files(vec![r"C:\docs\photo.png".into()])
+        );
+        assert_eq!(launch_from_args(&[r"C:\docs\README".into()]), Launch::None);
         assert_eq!(
             launch_from_args(&[r"--open=C:\docs\note.pdf".into()]),
             Launch::Open(r"C:\docs\note.pdf".into())
         );
-        assert!(is_pdf_editor(
-            "https://ce-file-tools.vercel.app/pdf/view-and-markup"
+        let defaults = default_file_handlers();
+        assert!(handler_matches(
+            "https://ce-file-tools.vercel.app/pdf/view-and-markup",
+            &defaults
         ));
-        assert!(is_pdf_editor(
-            "https://ce-file-tools.vercel.app/pdf/view-and-markup?x=1"
+        assert!(handler_matches(
+            "https://ce-file-tools.vercel.app/pdf/view-and-markup?x=1",
+            &defaults
         ));
-        assert!(!is_pdf_editor("https://ce-file-tools.vercel.app/convert"));
-        assert!(!is_pdf_editor("https://example.com/pdf/view-and-markup"));
+        assert!(!handler_matches(
+            "https://ce-file-tools.vercel.app/convert",
+            &defaults
+        ));
+        let custom = vec![FileHandler {
+            extension: "pdf".into(),
+            url: "https://example.com/pdf/view-and-markup".into(),
+            input_id: "pdf-dropzone-input".into(),
+            profile: String::new(),
+        }];
+        assert!(handler_matches(
+            "https://example.com/pdf/view-and-markup",
+            &custom
+        ));
+        assert!(!handler_matches(
+            "https://ce-file-tools.vercel.app/pdf/view-and-markup",
+            &custom
+        ));
+    }
+
+    #[test]
+    fn the_default_profile_picks_where_a_file_type_opens() {
+        let stock = FileHandler {
+            extension: "pdf".into(),
+            url: "https://example.com/default".into(),
+            input_id: "pdf-dropzone-input".into(),
+            profile: String::new(),
+        };
+        let work = FileHandler {
+            extension: "pdf".into(),
+            url: "https://example.com/work".into(),
+            input_id: "drop".into(),
+            profile: "personal".into(),
+        };
+        let known = [
+            "default".to_string(),
+            "work".to_string(),
+            "personal".to_string(),
+        ];
+        let chosen = chosen_handler_in(
+            &[("default", &[stock.clone()]), ("work", &[work.clone()])],
+            "pdf",
+            &known,
+        );
+        assert_eq!(chosen.unwrap().url, "https://example.com/work");
+        let assigned = FileHandler {
+            profile: "work".into(),
+            ..stock.clone()
+        };
+        let chosen = chosen_handler_in(
+            &[("default", &[assigned]), ("work", &[work])],
+            "PDF",
+            &known,
+        );
+        assert_eq!(chosen.unwrap().profile, "work");
+        let missing = FileHandler {
+            profile: "gone".into(),
+            ..stock
+        };
+        assert!(chosen_handler_in(&[("default", &[missing])], "pdf", &known).is_none());
     }
 
     #[test]

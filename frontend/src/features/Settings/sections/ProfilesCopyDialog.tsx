@@ -105,7 +105,7 @@ export const PROFILE_COPY_CHOICES: {
   {
     id: "system",
     label: "System",
-    hint: "Summon shortcut, battery saver, and automatic updates.",
+    hint: "Summon shortcut, battery saver, automatic updates, and file handlers.",
   },
   {
     id: "shortcuts",

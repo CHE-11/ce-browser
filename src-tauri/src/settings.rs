@@ -104,6 +104,124 @@ impl Default for AiProviders {
     }
 }
 
+/// Page that opens one file type inside the browser.
+pub const DEFAULT_PDF_EDITOR: &str = "https://ce-file-tools.vercel.app/pdf/view-and-markup";
+pub const DEFAULT_PDF_INPUT: &str = "pdf-dropzone-input";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FileHandler {
+    /// Lowercase extension without a dot, such as `pdf`.
+    pub extension: String,
+    /// `http` or `https` page. The file is placed on that page's file input.
+    pub url: String,
+    /// Element id of the file input. Empty uses the first file input on the page.
+    pub input_id: String,
+    /// Profile that opens this type. Empty uses an open profile, or the default profile.
+    pub profile: String,
+}
+
+impl Default for FileHandler {
+    fn default() -> Self {
+        Self {
+            extension: String::new(),
+            url: String::new(),
+            input_id: String::new(),
+            profile: String::new(),
+        }
+    }
+}
+
+/// Used when `settings.json` has no `fileHandlers` key. A saved empty list stays empty.
+pub fn default_file_handlers() -> Vec<FileHandler> {
+    vec![FileHandler {
+        extension: "pdf".into(),
+        url: DEFAULT_PDF_EDITOR.into(),
+        input_id: DEFAULT_PDF_INPUT.into(),
+        profile: String::new(),
+    }]
+}
+
+fn clean_extension(raw: &str) -> Option<String> {
+    let text = raw.trim().trim_start_matches('.').to_ascii_lowercase();
+    if (1..=16).contains(&text.len())
+        && text
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        Some(text)
+    } else {
+        None
+    }
+}
+
+fn clean_handler_url(raw: &str) -> Option<String> {
+    let text = raw.trim();
+    if text.chars().any(|character| character.is_whitespace()) {
+        return None;
+    }
+    let lower = text.to_ascii_lowercase();
+    if !lower.starts_with("https://") && !lower.starts_with("http://") {
+        return None;
+    }
+    let rest = text.split_once("://")?.1;
+    if rest.is_empty() || rest.starts_with('/') {
+        return None;
+    }
+    Some(text.chars().take(500).collect())
+}
+
+fn clean_profile(raw: &str) -> String {
+    let text = raw.trim();
+    if text.is_empty()
+        || text.len() > 64
+        || !text
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
+    {
+        return String::new();
+    }
+    text.to_string()
+}
+
+fn clean_input_id(raw: &str) -> String {
+    raw.trim()
+        .chars()
+        .filter(|character| {
+            character.is_ascii_alphanumeric() || *character == '-' || *character == '_'
+        })
+        .take(80)
+        .collect()
+}
+
+fn normalize_file_handlers(handlers: Vec<FileHandler>) -> Vec<FileHandler> {
+    let mut kept = Vec::new();
+    for handler in handlers {
+        let Some(extension) = clean_extension(&handler.extension) else {
+            continue;
+        };
+        let Some(url) = clean_handler_url(&handler.url) else {
+            continue;
+        };
+        if kept
+            .iter()
+            .any(|item: &FileHandler| item.extension == extension)
+        {
+            continue;
+        }
+        kept.push(FileHandler {
+            extension,
+            url,
+            input_id: clean_input_id(&handler.input_id),
+            profile: clean_profile(&handler.profile),
+        });
+        if kept.len() >= 40 {
+            break;
+        }
+    }
+    kept
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct BrowserSettings {
@@ -321,6 +439,9 @@ pub struct BrowserSettings {
     /// Corner or edge of the page area where toasts appear, such as `bottom-right`.
     #[serde(default = "default_toast_position")]
     pub toast_position: String,
+    /// Pages that open files of each type inside the browser. Missing means the PDF editor.
+    #[serde(default = "default_file_handlers")]
+    pub file_handlers: Vec<FileHandler>,
 }
 
 const TAB_LAYOUTS: &[&str] = &["horizontal", "vertical"];
@@ -763,6 +884,7 @@ impl Default for BrowserSettings {
             auto_update: true,
             last_seen_version: String::new(),
             toast_position: default_toast_position(),
+            file_handlers: default_file_handlers(),
         }
     }
 }
@@ -919,6 +1041,7 @@ impl BrowserSettings {
             .chars()
             .take(180)
             .collect();
+        self.file_handlers = normalize_file_handlers(std::mem::take(&mut self.file_handlers));
         self.sync_folder = folder_from_stored(&self.sync_folder);
         if self.sync_bookmarks_revision == 0
             && self.sync_extensions_revision == 0
@@ -1028,6 +1151,14 @@ impl BrowserSettings {
             "mojeek" => "Mojeek",
             _ => "the web",
         }
+    }
+
+    /// The handler for `extension`, compared without a leading dot.
+    pub fn handler_for(&self, extension: &str) -> Option<&FileHandler> {
+        let extension = clean_extension(extension)?;
+        self.file_handlers
+            .iter()
+            .find(|handler| handler.extension == extension)
     }
 
     pub fn download_dir(&self, app: &AppHandle) -> PathBuf {
@@ -1856,6 +1987,57 @@ mod tests {
         let dir = std::env::temp_dir();
         let stored = folder_from_stored(dir.to_string_lossy().as_ref());
         assert_eq!(stored, dir.to_string_lossy());
+    }
+
+    #[test]
+    fn a_missing_file_handler_list_keeps_the_pdf_editor() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"searchEngine":"bing"}"#).expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.file_handlers.len(), 1);
+        assert_eq!(loaded.file_handlers[0].extension, "pdf");
+        assert_eq!(loaded.file_handlers[0].url, super::DEFAULT_PDF_EDITOR);
+        assert_eq!(loaded.file_handlers[0].input_id, super::DEFAULT_PDF_INPUT);
+    }
+
+    #[test]
+    fn an_empty_file_handler_list_stays_empty() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"fileHandlers":[]}"#).expect("settings parse");
+        assert!(loaded.normalize().file_handlers.is_empty());
+    }
+
+    #[test]
+    fn a_bad_file_handler_is_dropped_and_the_first_extension_wins() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"fileHandlers":[
+                {"extension":".PNG","url":"https://example.com/png","inputId":"drop zone"},
+                {"extension":"png","url":"https://example.com/second","inputId":"other"},
+                {"extension":"","url":"https://example.com/x","inputId":""},
+                {"extension":"pdf","url":"not a url","inputId":"pdf-dropzone-input"}
+            ]}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.file_handlers.len(), 1);
+        assert_eq!(loaded.file_handlers[0].extension, "png");
+        assert_eq!(loaded.file_handlers[0].url, "https://example.com/png");
+        assert_eq!(loaded.file_handlers[0].input_id, "dropzone");
+        assert_eq!(loaded.file_handlers[0].profile, "");
+    }
+
+    #[test]
+    fn a_file_handler_keeps_a_profile_id_and_drops_a_bad_one() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"fileHandlers":[
+                {"extension":"pdf","url":"https://example.com/pdf","inputId":"pdf-dropzone-input","profile":"work-1"},
+                {"extension":"png","url":"https://example.com/png","inputId":"","profile":"../nope"}
+            ]}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.file_handlers[0].profile, "work-1");
+        assert_eq!(loaded.file_handlers[1].profile, "");
     }
 
     #[test]

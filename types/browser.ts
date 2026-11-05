@@ -604,6 +604,18 @@ export type SearchEngine =
   | "mojeek"
   | "custom";
 
+/** A page that opens one file type inside the browser. */
+export type FileHandler = {
+  /** Lowercase extension without a dot, such as `pdf`. */
+  extension: string;
+  /** Page opened in a tab. The file is placed on that page's file input. */
+  url: string;
+  /** Element id of the file input. Empty uses the first file input on the page. */
+  inputId: string;
+  /** Profile id that opens this type. Empty uses an open profile, or the default profile. */
+  profile: string;
+};
+
 export type BrowserSettings = {
   searchEngine: SearchEngine;
   customSearchUrl: string;
@@ -733,6 +745,8 @@ export type BrowserSettings = {
   tabMenuPadding: number;
   /** Corner or edge of the page area where toasts appear. */
   toastPosition: ToastPosition;
+  /** Opens these file types in a browser tab. */
+  fileHandlers: FileHandler[];
 };
 
 export type ToastPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
