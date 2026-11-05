@@ -122,7 +122,7 @@ export function WebpageMarkdownButton({ activeTab, settings }: WebpageMarkdownBu
       ? "Markdown ready"
       : status === "failed"
         ? "Couldn't convert page"
-        : "To Markdown";
+        : "To .md";
 
   return (
     <IconButton
