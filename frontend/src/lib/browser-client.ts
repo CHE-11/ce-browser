@@ -322,6 +322,11 @@ export function clearNetworkLog(id: number) {
   return invoke<void>("clear_network_log", { id });
 }
 
+/** Opens this tab's network log in its own window, or focuses the one already open. */
+export function openNetworkWindow(id: number) {
+  return invoke<void>("open_network_window", { id });
+}
+
 export function setTabRefresh(id: number, secs: number, watch: boolean) {
   return invoke<void>("set_tab_refresh", { id, secs, watch });
 }

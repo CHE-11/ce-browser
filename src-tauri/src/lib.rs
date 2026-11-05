@@ -1154,6 +1154,12 @@ fn clear_network_log(app: AppHandle, id: u32) {
 }
 
 #[tauri::command]
+async fn open_network_window(app: AppHandle, window: Window, id: u32) -> Result<(), String> {
+    let owner = browser_window(&window);
+    privacy::open_window(&app, &owner, id)
+}
+
+#[tauri::command]
 fn list_keywords(app: AppHandle) -> Vec<keywords::Keyword> {
     keywords::list(&app)
 }
@@ -2305,6 +2311,7 @@ pub fn run() {
             create_ephemeral_tab,
             network_log,
             clear_network_log,
+            open_network_window,
             list_keywords,
             save_keywords,
             omnibox_extra,

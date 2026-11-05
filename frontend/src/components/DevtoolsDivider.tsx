@@ -6,9 +6,18 @@ type DevtoolsDividerProps = {
   ratio: number;
 };
 
-const MIN_RATIO = 0.35;
-const MAX_RATIO = 0.8;
+const PANEL_MIN = 0.1;
 const RESET_RATIO = 0.62;
+
+/** Either panel stops at 10% of the window width, measured against the page area being split. */
+function ratioLimits(areaWidth: number) {
+  const minPx = window.innerWidth * PANEL_MIN;
+  if (areaWidth <= minPx * 2) {
+    return { min: 0, max: 1 };
+  }
+  const min = minPx / areaWidth;
+  return { min, max: 1 - min };
+}
 
 /**
  * Drawn in the browser UI, which shows through the gap between the page and the docked tools.
@@ -39,7 +48,9 @@ export function DevtoolsDivider({ ratio: dockRatio }: DevtoolsDividerProps) {
     if (!area || area.width <= 0) {
       return ratio;
     }
-    return Math.min(MAX_RATIO, Math.max(MIN_RATIO, (event.clientX - area.left) / area.width));
+    const limits = ratioLimits(area.width);
+    const next = (event.clientX - area.left) / area.width;
+    return Math.min(limits.max, Math.max(limits.min, next));
   };
 
   return (

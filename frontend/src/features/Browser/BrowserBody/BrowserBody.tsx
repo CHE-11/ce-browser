@@ -7,6 +7,7 @@ import { SplitDivider } from "@/components/SplitDivider";
 import { VerticalTabs } from "../BrowserHeader/Tabs/VerticalTabs";
 import { VerticalToolbar } from "./VerticalToolbar/VerticalToolbar";
 import { ViewportBar } from "./ViewportBar";
+import { ViewportHandles } from "./ViewportHandles";
 
 type BrowserBodyProps = {
   snapshot: WindowTabsState;
@@ -50,6 +51,14 @@ export function BrowserBody({
               cutout={snapshot.viewport?.cutout ?? true}
               homeBar={snapshot.viewport?.homeBar ?? true}
               devtoolsTabId={devtools ? snapshot.activeId : null}
+            />
+          ) : null}
+          {snapshot.viewport && snapshot.viewport.width > 0 && snapshot.viewport.height > 0 ? (
+            <ViewportHandles
+              width={snapshot.viewport.width}
+              height={snapshot.viewport.height}
+              cutout={snapshot.viewport.cutout}
+              homeBar={snapshot.viewport.homeBar}
             />
           ) : null}
           {activeTab && !activeTab.loaded && !activeTab.failure ? (

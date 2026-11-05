@@ -33,9 +33,8 @@ pub const DOCUMENT_SCRIPT: &str = r#"(() => {
   let reporting = false;
   function post(active) {
     try {
-      if (window.chrome && window.chrome.webview) {
-        window.chrome.webview.postMessage({ type: "ce-mic", active: active, token: token });
-      }
+      var host = window.__ceHost || (window.chrome && window.chrome.webview);
+      if (host) host.postMessage({ type: "ce-mic", active: active, token: token });
     } catch (error) {}
   }
   function live() {

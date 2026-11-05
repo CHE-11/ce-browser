@@ -2190,6 +2190,40 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
     Ok(())
 }
 
+fn header_rows(iterator: &ICoreWebView2HttpHeadersCollectionIterator) -> Vec<(String, String)> {
+    let mut rows = Vec::new();
+    unsafe {
+        let mut has_current = BOOL::default();
+        if iterator.HasCurrentHeader(&mut has_current).is_err() {
+            return rows;
+        }
+        while has_current.as_bool() && rows.len() < 80 {
+            let mut name = PWSTR::null();
+            let mut value = PWSTR::null();
+            if iterator.GetCurrentHeader(&mut name, &mut value).is_err() {
+                break;
+            }
+            let name = if name.is_null() {
+                String::new()
+            } else {
+                take_pwstr(name)
+            };
+            let value = if value.is_null() {
+                String::new()
+            } else {
+                take_pwstr(value)
+            };
+            if !name.is_empty() {
+                rows.push((name, value));
+            }
+            if iterator.MoveNext(&mut has_current).is_err() {
+                break;
+            }
+        }
+    }
+    rows
+}
+
 fn resource_kind(context: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> &'static str {
     match context {
         COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT => "document",
@@ -2380,11 +2414,14 @@ fn attach_adblock(
                 let Some(args) = args else {
                     return Ok(());
                 };
+                let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
+                let _ = args.ResourceContext(&mut context);
                 if let Ok(request) = args.Request() {
                     crate::privacy::note_request_started(
                         &request_app,
                         id,
                         request.as_raw() as usize,
+                        resource_kind(context),
                     );
                 }
                 let uri = args
@@ -2447,8 +2484,6 @@ fn attach_adblock(
                         }
                     }
                 }
-                let mut context = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
-                let _ = args.ResourceContext(&mut context);
                 let is_document = context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT;
                 if crate::adblock::should_block(
                     &request_app,
@@ -2484,6 +2519,7 @@ fn attach_adblock(
                 }
                 if let Ok(request) = args.Request() {
                     if let Ok(headers) = request.Headers() {
+                        strip_webview_client_hints(&headers);
                         apply_referrer(&request_app, &page, &uri, &headers);
                     }
                 }
@@ -2571,7 +2607,8 @@ fn attach_adblock(
                     };
                     let uri = read_pwstr(|value| request.Uri(value));
                     let method = read_pwstr(|value| request.Method(value));
-                    let status = args.Response().ok().and_then(|response| {
+                    let response = args.Response().ok();
+                    let status = response.as_ref().and_then(|response| {
                         let mut code = 0i32;
                         response.StatusCode(&mut code).ok().map(|_| code)
                     });
@@ -2580,14 +2617,42 @@ fn attach_adblock(
                         id,
                         request.as_raw() as usize,
                     );
+                    let tracked = !crate::privacy::ignored_url(&uri);
+                    let request_headers = if tracked {
+                        request
+                            .Headers()
+                            .ok()
+                            .and_then(|headers| headers.GetIterator().ok())
+                            .map(|iterator| header_rows(&iterator))
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    let response_headers = if tracked {
+                        response
+                            .as_ref()
+                            .and_then(|response| response.Headers().ok())
+                            .and_then(|headers| headers.GetIterator().ok())
+                            .map(|iterator| header_rows(&iterator))
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    let kind = started
+                        .as_ref()
+                        .map(|(_, kind)| kind.clone())
+                        .unwrap_or_else(|| "other".to_string());
+                    let started_at = started.map(|(at, _)| at);
                     crate::privacy::record_request(
                         &response_app,
                         id,
                         &method,
                         &uri,
-                        "request",
+                        &kind,
                         status,
-                        started,
+                        started_at,
+                        request_headers,
+                        response_headers,
                     );
                     Ok(())
                 })),
@@ -2969,6 +3034,229 @@ fn form_escape(value: &str) -> String {
     }
     out
 }
+
+/// Drops the WebView2 client-hint brand before the request leaves.
+///
+/// Prime Video's player CDN answers 403 when `Sec-CH-UA` names "Microsoft Edge WebView2",
+/// and the page then never receives `WebLoader.js`. Edge itself is left in the hint.
+fn strip_webview_client_hints(headers: &ICoreWebView2HttpRequestHeaders) {
+    rewrite_client_hint(headers, windows::core::w!("Sec-CH-UA"));
+    rewrite_client_hint(headers, windows::core::w!("Sec-CH-UA-Full-Version-List"));
+    let agent = header_value(headers, windows::core::w!("User-Agent"));
+    if !agent.to_ascii_lowercase().contains("webview") {
+        return;
+    }
+    let cleaned = strip_webview_user_agent(&agent);
+    if cleaned.is_empty() || cleaned == agent {
+        return;
+    }
+    let _ = unsafe { headers.SetHeader(windows::core::w!("User-Agent"), &HSTRING::from(cleaned)) };
+}
+
+fn header_value(headers: &ICoreWebView2HttpRequestHeaders, name: windows::core::PCWSTR) -> String {
+    read_pwstr(|value| unsafe { headers.GetHeader(name, value) })
+}
+
+fn rewrite_client_hint(headers: &ICoreWebView2HttpRequestHeaders, name: windows::core::PCWSTR) {
+    let current = header_value(headers, name);
+    if !current.to_ascii_lowercase().contains("webview") {
+        return;
+    }
+    let cleaned = strip_webview_brand(&current);
+    if cleaned == current {
+        return;
+    }
+    let _ = unsafe { headers.RemoveHeader(name) };
+    if !cleaned.is_empty() {
+        let _ = unsafe { headers.SetHeader(name, &HSTRING::from(cleaned)) };
+    }
+}
+
+/// Removes client-hint brands whose name contains "webview".
+fn strip_webview_brand(value: &str) -> String {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty() && !part.to_ascii_lowercase().contains("webview"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Removes a `WebView` or `WebView2` product token from a user agent.
+fn strip_webview_user_agent(agent: &str) -> String {
+    let lower = agent.to_ascii_lowercase();
+    let mut result = String::with_capacity(agent.len());
+    let mut rest = agent;
+    let mut lower_rest = lower.as_str();
+    while let Some(index) = webview_at(lower_rest) {
+        result.push_str(&rest[..index]);
+        let len = webview_token_len(&lower_rest[index..]);
+        rest = &rest[index + len..];
+        lower_rest = &lower_rest[index + len..];
+        if result.ends_with(' ') && (rest.is_empty() || rest.starts_with(' ')) {
+            result.pop();
+            if let Some(stripped) = rest.strip_prefix(' ') {
+                rest = stripped;
+                lower_rest = &lower_rest[1..];
+            }
+        }
+    }
+    result.push_str(rest);
+    result
+}
+
+fn webview_at(lower: &str) -> Option<usize> {
+    let bytes = lower.as_bytes();
+    let mut start = 0;
+    while start + 7 <= bytes.len() {
+        let Some(rel) = lower[start..].find("webview") else {
+            break;
+        };
+        let index = start + rel;
+        let before_ok = index == 0 || !bytes[index - 1].is_ascii_alphanumeric();
+        if before_ok {
+            return Some(index);
+        }
+        start = index + 7;
+    }
+    None
+}
+
+fn webview_token_len(lower: &str) -> usize {
+    let bytes = lower.as_bytes();
+    let mut len = 7;
+    if bytes.get(len) == Some(&b'2') {
+        len += 1;
+    }
+    if bytes.get(len) == Some(&b'/') {
+        len += 1;
+        while len < bytes.len() && (bytes[len].is_ascii_digit() || bytes[len] == b'.') {
+            len += 1;
+        }
+    }
+    len
+}
+
+/// Runs before every frame's own scripts. Prime Video treats `chrome.webview` as its native
+/// shell and then crashes on the missing host object (`Element not found` / `0x80070490`).
+/// The real bridge stays on `__ceHost` for this browser's own page scripts.
+pub const WEBVIEW_CLOAK_SCRIPT: &str = r#"(function () {
+  if (window.__ceCloak) return;
+  window.__ceCloak = true;
+  var chromeObj = window.chrome;
+  var bridge = null;
+  try { bridge = chromeObj && chromeObj.webview; } catch (error) {}
+  if (bridge && !window.__ceHost) {
+    try {
+      Object.defineProperty(window, "__ceHost", {
+        configurable: true,
+        enumerable: false,
+        writable: false,
+        value: bridge
+      });
+    } catch (error) {
+      window.__ceHost = bridge;
+    }
+  }
+  if (!remotePage()) return;
+  hideWebView(chromeObj);
+  patchIpc();
+  spoofClientHints();
+
+  function appHost(host) {
+    host = String(host || "").toLowerCase();
+    return host === "tauri.localhost" || host === "localhost" || host === "127.0.0.1" || host === "::1";
+  }
+  function remotePage() {
+    if (appHost(location.hostname)) return false;
+    var protocol = location.protocol;
+    if (protocol === "http:" || protocol === "https:") return true;
+    if (protocol !== "about:" && protocol !== "blob:") return false;
+    try {
+      if (!window.top || window.top === window) return false;
+      if (appHost(window.top.location.hostname)) return false;
+      return window.top.location.protocol === "http:" || window.top.location.protocol === "https:";
+    } catch (error) {
+      return true;
+    }
+  }
+  function hideWebView(chromeObj) {
+    if (!chromeObj) return;
+    try { delete chromeObj.webview; } catch (error) {}
+    var still = false;
+    try { still = !!chromeObj.webview; } catch (error) { still = true; }
+    if (!still) return;
+    try {
+      Object.defineProperty(chromeObj, "webview", {
+        configurable: true,
+        enumerable: false,
+        get: function () { return undefined; },
+        set: function () {}
+      });
+    } catch (error) {
+      try { chromeObj.webview = undefined; } catch (ignored) {}
+    }
+  }
+  function patchIpc() {
+    var host = window.__ceHost;
+    if (!host) return;
+    try {
+      Object.defineProperty(window, "ipc", {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: Object.freeze({
+          postMessage: function (message) { host.postMessage(message); }
+        })
+      });
+    } catch (error) {}
+  }
+  function keep(list) {
+    return (list || []).filter(function (item) {
+      return !item || !/webview/i.test(String(item.brand || ""));
+    });
+  }
+  function spoofClientHints() {
+    var data = navigator.userAgentData;
+    if (data && data.brands && data.brands.some(function (item) { return item && /webview/i.test(String(item.brand || "")); })) {
+      var brands = keep(data.brands);
+      var fake = {
+        brands: brands,
+        mobile: !!data.mobile,
+        platform: data.platform || "Windows",
+        toJSON: function () {
+          return { brands: brands, mobile: !!data.mobile, platform: data.platform || "Windows" };
+        },
+        getHighEntropyValues: function (hints) {
+          if (!data.getHighEntropyValues) return Promise.resolve(fake.toJSON());
+          return data.getHighEntropyValues.call(data, hints).then(function (values) {
+            var copy = {};
+            for (var key in values) copy[key] = values[key];
+            if (copy.brands) copy.brands = keep(copy.brands);
+            if (copy.fullVersionList) copy.fullVersionList = keep(copy.fullVersionList);
+            return copy;
+          });
+        }
+      };
+      try {
+        Object.defineProperty(Navigator.prototype, "userAgentData", {
+          configurable: true,
+          get: function () { return fake; }
+        });
+      } catch (error) {}
+    }
+    var agent = navigator.userAgent || "";
+    if (!/webview/i.test(agent)) return;
+    var cleaned = agent.replace(/\s*WebView2?\/[\d.]+/ig, "").replace(/\s*WebView2?(?=[\s);]|$)/ig, "");
+    if (!cleaned || cleaned === agent) return;
+    try {
+      Object.defineProperty(Navigator.prototype, "userAgent", {
+        configurable: true,
+        get: function () { return cleaned; }
+      });
+    } catch (error) {}
+  }
+})();"#;
 
 fn apply_referrer(
     app: &AppHandle,
@@ -4026,6 +4314,37 @@ mod tests {
         assert!(!page_keeps_light_scheme("https://accounts.google.com/"));
         assert!(!page_keeps_light_scheme("https://example.com/gmail"));
         assert!(!page_keeps_light_scheme("not a url"));
+    }
+
+    #[test]
+    fn the_webview_brand_is_removed_from_client_hints() {
+        let raw =
+            r#""Chromium";v="126", "Microsoft Edge";v="126", "Microsoft Edge WebView2";v="126""#;
+        assert_eq!(
+            super::strip_webview_brand(raw),
+            r#""Chromium";v="126", "Microsoft Edge";v="126""#
+        );
+    }
+
+    #[test]
+    fn an_edge_client_hint_is_unchanged() {
+        let raw = r#""Chromium";v="126", "Microsoft Edge";v="126", "Not_A Brand";v="24""#;
+        assert_eq!(super::strip_webview_brand(raw), raw);
+    }
+
+    #[test]
+    fn a_webview_token_is_removed_from_the_user_agent() {
+        let agent = "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0 WebView2/126.0.0.0";
+        assert_eq!(
+            super::strip_webview_user_agent(agent),
+            "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0"
+        );
+    }
+
+    #[test]
+    fn an_edge_user_agent_is_left_alone() {
+        let agent = "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0";
+        assert_eq!(super::strip_webview_user_agent(agent), agent);
     }
 
     #[test]

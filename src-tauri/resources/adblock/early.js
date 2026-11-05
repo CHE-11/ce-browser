@@ -125,9 +125,17 @@
   hold("fbq", fbq);
   hold("_fbq", fbq);
 
-  if (document.getElementById("ce-adblock")) return;
-  const style = document.createElement("style");
-  style.id = "ce-adblock";
-  style.textContent = __CE_CSS__;
-  (document.head || document.documentElement).appendChild(style);
+  const mount = () => {
+    if (document.getElementById("ce-adblock")) return true;
+    const root = document.head || document.documentElement;
+    if (!root) return false;
+    const style = document.createElement("style");
+    style.id = "ce-adblock";
+    style.textContent = __CE_CSS__;
+    root.appendChild(style);
+    return true;
+  };
+  if (!mount() && document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", mount, { once: true });
+  }
 })();

@@ -423,9 +423,12 @@ pub fn early_script() -> String {
 pub fn cosmetic_script() -> String {
     let css = serde_json::to_string(COSMETIC_CSS).unwrap_or_else(|_| "\"\"".into());
     format!(
-        "(() => {{ if (document.getElementById('ce-adblock')) return; \
+        "(() => {{ const mount = () => {{ if (document.getElementById('ce-adblock')) return true; \
+         const root = document.head || document.documentElement; if (!root) return false; \
          const style = document.createElement('style'); style.id = 'ce-adblock'; \
-         style.textContent = {css}; (document.head || document.documentElement).appendChild(style); }})();"
+         style.textContent = {css}; root.appendChild(style); return true; }}; \
+         if (!mount() && document.readyState === 'loading') {{ \
+         document.addEventListener('DOMContentLoaded', mount, {{ once: true }}); }} }})();"
     )
 }
 

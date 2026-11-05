@@ -1,5 +1,5 @@
 import { RotateCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clearViewport, openDevtools, setViewport } from "@/lib/browser-client";
 
 type ViewportBarProps = {
@@ -38,15 +38,47 @@ function presetFor(width: number, height: number) {
  * Sits in the page column, above the real page view. The native webview is placed below this bar
  * at the chosen CSS size, so device preview is the page itself.
  */
+/** Matches the device bar height the page view is placed under. */
+const BAR_HEIGHT = 36;
+
 export function ViewportBar({ width, height, cutout, homeBar, devtoolsTabId }: ViewportBarProps) {
-  const [draftWidth, setDraftWidth] = useState(width > 0 ? String(width) : "");
-  const [draftHeight, setDraftHeight] = useState(height > 0 ? String(height) : "");
+  const barRef = useRef<HTMLDivElement>(null);
+  const widthFocused = useRef(false);
+  const heightFocused = useRef(false);
+  const [frame, setFrame] = useState({ width: 0, height: 0 });
+  const [draftWidth, setDraftWidth] = useState("");
+  const [draftHeight, setDraftHeight] = useState("");
   const preset = presetFor(width, height);
+  const full = width <= 0 || height <= 0;
 
   useEffect(() => {
-    setDraftWidth(width > 0 ? String(width) : "");
-    setDraftHeight(height > 0 ? String(height) : "");
-  }, [width, height]);
+    const pages = barRef.current?.parentElement;
+    if (!pages) {
+      return;
+    }
+    const measure = () => {
+      const rect = pages.getBoundingClientRect();
+      setFrame({
+        width: Math.max(0, Math.round(rect.width)),
+        height: Math.max(0, Math.round(rect.height - BAR_HEIGHT)),
+      });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(pages);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const shownWidth = full ? frame.width : width;
+    const shownHeight = full ? frame.height : height;
+    if (!widthFocused.current && shownWidth > 0) {
+      setDraftWidth(String(shownWidth));
+    }
+    if (!heightFocused.current && shownHeight > 0) {
+      setDraftHeight(String(shownHeight));
+    }
+  }, [full, width, height, frame]);
 
   const commit = (nextWidth: number, nextHeight: number, nextCutout = cutout, nextHome = homeBar) => {
     if (!Number.isFinite(nextWidth) || !Number.isFinite(nextHeight) || nextWidth <= 0 || nextHeight <= 0) {
@@ -57,7 +89,12 @@ export function ViewportBar({ width, height, cutout, homeBar, devtoolsTabId }: V
   };
 
   const commitDraft = () => {
-    commit(Number(draftWidth), Number(draftHeight));
+    const nextWidth = Number(draftWidth);
+    const nextHeight = Number(draftHeight);
+    if (full && nextWidth === frame.width && nextHeight === frame.height) {
+      return;
+    }
+    commit(nextWidth, nextHeight);
   };
 
   const sized = width > 0 && height > 0;
@@ -65,6 +102,7 @@ export function ViewportBar({ width, height, cutout, homeBar, devtoolsTabId }: V
   return (
     <div
       id="viewport-bar"
+      ref={barRef}
       className="absolute inset-x-0 top-0 z-20 flex h-9 items-center justify-center border-b border-zinc-800 bg-zinc-950 px-2"
     >
       <div id="viewport-controls" className="flex items-center gap-2">
@@ -102,7 +140,13 @@ export function ViewportBar({ width, height, cutout, homeBar, devtoolsTabId }: V
         className="h-7 w-16 rounded-md border border-zinc-700 bg-zinc-900 px-2 text-xs text-zinc-100"
         value={draftWidth}
         onChange={(event) => setDraftWidth(event.target.value)}
-        onBlur={commitDraft}
+        onFocus={() => {
+          widthFocused.current = true;
+        }}
+        onBlur={() => {
+          widthFocused.current = false;
+          commitDraft();
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             commitDraft();
@@ -122,7 +166,13 @@ export function ViewportBar({ width, height, cutout, homeBar, devtoolsTabId }: V
         className="h-7 w-16 rounded-md border border-zinc-700 bg-zinc-900 px-2 text-xs text-zinc-100"
         value={draftHeight}
         onChange={(event) => setDraftHeight(event.target.value)}
-        onBlur={commitDraft}
+        onFocus={() => {
+          heightFocused.current = true;
+        }}
+        onBlur={() => {
+          heightFocused.current = false;
+          commitDraft();
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             commitDraft();

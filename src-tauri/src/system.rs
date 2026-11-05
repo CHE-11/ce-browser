@@ -1401,9 +1401,8 @@ pub const NOTIFY_JS: &str = r#"(function () {
   var Native = window.Notification;
   function Wrapped(title, options) {
     try {
-      if (window.chrome && window.chrome.webview) {
-        window.chrome.webview.postMessage({ type: "ce-notify", title: String(title || ""), body: options && options.body ? String(options.body) : "" });
-      }
+      var host = window.__ceHost || (window.chrome && window.chrome.webview);
+      if (host) host.postMessage({ type: "ce-notify", title: String(title || ""), body: options && options.body ? String(options.body) : "" });
     } catch (error) {}
     return new Native(title, options);
   }

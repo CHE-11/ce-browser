@@ -12,6 +12,7 @@ import { BrowserPage } from "./features/Browser/Browser.page";
 import { DownloadsPage } from "./features/Downloads/Downloads.page";
 import { FilesPage } from "./features/Files/Files.page";
 import { HistoryPage } from "./features/History/History.page";
+import { NetworkPage } from "./features/Network/Network.page";
 import { ExtensionsPage } from "./features/Extensions/Extensions.page";
 import { PeekPage } from "./features/Peek/Peek.page";
 import { PermissionsPage } from "./features/Permissions/Permissions.page";
@@ -60,6 +61,8 @@ function App() {
       return <FilesPage params={route.params} />;
     case "history":
       return <HistoryPage />;
+    case "network":
+      return <NetworkPage tabId={Number(route.params.get("id"))} />;
     case "settings":
       return <SettingsPage />;
     case "styles":

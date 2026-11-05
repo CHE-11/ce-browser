@@ -94,7 +94,7 @@ export type SplitView = {
 };
 
 export type DevtoolsDock = {
-  /** Share of the page area the pages keep. Tools take the rest, from 0.35 to 0.8. */
+  /** Share of the page area the pages keep. Either panel can shrink to 10% of the window width. */
   ratio: number;
   /** The column is on screen. Fullscreen keeps the dock open with this false. */
   visible: boolean;
@@ -985,7 +985,13 @@ export type Container = {
   color: TabGroupColor;
 };
 
+export type NetworkHeader = {
+  name: string;
+  value: string;
+};
+
 export type NetworkEntry = {
+  id: number;
   method: string;
   url: string;
   kind: string;
@@ -994,6 +1000,8 @@ export type NetworkEntry = {
   time: number;
   /** Milliseconds from the request start until the response, when the start was seen. */
   durationMs: number | null;
+  requestHeaders: NetworkHeader[];
+  responseHeaders: NetworkHeader[];
 };
 
 export type AdblockSettings = {

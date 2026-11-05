@@ -1,10 +1,12 @@
 //! Tracking-parameter removal, HTTPS-only, permissions, containers and the network log.
 
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::window::WindowBuilder;
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl};
 use url::Url;
 
 use crate::{files, paths, settings};
@@ -12,6 +14,12 @@ use crate::{files, paths, settings};
 const PERMISSIONS: &str = "permissions.json";
 const CONTAINERS: &str = "containers.json";
 const MAX_LOG: usize = 300;
+const MAX_HEADERS: usize = 40;
+const MAX_AUTH_HEADERS: usize = 24;
+const MAX_HEADER_NAME: usize = 128;
+const MAX_HEADER_VALUE: usize = 2_048;
+static NEXT_ENTRY: AtomicU64 = AtomicU64::new(1);
+static NETWORK_WINDOWS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 const KINDS: &[&str] = &[
     "camera",
     "microphone",
@@ -38,8 +46,9 @@ pub const PROTOCOL_JS: &str = r#"(function () {
     scheme = String(scheme || "");
     url = String(url || "");
     try {
-      if (!window.chrome || !window.chrome.webview) throw new Error("no host");
-      window.chrome.webview.postMessage({ type: "ce-protocol", scheme: scheme, url: url });
+      var host = window.__ceHost || (window.chrome && window.chrome.webview);
+      if (!host) throw new Error("no host");
+      host.postMessage({ type: "ce-protocol", scheme: scheme, url: url });
       queue.push({ scheme: scheme, url: url });
     } catch (error) {
       try { native(scheme, url); } catch (ignored) {}
@@ -164,9 +173,17 @@ struct ContainerFile {
     containers: Vec<Container>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkHeader {
+    pub name: String,
+    pub value: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NetworkEntry {
+    pub id: u64,
     pub method: String,
     pub url: String,
     pub kind: String,
@@ -175,6 +192,13 @@ pub struct NetworkEntry {
     pub time: u64,
     /// Milliseconds from the request start until the response, when the start was seen.
     pub duration_ms: Option<u64>,
+    pub request_headers: Vec<NetworkHeader>,
+    pub response_headers: Vec<NetworkHeader>,
+}
+
+struct Inflight {
+    at: u64,
+    kind: String,
 }
 
 struct PrivacyState {
@@ -182,8 +206,8 @@ struct PrivacyState {
     containers: Mutex<Vec<Container>>,
     log: Mutex<HashMap<u32, VecDeque<NetworkEntry>>>,
     seeds: Mutex<HashMap<String, u32>>,
-    /// Start time for a request still waiting on its response, keyed by tab and the request pointer.
-    started: Mutex<HashMap<(u32, usize), u64>>,
+    /// A request still waiting on its response, keyed by tab and the request pointer.
+    started: Mutex<HashMap<(u32, usize), Inflight>>,
 }
 
 pub fn init(app: &AppHandle) {
@@ -585,24 +609,39 @@ fn now_ms() -> u64 {
 
 /// Remember when this WebView2 request object started. `request` is the COM pointer, which the
 /// response event hands back for the same request.
-pub fn note_request_started(app: &AppHandle, tab: u32, request: usize) {
+pub fn note_request_started(app: &AppHandle, tab: u32, request: usize, kind: &str) {
     let now = now_ms();
     let guard = state(app);
     let mut started = guard.started.lock().expect("network start");
-    started.retain(|_, at| now.saturating_sub(*at) < 120_000);
+    started.retain(|_, item| now.saturating_sub(item.at) < 120_000);
     if started.len() >= 4_000 {
         started.clear();
     }
-    started.insert((tab, request), now);
+    started.insert(
+        (tab, request),
+        Inflight {
+            at: now,
+            kind: kind.chars().take(32).collect(),
+        },
+    );
 }
 
-pub fn take_request_started(app: &AppHandle, tab: u32, request: usize) -> Option<u64> {
+pub fn take_request_started(app: &AppHandle, tab: u32, request: usize) -> Option<(u64, String)> {
     let guard = state(app);
     guard
         .started
         .lock()
         .expect("network start")
         .remove(&(tab, request))
+        .map(|item| (item.at, item.kind))
+}
+
+/// Internal pages and extension frames are not part of the site the log is watching.
+pub fn ignored_url(url: &str) -> bool {
+    url.starts_with("ce:")
+        || url.starts_with("chrome-extension:")
+        || url.starts_with("data:")
+        || url.starts_with("about:")
 }
 
 pub fn record_request(
@@ -613,8 +652,10 @@ pub fn record_request(
     kind: &str,
     status: Option<i32>,
     started_at: Option<u64>,
+    request_headers: Vec<(String, String)>,
+    response_headers: Vec<(String, String)>,
 ) {
-    if url.starts_with("ce:") || url.starts_with("chrome-extension:") || url.starts_with("data:") {
+    if ignored_url(url) {
         return;
     }
     let time = now_ms();
@@ -622,15 +663,143 @@ pub fn record_request(
     let mut log = guard.log.lock().expect("network log");
     let entries = log.entry(tab).or_default();
     entries.push_back(NetworkEntry {
+        id: NEXT_ENTRY.fetch_add(1, Ordering::Relaxed),
         method: method.chars().take(16).collect(),
         url: url.chars().take(2000).collect(),
         kind: kind.chars().take(32).collect(),
         status,
         time,
         duration_ms: started_at.map(|started| time.saturating_sub(started)),
+        request_headers: trim_headers(request_headers),
+        response_headers: trim_headers(response_headers),
     });
     while entries.len() > MAX_LOG {
         entries.pop_front();
+    }
+}
+
+fn is_auth_header(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "authorization"
+            | "proxy-authorization"
+            | "www-authenticate"
+            | "proxy-authenticate"
+            | "authentication-info"
+            | "cookie"
+            | "set-cookie"
+            | "x-api-key"
+            | "x-auth-token"
+            | "x-access-token"
+            | "x-csrf-token"
+            | "x-xsrf-token"
+    )
+}
+
+/// Keeps credential headers even after the general cap, and shortens huge values.
+pub fn trim_headers(headers: Vec<(String, String)>) -> Vec<NetworkHeader> {
+    let mut rows = Vec::new();
+    let mut auth_count = 0usize;
+    let mut other_count = 0usize;
+    for (name, value) in headers {
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        let auth = is_auth_header(name);
+        if auth {
+            if auth_count >= MAX_AUTH_HEADERS {
+                continue;
+            }
+            auth_count += 1;
+        } else if other_count >= MAX_HEADERS {
+            continue;
+        } else {
+            other_count += 1;
+        }
+        rows.push(NetworkHeader {
+            name: clip(name, MAX_HEADER_NAME),
+            value: clip(&value, MAX_HEADER_VALUE),
+        });
+    }
+    rows
+}
+
+fn clip(value: &str, max: usize) -> String {
+    if value.chars().count() <= max {
+        return value.to_string();
+    }
+    let mut clipped: String = value.chars().take(max).collect();
+    clipped.push('…');
+    clipped
+}
+
+/// Opens a normal window on this tab's log. Focusing it again brings the existing one forward.
+pub fn open_window(app: &AppHandle, owner: &str, tab: u32) -> Result<(), String> {
+    let label = format!("popup-netlog-{tab}");
+    if let Some(existing) = app.get_window(&label) {
+        let _ = existing.unminimize();
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+    let window = WindowBuilder::new(app, &label)
+        .title("Network")
+        .inner_size(980.0, 720.0)
+        .min_inner_size(720.0, 420.0)
+        .resizable(true)
+        .decorations(true)
+        .focused(true)
+        .shadow(true)
+        .build()
+        .map_err(|error| error.to_string())?;
+    crate::profiles::apply_window_icon(app, &window);
+    if let Some(owner_window) = app.get_window(owner)
+        && let Ok(position) = owner_window.outer_position()
+    {
+        let _ = window.set_position(PhysicalPosition::new(position.x + 48, position.y + 48));
+    }
+    let url = crate::paths::internal_url(app, &format!("network?id={tab}"));
+    let host = app.clone();
+    let view = crate::tabs::base_builder(app, &label, WebviewUrl::External(url))
+        .auto_resize()
+        .disable_drag_drop_handler()
+        .background_color(crate::tabs::popup_surface_color(app))
+        .focused(true)
+        .on_new_window(move |url, features| crate::tabs::new_window(&host, None, url, features));
+    let size = match window.inner_size() {
+        Ok(size) => size,
+        Err(error) => {
+            let _ = window.close();
+            return Err(error.to_string());
+        }
+    };
+    let webview = match window.add_child(view, PhysicalPosition::new(0, 0), size) {
+        Ok(webview) => webview,
+        Err(error) => {
+            let _ = window.close();
+            return Err(error.to_string());
+        }
+    };
+    crate::webview2::attach_popup_hooks(app, &webview, &label);
+    if let Ok(mut open) = NETWORK_WINDOWS.lock() {
+        open.retain(|item| item != &label);
+        open.push(label);
+    }
+    let _ = window.set_focus();
+    Ok(())
+}
+
+/// Closes log windows so the process can exit with the last browser window.
+pub fn close_windows(app: &AppHandle) {
+    let labels = NETWORK_WINDOWS
+        .lock()
+        .map(|mut open| std::mem::take(&mut *open))
+        .unwrap_or_default();
+    for label in labels {
+        if let Some(window) = app.get_window(&label) {
+            let _ = window.close();
+        }
     }
 }
 
@@ -940,6 +1109,41 @@ mod tests {
         assert_eq!(decided("allow"), Some(true));
         assert_eq!(decided("deny"), Some(false));
         assert_eq!(decided("asked"), None);
+    }
+
+    #[test]
+    fn header_capture_keeps_credentials_and_clips_long_values() {
+        let mut headers = vec![(
+            "Authorization".into(),
+            format!("Bearer {}", "a".repeat(3_000)),
+        )];
+        for index in 0..50 {
+            headers.push((format!("X-Other-{index}"), "1".into()));
+        }
+        headers.push(("Set-Cookie".into(), "sid=abc".into()));
+        headers.push(("  ".into(), "dropped".into()));
+        let trimmed = super::trim_headers(headers);
+        let authorization = trimmed
+            .iter()
+            .find(|header| header.name == "Authorization")
+            .expect("authorization");
+        assert!(authorization.value.starts_with("Bearer "));
+        assert!(authorization.value.ends_with('…'));
+        assert_eq!(authorization.value.chars().count(), 2_049);
+        assert!(trimmed.iter().any(|header| header.name == "Set-Cookie"));
+        assert!(
+            trimmed
+                .iter()
+                .filter(|header| header.name.starts_with("X-Other"))
+                .count()
+                <= 40
+        );
+        assert!(trimmed.iter().all(|header| header.name != "  "));
+        assert!(super::is_auth_header("cookie"));
+        assert!(!super::is_auth_header("accept"));
+        assert!(super::ignored_url("ce://settings"));
+        assert!(super::ignored_url("data:text/plain,hi"));
+        assert!(!super::ignored_url("https://app.todoist.com/api/v1/sync"));
     }
 
     #[test]

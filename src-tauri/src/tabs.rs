@@ -51,10 +51,9 @@ const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSma
 /// Logical px between the two split panes. The browser UI shows through it as the divider.
 const SPLIT_GAP: f64 = 6.0;
 /// Share of the page area kept for pages when developer tools are docked. The tools take the rest.
-/// The divider in the browser UI uses the same limits.
 const DEVTOOLS_RATIO: f64 = 0.62;
-const DEVTOOLS_RATIO_MIN: f64 = 0.35;
-const DEVTOOLS_RATIO_MAX: f64 = 0.8;
+/// Either panel can shrink until it is this fraction of the window width.
+const DEVTOOLS_PANEL_MIN: f64 = 0.1;
 const MAX_WORKSPACES: usize = 20;
 
 #[derive(Debug, Clone, Serialize)]
@@ -1270,6 +1269,7 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
         .disable_drag_drop_handler()
         .background_color(color)
         .focused(false)
+        .initialization_script_for_all_frames(webview2::WEBVIEW_CLOAK_SCRIPT)
         .initialization_script(AUTOPLAY_GUARD_SCRIPT)
         .initialization_script(page_background_script(app))
         .initialization_script(PEEK_CLICK_SCRIPT)
@@ -1711,9 +1711,8 @@ const ZOOM_WHEEL_SCRIPT: &str = r#"(function () {
     post(change);
   }, { passive: false });
   function post(change) {
-    if (window.chrome && window.chrome.webview) {
-      window.chrome.webview.postMessage({ type: "ce-zoom", change: change });
-    }
+    var host = window.__ceHost || (window.chrome && window.chrome.webview);
+    if (host) host.postMessage({ type: "ce-zoom", change: change });
   }
 })();"#;
 
@@ -1737,8 +1736,9 @@ const PEEK_CLICK_SCRIPT: &str = r#"(function () {
   document.addEventListener("click", function (event) {
     if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.button !== 0) return;
     var href = linkHref(event);
-    if (!href || !window.chrome || !window.chrome.webview) return;
-    window.chrome.webview.postMessage({ type: "ce-peek", url: href });
+    var host = window.__ceHost || (window.chrome && window.chrome.webview);
+    if (!href || !host) return;
+    host.postMessage({ type: "ce-peek", url: href });
   }, true);
 })();"#;
 
@@ -2336,6 +2336,8 @@ pub fn fit_device(page_w: u32, page_h: u32, want_w: u32, want_h: u32) -> (u32, u
 
 /// Height of the device bar drawn above the page, in CSS pixels. The page view starts below it.
 const VIEWPORT_BAR: f64 = 36.0;
+/// Empty CSS pixels kept around a sized page so the resize handles sit outside the webview.
+const VIEWPORT_GUTTER: f64 = 12.0;
 const VIEWPORT_MIN: u32 = 200;
 const VIEWPORT_MAX: u32 = 3840;
 
@@ -2347,6 +2349,7 @@ fn clamp_viewport(width: u32, height: u32) -> Option<(u32, u32)> {
 }
 
 /// Centers a CSS viewport in the page column, under the device bar.
+/// Leaves a gutter on every side so the resize handles are not covered by the webview.
 fn viewport_frame(
     viewport: Option<(u32, u32)>,
     page_w: u32,
@@ -2355,11 +2358,21 @@ fn viewport_frame(
 ) -> Option<(i32, i32, u32, u32)> {
     let (css_w, css_h) = viewport?;
     let bar = (VIEWPORT_BAR * scale).round() as u32;
-    let avail_h = page_h.saturating_sub(bar).max(1);
+    let gutter = (VIEWPORT_GUTTER * scale).round() as u32;
+    let avail_w = page_w.saturating_sub(gutter.saturating_mul(2)).max(1);
+    let avail_h = page_h
+        .saturating_sub(bar)
+        .saturating_sub(gutter.saturating_mul(2))
+        .max(1);
     let want_w = (f64::from(css_w) * scale).round().max(1.0) as u32;
     let want_h = (f64::from(css_h) * scale).round().max(1.0) as u32;
-    let (x, y, width, height) = fit_device(page_w, avail_h, want_w, want_h);
-    Some((x as i32, y as i32 + bar as i32, width, height))
+    let (x, y, width, height) = fit_device(avail_w, avail_h, want_w, want_h);
+    Some((
+        x as i32 + gutter as i32,
+        y as i32 + bar as i32 + gutter as i32,
+        width,
+        height,
+    ))
 }
 
 pub fn set_viewport(
@@ -3125,15 +3138,28 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         }
         Some((shown, parked, changed, ratio, wake, viewport, dock_ratio))
     });
-    let Some((shown, parked, changed, ratio, wake, viewport, dock_ratio)) = plan else {
+    let Some((shown, parked, changed, ratio, wake, viewport, mut dock_ratio)) = plan else {
         return;
     };
+    let mut dock_clamped = false;
+    if let Some(share) = dock_ratio {
+        let clamped = clamp_devtools_ratio(share, page_size.width as f64, window_width(app, window));
+        if (clamped - share).abs() > 0.001 {
+            dock_clamped = true;
+            with_state(app, |state| {
+                if let Some(chrome) = state.chrome_mut(window) {
+                    chrome.devtools.ratio = clamped;
+                }
+            });
+        }
+        dock_ratio = Some(clamped);
+    }
     for label in &wake {
         if let Some(webview) = app.get_webview(label) {
             webview2::wake(&webview);
         }
     }
-    if !resize && !changed {
+    if !resize && !changed && !dock_clamped {
         if !wake.is_empty() {
             emit_tabs(app);
         }
@@ -3195,7 +3221,7 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         }
     }
     apply_audio(app, window);
-    if !wake.is_empty() {
+    if !wake.is_empty() || dock_clamped {
         emit_tabs(app);
     }
 }
@@ -5015,12 +5041,34 @@ fn devtools_job_is(app: &AppHandle, window: &str, job: u64) -> bool {
     })
 }
 
-fn clamp_devtools_ratio(ratio: f64) -> f64 {
-    if ratio.is_finite() {
-        ratio.clamp(DEVTOOLS_RATIO_MIN, DEVTOOLS_RATIO_MAX)
-    } else {
-        DEVTOOLS_RATIO
+/// Smallest and largest share of `page_width` the pages can keep, so neither panel is narrower
+/// than 10% of the window. When the page area cannot hold two panels of that size, the drag
+/// can use the whole area.
+fn devtools_ratio_bounds(page_width: f64, window_width: f64) -> (f64, f64) {
+    if page_width <= 1.0 || window_width <= 1.0 {
+        return (DEVTOOLS_PANEL_MIN, 1.0 - DEVTOOLS_PANEL_MIN);
     }
+    let min_px = window_width * DEVTOOLS_PANEL_MIN;
+    if page_width <= min_px * 2.0 {
+        return (0.0, 1.0);
+    }
+    let min_ratio = min_px / page_width;
+    (min_ratio, 1.0 - min_ratio)
+}
+
+fn clamp_devtools_ratio(ratio: f64, page_width: f64, window_width: f64) -> f64 {
+    if !ratio.is_finite() {
+        return DEVTOOLS_RATIO;
+    }
+    let (min_ratio, max_ratio) = devtools_ratio_bounds(page_width, window_width);
+    ratio.clamp(min_ratio, max_ratio)
+}
+
+fn window_width(app: &AppHandle, window: &str) -> f64 {
+    app.get_window(window)
+        .and_then(|window| window.inner_size().ok())
+        .map(|size| size.width as f64)
+        .unwrap_or(0.0)
 }
 
 /// Ctrl+Shift+I. A website under the pointer opens its docked tools. The browser chrome and
@@ -6063,12 +6111,13 @@ pub fn set_split_ratio(app: &AppHandle, window: &str, ratio: f64) {
 }
 
 pub fn set_devtools_ratio(app: &AppHandle, window: &str, ratio: f64) {
+    let (_, page) = page_rect(app, window);
+    let ratio = clamp_devtools_ratio(ratio, page.width as f64, window_width(app, window));
     let changed = with_state(app, |state| {
         let devtools = &mut state.chrome_mut(window)?.devtools;
         if !devtools.open {
             return None;
         }
-        let ratio = clamp_devtools_ratio(ratio);
         if (devtools.ratio - ratio).abs() < 0.001 {
             return None;
         }
@@ -6894,11 +6943,15 @@ mod tests {
     }
 
     #[test]
-    fn devtools_column_stays_wide_enough_to_use() {
-        assert_eq!(clamp_devtools_ratio(0.0), DEVTOOLS_RATIO_MIN);
-        assert_eq!(clamp_devtools_ratio(1.0), DEVTOOLS_RATIO_MAX);
-        assert_eq!(clamp_devtools_ratio(0.5), 0.5);
-        assert_eq!(clamp_devtools_ratio(f64::NAN), DEVTOOLS_RATIO);
+    fn either_devtools_panel_can_shrink_to_ten_percent_of_the_window() {
+        let (min_ratio, max_ratio) = devtools_ratio_bounds(1000.0, 1000.0);
+        assert!((min_ratio - 0.1).abs() < 1e-9);
+        assert!((max_ratio - 0.9).abs() < 1e-9);
+        let (min_ratio, max_ratio) = devtools_ratio_bounds(800.0, 1000.0);
+        assert!((min_ratio - 0.125).abs() < 1e-9);
+        assert!((max_ratio - 0.875).abs() < 1e-9);
+        assert_eq!(clamp_devtools_ratio(0.5, 1000.0, 1000.0), 0.5);
+        assert_eq!(clamp_devtools_ratio(f64::NAN, 1000.0, 1000.0), DEVTOOLS_RATIO);
     }
 
     #[test]
@@ -7188,6 +7241,19 @@ mod tests {
         assert_eq!((width, height), (390, 844));
         assert_eq!(x, (2000 - 390) / 2);
         assert_eq!(y, (1400 - 844) / 2);
+    }
+
+    #[test]
+    fn a_sized_page_keeps_a_gutter_for_resize_handles() {
+        let (x, y, width, height) = viewport_frame(Some((390, 844)), 800, 1000, 1.0).unwrap();
+        assert_eq!((width, height), (390, 844));
+        assert!(x >= 12);
+        assert!(y >= 36 + 12);
+        assert!(x + width as i32 <= 800 - 12);
+        assert!(y + height as i32 <= 1000 - 12);
+
+        let (x, y, width, height) = viewport_frame(Some((1180, 1400)), 800, 900, 1.0).unwrap();
+        assert_eq!((x, y, width, height), (12, 36 + 12, 800 - 24, 900 - 36 - 24));
     }
 
     #[test]

@@ -864,9 +864,8 @@ const INJECTION_JS: &str = r#"(function () {
         next = Math.round(Math.min(4, Math.max(0.25, next)) * 20) / 20;
         window.__ceSpec.videoSpeed = next;
         applyRate();
-        if (window.chrome && window.chrome.webview) {
-          window.chrome.webview.postMessage({ type: "ce-speed", speed: next });
-        }
+        var host = window.__ceHost || (window.chrome && window.chrome.webview);
+        if (host) host.postMessage({ type: "ce-speed", speed: next });
       }, true);
     }
   }
@@ -880,9 +879,8 @@ const THEME_JS: &str = r#"(function () {
     var meta = document.querySelector('meta[name="theme-color"]');
     var color = meta && meta.content ? String(meta.content) : "";
     try {
-      if (window.chrome && window.chrome.webview) {
-        window.chrome.webview.postMessage({ type: "ce-theme", color: color });
-      }
+      var host = window.__ceHost || (window.chrome && window.chrome.webview);
+      if (host) host.postMessage({ type: "ce-theme", color: color });
     } catch (error) {}
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", send);
@@ -894,9 +892,8 @@ const ERROR_JS: &str = r#"(function () {
   window.__ceErrors = true;
   function report() {
     try {
-      if (window.chrome && window.chrome.webview) {
-        window.chrome.webview.postMessage({ type: "ce-error" });
-      }
+      var host = window.__ceHost || (window.chrome && window.chrome.webview);
+      if (host) host.postMessage({ type: "ce-error" });
     } catch (error) {}
   }
   window.addEventListener("error", report);
@@ -949,9 +946,8 @@ const INSPECTOR_JS: &str = r##"(function () {
     event.stopPropagation();
     var text = line;
     cleanup();
-    if (text && window.chrome && window.chrome.webview) {
-      window.chrome.webview.postMessage({ type: "ce-inspect", text: text });
-    }
+    var host = window.__ceHost || (window.chrome && window.chrome.webview);
+    if (text && host) host.postMessage({ type: "ce-inspect", text: text });
   }
   function key(event) {
     if (event.key === "Escape") {
@@ -1120,9 +1116,8 @@ const ZAPPER_JS: &str = r##"(function () {
     element.style.setProperty("display", "none", "important");
     element.setAttribute("data-ce-hidden", "1");
     cleanup();
-    if (selector && window.chrome && window.chrome.webview) {
-      window.chrome.webview.postMessage({ type: "ce-zap", selector: selector });
-    }
+    var host = window.__ceHost || (window.chrome && window.chrome.webview);
+    if (selector && host) host.postMessage({ type: "ce-zap", selector: selector });
   }
   function wheel(event) {
     if (!event.altKey) return;
