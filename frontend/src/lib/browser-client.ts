@@ -77,13 +77,14 @@ import type {
   PopupRect,
   PopupRequest,
   PopupShow,
+  FontPreview,
   ThemePreview,
   WindowsColorScheme,
   TabGroupColor,
   TabsSnapshot,
   UserStyles,
 } from "../../../types/browser";
-import { applyThemePreview } from "./appearance";
+import { applyFontPreview, applyThemePreview } from "./appearance";
 
 // Tabs
 
@@ -960,6 +961,16 @@ export function sendThemePreview(theme: string | null, commit = false) {
 
 export function onThemePreview(handler: (preview: ThemePreview) => void): Promise<UnlistenFn> {
   return listen<ThemePreview>("theme-preview", (event) => handler(event.payload));
+}
+
+/** Paints a UI font on this webview and tells the others. Nothing is written until `commit`. */
+export function sendFontPreview(font: string | null, commit = false) {
+  applyFontPreview(font, commit);
+  return emit("font-preview", { font, commit } satisfies FontPreview);
+}
+
+export function onFontPreview(handler: (preview: FontPreview) => void): Promise<UnlistenFn> {
+  return listen<FontPreview>("font-preview", (event) => handler(event.payload));
 }
 
 // Built-in page tools

@@ -20,6 +20,7 @@ import {
   Settings,
   Star,
   TriangleAlert,
+  Type,
   Volume2,
   VolumeX,
   X,
@@ -1127,6 +1128,13 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         onClick={(event) => void openPopup("theme-picker", event.currentTarget)}
       >
         <Palette id="address-theme-icon" aria-hidden />
+      </IconButton>
+      <IconButton
+        id="address-font"
+        label="Fonts"
+        onClick={(event) => void openPopup("font-picker", event.currentTarget)}
+      >
+        <Type id="address-font-icon" aria-hidden />
       </IconButton>
       <ProfileSwitcherButton />
       <IconButton id="address-settings" label="Settings" onClick={() => void createTab("ce://settings")}>

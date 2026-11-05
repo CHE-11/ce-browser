@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { Check, Minus, Plus, RotateCcw } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
-import { COLOR_MODE_OPTIONS, DEFAULT_FONT, FONTS, THEMES, applyFontPreview, normalizeFont, resolveMode, themeSurfaceStyle } from "@/lib/appearance";
-import { backdropSupport, getUserStyles, sendThemePreview, showUserStyles } from "@/lib/browser-client";
+import { COLOR_MODE_OPTIONS, DEFAULT_FONT, FONTS, THEMES, normalizeFont, resolveMode, themeSurfaceStyle } from "@/lib/appearance";
+import { backdropSupport, getUserStyles, sendFontPreview, sendThemePreview, showUserStyles } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, PAGE_ZOOM_LEVELS, stepPageZoom, ZOOM_STEP } from "@/lib/zoom";
 import type { BackdropSupport, ToastPosition } from "@type/browser";
@@ -352,7 +352,7 @@ function FontPicker({ settings, onUpdate }: { settings: SettingsSectionProps["se
             label={`Reset ${FONT_LABEL} to default`}
             className="size-7 opacity-60 hover:opacity-100 focus-visible:opacity-100"
             onClick={() => {
-              applyFontPreview(DEFAULT_FONT, true);
+              void sendFontPreview(DEFAULT_FONT, true);
               reset();
             }}
           >
@@ -378,7 +378,7 @@ function FontPicker({ settings, onUpdate }: { settings: SettingsSectionProps["se
               )}
               style={{ fontFamily: font.stack }}
               onClick={() => {
-                applyFontPreview(font.id, true);
+                void sendFontPreview(font.id, true);
                 onUpdate({ uiFont: font.id });
               }}
             >

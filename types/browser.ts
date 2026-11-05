@@ -433,6 +433,7 @@ export type PopupKind =
   | "boards"
   | "board-images"
   | "theme-picker"
+  | "font-picker"
   | "profile-switcher"
   | "permission";
 
@@ -442,6 +443,12 @@ export type WindowsColorScheme = "light" | "dark";
 /** A theme shown over the saved one. `commit` stores it before the settings file catches up. */
 export type ThemePreview = {
   theme: string | null;
+  commit: boolean;
+};
+
+/** A UI font shown over the saved one. `commit` stores it before the settings file catches up. */
+export type FontPreview = {
+  font: string | null;
   commit: boolean;
 };
 

@@ -9,6 +9,7 @@ import { PopupHostContext, type PopupHostState } from "@lib/popup-host";
 import { useAppearanceState, useBookmarksState, useExtensions, useTabs } from "@lib/use-browser";
 import { AddressBarEllipsisMenu } from "@/features/Browser/BrowserHeader/Addressbar/AddressBarEllipsisMenu";
 import { ProfileSwitcher } from "@/features/Browser/BrowserHeader/Addressbar/ProfileSwitcher";
+import { FontPicker } from "@/features/Browser/BrowserHeader/Addressbar/FontPicker";
 import { ThemePicker } from "@/features/Browser/BrowserHeader/Addressbar/ThemePicker";
 import { ExtensionPinContextMenu } from "@/features/Browser/BrowserHeader/Addressbar/ExtensionPinContextMenu";
 import { PinContextMenu } from "@/features/Browser/BrowserHeader/Addressbar/PinContextMenu";
@@ -241,6 +242,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <ShortcutSheet />;
     case "theme-picker":
       return <ThemePicker />;
+    case "font-picker":
+      return <FontPicker />;
     case "profile-switcher":
       return <ProfileSwitcher />;
     default:
