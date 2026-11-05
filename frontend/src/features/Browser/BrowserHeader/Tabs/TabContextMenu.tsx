@@ -2,7 +2,7 @@ import { useEffect, useState, type ComponentProps } from "react";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "@/components/PopupFrame";
 import { bookmarkItemStyle } from "@/lib/bookmark-size";
 import { TAB_SIZE } from "@/lib/tab-size";
-import { closePopup, createEphemeralTab, createWorkspace, moveTabsToWorkspace, createTab, reload, duplicateTab, unpinTab, pinTab, setTabsMuted, addBookmark, exitSplit, splitWith, removeFromGroup, createGroup, addToGroup, sleepTab, sleepOtherTabs, neverSleepSite, closeSelectedTabs, closeTab, closeOtherTabs, closeTabsToRight, reopenClosedTab, installedBrowsers, installSite, openInBrowser, groupBySite } from "@/lib/browser-client";
+import { closePopup, createEphemeralTab, createWorkspace, moveTabsToWorkspace, createTab, reload, duplicateTab, unpinTab, pinTab, setTabsMuted, addBookmark, detachTab, exitSplit, splitWith, removeFromGroup, createGroup, addToGroup, sleepTab, sleepOtherTabs, neverSleepSite, closeSelectedTabs, closeTab, closeOtherTabs, closeTabsToRight, reopenClosedTab, installedBrowsers, installSite, openInBrowser, groupBySite } from "@/lib/browser-client";
 import type { ExternalBrowser } from "@type/browser";
 import { cn } from "@/lib/cn";
 import { groupColorClasses, GROUP_COLORS, groupLabel } from "@/lib/tab-rows";
@@ -174,6 +174,13 @@ export function TabContextMenu({ tabId }: TabMenuProps) {
             onClick={run(() => splitWith(tab.id))}
           />
         )}
+        <TabMenuItem
+          id="tab-menu-detach"
+          icon={<AppWindowMac />}
+          label="Move to new window"
+          disabled={snapshot.windowTabs.length < 2}
+          onClick={run(() => detachTab(tab.id))}
+        />
         {tab.groupId !== null ? (
           <TabMenuItem
             id="tab-menu-ungroup"
