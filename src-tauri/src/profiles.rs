@@ -680,6 +680,12 @@ const COPY_PARTS: &[PartSpec] = &[
             "bookmarkFolderIconSize",
             "bookmarksBarMenuIconSize",
             "bookmarksBarMenuWidth",
+            "bookmarkEditorTextSize",
+            "bookmarkEditorPadding",
+            "bookmarkEditorRowPadding",
+            "bookmarkEditorIconSize",
+            "bookmarkEditorListHeight",
+            "bookmarkEditorWidth",
         ],
         extra: &["bookmarkSize"],
         ..bare("bookmarks")

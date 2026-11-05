@@ -94,6 +94,19 @@ export const STYLE_SURFACES: StyleSurface[] = [
     ],
   },
   {
+    id: "bookmark-editor",
+    label: "Bookmark editor",
+    hint: "The panel for naming a bookmark and choosing where it sits.",
+    controls: [
+      rem("bookmarkEditorTextSize", "Text", TEXT, text),
+      rem("bookmarkEditorPadding", "Padding", "Space around the name, list, and buttons, in rem.", pad),
+      rem("bookmarkEditorRowPadding", "Row padding", SIDE, pad),
+      rem("bookmarkEditorIconSize", "Icon", "Favicon size in the place list, in rem.", icon),
+      rem("bookmarkEditorListHeight", "List height", "Height of the place list, in rem.", CHROME_LIMITS.listHeight),
+      px("bookmarkEditorWidth", "Width", "Editor width in pixels at 100% browser UI size.", CHROME_LIMITS.panelWidth),
+    ],
+  },
+  {
     id: "menus",
     label: "Menus",
     hint: "The app menu, profile list, theme and font lists, pin menus, and workspace menu.",

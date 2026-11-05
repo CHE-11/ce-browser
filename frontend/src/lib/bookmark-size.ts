@@ -40,3 +40,12 @@ export function bookmarkItemStyle(
   }
   return style;
 }
+
+/** Padding and type size for the bookmark editor panel. The gap stays a step tighter than the padding. */
+export function bookmarkEditorFrameStyle(textSize: number, padding: number): CSSProperties {
+  return {
+    fontSize: `${textSize}rem`,
+    padding: `${padding}rem`,
+    gap: `${Math.max(padding * 0.65, 0.3)}rem`,
+  };
+}

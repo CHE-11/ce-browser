@@ -675,6 +675,18 @@ export type BrowserSettings = {
   bookmarksBarMenuIconSize: number;
   /** Width of the bookmarks bar context menu, in CSS pixels at 100% UI size. */
   bookmarksBarMenuWidth: number;
+  /** Text size of the bookmark editor, in rem. */
+  bookmarkEditorTextSize: number;
+  /** Padding around the bookmark editor, in rem. */
+  bookmarkEditorPadding: number;
+  /** Side padding of a row in the bookmark editor, in rem. Top and bottom get half. */
+  bookmarkEditorRowPadding: number;
+  /** Favicon in the bookmark editor's place list, in rem. */
+  bookmarkEditorIconSize: number;
+  /** Height of the place list in the bookmark editor, in rem. */
+  bookmarkEditorListHeight: number;
+  /** Width of the bookmark editor, in CSS pixels at 100% UI size. */
+  bookmarkEditorWidth: number;
   /** The status bar under every page. */
   showStatusBar: boolean;
   /** Memory, time and the other status readings. Off leaves the version and zoom. */

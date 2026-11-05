@@ -4083,7 +4083,7 @@ fn pinned_local(state: &TabsState, window: &str, workspace: &str, id: u32) -> Op
     })
 }
 
-/// Opens settings pins that were closed and lines the saved pins up in list order.
+/// Opens settings pins that were closed, lines the saved pins up in list order, and reloads the ones already open.
 pub fn restore_saved_pins(app: &AppHandle, window: &str) -> Result<(), String> {
     let pins = settings::get(app).pinned_tabs;
     let (workspace, bound) = with_state(app, |state| {
@@ -4092,6 +4092,7 @@ pub fn restore_saved_pins(app: &AppHandle, window: &str) -> Result<(), String> {
         (workspace, bound)
     });
     let mut next_local = 0usize;
+    let mut refresh = Vec::new();
     for (index, pin) in pins.iter().enumerate() {
         match bound.get(index) {
             Some(PinBind::Tab(id)) => {
@@ -4102,6 +4103,15 @@ pub fn restore_saved_pins(app: &AppHandle, window: &str) -> Result<(), String> {
                         move_tab(app, id, next_local);
                     }
                     next_local += 1;
+                }
+                let pinned = with_state(app, |state| {
+                    state
+                        .tabs
+                        .iter()
+                        .any(|tab| tab.info.id == id && tab.info.pinned)
+                });
+                if pinned {
+                    refresh.push(id);
                 }
             }
             Some(PinBind::Missing) => {
@@ -4122,7 +4132,30 @@ pub fn restore_saved_pins(app: &AppHandle, window: &str) -> Result<(), String> {
             _ => {}
         }
     }
+    for id in refresh {
+        refresh_pinned_tab(app, id);
+    }
     Ok(())
+}
+
+/// Reloads a pinned tab that is already open. One that has no page view yet is loaded instead.
+fn refresh_pinned_tab(app: &AppHandle, id: u32) {
+    let needs_view = with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .find(|tab| tab.info.id == id && tab.info.pinned)
+            .map(|tab| tab.webview.is_none())
+    });
+    let Some(needs_view) = needs_view else {
+        return;
+    };
+    if needs_view {
+        let _ = ready_pinned(app, id);
+        return;
+    }
+    let _ = ready_pinned(app, id);
+    let _ = reload(app, id);
 }
 
 impl TabsState {

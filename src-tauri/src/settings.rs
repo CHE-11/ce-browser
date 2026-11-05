@@ -57,6 +57,8 @@ const HEIGHT_REM: (f32, f32) = (1.0, 4.0);
 const OPTIONAL_HEIGHT_REM: (f32, f32) = (0.0, 4.0);
 const MENU_WIDTH_PX: (u32, u32) = (160, 480);
 const PANEL_WIDTH_PX: (u32, u32) = (240, 720);
+/// Height of the bookmark editor's place list, in rem.
+const LIST_HEIGHT_REM: (f32, f32) = (8.0, 36.0);
 const PALETTE_WIDTH_PX: (u32, u32) = (360, 880);
 /// Fine-tune sizes the Styles page copies from another profile. Theme, font, and zoom stay out.
 pub const STYLE_METRIC_KEYS: &[&str] = &[
@@ -82,6 +84,12 @@ pub const STYLE_METRIC_KEYS: &[&str] = &[
     "bookmarksBarMenuPadding",
     "bookmarksBarMenuIconSize",
     "bookmarksBarMenuWidth",
+    "bookmarkEditorTextSize",
+    "bookmarkEditorPadding",
+    "bookmarkEditorRowPadding",
+    "bookmarkEditorIconSize",
+    "bookmarkEditorListHeight",
+    "bookmarkEditorWidth",
     "menuTextSize",
     "menuPadding",
     "menuHeight",
@@ -343,6 +351,24 @@ pub struct BrowserSettings {
     /// Width of the bookmarks bar context menu, in CSS pixels at 100% UI size.
     #[serde(default = "default_bookmarks_bar_menu_width")]
     pub bookmarks_bar_menu_width: u32,
+    /// Text size of the bookmark editor, in rem.
+    #[serde(default = "default_bookmark_editor_text_size")]
+    pub bookmark_editor_text_size: f32,
+    /// Padding around the bookmark editor, in rem.
+    #[serde(default = "default_bookmark_editor_padding")]
+    pub bookmark_editor_padding: f32,
+    /// Side padding of a row in the bookmark editor, in rem. Top and bottom get half.
+    #[serde(default = "default_bookmark_editor_row_padding")]
+    pub bookmark_editor_row_padding: f32,
+    /// Favicon in the bookmark editor's place list, in rem.
+    #[serde(default = "default_bookmark_editor_icon_size")]
+    pub bookmark_editor_icon_size: f32,
+    /// Height of the place list in the bookmark editor, in rem.
+    #[serde(default = "default_bookmark_editor_list_height")]
+    pub bookmark_editor_list_height: f32,
+    /// Width of the bookmark editor, in CSS pixels at 100% UI size.
+    #[serde(default = "default_bookmark_editor_width")]
+    pub bookmark_editor_width: u32,
     /// Retired preset (`small`, `default`, `large`, `xlarge`). Read once and mapped onto the
     /// four values above.
     #[serde(rename = "bookmarkSize", skip_serializing)]
@@ -1008,6 +1034,12 @@ impl Default for BrowserSettings {
             bookmark_folder_icon_size: default_bookmark_folder_icon_size(),
             bookmarks_bar_menu_icon_size: default_bookmarks_bar_menu_icon_size(),
             bookmarks_bar_menu_width: default_bookmarks_bar_menu_width(),
+            bookmark_editor_text_size: default_bookmark_editor_text_size(),
+            bookmark_editor_padding: default_bookmark_editor_padding(),
+            bookmark_editor_row_padding: default_bookmark_editor_row_padding(),
+            bookmark_editor_icon_size: default_bookmark_editor_icon_size(),
+            bookmark_editor_list_height: default_bookmark_editor_list_height(),
+            bookmark_editor_width: default_bookmark_editor_width(),
             legacy_bookmark_size: None,
             show_status_bar: true,
             status_stats: true,
@@ -1232,6 +1264,34 @@ impl BrowserSettings {
         self.bookmarks_bar_menu_width = self
             .bookmarks_bar_menu_width
             .clamp(MENU_WIDTH_PX.0, MENU_WIDTH_PX.1);
+        self.bookmark_editor_text_size = rem_in(
+            self.bookmark_editor_text_size,
+            BOOKMARK_TEXT_REM,
+            defaults.bookmark_editor_text_size,
+        );
+        self.bookmark_editor_padding = rem_in(
+            self.bookmark_editor_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.bookmark_editor_padding,
+        );
+        self.bookmark_editor_row_padding = rem_in(
+            self.bookmark_editor_row_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.bookmark_editor_row_padding,
+        );
+        self.bookmark_editor_icon_size = rem_in(
+            self.bookmark_editor_icon_size,
+            ICON_REM,
+            defaults.bookmark_editor_icon_size,
+        );
+        self.bookmark_editor_list_height = rem_in(
+            self.bookmark_editor_list_height,
+            LIST_HEIGHT_REM,
+            defaults.bookmark_editor_list_height,
+        );
+        self.bookmark_editor_width = self
+            .bookmark_editor_width
+            .clamp(PANEL_WIDTH_PX.0, PANEL_WIDTH_PX.1);
         self.menu_text_size = rem_in(
             self.menu_text_size,
             BOOKMARK_TEXT_REM,
@@ -2016,6 +2076,30 @@ fn default_bookmarks_bar_menu_width() -> u32 {
     280
 }
 
+fn default_bookmark_editor_text_size() -> f32 {
+    0.75
+}
+
+fn default_bookmark_editor_padding() -> f32 {
+    0.5
+}
+
+fn default_bookmark_editor_row_padding() -> f32 {
+    0.5
+}
+
+fn default_bookmark_editor_icon_size() -> f32 {
+    1.0
+}
+
+fn default_bookmark_editor_list_height() -> f32 {
+    24.0
+}
+
+fn default_bookmark_editor_width() -> u32 {
+    400
+}
+
 fn default_menu_height() -> f32 {
     2.25
 }
@@ -2456,6 +2540,12 @@ mod tests {
         assert_eq!(loaded.bookmarks_bar_height, 1.5);
         assert_eq!(loaded.bookmark_folder_icon_size, 1.0);
         assert_eq!(loaded.bookmarks_bar_menu_width, 280);
+        assert_eq!(loaded.bookmark_editor_text_size, 0.75);
+        assert_eq!(loaded.bookmark_editor_padding, 0.5);
+        assert_eq!(loaded.bookmark_editor_row_padding, 0.5);
+        assert_eq!(loaded.bookmark_editor_icon_size, 1.0);
+        assert_eq!(loaded.bookmark_editor_list_height, 24.0);
+        assert_eq!(loaded.bookmark_editor_width, 400);
         assert_eq!(loaded.menu_text_size, 0.875);
         assert_eq!(loaded.menu_padding, 0.625);
         assert_eq!(loaded.menu_height, 2.25);

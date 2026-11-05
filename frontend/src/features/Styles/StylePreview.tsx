@@ -1,8 +1,8 @@
-import { FileText, Folder, Globe, History, Plus, Search, Star, X } from "lucide-react";
+import { ChevronRight, FileText, Folder, Globe, History, Plus, Search, Star, X } from "lucide-react";
 import type { BrowserSettings } from "@type/browser";
 import { IconButton } from "@/components/IconButton";
 import { Menu, MenuItem } from "@/components/Menu";
-import { bookmarkItemStyle } from "@/lib/bookmark-size";
+import { bookmarkEditorFrameStyle, bookmarkItemStyle } from "@/lib/bookmark-size";
 import {
   CHROME,
   chromeVarStyle,
@@ -52,6 +52,8 @@ function PreviewSurface({ surface, settings }: { surface: StyleSurface; settings
       return <BookmarkFolderPreview settings={settings} />;
     case "bookmark-menu":
       return <BookmarkMenuPreview settings={settings} />;
+    case "bookmark-editor":
+      return <BookmarkEditorPreview settings={settings} />;
     case "menus":
       return <MenusPreview />;
     case "toolbar":
@@ -178,6 +180,75 @@ function BookmarkMenuPreview({ settings }: { settings: BrowserSettings }) {
         <MenuItem id="styles-preview-bookmark-menu-folder" icon={<Folder />} label="New folder" style={style} onClick={() => undefined} />
         <MenuItem id="styles-preview-bookmark-menu-delete" icon={<X />} label="Delete" danger style={style} onClick={() => undefined} />
       </Menu>
+    </div>
+  );
+}
+
+function BookmarkEditorPreview({ settings }: { settings: BrowserSettings }) {
+  const frame = bookmarkEditorFrameStyle(settings.bookmarkEditorTextSize, settings.bookmarkEditorPadding);
+  const row = bookmarkItemStyle(settings.bookmarkEditorTextSize, settings.bookmarkEditorRowPadding, {
+    text: CHROME.bookmarkEditorTextSize,
+    padding: CHROME.bookmarkEditorRowPadding,
+  });
+  const icon = remBox(settings.bookmarkEditorIconSize);
+  const rows = [
+    { id: "news", label: "News", folder: false },
+    { id: "work", label: "Work", folder: true },
+    { id: "maps", label: "Maps", folder: false },
+  ];
+  return (
+    <div
+      id="styles-preview-bookmark-editor"
+      className={cn(frameClass, "flex flex-col bg-zinc-900 text-zinc-100")}
+      style={{ ...frame, width: `${settings.bookmarkEditorWidth / 16}rem` }}
+    >
+      <h2 id="styles-preview-bookmark-editor-title" className="font-semibold">
+        Bookmark added
+      </h2>
+      <label id="styles-preview-bookmark-editor-name-label" className="flex flex-col gap-[0.25em] text-[0.8em] text-zinc-400">
+        Name
+        <span
+          id="styles-preview-bookmark-editor-name"
+          className="flex items-center rounded-md border border-zinc-700 bg-zinc-950 px-[0.55em] text-zinc-100"
+          style={{ height: "2.15em", fontSize: `${settings.bookmarkEditorTextSize}rem` }}
+        >
+          Example
+        </span>
+      </label>
+      <div id="styles-preview-bookmark-editor-place" className="flex flex-col gap-[0.4em]">
+        <span id="styles-preview-bookmark-editor-place-label" className="text-[0.8em] text-zinc-400">
+          Place
+        </span>
+        <div
+          id="styles-preview-bookmark-editor-list"
+          className="overflow-hidden rounded-md border border-zinc-700 bg-zinc-950 p-1"
+          style={{ height: `${settings.bookmarkEditorListHeight}rem` }}
+        >
+          {rows.map((item) => (
+            <div id={`styles-preview-bookmark-editor-${item.id}`} key={item.id} className="flex items-center gap-[0.5em] rounded-md text-zinc-200" style={row}>
+              {item.folder ? (
+                <ChevronRight id={`styles-preview-bookmark-editor-${item.id}-icon`} className="shrink-0 text-zinc-400" style={icon} aria-hidden />
+              ) : (
+                <Globe id={`styles-preview-bookmark-editor-${item.id}-icon`} className="shrink-0 text-zinc-400" style={icon} aria-hidden />
+              )}
+              <span id={`styles-preview-bookmark-editor-${item.id}-label`} className="min-w-0 flex-1 truncate">
+                {item.label}
+              </span>
+            </div>
+          ))}
+        </div>
+        <p id="styles-preview-bookmark-editor-caption" className="truncate text-[0.85em] text-zinc-500">
+          Bookmarks bar, before News
+        </p>
+      </div>
+      <div id="styles-preview-bookmark-editor-actions" className="flex justify-end gap-[0.5em]">
+        <span id="styles-preview-bookmark-editor-remove" className="inline-flex h-[2.15em] items-center px-[0.8em] text-zinc-300">
+          Remove
+        </span>
+        <span id="styles-preview-bookmark-editor-done" className="inline-flex h-[2.15em] items-center rounded-md bg-sky-600 px-[0.8em] text-white">
+          Done
+        </span>
+      </div>
     </div>
   );
 }
