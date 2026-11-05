@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Browser UI, popups and ce:// pages. Remote sites in tabs match no capability and cannot invoke commands. Detached windows use the main-* label. Menu popups are their own popup-* windows; extension popups (extpopup-*) get none.",
+  "description": "Browser UI, popups and ce:// pages. Remote sites in tabs match no capability and cannot invoke commands. Page alert and confirm stay on the webview dialog (see page_dialogs). Detached windows use the main-* label. Menu popups are their own popup-* windows; extension popups (extpopup-*) get none.",
   "windows": ["main", "main-*", "popup-*"],
   "permissions": [
     "core:default",

@@ -23,6 +23,7 @@ mod library;
 mod media;
 mod microphone;
 mod ocr;
+mod page_dialogs;
 mod page_errors;
 mod page_menu;
 mod page_rules;
@@ -1991,6 +1992,8 @@ pub fn run() {
     system::read_args();
     profiles::read_args();
     tauri::Builder::default()
+        // Before the dialog plugin, so its alert/confirm replacement is ignored.
+        .plugin(page_dialogs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
