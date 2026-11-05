@@ -1028,9 +1028,7 @@ mod tests {
             "https://ce-file-tools.vercel.app/pdf/view-and-markup?x=1"
         ));
         assert!(!is_pdf_editor("https://ce-file-tools.vercel.app/convert"));
-        assert!(!is_pdf_editor(
-            "https://example.com/pdf/view-and-markup"
-        ));
+        assert!(!is_pdf_editor("https://example.com/pdf/view-and-markup"));
     }
 
     #[test]

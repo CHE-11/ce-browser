@@ -52,6 +52,9 @@ pub struct DownloadItem {
     /// Inclusive byte ranges. Empty for a normal WebView2 download.
     #[serde(default)]
     pub ranges: Vec<ByteRange>,
+    /// Windows name of the computer that saved this file.
+    #[serde(default)]
+    pub computer_name: String,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -81,11 +84,7 @@ fn now_ms() -> u64 {
 }
 
 pub fn init(app: &AppHandle) {
-    let file: DownloadsFile = files::read_json(&paths::data_file(app, FILE));
-    let mut items = file.items;
-    for item in &mut items {
-        settle_unfinished(item);
-    }
+    let items = read_items(app);
     let next_id = items.iter().map(|item| item.id).max().unwrap_or(0) + 1;
     app.manage(Downloads(Mutex::new(DownloadsState {
         items,
@@ -95,17 +94,74 @@ pub fn init(app: &AppHandle) {
 }
 
 pub fn reload(app: &AppHandle) {
-    let file: DownloadsFile = files::read_json(&paths::data_file(app, FILE));
-    let mut items = file.items;
-    for item in &mut items {
-        settle_unfinished(item);
-    }
+    let items = read_items(app);
     let next_id = items.iter().map(|item| item.id).max().unwrap_or(0) + 1;
     with_state(app, |state| {
         state.items = items.clone();
         state.next_id = next_id;
     });
     let _ = app.emit("downloads-changed", &items);
+}
+
+fn read_items(app: &AppHandle) -> Vec<DownloadItem> {
+    let file: DownloadsFile = files::read_json(&paths::data_file(app, FILE));
+    let mut items = file.items;
+    for item in &mut items {
+        settle_unfinished(item);
+    }
+    if adopt_local(&mut items) {
+        let saved: Vec<DownloadItem> = items.iter().take(MAX_HISTORY).cloned().collect();
+        let _ = files::write_json(
+            &paths::data_file(app, FILE),
+            &DownloadsFile { items: saved },
+        );
+    }
+    items
+}
+
+/// Name Windows shows for this PC. Downloads from another computer stay in the list and do nothing here.
+pub fn computer_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .ok()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "This computer".to_string())
+}
+
+fn on_this_computer(item: &DownloadItem) -> bool {
+    let current = computer_name();
+    !item.computer_name.is_empty() && item.computer_name.eq_ignore_ascii_case(&current)
+}
+
+fn not_here(item: &DownloadItem) -> String {
+    if item.computer_name.is_empty() {
+        "That file was saved on another computer.".into()
+    } else {
+        format!("That file was saved on {}.", item.computer_name)
+    }
+}
+
+fn require_here(app: &AppHandle, id: u32) -> Result<DownloadItem, String> {
+    let item = item(app, id)?;
+    if on_this_computer(&item) {
+        Ok(item)
+    } else {
+        Err(not_here(&item))
+    }
+}
+
+/// Older lists have no computer name. A file that is still on this disk belongs to this computer.
+fn adopt_local(items: &mut [DownloadItem]) -> bool {
+    let current = computer_name();
+    let mut changed = false;
+    for item in items.iter_mut() {
+        if !item.computer_name.is_empty() || !Path::new(&item.path).is_file() {
+            continue;
+        }
+        item.computer_name = current.clone();
+        changed = true;
+    }
+    changed
 }
 
 fn with_state<T>(app: &AppHandle, change: impl FnOnce(&mut DownloadsState) -> T) -> T {
@@ -145,6 +201,7 @@ pub fn record_completed(app: &AppHandle, url: &str, path: &Path, mime_type: &str
                 can_resume: false,
                 accelerated: false,
                 ranges: Vec::new(),
+                computer_name: computer_name(),
             },
         );
     });
@@ -329,6 +386,7 @@ fn track(
                     can_resume: false,
                     accelerated: false,
                     ranges: Vec::new(),
+                    computer_name: computer_name(),
                 },
             );
             id
@@ -477,6 +535,7 @@ fn set_state(app: &AppHandle, id: u32, next: &str) {
 }
 
 pub fn pause(app: &AppHandle, id: u32) -> Result<(), String> {
+    require_here(app, id)?;
     if accelerated(app, id) {
         if let Some(job) = jobs().get(&id) {
             job.pause.store(true, Ordering::Relaxed);
@@ -490,6 +549,7 @@ pub fn pause(app: &AppHandle, id: u32) -> Result<(), String> {
 }
 
 pub fn resume(app: &AppHandle, id: u32) -> Result<(), String> {
+    require_here(app, id)?;
     if accelerated(app, id) {
         let item = item(app, id)?;
         let needs_cookie = jobs()
@@ -522,6 +582,7 @@ pub fn resume(app: &AppHandle, id: u32) -> Result<(), String> {
 }
 
 pub fn cancel(app: &AppHandle, id: u32) -> Result<(), String> {
+    require_here(app, id)?;
     if accelerated(app, id) {
         let running = jobs().get(&id).is_some_and(|job| {
             job.cancel.store(true, Ordering::Relaxed);
@@ -544,7 +605,7 @@ fn item(app: &AppHandle, id: u32) -> Result<DownloadItem, String> {
 }
 
 pub fn open(app: &AppHandle, id: u32, window: &str) -> Result<(), String> {
-    let item = item(app, id)?;
+    let item = require_here(app, id)?;
     if item.state != COMPLETED {
         return Err("The download has not finished.".into());
     }
@@ -563,7 +624,7 @@ fn is_pdf(path: &str) -> bool {
 }
 
 pub fn show_in_folder(app: &AppHandle, id: u32) -> Result<(), String> {
-    let item = item(app, id)?;
+    let item = require_here(app, id)?;
     files::reveal_path(Path::new(&item.path))
 }
 
@@ -596,30 +657,48 @@ impl Drop for FileDragFlag {
     }
 }
 
-/// Drags a finished download as a real file (`CF_HDROP`) so pages and other programs can take it.
+/// Drags a finished download as a real file so page drop zones and other programs can take it.
 pub fn drag_file(app: &AppHandle, window: &Window, id: u32) -> Result<(), String> {
-    let found = item(app, id)?;
+    let found = require_here(app, id)?;
     if found.state != COMPLETED {
         return Err("The download has not finished.".into());
     }
-    let path = PathBuf::from(&found.path);
+    let path = shell_path(Path::new(&found.path));
     if !path.is_file() {
         return Err("That file is no longer on disk.".into());
     }
-    let icon = file_icon_png(&path).unwrap_or_default();
     let _flag = FileDragFlag::enter();
     // The webview still owns the mouse. Release it so the drag can leave the window.
     unsafe {
         let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
     }
-    let result = drag::start_drag(
-        window,
-        drag::DragItem::Files(vec![path]),
-        drag::Image::Raw(icon),
-        |_, _| {},
-        drag::Options::default(),
-    )
-    .map_err(|_| "The file could not be dragged.".to_string());
+    // The downloads panel sits above the page. Move it aside once the drag is watching the
+    // mouse, so a drop lands on the page underneath. Close it when the drag ends. Destroying
+    // it here would run under DoDragDrop.
+    let popup_drag = popup::is_popup_label(window.label());
+    if popup_drag {
+        CLOSE_POPUP_AFTER_DRAG.store(true, Ordering::Release);
+    }
+    let hwnd = popup_drag.then(|| window.hwnd().ok()).flatten();
+    let result = shell_drag(&path, move || {
+        let Some(hwnd) = hwnd else {
+            return;
+        };
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::{
+                SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetWindowPos,
+            };
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                -20_000,
+                -20_000,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE,
+            );
+        }
+    });
     let close = CLOSE_POPUP_AFTER_DRAG.swap(false, Ordering::AcqRel);
     drop(_flag);
     if close {
@@ -632,98 +711,115 @@ pub fn drag_file(app: &AppHandle, window: &Window, id: u32) -> Result<(), String
     result
 }
 
-/// A PNG of the Windows icon for this file, used as the drag image.
-fn file_icon_png(path: &Path) -> Option<Vec<u8>> {
-    use windows::Win32::Storage::FileSystem::FILE_ATTRIBUTE_NORMAL;
-    use windows::Win32::UI::Shell::{SHFILEINFOW, SHGFI_ICON, SHGetFileInfoW};
-    use windows::Win32::UI::WindowsAndMessaging::DestroyIcon;
-    use windows::core::HSTRING;
+/// `canonicalize` adds a `\\?\` prefix that page drop zones and other programs reject.
+fn shell_path(path: &Path) -> PathBuf {
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let text = canonical.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    canonical
+}
 
-    unsafe {
-        let mut info = SHFILEINFOW::default();
-        let wide = HSTRING::from(path.as_os_str());
-        let found = SHGetFileInfoW(
-            &wide,
-            FILE_ATTRIBUTE_NORMAL,
-            Some(&mut info),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
-            SHGFI_ICON,
-        );
-        if found == 0 || info.hIcon.is_invalid() {
-            return None;
+/// WebView2 does not report the mouse button to `DoDragDrop`, so a normal drop source ends
+/// the drag at once. This one follows the physical button, and a low-level hook when that
+/// state is missing, until the button actually comes up.
+static DRAG_BUTTON_HELD: AtomicBool = AtomicBool::new(false);
+static DRAG_BUTTON_UP: AtomicBool = AtomicBool::new(false);
+
+#[windows::core::implement(windows::Win32::System::Ole::IDropSource)]
+struct DownloadDropSource;
+
+impl windows::Win32::System::Ole::IDropSource_Impl for DownloadDropSource_Impl {
+    fn QueryContinueDrag(
+        &self,
+        escape: windows::core::BOOL,
+        keys: windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS,
+    ) -> windows::core::HRESULT {
+        use windows::Win32::Foundation::{DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, S_OK};
+        use windows::Win32::System::SystemServices::MK_LBUTTON;
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+
+        if escape.as_bool() {
+            return DRAGDROP_S_CANCEL;
         }
-        let icon = info.hIcon;
-        let png = icon_png(icon);
-        let _ = DestroyIcon(icon);
-        png
+        let physical = unsafe { (GetAsyncKeyState(i32::from(VK_LBUTTON.0)) as u16) & 0x8000 != 0 };
+        let message =
+            (keys & MK_LBUTTON) != windows::Win32::System::SystemServices::MODIFIERKEYS_FLAGS(0);
+        if physical || message {
+            DRAG_BUTTON_HELD.store(true, Ordering::Release);
+            return S_OK;
+        }
+        if DRAG_BUTTON_HELD.load(Ordering::Acquire) || DRAG_BUTTON_UP.load(Ordering::Acquire) {
+            return DRAGDROP_S_DROP;
+        }
+        S_OK
+    }
+
+    fn GiveFeedback(
+        &self,
+        _effect: windows::Win32::System::Ole::DROPEFFECT,
+    ) -> windows::core::HRESULT {
+        windows::Win32::Foundation::DRAGDROP_S_USEDEFAULTCURSORS
     }
 }
 
-fn icon_png(icon: windows::Win32::UI::WindowsAndMessaging::HICON) -> Option<Vec<u8>> {
-    use std::ffi::c_void;
+unsafe extern "system" fn download_drag_hook(
+    code: i32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::UI::WindowsAndMessaging::{CallNextHookEx, HC_ACTION, WM_LBUTTONUP};
 
-    use image::RgbaImage;
-    use windows::Win32::Graphics::Gdi::{
-        BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS,
-        DeleteDC, DeleteObject, SelectObject,
+    if code == HC_ACTION as i32 && wparam.0 as u32 == WM_LBUTTONUP {
+        DRAG_BUTTON_UP.store(true, Ordering::Release);
+    }
+    unsafe { CallNextHookEx(None, code, wparam, lparam) }
+}
+
+fn shell_drag(path: &Path, prepare: impl FnOnce()) -> Result<(), String> {
+    use windows::Win32::Foundation::DRAGDROP_S_DROP;
+    use windows::Win32::System::Com::IDataObject;
+    use windows::Win32::System::Ole::{DROPEFFECT_COPY, DoDragDrop, IDropSource, OleInitialize};
+    use windows::Win32::UI::Shell::{
+        BHID_DataObject, IShellItem, IShellItemArray, SHCreateItemFromParsingName,
+        SHCreateShellItemArrayFromShellItem,
     };
-    use windows::Win32::UI::WindowsAndMessaging::{DI_NORMAL, DrawIconEx};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowsHookExW, UnhookWindowsHookEx, WH_MOUSE_LL,
+    };
+    use windows::core::HSTRING;
 
-    const SIZE: i32 = 32;
-    unsafe {
-        let memory = CreateCompatibleDC(None);
-        if memory.is_invalid() {
-            return None;
+    let wide = HSTRING::from(path.as_os_str());
+    let data: IDataObject = unsafe {
+        let _ = OleInitialize(None);
+        let item: IShellItem = SHCreateItemFromParsingName(&wide, None)
+            .map_err(|_| "The file could not be dragged.".to_string())?;
+        let items: IShellItemArray = SHCreateShellItemArrayFromShellItem(&item)
+            .map_err(|_| "The file could not be dragged.".to_string())?;
+        items
+            .BindToHandler(None, &BHID_DataObject)
+            .map_err(|_| "The file could not be dragged.".to_string())?
+    };
+    let source: IDropSource = DownloadDropSource.into();
+    DRAG_BUTTON_HELD.store(false, Ordering::Release);
+    DRAG_BUTTON_UP.store(false, Ordering::Release);
+    let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(download_drag_hook), None, 0) }.ok();
+    prepare();
+    let mut effect = windows::Win32::System::Ole::DROPEFFECT::default();
+    let result = unsafe { DoDragDrop(&data, &source, DROPEFFECT_COPY, &mut effect) };
+    if let Some(hook) = hook {
+        unsafe {
+            let _ = UnhookWindowsHookEx(hook);
         }
-        let info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: SIZE,
-                biHeight: -SIZE,
-                biPlanes: 1,
-                biBitCount: 32,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let mut bits: *mut c_void = std::ptr::null_mut();
-        let bitmap = match CreateDIBSection(Some(memory), &info, DIB_RGB_COLORS, &mut bits, None, 0)
-        {
-            Ok(bitmap) => bitmap,
-            Err(_) => {
-                let _ = DeleteDC(memory);
-                return None;
-            }
-        };
-        let previous = SelectObject(memory, bitmap.into());
-        if !bits.is_null() {
-            std::ptr::write_bytes(bits, 0, (SIZE * SIZE * 4) as usize);
-        }
-        let drawn = DrawIconEx(memory, 0, 0, icon, SIZE, SIZE, 0, None, DI_NORMAL);
-        let png = if drawn.is_ok() && !bits.is_null() {
-            let count = (SIZE * SIZE) as usize;
-            let bytes = std::slice::from_raw_parts(bits.cast::<u8>(), count * 4);
-            let mut image = RgbaImage::new(SIZE as u32, SIZE as u32);
-            let mut opaque = false;
-            for (pixel, chunk) in image.pixels_mut().zip(bytes.chunks_exact(4)) {
-                if chunk[3] != 0 {
-                    opaque = true;
-                }
-                *pixel = image::Rgba([chunk[2], chunk[1], chunk[0], chunk[3]]);
-            }
-            if !opaque {
-                for pixel in image.pixels_mut() {
-                    pixel[3] = 255;
-                }
-            }
-            crate::profile_icons::encode_png(&image).ok()
-        } else {
-            None
-        };
-        SelectObject(memory, previous);
-        let _ = DeleteObject(bitmap.into());
-        let _ = DeleteDC(memory);
-        png
+    }
+    if result == DRAGDROP_S_DROP || result.is_ok() {
+        Ok(())
+    } else {
+        Err("The file could not be dragged.".into())
     }
 }
 
@@ -811,6 +907,7 @@ fn start_accelerated(
                 can_resume: true,
                 accelerated: true,
                 ranges,
+                computer_name: computer_name(),
             },
         );
         id
@@ -1039,7 +1136,7 @@ fn refresh_session(app: &AppHandle, url: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::DownloadItem;
+    use super::{DownloadItem, adopt_local, computer_name, on_this_computer};
 
     #[test]
     fn an_older_download_file_still_loads() {
@@ -1050,5 +1147,53 @@ mod tests {
         assert!(!item.accelerated);
         assert!(item.ranges.is_empty());
         assert_eq!(item.file_name, "a.zip");
+        assert!(item.computer_name.is_empty());
+    }
+
+    #[test]
+    fn a_computer_name_round_trips() {
+        let item = DownloadItem {
+            computer_name: "OFFICE".into(),
+            file_name: "a.zip".into(),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&item).expect("json");
+        assert!(json.contains("\"computerName\":\"OFFICE\""));
+        let back: DownloadItem = serde_json::from_str(&json).expect("download");
+        assert_eq!(back.computer_name, "OFFICE");
+    }
+
+    #[test]
+    fn a_file_on_this_disk_adopts_this_computer() {
+        let dir = std::env::temp_dir().join(format!("ce-download-adopt-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("note.txt");
+        std::fs::write(&path, b"hi").expect("file");
+        let mut local = DownloadItem {
+            path: path.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        assert!(adopt_local(std::slice::from_mut(&mut local)));
+        assert_eq!(local.computer_name, computer_name());
+        assert!(on_this_computer(&local));
+        local.computer_name = computer_name().to_ascii_lowercase();
+        assert!(on_this_computer(&local));
+
+        let mut foreign = DownloadItem {
+            computer_name: format!("{}-other", computer_name()),
+            path: path.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        assert!(!adopt_local(std::slice::from_mut(&mut foreign)));
+        assert!(!on_this_computer(&foreign));
+
+        let mut missing = DownloadItem {
+            path: dir.join("missing.bin").to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        assert!(!adopt_local(std::slice::from_mut(&mut missing)));
+        assert!(missing.computer_name.is_empty());
+        assert!(!on_this_computer(&missing));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

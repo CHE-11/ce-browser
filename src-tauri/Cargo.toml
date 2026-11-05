@@ -1,6 +1,6 @@
 [package]
 name = "ce-browser"
-version = "0.1.40"
+version = "0.1.41"
 description = "Tabbed WebView2 browser"
 authors = ["you"]
 edition = "2024"
@@ -32,7 +32,6 @@ zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 # webview2-com and windows must match the versions wry is built against, or the
 # WebView2 interface types will not line up with `PlatformWebview::controller()`.
 [target.'cfg(windows)'.dependencies]
-drag = "2.1"
 webview2-com = "0.38"
 windows = { version = "0.61", features = [
     "Win32_Foundation",
@@ -43,6 +42,7 @@ windows = { version = "0.61", features = [
     "Win32_System_DataExchange",
     "Win32_System_Memory",
     "Win32_System_Ole",
+    "Win32_System_SystemServices",
     "Win32_System_Variant",
     "Win32_Devices_FunctionDiscovery",
     "Win32_Graphics_Gdi",

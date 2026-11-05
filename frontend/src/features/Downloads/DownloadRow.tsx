@@ -4,6 +4,7 @@ import { openDownload, createTab, pauseDownload, resumeDownload, cancelDownload,
 import { cn } from "@/lib/cn";
 import { formatBytes, hostOf } from "@/lib/format";
 import { relativeTime } from "@/lib/time";
+import { useComputerName } from "@/lib/use-browser";
 import { DownloadItem } from "@type/browser";
 import {
   File,
@@ -73,9 +74,30 @@ function fileType(name: string): { icon: LucideIcon; className: string } {
   return { icon: File, className: "text-zinc-400" };
 }
 
-function statusText(item: DownloadItem, compact: boolean) {
+function savedOn(item: DownloadItem) {
+  return item.computerName?.trim() ?? "";
+}
+
+/** A download can be opened or dragged only on the computer that saved it. */
+function onThisComputer(item: DownloadItem, computer: string | null) {
+  const saved = savedOn(item);
+  if (!saved) {
+    return false;
+  }
+  if (computer === null) {
+    return true;
+  }
+  return saved.localeCompare(computer, undefined, { sensitivity: "accent" }) === 0;
+}
+
+function statusText(item: DownloadItem, compact: boolean, here: boolean) {
   const received = formatBytes(item.receivedBytes);
   const total = item.totalBytes ? formatBytes(item.totalBytes) : null;
+  if (!here) {
+    const where = savedOn(item) ? `On ${savedOn(item)}` : "Not on this computer";
+    const size = total ?? received;
+    return compact ? `${where} • ${size}` : `${where}, ${size}`;
+  }
   switch (item.state) {
     case "inProgress":
       return total ? `${received} of ${total}` : `${received} so far`;
@@ -93,16 +115,25 @@ function statusText(item: DownloadItem, compact: boolean) {
 }
 
 export function DownloadRow({ item, compact }: DownloadRowProps) {
+  const computer = useComputerName();
+  const here = onThisComputer(item, computer);
   const domId = `download-${item.id}`;
-  const running = item.state === "inProgress" || item.state === "paused";
+  const running = here && (item.state === "inProgress" || item.state === "paused");
   const fraction = item.totalBytes ? Math.min(1, item.receivedBytes / item.totalBytes) : null;
-  const completed = item.state === "completed";
+  const completed = item.state === "completed" && here;
   const dragging = useRef(false);
   const suppressClickUntil = useRef(0);
   const { icon: TypeIcon, className: typeClass } = fileType(item.fileName);
+  const elsewhere = savedOn(item) ? `Saved on ${savedOn(item)}` : "Saved on another computer";
+  let nameTitle = item.fileName;
+  if (completed) {
+    nameTitle = `Open ${item.fileName}`;
+  } else if (!here) {
+    nameTitle = elsewhere;
+  }
 
   function openDownloaded() {
-    if (performance.now() < suppressClickUntil.current) {
+    if (!here || performance.now() < suppressClickUntil.current) {
       return;
     }
     if (previewable(item.fileName)) {
@@ -113,7 +144,7 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
   }
 
   function beginFileDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!completed || event.button !== 0) {
+    if (!completed || !here || event.button !== 0) {
       return;
     }
     const target = event.target;
@@ -158,8 +189,10 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
       className={cn(
         "group flex items-center gap-3 rounded-md px-3 py-2 hover:bg-zinc-800/70",
         completed && "cursor-grab",
+        !here && "opacity-60",
         !compact && "border border-zinc-800 bg-zinc-900 py-3",
       )}
+      aria-disabled={!here}
       onPointerDown={completed ? beginFileDrag : undefined}
     >
       <TypeIcon id={`${domId}-icon`} className={cn("shrink-0", compact ? "size-8" : "size-6", typeClass)} aria-hidden />
@@ -168,10 +201,11 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
           id={`${domId}-name`}
           type="button"
           disabled={!completed}
-          title={completed ? `Open ${item.fileName}` : item.fileName}
+          title={nameTitle}
           className={cn(
             "block max-w-full truncate text-left text-sm",
             completed ? "cursor-grab text-zinc-100 hover:underline" : "cursor-default text-zinc-300",
+            !here && "cursor-not-allowed",
             (item.state === "cancelled" || item.state === "interrupted") && "line-through decoration-zinc-500",
           )}
           onClick={openDownloaded}
@@ -190,7 +224,7 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
           </button>
         ) : null}
         <div id={`${domId}-status`} className="truncate text-xs text-zinc-400">
-          {statusText(item, compact ?? false)}
+          {statusText(item, compact ?? false, here)}
         </div>
         {running ? (
           <div id={`${domId}-progress`} className="mt-1 h-1 overflow-hidden rounded-full bg-zinc-800">
@@ -207,12 +241,12 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
         ) : null}
       </div>
       <div id={`${domId}-actions`} className="flex shrink-0 cursor-default items-center gap-0.5">
-        {item.state === "inProgress" ? (
+        {here && item.state === "inProgress" ? (
           <IconButton id={`${domId}-pause`} label="Pause" onClick={() => void pauseDownload(item.id)}>
             <Pause id={`${domId}-pause-icon`} aria-hidden />
           </IconButton>
         ) : null}
-        {item.state === "paused" || (item.state === "interrupted" && item.canResume) ? (
+        {here && (item.state === "paused" || (item.state === "interrupted" && item.canResume)) ? (
           <IconButton id={`${domId}-resume`} label="Resume" onClick={() => void resumeDownload(item.id)}>
             <Play id={`${domId}-resume-icon`} aria-hidden />
           </IconButton>
@@ -222,7 +256,7 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
             <X id={`${domId}-cancel-icon`} aria-hidden />
           </IconButton>
         ) : null}
-        {(item.state === "cancelled" || (item.state === "interrupted" && !item.canResume)) ? (
+        {!here || item.state === "cancelled" || (item.state === "interrupted" && !item.canResume) ? (
           <IconButton id={`${domId}-retry`} label="Download again" onClick={() => void createTab(item.url, true)}>
             <RotateCw id={`${domId}-retry-icon`} aria-hidden />
           </IconButton>

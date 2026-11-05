@@ -890,6 +890,11 @@ fn list_downloads(app: AppHandle) -> Vec<DownloadItem> {
 }
 
 #[tauri::command]
+fn computer_name() -> String {
+    downloads::computer_name()
+}
+
+#[tauri::command]
 fn browse_local(app: AppHandle, path: Option<String>) -> Result<library::BrowseResult, String> {
     let path = path
         .filter(|path| !path.trim().is_empty())
@@ -2223,6 +2228,7 @@ pub fn run() {
             import_bookmarks_html,
             export_bookmarks_html,
             list_downloads,
+            computer_name,
             browse_local,
             open_local_file,
             pause_download,

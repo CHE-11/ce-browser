@@ -1187,6 +1187,10 @@ export function listDownloads() {
   return invoke<DownloadItem[]>("list_downloads");
 }
 
+export function computerName() {
+  return invoke<string>("computer_name");
+}
+
 export function pauseDownload(id: number) {
   return invoke<void>("pause_download", { id });
 }

@@ -1173,6 +1173,12 @@ pub fn lost_focus(app: &AppHandle, label: &str) {
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(BLUR_SETTLE);
+        // A file drag from the downloads panel takes focus. Closing now would drop the
+        // window out from under DoDragDrop. The drag closes the popup when it finishes.
+        if crate::downloads::dragging_file() {
+            crate::downloads::close_popup_when_drag_ends();
+            return;
+        }
         let labels = with(&app, |state| {
             state
                 .stacks

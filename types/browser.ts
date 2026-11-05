@@ -543,6 +543,8 @@ export type DownloadItem = {
   /** Saved with range requests instead of the single WebView2 download. */
   accelerated: boolean;
   ranges: { start: number; end: number; received: number }[];
+  /** Windows name of the computer that saved this file. Empty when an older list could not tell. */
+  computerName: string;
 };
 
 export type LocalEntry = {

@@ -10,6 +10,7 @@ import {
   onThemePreview,
   listBookmarks,
   listDownloads,
+  computerName,
   listExtensions,
   listHistory,
   listRecentlyClosed,
@@ -233,6 +234,36 @@ export function useSiteFavicons(urls: (string | null | undefined)[]) {
   }, [requested]);
 
   return icons;
+}
+
+let computerNameCache: string | null = null;
+let computerNameRequest: Promise<string> | null = null;
+
+/** Windows name of this PC. Null until the first read finishes. */
+export function useComputerName() {
+  const [name, setName] = useState<string | null>(computerNameCache);
+
+  useEffect(() => {
+    let live = true;
+    if (computerNameCache !== null) {
+      setName(computerNameCache);
+      return;
+    }
+    computerNameRequest ??= computerName();
+    void computerNameRequest
+      .then((value) => {
+        computerNameCache = value;
+        if (live) {
+          setName(value);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  return name;
 }
 
 export function useDownloadsState() {
