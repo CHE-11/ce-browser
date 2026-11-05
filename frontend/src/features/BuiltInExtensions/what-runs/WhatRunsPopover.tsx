@@ -28,10 +28,21 @@ function hostOf(url: string) {
   }
 }
 
+/** Vendor product names when this page is that company's software under another brand. */
+function softwareNames(technologies: DetectedTechnology[]) {
+  return technologies
+    .filter((technology) => technology.category === "platform")
+    .map((technology) => technology.name)
+    .sort((left, right) => left.localeCompare(right));
+}
+
 export function WhatRunsPopover({ params }: WhatRunsPopoverProps) {
   const tab = readPopoverTab(params);
   const [scan, setScan] = useState<Scan>({ state: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const host = hostOf(tab.url) || tab.title;
+  const software = scan.state === "done" ? softwareNames(scan.technologies) : [];
+  const subtitle = [software.join(", "), host].filter(Boolean).join(" · ");
 
   useEffect(() => {
     let cancelled = false;
@@ -58,7 +69,7 @@ export function WhatRunsPopover({ params }: WhatRunsPopoverProps) {
         id="what-runs-header"
         icon={<Layers aria-hidden />}
         title="What runs"
-        subtitle={hostOf(tab.url) || tab.title}
+        subtitle={subtitle}
       />
       <div id="what-runs-body" className="flex flex-col gap-2 px-3 pb-3">
         {scan.state === "loading" ? (

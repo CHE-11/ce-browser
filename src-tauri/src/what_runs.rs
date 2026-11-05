@@ -1,4 +1,4 @@
-//! What runs: finds the frameworks, languages, libraries and services a tab's page uses.
+//! What runs: finds the frameworks, languages, libraries, services and white-label products a tab's page uses.
 
 use std::time::Duration;
 
@@ -9,6 +9,7 @@ use crate::{tabs, webview2};
 
 const FAILURE: &str = "Couldn't scan this page.";
 const CATEGORIES: &[&str] = &[
+    "platform",
     "framework",
     "language",
     "library",
@@ -324,12 +325,12 @@ const DETECT_SCRIPT: &str = r##"(async () => {
     }
     const typo3 = generator(/TYPO3\s*(?:CMS)?\s*([\d.]+)?/i);
     if (typo3) { add("TYPO3", "cms", typo3.version, "https://typo3.org"); php(); }
-    if (w.Shopify || hasUrl(/cdn\.shopify\.com/)) add("Shopify", "cms", null, "https://www.shopify.com");
-    if (w.wixBiSession || hasUrl(/static\.(wixstatic|parastorage)\.com/) || generator(/Wix\.com/i)) add("Wix", "cms", null, "https://www.wix.com");
-    if ((w.Static && w.Static.SQUARESPACE_CONTEXT) || hasUrl(/squarespace(-cdn)?\.com/) || generator(/Squarespace/i)) add("Squarespace", "cms", null, "https://www.squarespace.com");
-    if (w.Webflow || document.documentElement.hasAttribute("data-wf-page") || generator(/Webflow/i)) add("Webflow", "cms", null, "https://webflow.com");
+    if (w.Shopify || hasUrl(/cdn\.shopify\.com/)) add("Shopify", "platform", null, "https://www.shopify.com");
+    if (w.wixBiSession || hasUrl(/static\.(wixstatic|parastorage)\.com/) || generator(/Wix\.com/i)) add("Wix", "platform", null, "https://www.wix.com");
+    if ((w.Static && w.Static.SQUARESPACE_CONTEXT) || hasUrl(/squarespace(-cdn)?\.com/) || generator(/Squarespace/i)) add("Squarespace", "platform", null, "https://www.squarespace.com");
+    if (w.Webflow || document.documentElement.hasAttribute("data-wf-page") || generator(/Webflow/i)) add("Webflow", "platform", null, "https://webflow.com");
     const ghost = generator(/Ghost\s*([\d.]+)?/i);
-    if (ghost) add("Ghost", "cms", ghost.version, "https://ghost.org");
+    if (ghost) add("Ghost", "platform", ghost.version, "https://ghost.org");
     const hugo = generator(/Hugo\s*([\d.]+)?/i);
     if (hugo) add("Hugo", "cms", hugo.version, "https://gohugo.io");
     const jekyll = generator(/Jekyll\s*v?([\d.]+)?/i);
@@ -351,6 +352,231 @@ const DETECT_SCRIPT: &str = r##"(async () => {
     if (generator(/Blogger/i)) add("Blogger", "cms", null, "https://www.blogger.com");
     if (w.Discourse) add("Discourse", "cms", null, "https://www.discourse.org");
     if (w.HubSpotConversations || hasUrl(/js\.hs-scripts\.com|js\.hsforms\.net/)) add("HubSpot", "analytics", null, "https://www.hubspot.com");
+  });
+
+  // White-label and hosted apps. The name is the vendor's product, not the brand on the page.
+  check(() => {
+    const host = location.hostname.replace(/\.$/, "").replace(/^www\./, "").toLowerCase();
+    const hostIs = (domain) => host === domain || host.endsWith("." + domain);
+    const vendor = (domain) => {
+      if (hostIs(domain)) return true;
+      const escaped = domain.replace(/\./g, "\\.");
+      return hasUrl(new RegExp("(^|[./])" + escaped + "(?::\\d+)?(?:[/?#]|$)", "i"));
+    };
+    const gen = (pattern) => !!generator(pattern);
+    const badge = (pattern) => {
+      try {
+        return Array.from(document.links).slice(0, 500).some((link) => {
+          const href = link.href || "";
+          if (!pattern.test(href)) return false;
+          const image = link.querySelector("img");
+          const text = (link.textContent || "") + " " + (link.getAttribute("aria-label") || "") + " " + (image ? image.alt : "");
+          return pattern.test(text) || /powered|made with|built with|create a free/i.test(text);
+        });
+      } catch { return false; }
+    };
+    let cookies = "";
+    try { cookies = document.cookie || ""; } catch {}
+    const foundPlatform = (fn, name, url) => {
+      try { if (fn()) add(name, "platform", null, url); } catch {}
+    };
+    const domains = [
+      ["framerusercontent.com", "Framer", "https://www.framer.com"],
+      ["cdn-website.com", "Duda", "https://www.duda.co"],
+      ["multiscreensite.com", "Duda", "https://www.duda.co"],
+      ["duda.co", "Duda", "https://www.duda.co"],
+      ["dudaone.com", "Duda", "https://www.duda.co"],
+      ["clickfunnels.com", "ClickFunnels", "https://www.clickfunnels.com"],
+      ["myclickfunnels.com", "ClickFunnels", "https://www.clickfunnels.com"],
+      ["kajabi-cdn.com", "Kajabi", "https://kajabi.com"],
+      ["kajabi.com", "Kajabi", "https://kajabi.com"],
+      ["kartra.com", "Kartra", "https://kartra.com"],
+      ["systeme.io", "systeme.io", "https://systeme.io"],
+      ["d1yei2z3i6k35z.cloudfront.net", "systeme.io", "https://systeme.io"],
+      ["builderall.com", "Builderall", "https://www.builderall.com"],
+      ["carrd.co", "Carrd", "https://carrd.co"],
+      ["unbounce.com", "Unbounce", "https://unbounce.com"],
+      ["ubembed.com", "Unbounce", "https://unbounce.com"],
+      ["unbouncepages.com", "Unbounce", "https://unbounce.com"],
+      ["pageserve.co", "Instapage", "https://instapage.com"],
+      ["instapage.com", "Instapage", "https://instapage.com"],
+      ["leadpages.net", "Leadpages", "https://www.leadpages.com"],
+      ["lpages.co", "Leadpages", "https://www.leadpages.com"],
+      ["tildacdn.com", "Tilda", "https://tilda.cc"],
+      ["tilda.ws", "Tilda", "https://tilda.cc"],
+      ["tilda.cc", "Tilda", "https://tilda.cc"],
+      ["bubble.io", "Bubble", "https://bubble.io"],
+      ["softr.io", "Softr", "https://www.softr.io"],
+      ["softrfiles.com", "Softr", "https://www.softr.io"],
+      ["jimcdn.com", "Jimdo", "https://www.jimdo.com"],
+      ["jimdosite.com", "Jimdo", "https://www.jimdo.com"],
+      ["webnode.com", "Webnode", "https://www.webnode.com"],
+      ["webnode.page", "Webnode", "https://www.webnode.com"],
+      ["strikinglycdn.com", "Strikingly", "https://www.strikingly.com"],
+      ["strikingly.com", "Strikingly", "https://www.strikingly.com"],
+      ["simvoly.com", "Simvoly", "https://simvoly.com"],
+      ["showit.co", "Showit", "https://www.showit.com"],
+      ["popmenu.com", "Popmenu", "https://www.popmenu.com"],
+      ["popmenucloud.com", "Popmenu", "https://www.popmenu.com"],
+      ["getbento.com", "BentoBox", "https://www.getbento.com"],
+      ["pixieset.com", "Pixieset", "https://pixieset.com"],
+      ["bigcommerce.com", "BigCommerce", "https://www.bigcommerce.com"],
+      ["ecwid.com", "Ecwid", "https://www.ecwid.com"],
+      ["shift4shop.com", "Shift4Shop", "https://www.shift4shop.com"],
+      ["3dcart.com", "Shift4Shop", "https://www.shift4shop.com"],
+      ["3dcartstores.com", "Shift4Shop", "https://www.shift4shop.com"],
+      ["webshopapp.com", "Lightspeed", "https://www.lightspeedhq.com"],
+      ["shoplightspeed.com", "Lightspeed", "https://www.lightspeedhq.com"],
+      ["volusion.com", "Volusion", "https://www.volusion.com"],
+      ["bigcartel.com", "Big Cartel", "https://www.bigcartel.com"],
+      ["swell.is", "Swell", "https://www.swell.is"],
+      ["swell.store", "Swell", "https://www.swell.is"],
+      ["vtexassets.com", "VTEX", "https://vtex.com"],
+      ["vteximg.com.br", "VTEX", "https://vtex.com"],
+      ["vtexcommercestable.com.br", "VTEX", "https://vtex.com"],
+      ["tcdn.com.br", "Tray", "https://www.tray.com.br"],
+      ["tray.com.br", "Tray", "https://www.tray.com.br"],
+      ["lojaintegrada.com.br", "Loja Integrada", "https://lojaintegrada.com.br"],
+      ["teachablecdn.com", "Teachable", "https://teachable.com"],
+      ["teachable.com", "Teachable", "https://teachable.com"],
+      ["thinkific.com", "Thinkific", "https://www.thinkific.com"],
+      ["podia.com", "Podia", "https://www.podia.com"],
+      ["learnworlds.com", "LearnWorlds", "https://www.learnworlds.com"],
+      ["gumroad.com", "Gumroad", "https://gumroad.com"],
+      ["readymag.com", "Readymag", "https://readymag.com"],
+      ["cargo.site", "Cargo", "https://cargo.site"],
+      ["format.com", "Format", "https://www.format.com"],
+      ["smugmug.com", "SmugMug", "https://www.smugmug.com"],
+      ["myportfolio.com", "Adobe Portfolio", "https://portfolio.adobe.com"],
+      ["carbonmade.com", "Carbonmade", "https://carbonmade.com"],
+      ["zenfolio.com", "Zenfolio", "https://zenfolio.com"],
+      ["photoshelter.com", "PhotoShelter", "https://www.photoshelter.com"],
+      ["pixpa.com", "Pixpa", "https://www.pixpa.com"],
+      ["mozello.com", "Mozello", "https://www.mozello.com"],
+      ["voog.com", "Voog", "https://www.voog.com"],
+      ["dorik.io", "Dorik", "https://dorik.com"],
+      ["ucraft.com", "uCraft", "https://www.ucraft.com"],
+      ["ucraft.net", "uCraft", "https://www.ucraft.com"],
+      ["durable.co", "Durable", "https://durable.co"],
+      ["typedream.com", "Typedream", "https://typedream.com"],
+      ["popsy.co", "Popsy", "https://popsy.co"],
+      ["circle.so", "Circle", "https://circle.so"],
+      ["mightynetworks.com", "Mighty Networks", "https://www.mightynetworks.com"],
+      ["skool.com", "Skool", "https://www.skool.com"],
+      ["glideapps.com", "Glide", "https://www.glideapps.com"],
+      ["adalo.com", "Adalo", "https://www.adalo.com"],
+      ["appsmith.com", "Appsmith", "https://www.appsmith.com"],
+      ["budibase.com", "Budibase", "https://budibase.com"],
+      ["budibase.app", "Budibase", "https://budibase.com"],
+      ["retool.com", "Retool", "https://retool.com"],
+      ["retool-edge.com", "Retool", "https://retool.com"],
+      ["mendix.com", "Mendix", "https://www.mendix.com"],
+      ["mendixcloud.com", "Mendix", "https://www.mendix.com"],
+      ["outsystems.com", "OutSystems", "https://www.outsystems.com"],
+      ["outsystemsenterprise.com", "OutSystems", "https://www.outsystems.com"],
+      ["caspio.com", "Caspio", "https://www.caspio.com"],
+      ["builder.io", "Builder.io", "https://www.builder.io"],
+      ["plasmic.app", "Plasmic", "https://www.plasmic.app"],
+      ["brizy.io", "Brizy", "https://www.brizy.io"],
+      ["brizy.cloud", "Brizy", "https://www.brizy.io"],
+      ["weblium.com", "Weblium", "https://weblium.com"],
+      ["convertri.com", "Convertri", "https://www.convertri.com"],
+      ["samcart.com", "SamCart", "https://samcart.com"],
+      ["landingi.com", "Landingi", "https://landingi.com"],
+      ["swipepages.com", "Swipe Pages", "https://swipepages.com"],
+      ["heyflow.com", "Heyflow", "https://heyflow.com"],
+      ["heyflow.app", "Heyflow", "https://heyflow.com"],
+      ["groovepages.com", "GroovePages", "https://groove.cm"],
+      ["yolasite.com", "Yola", "https://www.yola.com"],
+      ["yolacdn.net", "Yola", "https://www.yola.com"],
+      ["hashnode.com", "Hashnode", "https://hashnode.com"],
+      ["scorpion.co", "Scorpion", "https://www.scorpion.co"],
+      ["officite.com", "Officite", "https://www.officite.com"],
+      ["patientpop.com", "Tebra", "https://www.tebra.com"],
+      ["tebra.com", "Tebra", "https://www.tebra.com"],
+      ["lawlytics.com", "LawLytics", "https://www.lawlytics.com"],
+      ["justatic.com", "Justia", "https://www.justia.com"],
+      ["findlaw.com", "FindLaw", "https://www.findlaw.com"],
+      ["fl-cdn.com", "FindLaw", "https://www.findlaw.com"],
+      ["placester.com", "Placester", "https://placester.com"],
+      ["placester.net", "Placester", "https://placester.com"],
+      ["luxurypresence.com", "Luxury Presence", "https://www.luxurypresence.com"],
+      ["boomtownroi.com", "BoomTown", "https://www.boomtownroi.com"],
+      ["kvcore.com", "kvCORE", "https://www.kvcore.com"],
+      ["lofty.com", "Lofty", "https://lofty.com"],
+      ["chime.me", "Lofty", "https://lofty.com"],
+      ["sierrainteractive.com", "Sierra Interactive", "https://www.sierrainteractive.com"],
+      ["realgeeks.com", "Real Geeks", "https://www.realgeeks.com"],
+      ["dealer.com", "Dealer.com", "https://www.dealer.com"],
+      ["dealeron.com", "DealerOn", "https://www.dealeron.com"],
+      ["dealerinspire.com", "Dealer Inspire", "https://www.dealerinspire.com"],
+      ["dealerfire.com", "DealerFire", "https://www.dealerfire.com"],
+      ["payhip.com", "Payhip", "https://payhip.com"],
+      ["sellfy.com", "Sellfy", "https://sellfy.com"],
+      ["perspective.co", "Perspective", "https://www.perspective.co"],
+      ["super.so", "Super", "https://super.so"],
+      ["zyrosite.com", "Hostinger Website Builder", "https://www.hostinger.com/website-builder"],
+      ["mywebsite-editor.com", "IONOS MyWebsite", "https://www.ionos.com/websites/website-builder"],
+      ["ionos.space", "IONOS MyWebsite", "https://www.ionos.com/websites/website-builder"],
+      ["godaddysites.com", "GoDaddy Website Builder", "https://www.godaddy.com/websites/website-builder"],
+    ];
+    for (const [domain, name, url] of domains) foundPlatform(() => vendor(domain), name, url);
+
+    foundPlatform(() => gen(/Framer/i) || !!$("[data-framer-name], [data-framer-page], [data-framer-component-type]") || (document.documentElement && (document.documentElement.hasAttribute("data-framer-html") || document.documentElement.hasAttribute("data-framer-theme"))) || badge(/\bframer\.com\b/i), "Framer", "https://www.framer.com");
+    foundPlatform(() => !!$("#dmRoot, .dmBody, #d-js-dmapi") || !!(w.dmAPI || w.DM) || gen(/Duda/i), "Duda", "https://www.duda.co");
+    foundPlatform(() => hostIs("highlevel.com") || hostIs("gohighlevel.com") || vendor("msgsndr.com") || vendor("filesafe.space") || vendor("apisystem.tech") || hasUrl(/(^|[./])(?:backend|stcdn|api|images|cdn|link)\.leadconnectorhq\.com(?::\d+)?(?:[/?#]|$)/i) || gen(/HighLevel|GoHighLevel|LeadConnector/i), "HighLevel", "https://www.highlevel.com");
+    foundPlatform(() => !!w.ClickFunnels || gen(/ClickFunnels/i), "ClickFunnels", "https://www.clickfunnels.com");
+    foundPlatform(() => hasUrl(/kajabi-storefronts/i) || !!$("[data-kajabi-app]") || gen(/Kajabi/i), "Kajabi", "https://kajabi.com");
+    foundPlatform(() => gen(/Kartra/i), "Kartra", "https://kartra.com");
+    foundPlatform(() => gen(/systeme\.io/i), "systeme.io", "https://systeme.io");
+    foundPlatform(() => gen(/Builderall/i), "Builderall", "https://www.builderall.com");
+    foundPlatform(() => gen(/Carrd/i) || badge(/carrd\.co/i), "Carrd", "https://carrd.co");
+    foundPlatform(() => !!$("#lp-pom-root") || gen(/Unbounce/i), "Unbounce", "https://unbounce.com");
+    foundPlatform(() => gen(/Instapage/i), "Instapage", "https://instapage.com");
+    foundPlatform(() => gen(/Leadpages/i), "Leadpages", "https://www.leadpages.com");
+    foundPlatform(() => !!$(".t-records") || gen(/Tilda/i), "Tilda", "https://tilda.cc");
+    foundPlatform(() => !!w.appquery || gen(/^Bubble/i), "Bubble", "https://bubble.io");
+    foundPlatform(() => gen(/Softr/i), "Softr", "https://www.softr.io");
+    foundPlatform(() => gen(/Jimdo/i), "Jimdo", "https://www.jimdo.com");
+    foundPlatform(() => gen(/Webnode/i), "Webnode", "https://www.webnode.com");
+    foundPlatform(() => gen(/Strikingly/i), "Strikingly", "https://www.strikingly.com");
+    foundPlatform(() => hasUrl(/s123-cdn/i) || hostIs("site123.com") || hostIs("site123.me") || gen(/Site123/i), "Site123", "https://www.site123.com");
+    foundPlatform(() => !!w.showit || gen(/Showit/i), "Showit", "https://www.showit.com");
+    foundPlatform(() => gen(/Popmenu/i), "Popmenu", "https://www.popmenu.com");
+    foundPlatform(() => gen(/BentoBox/i), "BentoBox", "https://www.getbento.com");
+    foundPlatform(() => !!w.BCData || gen(/BigCommerce/i), "BigCommerce", "https://www.bigcommerce.com");
+    foundPlatform(() => !!w.Ecwid || !!$("#ecwid_html, #ecwid_body"), "Ecwid", "https://www.ecwid.com");
+    foundPlatform(() => !!w.vtexjs, "VTEX", "https://vtex.com");
+    foundPlatform(() => hasUrl(/\/vspfiles\//i), "Volusion", "https://www.volusion.com");
+    foundPlatform(() => gen(/Teachable/i), "Teachable", "https://teachable.com");
+    foundPlatform(() => gen(/Thinkific/i), "Thinkific", "https://www.thinkific.com");
+    foundPlatform(() => gen(/Podia/i), "Podia", "https://www.podia.com");
+    foundPlatform(() => gen(/LearnWorlds/i), "LearnWorlds", "https://www.learnworlds.com");
+    foundPlatform(() => gen(/Simvoly/i), "Simvoly", "https://simvoly.com");
+    foundPlatform(() => vendor("tiendanube.com") || vendor("mitiendanube.com"), "Tiendanube", "https://www.tiendanube.com");
+    foundPlatform(() => (vendor("nuvemshop.com.br") || vendor("nuvemshop.com")) && !(vendor("tiendanube.com") || vendor("mitiendanube.com")), "Nuvemshop", "https://www.nuvemshop.com.br");
+    foundPlatform(() => hasUrl(/demandware\.static|demandware\.net|\/on\/demandware\./i) || /(?:^|;\s*)dwsid=/.test(cookies), "Salesforce Commerce Cloud", "https://www.salesforce.com/products/commerce/");
+    foundPlatform(() => hostIs("my.site.com") || hostIs("salesforce-sites.com") || hasUrl(/\/sfsites\/c\//i), "Salesforce Experience Cloud", "https://www.salesforce.com/products/experience-cloud/overview/");
+    foundPlatform(() => !hostIs("my.site.com") && !hostIs("salesforce-sites.com") && !hasUrl(/\/sfsites\/c\//i) && (hostIs("force.com") || hostIs("salesforce.com") || hostIs("visualforce.com")), "Salesforce", "https://www.salesforce.com");
+    foundPlatform(() => !!w._spPageContextInfo || hostIs("sharepoint.com"), "SharePoint", "https://www.microsoft.com/microsoft-365/sharepoint/collaboration");
+    foundPlatform(() => hostIs("powerappsportals.com") || hostIs("powerpages.microsoft.com") || vendor("powerappsportals.com") || gen(/Power Pages/i), "Power Pages", "https://www.microsoft.com/power-platform/products/power-pages");
+    foundPlatform(() => !!$("[data-hs-cos-type]") || /\.hs-sites/.test(host) || host.includes("hubspotpagebuilder"), "HubSpot CMS", "https://www.hubspot.com/products/cms");
+    foundPlatform(() => gen(/Substack/i) || hostIs("substack.com") || (vendor("substackcdn.com") && !!w._preloads), "Substack", "https://substack.com");
+    foundPlatform(() => gen(/beehiiv/i) || hostIs("beehiiv.com") || hasUrl(/(^|[./])beehiiv\.com\/[^?#]*\.(?:js|css)(?:[?#]|$)/i), "Beehiiv", "https://www.beehiiv.com");
+    foundPlatform(() => hostIs("notion.site") || hostIs("notion.so"), "Notion", "https://www.notion.so");
+    foundPlatform(() => hostIs("janeapp.com"), "Jane", "https://jane.app");
+    foundPlatform(() => hostIs("vagaro.com"), "Vagaro", "https://www.vagaro.com");
+    foundPlatform(() => hostIs("mindbodyonline.com"), "Mindbody", "https://www.mindbodyonline.com");
+    foundPlatform(() => hostIs("ac-page.com") || hostIs("activehosted.com"), "ActiveCampaign", "https://www.activecampaign.com");
+    foundPlatform(() => hostIs("infusionsoft.com") || hostIs("keap.com"), "Keap", "https://keap.com");
+    foundPlatform(() => hostIs("sites.google.com") || gen(/Google Sites/i), "Google Sites", "https://sites.google.com");
+    foundPlatform(() => hostIs("lovable.app") || hostIs("lovableproject.com"), "Lovable", "https://lovable.dev");
+    foundPlatform(() => gen(/GoDaddy Website Builder/i) || (!!$("[data-ux]") && vendor("wsimg.com")), "GoDaddy Website Builder", "https://www.godaddy.com/websites/website-builder");
+    foundPlatform(() => gen(/Hostinger Website Builder|^Zyro/i) || hostIs("zyro.com"), "Hostinger Website Builder", "https://www.hostinger.com/website-builder");
+    foundPlatform(() => gen(/IONOS MyWebsite|1&1 MyWebsite|IONOS Website Builder/i), "IONOS MyWebsite", "https://www.ionos.com/websites/website-builder");
+    const squareOnline = gen(/Square Online/i) || hostIs("square.site");
+    foundPlatform(() => squareOnline, "Square Online", "https://squareup.com/us/en/online-store");
+    foundPlatform(() => !squareOnline && (vendor("editmysite.com") || (!!w._W && !!(w._W.metaSite || w._W.configDomain)) || gen(/Weebly/i)), "Weebly", "https://www.weebly.com");
   });
 
   // Analytics, tags and monitoring.
@@ -536,6 +762,19 @@ const DETECT_SCRIPT: &str = r##"(async () => {
         add("Drupal", "cms", drupalHeader && drupalHeader[1], "https://www.drupal.org");
         add("PHP", "language", null, "https://www.php.net");
       }
+      const hosted = [
+        [/Framer/i, "Framer", "https://www.framer.com"],
+        [/Webflow/i, "Webflow", "https://webflow.com"],
+        [/Wix\.com|Wix Studio/i, "Wix", "https://www.wix.com"],
+        [/Squarespace/i, "Squarespace", "https://www.squarespace.com"],
+        [/Shopify/i, "Shopify", "https://www.shopify.com"],
+        [/Duda/i, "Duda", "https://www.duda.co"],
+        [/Ghost/i, "Ghost", "https://ghost.org"],
+      ];
+      for (const [pattern, name, url] of hosted) {
+        if (pattern.test(xGenerator)) add(name, "platform", null, url);
+      }
+      if (header("d-cache")) add("Duda", "platform", null, "https://www.duda.co");
 
       if (header("cf-ray")) add("Cloudflare", "hosting", null, "https://www.cloudflare.com");
       if (header("x-vercel-id") || header("x-vercel-cache")) add("Vercel", "hosting", null, "https://vercel.com");
@@ -547,8 +786,8 @@ const DETECT_SCRIPT: &str = r##"(async () => {
       if (header("fly-request-id")) add("Fly.io", "hosting", null, "https://fly.io");
       if (header("x-render-origin-server")) add("Render", "hosting", null, "https://render.com");
       if (header("x-railway-request-id") || header("x-railway-edge")) add("Railway", "hosting", null, "https://railway.com");
-      if (header("x-shopify-stage") || header("x-shopid")) add("Shopify", "cms", null, "https://www.shopify.com");
-      if (header("x-wix-request-id")) add("Wix", "cms", null, "https://www.wix.com");
+      if (header("x-shopify-stage") || header("x-shopid")) add("Shopify", "platform", null, "https://www.shopify.com");
+      if (header("x-wix-request-id")) add("Wix", "platform", null, "https://www.wix.com");
       if (header("x-varnish")) add("Varnish", "server", null, "https://varnish-cache.org");
       if (header("x-litespeed-cache")) add("LiteSpeed", "server", null, "https://www.litespeedtech.com");
       if (/^1\.1 google$/i.test(header("via"))) add("Google Cloud", "hosting", null, "https://cloud.google.com");
@@ -649,5 +888,22 @@ mod tests {
         assert_eq!(page.technologies[1].category, "other");
         assert_eq!(page.technologies[1].version, None);
         assert_eq!(page.technologies[1].url, None);
+    }
+
+    #[test]
+    fn platform_category_is_kept() {
+        let page = PageTechnologies {
+            technologies: vec![DetectedTechnology {
+                name: "HighLevel".into(),
+                category: "platform".into(),
+                version: None,
+                url: Some("https://www.highlevel.com".into()),
+            }],
+        }
+        .clean();
+        assert_eq!(page.technologies.len(), 1);
+        assert_eq!(page.technologies[0].name, "HighLevel");
+        assert_eq!(page.technologies[0].category, "platform");
+        assert!(CATEGORIES.contains(&"platform"));
     }
 }

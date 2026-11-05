@@ -1,5 +1,6 @@
 import { TechnologyCategory } from "@type/browser";
 import {
+  AppWindow,
   Boxes,
   ChartLine,
   CircleHelp,
@@ -21,6 +22,7 @@ export type CategoryInfo = {
 
 /** Display order of the groups in the What runs popover. */
 export const CATEGORIES: CategoryInfo[] = [
+  { id: "platform", label: "Software", icon: AppWindow },
   { id: "framework", label: "Frameworks", icon: Boxes },
   { id: "language", label: "Languages", icon: Code },
   { id: "ui", label: "UI and CSS", icon: Palette },

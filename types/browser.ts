@@ -1154,6 +1154,7 @@ export type ExtractedPage = {
 };
 
 export type TechnologyCategory =
+  | "platform"
   | "framework"
   | "language"
   | "library"
