@@ -388,6 +388,22 @@ export const FONTS = [
   { id: "atkinson", label: "Atkinson Hyperlegible", stack: `"Atkinson Hyperlegible", ${SYSTEM_STACK}` },
   { id: "plex", label: "IBM Plex Sans", stack: `"IBM Plex Sans Variable", ${SYSTEM_STACK}` },
   { id: "source-serif", label: "Source Serif 4", stack: `"Source Serif 4 Variable", ${SYSTEM_STACK}` },
+  { id: "space-grotesk", label: "Space Grotesk", stack: `"Space Grotesk Variable", ${SYSTEM_STACK}` },
+  { id: "bricolage", label: "Bricolage Grotesque", stack: `"Bricolage Grotesque Variable", ${SYSTEM_STACK}` },
+  { id: "fraunces", label: "Fraunces", stack: `"Fraunces Variable", ${SYSTEM_STACK}` },
+  { id: "literata", label: "Literata", stack: `"Literata Variable", ${SYSTEM_STACK}` },
+  { id: "newsreader", label: "Newsreader", stack: `"Newsreader Variable", ${SYSTEM_STACK}` },
+  { id: "jetbrains-mono", label: "JetBrains Mono", stack: `"JetBrains Mono Variable", ${SYSTEM_STACK}` },
+  { id: "space-mono", label: "Space Mono", stack: `"Space Mono", ${SYSTEM_STACK}` },
+  { id: "martian-mono", label: "Martian Mono", stack: `"Martian Mono Variable", ${SYSTEM_STACK}` },
+  { id: "fira-code", label: "Fira Code", stack: `"Fira Code Variable", ${SYSTEM_STACK}` },
+  { id: "source-code", label: "Source Code Pro", stack: `"Source Code Pro Variable", ${SYSTEM_STACK}` },
+  { id: "share-tech-mono", label: "Share Tech Mono", stack: `"Share Tech Mono", ${SYSTEM_STACK}` },
+  { id: "oxanium", label: "Oxanium", stack: `"Oxanium Variable", ${SYSTEM_STACK}` },
+  { id: "exo-2", label: "Exo 2", stack: `"Exo 2 Variable", ${SYSTEM_STACK}` },
+  { id: "jura", label: "Jura", stack: `"Jura Variable", ${SYSTEM_STACK}` },
+  { id: "shantell", label: "Shantell Sans", stack: `"Shantell Sans Variable", ${SYSTEM_STACK}` },
+  { id: "comic-neue", label: "Comic Neue", stack: `"Comic Neue", ${SYSTEM_STACK}` },
 ] as const;
 
 export type FontId = (typeof FONTS)[number]["id"];

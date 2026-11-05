@@ -332,7 +332,7 @@ function FontPicker({ settings, onUpdate }: { settings: SettingsSectionProps["se
   }
   const selected = normalizeFont(settings.uiFont);
   return (
-    <div id="settings-font" className="px-5 py-3" onMouseLeave={() => applyFontPreview(null)}>
+    <div id="settings-font" className="px-5 py-3">
       <div id="settings-font-heading" className="mb-1 flex items-center gap-2">
         <div id="settings-font-label" className="text-sm text-zinc-100">
           {FONT_LABEL}
@@ -377,14 +377,6 @@ function FontPicker({ settings, onUpdate }: { settings: SettingsSectionProps["se
                 active ? "border-sky-500 text-zinc-100" : "border-zinc-700 text-zinc-300 hover:border-zinc-500",
               )}
               style={{ fontFamily: font.stack }}
-              onMouseEnter={() => applyFontPreview(font.id)}
-              onFocus={() => applyFontPreview(font.id)}
-              onBlur={(event) => {
-                const options = event.currentTarget.parentElement;
-                if (!options?.contains(event.relatedTarget as Node | null)) {
-                  applyFontPreview(null);
-                }
-              }}
               onClick={() => {
                 applyFontPreview(font.id, true);
                 onUpdate({ uiFont: font.id });

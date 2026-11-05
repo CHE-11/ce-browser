@@ -4,7 +4,7 @@ import type { BrowserProfile } from "@type/browser";
 import { IconButton } from "@/components/IconButton";
 import { listProfiles, onProfilesChanged, openPopup } from "@/lib/browser-client";
 
-/** Current profile, shown just left of the address-bar menu. */
+/** Current profile, shown just left of the settings button. */
 export function ProfileSwitcherButton() {
   const [profile, setProfile] = useState<BrowserProfile | null>(null);
 

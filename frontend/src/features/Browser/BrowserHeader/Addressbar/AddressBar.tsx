@@ -1128,10 +1128,10 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       >
         <Palette id="address-theme-icon" aria-hidden />
       </IconButton>
+      <ProfileSwitcherButton />
       <IconButton id="address-settings" label="Settings" onClick={() => void createTab("ce://settings")}>
         <Settings id="address-settings-icon" aria-hidden />
       </IconButton>
-      <ProfileSwitcherButton />
 
       <IconButton
         id="address-menu"

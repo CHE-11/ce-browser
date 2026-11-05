@@ -29,6 +29,22 @@ const UI_FONTS: &[&str] = &[
     "atkinson",
     "plex",
     "source-serif",
+    "space-grotesk",
+    "bricolage",
+    "fraunces",
+    "literata",
+    "newsreader",
+    "jetbrains-mono",
+    "space-mono",
+    "martian-mono",
+    "fira-code",
+    "source-code",
+    "share-tech-mono",
+    "oxanium",
+    "exo-2",
+    "jura",
+    "shantell",
+    "comic-neue",
 ];
 const BOOKMARK_TEXT_REM: (f32, f32) = (0.5, 1.5);
 const BOOKMARK_PADDING_REM: (f32, f32) = (0.0, 1.5);
@@ -1842,6 +1858,12 @@ mod tests {
         let saved: super::BrowserSettings =
             serde_json::from_str(r#"{"uiFont":"inter"}"#).expect("settings parse");
         assert_eq!(saved.normalize().ui_font, "inter");
+        let distinctive: super::BrowserSettings =
+            serde_json::from_str(r#"{"uiFont":"fraunces"}"#).expect("settings parse");
+        assert_eq!(distinctive.normalize().ui_font, "fraunces");
+        let coding: super::BrowserSettings =
+            serde_json::from_str(r#"{"uiFont":"martian-mono"}"#).expect("settings parse");
+        assert_eq!(coding.normalize().ui_font, "martian-mono");
     }
 
     #[test]
