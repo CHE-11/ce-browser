@@ -1,5 +1,5 @@
 import { PopupMenu, PopupMenuItem, PopupMenuSeparator, PopupFrame } from "@/components/PopupFrame";
-import { openPopup, addBookmark, closePopup, createTab, deleteBookmark, getSettings, openFolderAsGroup, openInWindow, saveSettings } from "@/lib/browser-client";
+import { openPopup, addBookmark, closePopup, closeThisPopup, createTab, deleteBookmark, getSettings, openFolderAsGroup, openInWindow, saveSettings } from "@/lib/browser-client";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { useSettings } from "@/lib/use-browser";
 import { AppWindow, ExternalLink, FolderPlus, Group, Library, PencilLine, Pin, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
@@ -72,7 +72,8 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, targ
     if (!target || !canDelete) {
       return;
     }
-    void deleteBookmark(target.id).then(onDone);
+    // Close this menu only. The folder it opened from stays up.
+    void deleteBookmark(target.id).then(() => closeThisPopup());
   };
 
   const openRename = () => {

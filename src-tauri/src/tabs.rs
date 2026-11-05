@@ -1096,7 +1096,8 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
         activate(app, id)?;
     } else {
         if !tab.lazy {
-            ensure_webview(app, id)?;
+            // Leave an open menu up. The click that asked for a background tab did not dismiss it.
+            open_page_view(app, id, false)?;
         }
         emit_tabs(app);
     }
@@ -1104,6 +1105,11 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
 }
 
 fn ensure_webview(app: &AppHandle, id: u32) -> Result<(), String> {
+    open_page_view(app, id, true)
+}
+
+/// Builds the page view for `id`. `dismiss` closes menus; a background tab leaves them open.
+fn open_page_view(app: &AppHandle, id: u32, dismiss: bool) -> Result<(), String> {
     let fallback = paths::internal_url(app, "newtab");
     let pending = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
@@ -1119,8 +1125,10 @@ fn ensure_webview(app: &AppHandle, id: u32) -> Result<(), String> {
     let Some((label, url)) = pending else {
         return Ok(());
     };
-    if let Some(window) = with_state(app, |state| state.tab_window(id)) {
-        crate::popup::close_all(app, &window, true);
+    if dismiss {
+        if let Some(window) = with_state(app, |state| state.tab_window(id)) {
+            crate::popup::close_all(app, &window, true);
+        }
     }
     if let Err(error) = build_page_view(app, id, &label, url.clone()) {
         with_state(app, |state| {
@@ -1135,6 +1143,9 @@ fn ensure_webview(app: &AppHandle, id: u32) -> Result<(), String> {
     }
     if let Some(window) = with_state(app, |state| state.tab_window(id)) {
         apply_audio(app, &window);
+        if !dismiss {
+            crate::popup::refocus(app, &window);
+        }
     }
     Ok(())
 }
@@ -1195,10 +1206,13 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
             let active = lock(&load_app).active_of(&owner) == Some(id);
             // The new page view takes focus as soon as it starts loading. Take it back
             // for the new tab page then, instead of waiting until the document finishes.
+            // A background tab gives it back to the menu that opened the tab.
             if active && new_tab_page && fresh && (loading || finished) {
                 focus_active(&load_app, &owner);
             } else if first && active {
                 focus_active(&load_app, &owner);
+            } else if !active && (loading || first) {
+                crate::popup::refocus(&load_app, &owner);
             }
             // A reload restores the profile's per-site zoom. Extension pages stay on Browser UI size.
             if let Some(factor) = extension_zoom

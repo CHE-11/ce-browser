@@ -1104,25 +1104,43 @@ fn close_from(app: &AppHandle, window: &str, depth: usize) {
     }
 }
 
-fn focus_level(app: &AppHandle, window: &str, depth: usize) {
-    let label = with(app, |state| {
-        let level = state.stacks.get(window)?.levels.get(depth)?;
-        level.focus.then(|| level.label.clone())
-    });
-    let Some(label) = label else {
-        return;
-    };
-    let Some(popup) = app.get_window(&label) else {
+fn focus_popup(app: &AppHandle, label: &str) {
+    let Some(popup) = app.get_window(label) else {
         return;
     };
     let hwnd = hwnd_of(&popup);
-    let webview = app.get_webview(&label);
+    let webview = app.get_webview(label);
     let _ = app.run_on_main_thread(move || {
         webview2::activate_popup(hwnd);
         if let Some(webview) = webview {
             let _ = webview.set_focus();
         }
     });
+}
+
+fn focus_level(app: &AppHandle, window: &str, depth: usize) {
+    let label = with(app, |state| {
+        let level = state.stacks.get(window)?.levels.get(depth)?;
+        level.focus.then(|| level.label.clone())
+    });
+    if let Some(label) = label {
+        focus_popup(app, &label);
+    }
+}
+
+/// Puts the keyboard back on the menu still open in `window`. A background page view takes
+/// focus when it starts loading, and that blur would otherwise close the menu.
+pub fn refocus(app: &AppHandle, window: &str) {
+    let label = with(app, |state| {
+        let stack = state.stacks.get(window)?;
+        if !stack.levels.first()?.focus {
+            return None;
+        }
+        Some(stack.levels.last()?.label.clone())
+    });
+    if let Some(label) = label {
+        focus_popup(app, &label);
+    }
 }
 
 /// Closes popup `label` and everything opened from it. Focus goes back to the menu below it,
