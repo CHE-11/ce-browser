@@ -3,8 +3,8 @@ import { AppWindow, Calculator, Code, Globe, History, Search, Star, X } from "lu
 import { FavIcon } from "@/components/FavIcon";
 import { PopupFrame, PopupMenuSeparator } from "@/components/PopupFrame";
 import { closePopup, onOmniboxState, openDevtools, openUiDevtools, sendOmniboxReady, sendOmniboxPick, sendOmniboxRemove } from "@/lib/browser-client";
+import { menuIconClass, menuRowClass, omniboxIconClass, omniboxRowClass, omniboxRowStyle, omniboxUrlClass } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
-import { OMNIBOX_ROW_HEIGHT } from "@/lib/omnibox";
 import { useTabs } from "@/lib/use-browser";
 import { OmniboxSuggestion, OmniboxState } from "@type/browser";
 
@@ -24,6 +24,7 @@ export function AddressBarEllipsisMenu() {
   const [state, setState] = useState<OmniboxState>({ suggestions: [], selected: 0 });
   const snapshot = useTabs();
   const active = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
+  const webToolsLabel = snapshot.devtools ? "Close Web Developer Tools" : "Open Web Developer Tools";
 
   const openTools = (action: () => Promise<unknown>) => {
     void action().finally(() => void closePopup());
@@ -51,9 +52,10 @@ export function AddressBarEllipsisMenu() {
               id={domId}
               role="option"
               aria-selected={index === state.selected}
-              style={{ height: OMNIBOX_ROW_HEIGHT }}
+              style={omniboxRowStyle}
               className={cn(
-                "group mx-1.5 flex cursor-default items-center gap-3 rounded-lg px-2.5 text-sm",
+                "group mx-1.5 cursor-default",
+                omniboxRowClass,
                 index === state.selected ? "bg-zinc-800" : "hover:bg-zinc-800/60",
               )}
               onMouseDown={(event) => {
@@ -62,15 +64,15 @@ export function AddressBarEllipsisMenu() {
               }}
             >
               {suggestion.kind === "search" || suggestion.kind === "url" || suggestion.kind === "answer" ? (
-                <Icon id={`${domId}-icon`} className="size-4 shrink-0 text-zinc-400" aria-hidden />
+                <Icon id={`${domId}-icon`} className={cn(omniboxIconClass, "text-zinc-400")} aria-hidden />
               ) : (
-                <FavIcon id={`${domId}-icon`} url={suggestion.url} />
+                <FavIcon id={`${domId}-icon`} url={suggestion.url} className={omniboxIconClass} />
               )}
               <span id={`${domId}-title`} className="min-w-0 truncate">
                 {suggestion.title}
               </span>
               {suggestion.kind === "bookmark" || suggestion.kind === "tab" || suggestion.kind === "history" ? (
-                <span id={`${domId}-url`} className="min-w-0 flex-1 truncate text-xs text-sky-400">
+                <span id={`${domId}-url`} className={cn(omniboxUrlClass, "text-sky-400")}>
                   {suggestion.url}
                 </span>
               ) : (
@@ -115,20 +117,23 @@ export function AddressBarEllipsisMenu() {
         <button
           id="address-bar-ellipsis-tauri-devtools"
           type="button"
-          className="flex h-9 w-full items-center gap-3 rounded-lg px-2.5 text-left text-sm text-zinc-100 hover:bg-zinc-800"
+          className={cn("flex w-full items-center gap-3 rounded-lg text-left text-zinc-100 hover:bg-zinc-800", menuRowClass)}
           onMouseDown={(event) => {
             event.preventDefault();
             openTools(openUiDevtools);
           }}
         >
-          <AppWindow id="address-bar-ellipsis-tauri-devtools-icon" className="size-4 shrink-0 text-zinc-400" aria-hidden />
+          <AppWindow id="address-bar-ellipsis-tauri-devtools-icon" className={cn(menuIconClass, "text-zinc-400")} aria-hidden />
           <span id="address-bar-ellipsis-tauri-devtools-label">Open Tauri Developer Tools</span>
         </button>
         <button
           id="address-bar-ellipsis-web-devtools"
           type="button"
           disabled={!active}
-          className="flex h-9 w-full items-center gap-3 rounded-lg px-2.5 text-left text-sm text-zinc-100 hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent"
+          className={cn(
+            "flex w-full items-center gap-3 rounded-lg text-left text-zinc-100 hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent",
+            menuRowClass,
+          )}
           onMouseDown={(event) => {
             event.preventDefault();
             if (active) {
@@ -136,8 +141,8 @@ export function AddressBarEllipsisMenu() {
             }
           }}
         >
-          <Code id="address-bar-ellipsis-web-devtools-icon" className="size-4 shrink-0 text-zinc-400" aria-hidden />
-          <span id="address-bar-ellipsis-web-devtools-label">Open Web Developer Tools</span>
+          <Code id="address-bar-ellipsis-web-devtools-icon" className={cn(menuIconClass, "text-zinc-400")} aria-hidden />
+          <span id="address-bar-ellipsis-web-devtools-label">{webToolsLabel}</span>
         </button>
       </div>
     </PopupFrame>

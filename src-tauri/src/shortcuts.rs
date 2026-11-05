@@ -36,6 +36,8 @@ pub enum Action {
     ZoomOut,
     ZoomReset,
     DevTools,
+    /// Ctrl+Shift+I. Website tools or the app tools, depending on what is under the pointer.
+    Inspect,
     ClosePopup,
     ClosePeek,
     Workspace(usize),
@@ -185,6 +187,10 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             }
             Ok(())
         }
+        Action::Inspect => {
+            tabs::inspect_hovered(app);
+            Ok(())
+        }
         Action::ClosePopup => {
             popup::close_top(app, &window);
             Ok(())
@@ -268,7 +274,7 @@ fn category_of(action: &str) -> &'static str {
         | "bookmark"
         | "toggle-bookmarks-bar" => "Address bar and bookmarks",
         "reload" | "reload-key" | "back" | "forward" | "find" | "zoom-in" | "zoom-in-shift"
-        | "zoom-out" | "zoom-reset" | "devtools" => "Page",
+        | "zoom-out" | "zoom-reset" | "devtools" | "inspect" => "Page",
         _ => "Browser",
     }
 }
@@ -538,6 +544,7 @@ fn action_from(action: &str) -> Option<Action> {
         "zoom-out" => Action::ZoomOut,
         "zoom-reset" => Action::ZoomReset,
         "devtools" => Action::DevTools,
+        "inspect" => Action::Inspect,
         "command-palette" => Action::CommandPalette,
         "tab-search" => Action::TabSearch,
         "shortcut-sheet" => Action::ShortcutSheet,
@@ -604,6 +611,7 @@ pub fn defaults() -> Vec<ShortcutBinding> {
         bind("zoom-out", "Zoom out", "ctrl+minus"),
         bind("zoom-reset", "Reset zoom", "ctrl+0"),
         bind("devtools", "Developer tools", "f12"),
+        bind("inspect", "Inspect", "ctrl+shift+i"),
         bind("new-window", "New tab", "ctrl+n"),
         bind("close-f4", "Close tab", "ctrl+f4"),
         bind("next-page", "Next tab", "ctrl+pagedown"),

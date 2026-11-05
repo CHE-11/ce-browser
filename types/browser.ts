@@ -93,16 +93,35 @@ export type SplitView = {
   ratio: number;
 };
 
+export type DevtoolsDock = {
+  /** Share of the page area the pages keep. Tools take the rest, from 0.35 to 0.8. */
+  ratio: number;
+  /** The column is on screen. Fullscreen keeps the dock open with this false. */
+  visible: boolean;
+};
+
+export type PageViewport = {
+  /** CSS pixels. The page view is this size. */
+  width: number;
+  height: number;
+  /** Black cutout over the top of the page. */
+  cutout: boolean;
+  /** Home indicator along the bottom of the page. */
+  homeBar: boolean;
+};
+
 export type WindowTabs = {
   label: string;
   activeId: number | null;
   fullscreen: boolean;
   workspace: string;
   split: SplitView | null;
+  /** Docked page inspector. Null until the user opens it. */
+  devtools: DevtoolsDock | null;
   /** Address of the open peek, if any. */
   peekUrl: string | null;
-  /** `phone`, `tablet`, `laptop`, or empty for the full page. */
-  device: string;
+  /** Fixed CSS size of the page view. Null uses the whole page area. */
+  viewport: PageViewport | null;
 };
 
 export type RewriteRule = {
@@ -433,6 +452,7 @@ export type PopupKind =
   | "boards"
   | "board-images"
   | "theme-picker"
+  | "style-picker"
   | "font-picker"
   | "profile-switcher"
   | "permission";
@@ -645,6 +665,16 @@ export type BrowserSettings = {
   bookmarksBarMenuTextSize: number;
   /** Side padding of rows in the bookmarks bar context menu, in rem. Top and bottom get half. */
   bookmarksBarMenuPadding: number;
+  /** Favicon and folder icon on the bookmarks bar, in rem. */
+  bookmarksBarIconSize: number;
+  /** Minimum height of a bookmarks bar item, in rem. */
+  bookmarksBarHeight: number;
+  /** Icon in a bookmark folder menu, in rem. */
+  bookmarkFolderIconSize: number;
+  /** Icon in the bookmarks bar context menu, in rem. */
+  bookmarksBarMenuIconSize: number;
+  /** Width of the bookmarks bar context menu, in CSS pixels at 100% UI size. */
+  bookmarksBarMenuWidth: number;
   /** The status bar under every page. */
   showStatusBar: boolean;
   /** Memory, time and the other status readings. Off leaves the version and zoom. */
@@ -743,6 +773,74 @@ export type BrowserSettings = {
   tabMenuTextSize: number;
   /** Side padding of rows in the tab context menu, in rem. Top and bottom get half. */
   tabMenuPadding: number;
+  /** Minimum height of a horizontal tab, in rem. */
+  tabItemHeight: number;
+  /** Favicon on a tab, in rem. The close icon is 0.875 times this. */
+  tabIconSize: number;
+  /** Icon in the tab context menu, in rem. */
+  tabMenuIconSize: number;
+  /** Minimum height of a tab context menu row, in rem. Zero keeps the height of the text and padding. */
+  tabMenuHeight: number;
+  /** Width of the tab context menu, in CSS pixels at 100% UI size. */
+  tabMenuWidth: number;
+  /** Text size of shared menu rows, in rem. */
+  menuTextSize: number;
+  /** Side padding of shared menu rows, in rem. */
+  menuPadding: number;
+  /** Height of a shared menu row, in rem. */
+  menuHeight: number;
+  /** Icon in a shared menu row, in rem. */
+  menuIconSize: number;
+  /** Height of the address bar, in rem. */
+  toolbarHeight: number;
+  /** Address-bar and side-strip buttons, in rem. */
+  toolbarButtonSize: number;
+  /** Icons in those buttons, in rem. */
+  toolbarIconSize: number;
+  /** Height of the address field, in rem. */
+  addressHeight: number;
+  /** Text in the address field, in rem. */
+  addressTextSize: number;
+  /** Height of an omnibox suggestion, in rem. */
+  omniboxRowHeight: number;
+  /** Title in an omnibox suggestion, in rem. */
+  omniboxTextSize: number;
+  /** Icon in an omnibox suggestion, in rem. */
+  omniboxIconSize: number;
+  /** Address beside an omnibox title, in rem. */
+  omniboxUrlSize: number;
+  /** Width of the downloads panel, in CSS pixels at 100% UI size. */
+  downloadsPanelWidth: number;
+  /** File name in the downloads panel, in rem. */
+  downloadsTextSize: number;
+  /** Side padding of a downloads panel row, in rem. */
+  downloadsPadding: number;
+  /** Top and bottom padding of a downloads panel row, in rem. */
+  downloadsRowPadding: number;
+  /** File icon in the downloads panel, in rem. */
+  downloadsIconSize: number;
+  /** Width of the history popover, in CSS pixels at 100% UI size. */
+  historyPanelWidth: number;
+  /** Title in the history popover, in rem. */
+  historyTextSize: number;
+  /** Host and time in the history popover, in rem. */
+  historyMetaSize: number;
+  /** Side padding of a history popover row, in rem. */
+  historyPadding: number;
+  /** Top and bottom padding of a history popover row, in rem. */
+  historyRowPadding: number;
+  /** Favicon in the history popover, in rem. */
+  historyIconSize: number;
+  /** Width of the command palette, in CSS pixels at 100% UI size. */
+  commandPaletteWidth: number;
+  /** Height of the command palette search field, in rem. */
+  commandPaletteInputHeight: number;
+  /** Height of a command palette row, in rem. */
+  commandPaletteRowHeight: number;
+  /** Title in a command palette row, in rem. */
+  commandPaletteTextSize: number;
+  /** Hint in a command palette row, in rem. */
+  commandPaletteHintSize: number;
   /** Corner or edge of the page area where toasts appear. */
   toastPosition: ToastPosition;
   /** Opens these file types in a browser tab. */

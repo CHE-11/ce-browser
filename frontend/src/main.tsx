@@ -23,6 +23,7 @@ import { RewritesPage } from "./features/Rewrites/Rewrites.page";
 import { ShortcutsPage } from "./features/Shortcuts/Shortcuts.page";
 import { StoragePage } from "./features/Storage/Storage.page";
 import { SettingsPage } from "./features/Settings/Settings.page";
+import { StylesPage } from "./features/Styles/Styles.page";
 import { ShoppingPage } from "./features/Shopping/Shopping.page";
 import { WhatsNewPage } from "./features/WhatsNew/WhatsNew.page";
 import "./index.css";
@@ -61,6 +62,8 @@ function App() {
       return <HistoryPage />;
     case "settings":
       return <SettingsPage />;
+    case "styles":
+      return <StylesPage />;
     case "shopping":
       return <ShoppingPage params={route.params} />;
     case "extensions":

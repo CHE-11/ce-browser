@@ -1,4 +1,5 @@
 import { useRef, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+import { menuIconClass, menuRowClass } from "../lib/chrome-metrics";
 import { cn } from "../lib/cn";
 import { focusRow } from "../lib/focus-ring";
 
@@ -103,7 +104,7 @@ export function MenuItem({ id, icon, label, shortcut, disabled, danger, title, s
       style={style}
       className={cn(
         "group flex w-full items-center gap-3 rounded-lg text-left text-zinc-100 transition-colors hover:bg-zinc-800 disabled:opacity-40 disabled:hover:bg-transparent",
-        sized ? undefined : "h-9 px-2.5 text-sm",
+        sized ? undefined : menuRowClass,
         focusRow,
         danger && "text-red-300",
       )}
@@ -115,7 +116,7 @@ export function MenuItem({ id, icon, label, shortcut, disabled, danger, title, s
         aria-hidden
         className={cn(
           "inline-flex shrink-0 items-center justify-center text-zinc-400 group-hover:text-zinc-200",
-          sized ? "size-[1.15em] [&_svg]:size-[1.15em]" : "size-4 [&_svg]:size-4",
+          sized ? "size-[var(--item-icon)] [&_svg]:size-[var(--item-icon)]" : menuIconClass,
         )}
       >
         {icon}

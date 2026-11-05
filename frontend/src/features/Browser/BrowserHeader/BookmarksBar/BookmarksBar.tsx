@@ -5,6 +5,7 @@ import { FavIcon } from "@/components/FavIcon";
 import { closePopup, createTab, moveBookmark, navigate, openPopup } from "@/lib/browser-client";
 import { BOOKMARK_DROP_END, isBookmarkDrag, useBookmarkDrag } from "@/lib/bookmark-drag";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
+import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { faviconKey } from "@/lib/format";
@@ -18,6 +19,10 @@ type BookmarksBarProps = {
   textSize?: number;
   /** rem */
   padding?: number;
+  /** rem */
+  iconSize?: number;
+  /** rem */
+  height?: number;
   /** Off hides folder icons. A folder without a title keeps its icon so it stays visible. */
   folderIcons?: boolean;
 };
@@ -27,7 +32,7 @@ const itemClass = cn(
   "inline-flex max-w-[15em] shrink-0 items-center gap-[0.5em] rounded-md text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100",
   focusRing,
 );
-const iconClass = "size-[1.2em] shrink-0";
+const iconClass = "shrink-0";
 
 function itemSignature(node: BookmarkNode) {
   return `${node.id}\0${node.title}\0${node.url ?? ""}\0${node.separator ? 1 : 0}`;
@@ -64,12 +69,14 @@ function useFittedCount(
   items: BookmarkNode[],
   textSize: number | undefined,
   padding: number | undefined,
+  iconSize: number,
+  height: number,
   folderIcons: boolean,
   dropMarker: boolean,
   slotRef: RefObject<HTMLDivElement | null>,
   chevronRef: RefObject<HTMLButtonElement | null>,
 ) {
-  const signature = `${textSize ?? ""}|${padding ?? ""}|${folderIcons ? 1 : 0}|${items.map(itemSignature).join("\n")}`;
+  const signature = `${textSize ?? ""}|${padding ?? ""}|${iconSize}|${height}|${folderIcons ? 1 : 0}|${items.map(itemSignature).join("\n")}`;
   const widths = useRef(new Map<string, number>());
   const fontsApplied = useRef("");
   const itemsRef = useRef(items);
@@ -187,10 +194,18 @@ export function openBookmarkLink(url: string, activeId: number | null, event?: M
   }
 }
 
-export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = true }: BookmarksBarProps) {
+export function BookmarksBar({ tree, activeId, textSize, padding, iconSize, height, folderIcons = true }: BookmarksBarProps) {
   const items = tree?.bar.children ?? [];
   const icons = useSiteFavicons(items.map((node) => node.url));
-  const itemStyle = bookmarkItemStyle(textSize, padding, { text: BOOKMARK_SIZE.barText, padding: BOOKMARK_SIZE.barPadding });
+  const icon = metric(iconSize, CHROME.bookmarksBarIconSize);
+  const barHeight = metric(height, CHROME.bookmarksBarHeight);
+  const iconStyle = remBox(icon);
+  const itemStyle = bookmarkItemStyle(
+    textSize,
+    padding,
+    { text: BOOKMARK_SIZE.barText, padding: BOOKMARK_SIZE.barPadding },
+    { height: barHeight },
+  );
   /** Folder whose popup this drag opened by hovering it. */
   const dragOpened = useRef<string | null>(null);
   const slotRef = useRef<HTMLDivElement>(null);
@@ -219,7 +234,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
   });
 
   const dropMarker = drag.drop?.id === BOOKMARK_DROP_END;
-  const visibleCount = useFittedCount(items, textSize, padding, folderIcons, dropMarker, slotRef, chevronRef);
+  const visibleCount = useFittedCount(items, textSize, padding, icon, barHeight, folderIcons, dropMarker, slotRef, chevronRef);
   const shown = items.slice(0, visibleCount);
 
   const openFolder = (event: MouseEvent<HTMLElement>, node: BookmarkNode) => {
@@ -337,6 +352,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
                 url={node.url}
                 src={icons[faviconKey(node.url) ?? ""] ?? null}
                 className={iconClass}
+                style={iconStyle}
               />
               <span id={`bookmarks-bar-${node.id}-title`} className="truncate">
                 {node.title || node.url}
@@ -357,7 +373,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
               {...drag.itemProps(node, index)}
             >
               {folderIcons || !node.title ? (
-                <Folder id={`bookmarks-bar-${node.id}-icon`} className={cn(iconClass, "text-amber-400")} aria-hidden />
+                <Folder id={`bookmarks-bar-${node.id}-icon`} className={cn(iconClass, "text-amber-400")} style={iconStyle} aria-hidden />
               ) : null}
               <span id={`bookmarks-bar-${node.id}-title`} className="truncate">
                 {node.title}
@@ -381,7 +397,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
           onClick={openOverflow}
           {...drag.targetProps(tree.bar, items.length)}
         >
-          <ChevronsRight id="bookmarks-bar-all-icon" className={iconClass} aria-hidden />
+          <ChevronsRight id="bookmarks-bar-all-icon" className={iconClass} style={iconStyle} aria-hidden />
         </button>
       ) : null}
       {tree && (tree.other.children?.length ?? 0) > 0 ? (
@@ -395,7 +411,7 @@ export function BookmarksBar({ tree, activeId, textSize, padding, folderIcons = 
           onClick={(event) => openFolder(event, tree.other)}
           {...drag.targetProps(tree.other, 0)}
         >
-          {folderIcons ? <Folder id="bookmarks-bar-other-icon" className={cn(iconClass, "text-amber-400")} aria-hidden /> : null}
+          {folderIcons ? <Folder id="bookmarks-bar-other-icon" className={cn(iconClass, "text-amber-400")} style={iconStyle} aria-hidden /> : null}
           <span id="bookmarks-bar-other-title" className="truncate">
             {tree.other.title || "Other bookmarks"}
           </span>

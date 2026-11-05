@@ -1,5 +1,5 @@
 import { Fragment, useEffect, type ReactNode } from "react";
-import { Bookmark, Download, Folder, History, LayoutGrid, Puzzle, Settings } from "lucide-react";
+import { Bookmark, Download, Folder, History, LayoutGrid, Paintbrush, Puzzle, Settings } from "lucide-react";
 import { cn } from "../lib/cn";
 import { focusRing } from "../lib/focus-ring";
 import { goToPage } from "../lib/route";
@@ -12,6 +12,7 @@ export const PAGE_NAV = [
   { page: "files", label: "Files", icon: Folder },
   { page: "history", label: "History", icon: History },
   { page: "extensions", label: "Extensions", icon: Puzzle },
+  { page: "styles", label: "Styles", icon: Paintbrush },
   { page: "settings", label: "Settings", icon: Settings },
 ] as const;
 
@@ -61,10 +62,12 @@ type PageShellProps = {
   actions?: ReactNode;
   nav?: ReactNode;
   lockHorizontalScroll?: boolean;
+  /** The body fills the page height and does not pad or scroll on its own. */
+  flush?: boolean;
   children: ReactNode;
 };
 
-export function PageShell({ id, page, title, actions, nav, lockHorizontalScroll = false, children }: PageShellProps) {
+export function PageShell({ id, page, title, actions, nav, lockHorizontalScroll = false, flush = false, children }: PageShellProps) {
   useAppearanceFromSettings();
 
   useEffect(() => {
@@ -107,7 +110,10 @@ export function PageShell({ id, page, title, actions, nav, lockHorizontalScroll 
             {actions}
           </div>
         </header>
-        <div id={`${id}-body`} className={cn("min-h-0 flex-1 overflow-y-auto px-8 py-6", scrollLock)}>
+        <div
+          id={`${id}-body`}
+          className={cn("min-h-0 flex-1", flush ? "flex flex-col overflow-hidden" : "overflow-y-auto px-8 py-6", scrollLock)}
+        >
           {children}
         </div>
       </main>

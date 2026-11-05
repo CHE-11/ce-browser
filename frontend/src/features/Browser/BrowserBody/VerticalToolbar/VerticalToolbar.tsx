@@ -209,7 +209,7 @@ export const VerticalToolbar = forwardRef<HTMLElement, VerticalToolbarProps>(fun
       id="vertical-toolbar"
       ref={ref}
       aria-label="Tools"
-      className="flex h-full w-12 min-h-0 min-w-12 max-w-12 shrink-0 flex-col overflow-hidden border-l border-zinc-800 bg-zinc-950"
+      className="chrome-tool-strip flex h-full w-12 min-h-0 min-w-12 max-w-12 shrink-0 flex-col overflow-hidden border-l border-zinc-800 bg-zinc-950"
     >
       <div id="vertical-toolbar-dock" className="flex shrink-0 justify-center border-b border-zinc-800 py-1">
         <IconButton

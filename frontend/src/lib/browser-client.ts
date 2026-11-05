@@ -598,8 +598,12 @@ export function openDefaultApps() {
   return invoke<void>("open_default_apps");
 }
 
-export function setDevice(window: string, device: string) {
-  return invoke<void>("set_device", { window, device });
+export function setViewport(width: number, height: number, cutout: boolean, homeBar: boolean) {
+  return invoke<void>("set_viewport", { width, height, cutout, homeBar });
+}
+
+export function clearViewport() {
+  return invoke<void>("clear_viewport");
 }
 
 export function listRewriteRules() {
@@ -682,6 +686,10 @@ export function exitSplit() {
 
 export function setSplitRatio(ratio: number) {
   return invoke<void>("set_split_ratio", { ratio });
+}
+
+export function setDevtoolsRatio(ratio: number) {
+  return invoke<void>("set_devtools_ratio", { ratio });
 }
 
 // Tab groups
@@ -1562,6 +1570,11 @@ export function createProfile(name: string) {
 
 export function copyProfile(id: string, name: string, parts: ProfileCopyPart[]) {
   return invoke<BrowserProfile[]>("copy_profile", { id, name, parts });
+}
+
+/** Copies fine-tune sizes from another profile. Theme, font, and zoom stay. */
+export function importStyleMetrics(profileId: string) {
+  return invoke<BrowserSettings>("import_style_metrics", { profileId });
 }
 
 export function openProfile(id: string) {

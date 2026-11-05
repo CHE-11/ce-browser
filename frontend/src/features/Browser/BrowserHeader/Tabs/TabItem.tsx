@@ -6,6 +6,7 @@ import { accentTint } from "@/lib/accent";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { tabProblemTitle, type HeavyTab } from "@/lib/tab-alert";
+import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
 import { TAB_SIZE, tabItemStyle } from "@/lib/tab-size";
 import { useSettings } from "@/lib/use-browser";
 import { hoverTab, leaveTab } from "@/lib/tab-hover";
@@ -59,11 +60,19 @@ export function TabItem({
   const quietActive = QUIET_TAB_THEMES.has(settings?.theme ?? document.documentElement.dataset.theme ?? "");
   const hoverPreview = settings?.tabHoverPreview !== false;
   const tabWidth = settings?.tabWidth ?? TAB_SIZE.width;
-  const itemStyle = compact ? null : tabItemStyle(settings?.tabItemTextSize, settings?.tabItemPadding);
+  const vertical = orientation === "vertical";
+  const iconSize = metric(settings?.tabIconSize, CHROME.tabIconSize);
+  const closeSize = iconSize * 0.875;
+  const itemStyle = compact
+    ? null
+    : tabItemStyle(
+        settings?.tabItemTextSize,
+        settings?.tabItemPadding,
+        vertical ? undefined : metric(settings?.tabItemHeight, CHROME.tabItemHeight),
+      );
   const accent = settings?.siteAccent && tab.accent && !tab.pinned ? tab.accent : null;
   const pinBorder = (settings?.pinTabBorder ?? true) && tab.pinned ? tab.accent : null;
   const domId = `tab-${tab.id}`;
-  const vertical = orientation === "vertical";
   const showAudio = tab.audible || tab.muted;
   const alert = tabProblemTitle(tab, heavy);
   const accentFill = accent && active ? accentTint(accent, 0.28) : undefined;
@@ -77,9 +86,9 @@ export function TabItem({
   };
 
   const audioIcon = tab.muted ? (
-    <VolumeX id={`${domId}-audio-muted`} className={compact ? "size-2" : "size-3.5"} aria-hidden />
+    <VolumeX id={`${domId}-audio-muted`} className={cn(compact ? "size-3" : "size-4", "text-white")} aria-hidden />
   ) : (
-    <Volume2 id={`${domId}-audio-playing`} className={cn(compact ? "size-2" : "size-3.5", "text-sky-400")} aria-hidden />
+    <Volume2 id={`${domId}-audio-playing`} className={cn(compact ? "size-3" : "size-4", "text-white")} aria-hidden />
   );
   const audioButton = showAudio ? (
     compact ? (
@@ -89,7 +98,7 @@ export function TabItem({
         title={tab.muted ? "Unmute tab" : "Mute tab"}
         aria-label={tab.muted ? `Unmute ${tab.title}` : `Mute ${tab.title}`}
         className={cn(
-          "absolute -right-1.5 -top-1.5 z-10 inline-flex size-3.5 items-center justify-center rounded-full bg-zinc-950 text-zinc-300 ring-1 ring-zinc-700 hover:bg-zinc-800 hover:text-zinc-100",
+          "absolute -right-2 -top-2 z-10 inline-flex size-4.5 items-center justify-center rounded-full bg-zinc-950 text-white ring-1 ring-zinc-700 hover:bg-zinc-800",
           focusRing,
         )}
         onMouseDown={(event) => event.stopPropagation()}
@@ -152,6 +161,7 @@ export function TabItem({
       )}
       style={{
         viewTransitionName: `tab-${tab.id}`,
+        ["--tab-close" as string]: `${Math.max(1.25, closeSize)}rem`,
         ...(itemStyle ?? null),
         ...(!vertical && !compact ? { width: tabWidth } : null),
         ...(backgroundColor ? { backgroundColor, "--tab-fill": backgroundColor } : null),
@@ -225,9 +235,15 @@ export function TabItem({
       ) : null}
       <span id={`${domId}-icon-wrap`} className="relative inline-flex shrink-0">
         {tab.failure ? (
-          <TriangleAlert id={`${domId}-failed`} className="size-4 shrink-0 text-amber-400" aria-label="Page failed to load" />
+          <TriangleAlert id={`${domId}-failed`} className="shrink-0 text-amber-400" style={remBox(iconSize)} aria-label="Page failed to load" />
         ) : (
-          <FavIcon id={`${domId}-icon`} url={tab.url} src={tab.favicon} className={cn("transition-transform", tab.loading && "scale-75")} />
+          <FavIcon
+            id={`${domId}-icon`}
+            url={tab.url}
+            src={tab.favicon}
+            className={cn("transition-transform", tab.loading && "scale-75")}
+            style={remBox(iconSize)}
+          />
         )}
         {tab.loading ? (
           <span
@@ -264,15 +280,15 @@ export function TabItem({
             title={grouped ? "Close selected tabs (Ctrl+W)" : "Close tab (Ctrl+W)"}
             aria-label={grouped ? "Close selected tabs" : `Close ${tab.title}`}
             className={cn(
-              "pointer-events-none -ml-2 inline-flex h-5 w-0 min-w-0 shrink-0 items-center justify-center overflow-hidden rounded p-0 text-zinc-400 opacity-0 transition-[width,opacity,margin] duration-100 hover:bg-zinc-700 hover:text-zinc-100",
-              "group-hover:pointer-events-auto group-hover:ml-0 group-hover:w-5 group-hover:overflow-visible group-hover:opacity-100",
-              "focus-visible:pointer-events-auto focus-visible:ml-0 focus-visible:w-5 focus-visible:overflow-visible focus-visible:opacity-100",
+              "pointer-events-none -ml-2 inline-flex h-[var(--tab-close)] w-0 min-w-0 shrink-0 items-center justify-center overflow-hidden rounded p-0 text-zinc-400 opacity-0 transition-[width,opacity,margin] duration-100 hover:bg-zinc-700 hover:text-zinc-100",
+              "group-hover:pointer-events-auto group-hover:ml-0 group-hover:w-[var(--tab-close)] group-hover:overflow-visible group-hover:opacity-100",
+              "focus-visible:pointer-events-auto focus-visible:ml-0 focus-visible:w-[var(--tab-close)] focus-visible:overflow-visible focus-visible:opacity-100",
               focusRing,
             )}
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onClose}
           >
-            <X id={`${domId}-close-icon`} className="size-3.5 shrink-0" aria-hidden />
+            <X id={`${domId}-close-icon`} className="shrink-0" style={remBox(closeSize)} aria-hidden />
           </button>
         </>
       )}

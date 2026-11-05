@@ -3,7 +3,8 @@ import { PopupFrame } from "@/components/PopupFrame";
 import { createTab, closePopup } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { focusRow } from "@/lib/focus-ring";
-import { useDownloadsState } from "@/lib/use-browser";
+import { CHROME, metric } from "@/lib/chrome-metrics";
+import { useDownloadsState, useSettings } from "@/lib/use-browser";
 import { Download, SquareArrowOutUpRight, X } from "lucide-react";
 import { DownloadRow } from "./DownloadRow";
 
@@ -12,10 +13,11 @@ const PANEL_LIMIT = 8;
 
 export function DownloadsPanel() {
   const { downloads, loaded } = useDownloadsState();
+  const settings = useSettings();
   const recent = downloads.slice(0, PANEL_LIMIT);
 
   return (
-    <PopupFrame id="downloads-panel" width={380} maxHeight={520} ready={loaded}>
+    <PopupFrame id="downloads-panel" width={metric(settings?.downloadsPanelWidth, CHROME.downloadsPanelWidth)} maxHeight={520} ready={loaded}>
       <div id="downloads-panel-header" className="flex items-center justify-between gap-2 py-1 pr-1 pl-4">
         <h2 id="downloads-panel-title" className="text-sm font-medium">
           Recent download history

@@ -4,6 +4,7 @@ import { Menu } from "@/components/Menu";
 import { PopupFrame } from "@/components/PopupFrame";
 import { closeThisPopup, getSettings, saveSettings, sendThemePreview } from "@/lib/browser-client";
 import { THEMES, normalizeTheme, resolveMode, themeSurfaceStyle, type ThemeId } from "@/lib/appearance";
+import { menuRowClass } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { focusRing, focusRow } from "@/lib/focus-ring";
 import { useSettingsState } from "@/lib/use-browser";
@@ -122,7 +123,8 @@ export function ThemePicker() {
                 data-label={theme.label}
                 aria-current={active ? "true" : undefined}
                 className={cn(
-                  "flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm text-zinc-100 hover:bg-zinc-800",
+                  "flex w-full items-center gap-2.5 rounded-lg text-left text-zinc-100 hover:bg-zinc-800",
+                  menuRowClass,
                   focusRow,
                   active && "bg-zinc-800",
                 )}

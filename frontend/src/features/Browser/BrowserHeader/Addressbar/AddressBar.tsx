@@ -11,6 +11,7 @@ import {
   Info,
   Lock,
   Mic,
+  Paintbrush,
   Palette,
   PanelRight,
   Pin,
@@ -763,7 +764,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   return (
     <div
       id="address-bar"
-      className={cn("relative flex h-10 shrink-0 items-center gap-1 bg-zinc-900 px-2", windowControls && "pr-0")}
+      className={cn("chrome-toolbar relative flex h-10 shrink-0 items-center gap-1 bg-zinc-900 px-2", windowControls && "pr-0")}
       style={
         settings?.siteAccent && activeTab?.accent
           ? { backgroundColor: accentTint(activeTab.accent, 0.28) }
@@ -814,7 +815,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         id="address-field"
         ref={fieldRef}
         className={cn(
-          "mx-1 flex h-8 min-w-0 flex-1 items-center gap-2 rounded-full bg-zinc-800 px-3 ring-sky-500/70 transition-shadow",
+          "chrome-address-field mx-1 flex h-8 min-w-0 flex-1 items-center gap-2 rounded-full bg-zinc-800 px-3 ring-sky-500/70 transition-shadow",
           editing && "ring-2",
         )}
       >
@@ -856,7 +857,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
             <div
               id="address-display"
               aria-hidden
-              className="pointer-events-none absolute inset-0 z-10 flex items-center overflow-hidden whitespace-pre bg-zinc-800 text-sm"
+              className="chrome-address-text pointer-events-none absolute inset-0 z-10 flex items-center overflow-hidden whitespace-pre bg-zinc-800 text-sm"
             >
               {emphasis.scheme ? (
                 <span id="address-display-scheme" className="text-zinc-500">
@@ -883,7 +884,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           placeholder="Search or enter address"
           aria-label="Address and search bar"
           className={cn(
-            "min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-500",
+            "chrome-address-text min-w-0 flex-1 bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-500",
             emphasis &&
               "text-transparent caret-transparent selection:bg-transparent selection:text-transparent [-webkit-text-fill-color:transparent]",
           )}
@@ -1121,6 +1122,13 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         onClick={(event) => void openPopup("status", event.currentTarget)}
       >
         <Activity id="address-status-icon" aria-hidden />
+      </IconButton>
+      <IconButton
+        id="address-styles"
+        label="Styles"
+        onClick={(event) => void openPopup("style-picker", event.currentTarget)}
+      >
+        <Paintbrush id="address-styles-icon" aria-hidden />
       </IconButton>
       <IconButton
         id="address-theme"

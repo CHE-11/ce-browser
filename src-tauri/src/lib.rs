@@ -9,6 +9,7 @@ mod bookmark_health;
 mod bookmarks;
 mod browsers;
 mod capture;
+mod devtools;
 mod downloads;
 mod extension_store;
 mod extensions;
@@ -336,6 +337,11 @@ async fn exit_split(app: AppHandle, window: Window) -> Result<(), String> {
 #[tauri::command]
 async fn set_split_ratio(app: AppHandle, window: Window, ratio: f64) {
     tabs::set_split_ratio(&app, &browser_window(&window), ratio);
+}
+
+#[tauri::command]
+async fn set_devtools_ratio(app: AppHandle, window: Window, ratio: f64) {
+    tabs::set_devtools_ratio(&app, &browser_window(&window), ratio);
 }
 
 // Tab groups
@@ -1588,8 +1594,27 @@ fn open_default_apps() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_device(app: AppHandle, window: String, device: String) -> Result<(), String> {
-    tabs::set_device(&app, &window, &device)
+async fn set_viewport(
+    app: AppHandle,
+    window: Window,
+    width: u32,
+    height: u32,
+    cutout: bool,
+    home_bar: bool,
+) {
+    tabs::set_viewport(
+        &app,
+        &browser_window(&window),
+        width,
+        height,
+        cutout,
+        home_bar,
+    );
+}
+
+#[tauri::command]
+async fn clear_viewport(app: AppHandle, window: Window) {
+    tabs::clear_viewport(&app, &browser_window(&window));
 }
 
 #[tauri::command]
@@ -1881,6 +1906,11 @@ fn create_profile(app: AppHandle, name: String) -> Result<Vec<ProfileInfo>, Stri
 }
 
 #[tauri::command]
+fn import_style_metrics(app: AppHandle, profile_id: String) -> Result<BrowserSettings, String> {
+    settings::import_style_metrics(&app, &profile_id)
+}
+
+#[tauri::command]
 async fn copy_profile(
     app: AppHandle,
     id: String,
@@ -2168,6 +2198,7 @@ pub fn run() {
             swap_split,
             exit_split,
             set_split_ratio,
+            set_devtools_ratio,
             create_group,
             add_to_group,
             remove_from_group,
@@ -2340,7 +2371,8 @@ pub fn run() {
             list_ai_models,
             install_site,
             open_default_apps,
-            set_device,
+            set_viewport,
+            clear_viewport,
             list_rewrite_rules,
             save_rewrite_rules,
             installed_browsers,
@@ -2382,6 +2414,7 @@ pub fn run() {
             import_profile_archive,
             list_profiles,
             create_profile,
+            import_style_metrics,
             copy_profile,
             open_profile,
             install_profile_shortcut,

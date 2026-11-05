@@ -20,6 +20,7 @@ import {
   zoomTab,
 } from "@/lib/browser-client";
 import { PopupFrame } from "@/components/PopupFrame";
+import { CHROME, metric, paletteHintClass, paletteInputClass, paletteRowClass } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { flattenBookmarks, useBookmarks, useExtensions, useHistory, useRecentlyClosed, useSettings, useTabs } from "@/lib/use-browser";
 import { BUILTIN_TOOLS } from "@features/BuiltInExtensions/builtin";
@@ -149,6 +150,7 @@ export function CommandPalette() {
       { id: "files", title: "Files", hint: "ce://files", group: "Action", run: () => createTab("ce://files") },
       { id: "history", title: "History", hint: "ce://history", group: "Action", run: () => createTab("ce://history") },
       { id: "settings", title: "Settings", hint: "ce://settings", group: "Action", run: () => openSetting(snapshot.windowTabs, "settings-profiles") },
+      { id: "styles", title: "Styles", hint: "ce://styles", group: "Action", run: () => createTab("ce://styles") },
       { id: "extensions", title: "Extensions", hint: "ce://extensions", group: "Action", run: () => createTab("ce://extensions") },
       { id: "scripts", title: "Site scripts", hint: "ce://scripts", group: "Action", run: () => createTab("ce://scripts") },
       { id: "permissions", title: "Permissions", hint: "ce://permissions", group: "Action", run: () => createTab("ce://permissions") },
@@ -380,7 +382,7 @@ export function CommandPalette() {
   };
 
   return (
-    <PopupFrame id="command-palette" width={560} maxHeight={2000} className="flex flex-col">
+    <PopupFrame id="command-palette" width={metric(settings?.commandPaletteWidth, CHROME.commandPaletteWidth)} maxHeight={2000} className="flex flex-col">
       <input
         id="command-palette-input"
         ref={inputRef}
@@ -392,7 +394,7 @@ export function CommandPalette() {
         aria-label="Command palette"
         aria-controls="command-palette-list"
         aria-describedby="command-palette-filters"
-        className="h-12 shrink-0 border-b border-zinc-800 bg-transparent px-4 text-sm outline-none [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden"
+        className={cn(paletteInputClass, "[&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden")}
         onChange={(event) => setQuery(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown") {
@@ -424,7 +426,7 @@ export function CommandPalette() {
               aria-selected={index === selected}
               data-index={index}
               className={cn(
-                "flex h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-sm",
+                paletteRowClass,
                 index === selected ? "bg-zinc-800" : "hover:bg-zinc-800/60",
               )}
               onMouseEnter={() => setSelected(index)}
@@ -436,7 +438,7 @@ export function CommandPalette() {
               <span id={`command-palette-${hit.id}-title`} className="min-w-0 flex-1 truncate">
                 <Highlighted id={`command-palette-${hit.id}-text`} text={hit.title} matches={matches} />
               </span>
-              <span id={`command-palette-${hit.id}-hint`} className="max-w-56 shrink-0 truncate text-xs text-zinc-500">
+              <span id={`command-palette-${hit.id}-hint`} className={paletteHintClass}>
                 {hit.hint}
               </span>
             </button>

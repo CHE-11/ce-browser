@@ -4,6 +4,7 @@ import { Menu } from "@/components/Menu";
 import { PopupFrame } from "@/components/PopupFrame";
 import { closeThisPopup, getSettings, saveSettings, sendFontPreview } from "@/lib/browser-client";
 import { FONTS, normalizeFont, type FontId } from "@/lib/appearance";
+import { menuRowClass } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { focusRow } from "@/lib/focus-ring";
 import { useSettingsState } from "@/lib/use-browser";
@@ -77,7 +78,8 @@ export function FontPicker() {
                 data-label={font.label}
                 aria-current={active ? "true" : undefined}
                 className={cn(
-                  "flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm text-zinc-100 hover:bg-zinc-800",
+                  "flex w-full items-center gap-2.5 rounded-lg text-left text-zinc-100 hover:bg-zinc-800",
+                  menuRowClass,
                   focusRow,
                   active && "bg-zinc-800",
                 )}

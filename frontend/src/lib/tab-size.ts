@@ -16,13 +16,15 @@ export const TAB_SIZE = {
 } as const;
 
 /** Font size and padding for a tab title. `padding` is the side padding and the top and bottom get half. */
-export function tabItemStyle(textSize: number | undefined, padding: number | undefined): CSSProperties {
+export function tabItemStyle(textSize: number | undefined, padding: number | undefined, height?: number): CSSProperties {
   const text = Number.isFinite(textSize) ? (textSize as number) : TAB_SIZE.itemText;
   const side = Number.isFinite(padding) ? (padding as number) : TAB_SIZE.itemPadding;
+  const minHeight = Number.isFinite(height) && (height as number) > 0 ? `${height}rem` : undefined;
   return {
     fontSize: `${text}rem`,
     lineHeight: 1.35,
     paddingBlock: `${side / 2}rem`,
     paddingInline: `${side}rem`,
+    ...(minHeight ? { minHeight } : null),
   };
 }

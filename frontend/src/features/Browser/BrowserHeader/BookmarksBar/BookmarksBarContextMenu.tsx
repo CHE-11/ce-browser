@@ -1,6 +1,7 @@
 import { PopupMenu, PopupMenuItem, PopupMenuSeparator, PopupFrame } from "@/components/PopupFrame";
 import { openPopup, addBookmark, closePopup, closeThisPopup, createTab, deleteBookmark, getSettings, openFolderAsGroup, openInWindow, saveSettings } from "@/lib/browser-client";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
+import { CHROME, metric } from "@/lib/chrome-metrics";
 import { useSettings } from "@/lib/use-browser";
 import { AppWindow, ExternalLink, FolderPlus, Group, Library, PencilLine, Pin, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
 
@@ -50,10 +51,12 @@ function pinKey(url: string) {
 
 export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, target, onDone }: BookmarksBarMenuItemsProps) {
   const settings = useSettings();
-  const itemStyle = bookmarkItemStyle(settings?.bookmarksBarMenuTextSize, settings?.bookmarksBarMenuPadding, {
-    text: BOOKMARK_SIZE.menuText,
-    padding: BOOKMARK_SIZE.menuPadding,
-  });
+  const itemStyle = bookmarkItemStyle(
+    settings?.bookmarksBarMenuTextSize,
+    settings?.bookmarksBarMenuPadding,
+    { text: BOOKMARK_SIZE.menuText, padding: BOOKMARK_SIZE.menuPadding },
+    { icon: metric(settings?.bookmarksBarMenuIconSize, CHROME.bookmarksBarMenuIconSize) },
+  );
   const openAdd = (mode: "link" | "folder") => {
     const params = new URLSearchParams({ mode, parent: parentId });
     void openPopup("bookmark-add", MENU_CORNER, { params: params.toString() });
@@ -194,8 +197,9 @@ type BookmarksBarMenuProps = {
 };
 
 export function BookmarksBarContextMenu({ parentId, divider, target }: BookmarksBarMenuProps) {
+  const settings = useSettings();
   return (
-    <PopupFrame id="bookmarks-bar-menu" width={280}>
+    <PopupFrame id="bookmarks-bar-menu" width={metric(settings?.bookmarksBarMenuWidth, CHROME.bookmarksBarMenuWidth)}>
       <BookmarksBarContextMenuItems
         idPrefix="bookmarks-bar-menu"
         parentId={parentId}

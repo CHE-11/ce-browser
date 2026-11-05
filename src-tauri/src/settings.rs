@@ -49,6 +49,69 @@ const UI_FONTS: &[&str] = &[
 const BOOKMARK_TEXT_REM: (f32, f32) = (0.5, 1.5);
 const BOOKMARK_PADDING_REM: (f32, f32) = (0.0, 1.5);
 const TAB_WIDTH_PX: (u32, u32) = (88, 480);
+/// Icons on tabs, menus, and the toolbar, in rem.
+const ICON_REM: (f32, f32) = (0.5, 3.0);
+/// Row and bar heights that always take space, in rem.
+const HEIGHT_REM: (f32, f32) = (1.0, 4.0);
+/// A menu row height that may be 0, meaning the text and padding decide.
+const OPTIONAL_HEIGHT_REM: (f32, f32) = (0.0, 4.0);
+const MENU_WIDTH_PX: (u32, u32) = (160, 480);
+const PANEL_WIDTH_PX: (u32, u32) = (240, 720);
+const PALETTE_WIDTH_PX: (u32, u32) = (360, 880);
+/// Fine-tune sizes the Styles page copies from another profile. Theme, font, and zoom stay out.
+pub const STYLE_METRIC_KEYS: &[&str] = &[
+    "tabWidth",
+    "verticalTabsWidth",
+    "tabItemTextSize",
+    "tabItemPadding",
+    "tabItemHeight",
+    "tabIconSize",
+    "tabMenuTextSize",
+    "tabMenuPadding",
+    "tabMenuIconSize",
+    "tabMenuHeight",
+    "tabMenuWidth",
+    "bookmarksBarTextSize",
+    "bookmarksBarPadding",
+    "bookmarksBarIconSize",
+    "bookmarksBarHeight",
+    "bookmarkFolderTextSize",
+    "bookmarkFolderPadding",
+    "bookmarkFolderIconSize",
+    "bookmarksBarMenuTextSize",
+    "bookmarksBarMenuPadding",
+    "bookmarksBarMenuIconSize",
+    "bookmarksBarMenuWidth",
+    "menuTextSize",
+    "menuPadding",
+    "menuHeight",
+    "menuIconSize",
+    "toolbarHeight",
+    "toolbarButtonSize",
+    "toolbarIconSize",
+    "addressHeight",
+    "addressTextSize",
+    "omniboxRowHeight",
+    "omniboxTextSize",
+    "omniboxIconSize",
+    "omniboxUrlSize",
+    "downloadsPanelWidth",
+    "downloadsTextSize",
+    "downloadsPadding",
+    "downloadsRowPadding",
+    "downloadsIconSize",
+    "historyPanelWidth",
+    "historyTextSize",
+    "historyMetaSize",
+    "historyPadding",
+    "historyRowPadding",
+    "historyIconSize",
+    "commandPaletteWidth",
+    "commandPaletteInputHeight",
+    "commandPaletteRowHeight",
+    "commandPaletteTextSize",
+    "commandPaletteHintSize",
+];
 pub const AI_PROVIDER_IDS: &[&str] = &["openai", "claude", "custom", "local"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -265,6 +328,21 @@ pub struct BrowserSettings {
     /// Side padding of rows in the bookmarks bar context menu, in rem. Top and bottom get half.
     #[serde(default = "default_menu_padding")]
     pub bookmarks_bar_menu_padding: f32,
+    /// Favicon and folder icon on the bookmarks bar, in rem.
+    #[serde(default = "default_bookmarks_bar_icon_size")]
+    pub bookmarks_bar_icon_size: f32,
+    /// Minimum height of a bookmarks bar item, in rem.
+    #[serde(default = "default_bookmarks_bar_height")]
+    pub bookmarks_bar_height: f32,
+    /// Icon in a bookmark folder menu, in rem.
+    #[serde(default = "default_bookmark_folder_icon_size")]
+    pub bookmark_folder_icon_size: f32,
+    /// Icon in the bookmarks bar context menu, in rem.
+    #[serde(default = "default_bookmarks_bar_menu_icon_size")]
+    pub bookmarks_bar_menu_icon_size: f32,
+    /// Width of the bookmarks bar context menu, in CSS pixels at 100% UI size.
+    #[serde(default = "default_bookmarks_bar_menu_width")]
+    pub bookmarks_bar_menu_width: u32,
     /// Retired preset (`small`, `default`, `large`, `xlarge`). Read once and mapped onto the
     /// four values above.
     #[serde(rename = "bookmarkSize", skip_serializing)]
@@ -427,6 +505,108 @@ pub struct BrowserSettings {
     /// Side padding of rows in the tab context menu, in rem. Top and bottom get half.
     #[serde(default = "default_tab_menu_padding")]
     pub tab_menu_padding: f32,
+    /// Minimum height of a horizontal tab, in rem.
+    #[serde(default = "default_tab_item_height")]
+    pub tab_item_height: f32,
+    /// Favicon on a tab, in rem. The close icon is 0.875 times this.
+    #[serde(default = "default_tab_icon_size")]
+    pub tab_icon_size: f32,
+    /// Icon in the tab context menu, in rem.
+    #[serde(default = "default_tab_menu_icon_size")]
+    pub tab_menu_icon_size: f32,
+    /// Minimum height of a tab context menu row, in rem. Zero keeps the height of the text and padding.
+    #[serde(default)]
+    pub tab_menu_height: f32,
+    /// Width of the tab context menu, in CSS pixels at 100% UI size.
+    #[serde(default = "default_tab_menu_width")]
+    pub tab_menu_width: u32,
+    /// Text size of shared menu rows, in rem. Tab and bookmark menus keep their own sizes.
+    #[serde(default = "default_menu_text_size")]
+    pub menu_text_size: f32,
+    /// Side padding of shared menu rows, in rem.
+    #[serde(default = "default_menu_padding")]
+    pub menu_padding: f32,
+    /// Height of a shared menu row, in rem.
+    #[serde(default = "default_menu_height")]
+    pub menu_height: f32,
+    /// Icon in a shared menu row, in rem.
+    #[serde(default = "default_menu_icon_size")]
+    pub menu_icon_size: f32,
+    /// Height of the address bar, in rem.
+    #[serde(default = "default_toolbar_height")]
+    pub toolbar_height: f32,
+    /// Address-bar and side-strip buttons, in rem.
+    #[serde(default = "default_toolbar_button_size")]
+    pub toolbar_button_size: f32,
+    /// Icons in those buttons, in rem.
+    #[serde(default = "default_toolbar_icon_size")]
+    pub toolbar_icon_size: f32,
+    /// Height of the address field, in rem.
+    #[serde(default = "default_address_height")]
+    pub address_height: f32,
+    /// Text in the address field, in rem.
+    #[serde(default = "default_address_text_size")]
+    pub address_text_size: f32,
+    /// Height of an omnibox suggestion, in rem.
+    #[serde(default = "default_omnibox_row_height")]
+    pub omnibox_row_height: f32,
+    /// Title in an omnibox suggestion, in rem.
+    #[serde(default = "default_menu_text_size")]
+    pub omnibox_text_size: f32,
+    /// Icon in an omnibox suggestion, in rem.
+    #[serde(default = "default_menu_icon_size")]
+    pub omnibox_icon_size: f32,
+    /// Address beside an omnibox title, in rem.
+    #[serde(default = "default_omnibox_url_size")]
+    pub omnibox_url_size: f32,
+    /// Width of the downloads panel, in CSS pixels at 100% UI size.
+    #[serde(default = "default_downloads_panel_width")]
+    pub downloads_panel_width: u32,
+    /// File name in the downloads panel, in rem.
+    #[serde(default = "default_menu_text_size")]
+    pub downloads_text_size: f32,
+    /// Side padding of a downloads panel row, in rem.
+    #[serde(default = "default_panel_padding")]
+    pub downloads_padding: f32,
+    /// Top and bottom padding of a downloads panel row, in rem.
+    #[serde(default = "default_panel_row_padding")]
+    pub downloads_row_padding: f32,
+    /// File icon in the downloads panel, in rem.
+    #[serde(default = "default_downloads_icon_size")]
+    pub downloads_icon_size: f32,
+    /// Width of the history popover, in CSS pixels at 100% UI size.
+    #[serde(default = "default_history_panel_width")]
+    pub history_panel_width: u32,
+    /// Title in the history popover, in rem.
+    #[serde(default = "default_menu_text_size")]
+    pub history_text_size: f32,
+    /// Host and time in the history popover, in rem.
+    #[serde(default = "default_omnibox_url_size")]
+    pub history_meta_size: f32,
+    /// Side padding of a history popover row, in rem.
+    #[serde(default = "default_panel_padding")]
+    pub history_padding: f32,
+    /// Top and bottom padding of a history popover row, in rem.
+    #[serde(default = "default_panel_row_padding")]
+    pub history_row_padding: f32,
+    /// Favicon in the history popover, in rem.
+    #[serde(default = "default_menu_icon_size")]
+    pub history_icon_size: f32,
+    /// Width of the command palette, in CSS pixels at 100% UI size.
+    #[serde(default = "default_command_palette_width")]
+    pub command_palette_width: u32,
+    /// Height of the command palette search field, in rem.
+    #[serde(default = "default_command_palette_input_height")]
+    pub command_palette_input_height: f32,
+    /// Height of a command palette row, in rem.
+    #[serde(default = "default_command_palette_row_height")]
+    pub command_palette_row_height: f32,
+    /// Title in a command palette row, in rem.
+    #[serde(default = "default_menu_text_size")]
+    pub command_palette_text_size: f32,
+    /// Hint in a command palette row, in rem.
+    #[serde(default = "default_omnibox_url_size")]
+    pub command_palette_hint_size: f32,
     /// `none`, `mica` or `acrylic`. Windows draws it behind the tab strip and toolbars.
     #[serde(default = "default_backdrop")]
     pub window_backdrop: String,
@@ -823,6 +1003,11 @@ impl Default for BrowserSettings {
             bookmark_folder_padding: default_folder_padding(),
             bookmarks_bar_menu_text_size: default_menu_text_size(),
             bookmarks_bar_menu_padding: default_menu_padding(),
+            bookmarks_bar_icon_size: default_bookmarks_bar_icon_size(),
+            bookmarks_bar_height: default_bookmarks_bar_height(),
+            bookmark_folder_icon_size: default_bookmark_folder_icon_size(),
+            bookmarks_bar_menu_icon_size: default_bookmarks_bar_menu_icon_size(),
+            bookmarks_bar_menu_width: default_bookmarks_bar_menu_width(),
             legacy_bookmark_size: None,
             show_status_bar: true,
             status_stats: true,
@@ -880,6 +1065,40 @@ impl Default for BrowserSettings {
             tab_item_padding: default_tab_item_padding(),
             tab_menu_text_size: default_tab_menu_text_size(),
             tab_menu_padding: default_tab_menu_padding(),
+            tab_item_height: default_tab_item_height(),
+            tab_icon_size: default_tab_icon_size(),
+            tab_menu_icon_size: default_tab_menu_icon_size(),
+            tab_menu_height: 0.0,
+            tab_menu_width: default_tab_menu_width(),
+            menu_text_size: default_menu_text_size(),
+            menu_padding: default_menu_padding(),
+            menu_height: default_menu_height(),
+            menu_icon_size: default_menu_icon_size(),
+            toolbar_height: default_toolbar_height(),
+            toolbar_button_size: default_toolbar_button_size(),
+            toolbar_icon_size: default_toolbar_icon_size(),
+            address_height: default_address_height(),
+            address_text_size: default_address_text_size(),
+            omnibox_row_height: default_omnibox_row_height(),
+            omnibox_text_size: default_menu_text_size(),
+            omnibox_icon_size: default_menu_icon_size(),
+            omnibox_url_size: default_omnibox_url_size(),
+            downloads_panel_width: default_downloads_panel_width(),
+            downloads_text_size: default_menu_text_size(),
+            downloads_padding: default_panel_padding(),
+            downloads_row_padding: default_panel_row_padding(),
+            downloads_icon_size: default_downloads_icon_size(),
+            history_panel_width: default_history_panel_width(),
+            history_text_size: default_menu_text_size(),
+            history_meta_size: default_omnibox_url_size(),
+            history_padding: default_panel_padding(),
+            history_row_padding: default_panel_row_padding(),
+            history_icon_size: default_menu_icon_size(),
+            command_palette_width: default_command_palette_width(),
+            command_palette_input_height: default_command_palette_input_height(),
+            command_palette_row_height: default_command_palette_row_height(),
+            command_palette_text_size: default_menu_text_size(),
+            command_palette_hint_size: default_omnibox_url_size(),
             window_backdrop: default_backdrop(),
             auto_update: true,
             last_seen_version: String::new(),
@@ -980,6 +1199,152 @@ impl BrowserSettings {
             self.tab_menu_padding,
             BOOKMARK_PADDING_REM,
             defaults.tab_menu_padding,
+        );
+        self.tab_item_height = rem_in(self.tab_item_height, HEIGHT_REM, defaults.tab_item_height);
+        self.tab_icon_size = rem_in(self.tab_icon_size, ICON_REM, defaults.tab_icon_size);
+        self.tab_menu_icon_size = rem_in(
+            self.tab_menu_icon_size,
+            ICON_REM,
+            defaults.tab_menu_icon_size,
+        );
+        self.tab_menu_height = rem_in(self.tab_menu_height, OPTIONAL_HEIGHT_REM, 0.0);
+        self.tab_menu_width = self.tab_menu_width.clamp(MENU_WIDTH_PX.0, MENU_WIDTH_PX.1);
+        self.bookmarks_bar_icon_size = rem_in(
+            self.bookmarks_bar_icon_size,
+            ICON_REM,
+            defaults.bookmarks_bar_icon_size,
+        );
+        self.bookmarks_bar_height = rem_in(
+            self.bookmarks_bar_height,
+            HEIGHT_REM,
+            defaults.bookmarks_bar_height,
+        );
+        self.bookmark_folder_icon_size = rem_in(
+            self.bookmark_folder_icon_size,
+            ICON_REM,
+            defaults.bookmark_folder_icon_size,
+        );
+        self.bookmarks_bar_menu_icon_size = rem_in(
+            self.bookmarks_bar_menu_icon_size,
+            ICON_REM,
+            defaults.bookmarks_bar_menu_icon_size,
+        );
+        self.bookmarks_bar_menu_width = self
+            .bookmarks_bar_menu_width
+            .clamp(MENU_WIDTH_PX.0, MENU_WIDTH_PX.1);
+        self.menu_text_size = rem_in(
+            self.menu_text_size,
+            BOOKMARK_TEXT_REM,
+            defaults.menu_text_size,
+        );
+        self.menu_padding = rem_in(
+            self.menu_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.menu_padding,
+        );
+        self.menu_height = rem_in(self.menu_height, HEIGHT_REM, defaults.menu_height);
+        self.menu_icon_size = rem_in(self.menu_icon_size, ICON_REM, defaults.menu_icon_size);
+        self.toolbar_height = rem_in(self.toolbar_height, HEIGHT_REM, defaults.toolbar_height);
+        self.toolbar_button_size = rem_in(
+            self.toolbar_button_size,
+            HEIGHT_REM,
+            defaults.toolbar_button_size,
+        );
+        self.toolbar_icon_size =
+            rem_in(self.toolbar_icon_size, ICON_REM, defaults.toolbar_icon_size);
+        self.address_height = rem_in(self.address_height, HEIGHT_REM, defaults.address_height);
+        self.address_text_size = rem_in(
+            self.address_text_size,
+            BOOKMARK_TEXT_REM,
+            defaults.address_text_size,
+        );
+        self.omnibox_row_height = rem_in(
+            self.omnibox_row_height,
+            HEIGHT_REM,
+            defaults.omnibox_row_height,
+        );
+        self.omnibox_text_size = rem_in(
+            self.omnibox_text_size,
+            BOOKMARK_TEXT_REM,
+            defaults.omnibox_text_size,
+        );
+        self.omnibox_icon_size =
+            rem_in(self.omnibox_icon_size, ICON_REM, defaults.omnibox_icon_size);
+        self.omnibox_url_size = rem_in(
+            self.omnibox_url_size,
+            BOOKMARK_TEXT_REM,
+            defaults.omnibox_url_size,
+        );
+        self.downloads_panel_width = self
+            .downloads_panel_width
+            .clamp(PANEL_WIDTH_PX.0, PANEL_WIDTH_PX.1);
+        self.downloads_text_size = rem_in(
+            self.downloads_text_size,
+            BOOKMARK_TEXT_REM,
+            defaults.downloads_text_size,
+        );
+        self.downloads_padding = rem_in(
+            self.downloads_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.downloads_padding,
+        );
+        self.downloads_row_padding = rem_in(
+            self.downloads_row_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.downloads_row_padding,
+        );
+        self.downloads_icon_size = rem_in(
+            self.downloads_icon_size,
+            ICON_REM,
+            defaults.downloads_icon_size,
+        );
+        self.history_panel_width = self
+            .history_panel_width
+            .clamp(PANEL_WIDTH_PX.0, PANEL_WIDTH_PX.1);
+        self.history_text_size = rem_in(
+            self.history_text_size,
+            BOOKMARK_TEXT_REM,
+            defaults.history_text_size,
+        );
+        self.history_meta_size = rem_in(
+            self.history_meta_size,
+            BOOKMARK_TEXT_REM,
+            defaults.history_meta_size,
+        );
+        self.history_padding = rem_in(
+            self.history_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.history_padding,
+        );
+        self.history_row_padding = rem_in(
+            self.history_row_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.history_row_padding,
+        );
+        self.history_icon_size =
+            rem_in(self.history_icon_size, ICON_REM, defaults.history_icon_size);
+        self.command_palette_width = self
+            .command_palette_width
+            .clamp(PALETTE_WIDTH_PX.0, PALETTE_WIDTH_PX.1);
+        self.command_palette_input_height = rem_in(
+            self.command_palette_input_height,
+            HEIGHT_REM,
+            defaults.command_palette_input_height,
+        );
+        self.command_palette_row_height = rem_in(
+            self.command_palette_row_height,
+            HEIGHT_REM,
+            defaults.command_palette_row_height,
+        );
+        self.command_palette_text_size = rem_in(
+            self.command_palette_text_size,
+            BOOKMARK_TEXT_REM,
+            defaults.command_palette_text_size,
+        );
+        self.command_palette_hint_size = rem_in(
+            self.command_palette_hint_size,
+            BOOKMARK_TEXT_REM,
+            defaults.command_palette_hint_size,
         );
         if self.theme.trim().is_empty() {
             self.theme = defaults.theme;
@@ -1369,6 +1734,64 @@ fn page_rgb(theme: &str, light: bool) -> (u8, u8, u8) {
         })
 }
 
+/// Copies present style keys from `source` onto `current`, then clamps them.
+/// A key the source omits stays as it is. Theme and every other key are ignored.
+pub fn overlay_style_metrics(
+    current: serde_json::Value,
+    source: &serde_json::Map<String, serde_json::Value>,
+) -> Result<BrowserSettings, String> {
+    let mut current = current;
+    let Some(object) = current.as_object_mut() else {
+        return Err("Settings could not be read.".into());
+    };
+    for key in STYLE_METRIC_KEYS {
+        if let Some(value) = source.get(*key) {
+            object.insert((*key).to_string(), value.clone());
+        }
+    }
+    serde_json::from_value(current)
+        .map(BrowserSettings::normalize)
+        .map_err(|_| "Settings could not be read.".to_string())
+}
+
+/// Copies fine-tune sizes from another profile into this one.
+pub fn import_style_metrics(app: &AppHandle, profile_id: &str) -> Result<BrowserSettings, String> {
+    let id = profile_id.trim();
+    if id.is_empty() {
+        return Err("Choose a profile.".into());
+    }
+    if id == crate::profiles::active_id() {
+        return Err("Choose a different profile.".into());
+    }
+    if !crate::profiles::list(app)
+        .iter()
+        .any(|profile| profile.id == id)
+    {
+        return Err("That profile no longer exists.".into());
+    }
+    let path = paths::profile_data_dir(app, id).join(FILE);
+    let source = read_style_source(&path)?;
+    let current = serde_json::to_value(get(app)).map_err(|error| error.to_string())?;
+    let merged = overlay_style_metrics(current, &source)?;
+    save(app, merged)
+}
+
+fn read_style_source(
+    path: &std::path::Path,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    if !path.is_file() {
+        return Ok(serde_json::Map::new());
+    }
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|_| "That profile's settings could not be read.".to_string())?;
+    value
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "That profile's settings could not be read.".into())
+}
+
 pub fn reload(app: &AppHandle) {
     let path = paths::data_file(app, FILE);
     let mut loaded: BrowserSettings = crate::sync_conflicts::read_json(app, &path);
@@ -1555,6 +1978,110 @@ fn default_tab_menu_text_size() -> f32 {
 
 fn default_tab_menu_padding() -> f32 {
     0.625
+}
+
+fn default_tab_item_height() -> f32 {
+    1.875
+}
+
+fn default_tab_icon_size() -> f32 {
+    1.0
+}
+
+fn default_tab_menu_icon_size() -> f32 {
+    1.0
+}
+
+fn default_tab_menu_width() -> u32 {
+    260
+}
+
+fn default_bookmarks_bar_icon_size() -> f32 {
+    0.9
+}
+
+fn default_bookmarks_bar_height() -> f32 {
+    1.5
+}
+
+fn default_bookmark_folder_icon_size() -> f32 {
+    1.0
+}
+
+fn default_bookmarks_bar_menu_icon_size() -> f32 {
+    1.0
+}
+
+fn default_bookmarks_bar_menu_width() -> u32 {
+    280
+}
+
+fn default_menu_height() -> f32 {
+    2.25
+}
+
+fn default_menu_icon_size() -> f32 {
+    1.0
+}
+
+fn default_toolbar_height() -> f32 {
+    2.5
+}
+
+fn default_toolbar_button_size() -> f32 {
+    2.0
+}
+
+fn default_toolbar_icon_size() -> f32 {
+    1.0
+}
+
+fn default_address_height() -> f32 {
+    2.0
+}
+
+fn default_address_text_size() -> f32 {
+    0.875
+}
+
+fn default_omnibox_row_height() -> f32 {
+    2.25
+}
+
+fn default_omnibox_url_size() -> f32 {
+    0.75
+}
+
+fn default_downloads_panel_width() -> u32 {
+    380
+}
+
+fn default_panel_padding() -> f32 {
+    0.75
+}
+
+fn default_panel_row_padding() -> f32 {
+    0.5
+}
+
+fn default_downloads_icon_size() -> f32 {
+    2.0
+}
+
+fn default_history_panel_width() -> u32 {
+    380
+}
+
+fn default_command_palette_width() -> u32 {
+    560
+}
+
+fn default_command_palette_input_height() -> f32 {
+    3.0
+}
+
+fn default_command_palette_row_height() -> f32 {
+    2.5
 }
 
 /// Clamps a rem value into `range` and rounds it to 0.0001. Not a number falls back.
@@ -1900,6 +2427,8 @@ mod tests {
         assert_eq!(loaded.tab_item_padding, 0.0);
         assert_eq!(loaded.tab_menu_text_size, 1.5);
         assert_eq!(loaded.tab_menu_padding, 0.0);
+        assert_eq!(loaded.tab_item_height, 1.875);
+        assert_eq!(loaded.tab_menu_height, 0.0);
         assert_eq!(loaded.tab_sleep.minutes, 5);
         assert_eq!(
             loaded.tab_sleep.never_sleep_sites,
@@ -1911,6 +2440,73 @@ mod tests {
                 .never_sleeps("https://inbox.mail.example.com/x")
         );
         assert!(!loaded.tab_sleep.never_sleeps("https://example.com/"));
+    }
+
+    #[test]
+    fn older_settings_keep_the_current_chrome_sizes() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"searchEngine":"bing"}"#).expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.tab_item_height, 1.875);
+        assert_eq!(loaded.tab_icon_size, 1.0);
+        assert_eq!(loaded.tab_menu_icon_size, 1.0);
+        assert_eq!(loaded.tab_menu_height, 0.0);
+        assert_eq!(loaded.tab_menu_width, 260);
+        assert_eq!(loaded.bookmarks_bar_icon_size, 0.9);
+        assert_eq!(loaded.bookmarks_bar_height, 1.5);
+        assert_eq!(loaded.bookmark_folder_icon_size, 1.0);
+        assert_eq!(loaded.bookmarks_bar_menu_width, 280);
+        assert_eq!(loaded.menu_text_size, 0.875);
+        assert_eq!(loaded.menu_padding, 0.625);
+        assert_eq!(loaded.menu_height, 2.25);
+        assert_eq!(loaded.menu_icon_size, 1.0);
+        assert_eq!(loaded.toolbar_height, 2.5);
+        assert_eq!(loaded.toolbar_button_size, 2.0);
+        assert_eq!(loaded.address_height, 2.0);
+        assert_eq!(loaded.omnibox_row_height, 2.25);
+        assert_eq!(loaded.downloads_panel_width, 380);
+        assert_eq!(loaded.downloads_icon_size, 2.0);
+        assert_eq!(loaded.history_panel_width, 380);
+        assert_eq!(loaded.command_palette_width, 560);
+        assert_eq!(loaded.command_palette_input_height, 3.0);
+        assert_eq!(loaded.command_palette_row_height, 2.5);
+    }
+
+    #[test]
+    fn chrome_sizes_out_of_range_clamp() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"tabItemHeight":9,"tabIconSize":0,"tabMenuHeight":-1,"tabMenuWidth":10,"menuHeight":0,"downloadsPanelWidth":9000,"commandPaletteWidth":10,"omniboxUrlSize":4}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.tab_item_height, 4.0);
+        assert_eq!(loaded.tab_icon_size, 0.5);
+        assert_eq!(loaded.tab_menu_height, 0.0);
+        assert_eq!(loaded.tab_menu_width, 160);
+        assert_eq!(loaded.menu_height, 1.0);
+        assert_eq!(loaded.downloads_panel_width, 720);
+        assert_eq!(loaded.command_palette_width, 360);
+        assert_eq!(loaded.omnibox_url_size, 1.5);
+    }
+
+    #[test]
+    fn style_import_copies_a_present_size_and_leaves_the_rest() {
+        let mut current = super::BrowserSettings::default();
+        current.theme = "nord".into();
+        current.tab_icon_size = 1.5;
+        let current = serde_json::to_value(current).expect("settings value");
+        let source = serde_json::json!({
+            "tabItemHeight": 2.5,
+            "theme": "dracula",
+            "tabItemTextSize": 9
+        });
+        let source = source.as_object().expect("source object");
+        let merged = super::overlay_style_metrics(current, source).expect("overlay");
+        assert_eq!(merged.theme, "nord");
+        assert_eq!(merged.tab_item_height, 2.5);
+        assert_eq!(merged.tab_icon_size, 1.5);
+        assert_eq!(merged.tab_item_text_size, 1.5);
+        assert_eq!(merged.tab_menu_width, 260);
     }
 
     #[test]

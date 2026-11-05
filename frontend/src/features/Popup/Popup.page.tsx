@@ -10,6 +10,7 @@ import { useAppearanceState, useBookmarksState, useExtensions, useTabs } from "@
 import { AddressBarEllipsisMenu } from "@/features/Browser/BrowserHeader/Addressbar/AddressBarEllipsisMenu";
 import { ProfileSwitcher } from "@/features/Browser/BrowserHeader/Addressbar/ProfileSwitcher";
 import { FontPicker } from "@/features/Browser/BrowserHeader/Addressbar/FontPicker";
+import { StylePicker } from "@/features/Browser/BrowserHeader/Addressbar/StylePicker";
 import { ThemePicker } from "@/features/Browser/BrowserHeader/Addressbar/ThemePicker";
 import { ExtensionPinContextMenu } from "@/features/Browser/BrowserHeader/Addressbar/ExtensionPinContextMenu";
 import { PinContextMenu } from "@/features/Browser/BrowserHeader/Addressbar/PinContextMenu";
@@ -240,6 +241,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <FindAllPopover params={params} />;
     case "shortcut-sheet":
       return <ShortcutSheet />;
+    case "style-picker":
+      return <StylePicker />;
     case "theme-picker":
       return <ThemePicker />;
     case "font-picker":

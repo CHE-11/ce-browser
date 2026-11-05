@@ -13,6 +13,7 @@ import {
 } from "@/lib/browser-client";
 import { BOOKMARK_DROP_END, useBookmarkDrag } from "@/lib/bookmark-drag";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
+import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { faviconKey } from "@/lib/format";
 import { usePopupHost } from "@/lib/popup-host";
@@ -35,7 +36,7 @@ const MENU_ITEM = '[role="menuitem"]:not(:disabled)';
 /** Gap and icon are in `em`, so they follow the text size setting. */
 const rowClass =
   "flex w-full items-center gap-[0.85em] rounded-md text-left hover:bg-zinc-800 focus-visible:bg-zinc-800 focus-visible:outline-none";
-const rowIconClass = "size-[1.15em] shrink-0";
+const rowIconClass = "shrink-0";
 
 function targetKind(node: BookmarkNode): BookmarkMenuTarget["kind"] {
   if (node.separator) {
@@ -58,10 +59,13 @@ function rowId(node: BookmarkNode) {
 export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFolderMenuProps) {
   const { tree, loaded } = useBookmarksState();
   const { settings } = useSettingsState();
-  const rowStyle = bookmarkItemStyle(settings?.bookmarkFolderTextSize, settings?.bookmarkFolderPadding, {
-    text: BOOKMARK_SIZE.folderText,
-    padding: BOOKMARK_SIZE.folderPadding,
-  });
+  const folderIcon = remBox(metric(settings?.bookmarkFolderIconSize, CHROME.bookmarkFolderIconSize));
+  const rowStyle = bookmarkItemStyle(
+    settings?.bookmarkFolderTextSize,
+    settings?.bookmarkFolderPadding,
+    { text: BOOKMARK_SIZE.folderText, padding: BOOKMARK_SIZE.folderPadding },
+    { icon: metric(settings?.bookmarkFolderIconSize, CHROME.bookmarkFolderIconSize) },
+  );
   const { activeId } = useTabs();
   const host = usePopupHost();
   const level = host?.level ?? 0;
@@ -275,6 +279,7 @@ export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFol
                     url={node.url}
                     src={icons[faviconKey(node.url) ?? ""] ?? null}
                     className={rowIconClass}
+                    style={folderIcon}
                   />
                   <span id={`${rowId(node)}-title`} className="min-w-0 flex-1 truncate">
                     {node.title || node.url}
@@ -297,7 +302,7 @@ export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFol
                   onClick={(event) => clickFolder(event, node)}
                   {...drag.itemProps(node, index)}
                 >
-                  <Folder id={`${rowId(node)}-icon`} className={cn(rowIconClass, "text-amber-400")} aria-hidden />
+                  <Folder id={`${rowId(node)}-icon`} className={cn(rowIconClass, "text-amber-400")} style={folderIcon} aria-hidden />
                   <span id={`${rowId(node)}-title`} className="min-w-0 flex-1 truncate">
                     {node.title}
                   </span>

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ComponentProps } from "react";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "@/components/PopupFrame";
 import { bookmarkItemStyle } from "@/lib/bookmark-size";
+import { CHROME, metric } from "@/lib/chrome-metrics";
 import { TAB_SIZE } from "@/lib/tab-size";
 import { closePopup, createEphemeralTab, createWorkspace, moveTabsToWorkspace, createTab, reload, duplicateTab, unpinTab, pinTab, setTabsMuted, addBookmark, detachTab, exitSplit, splitWith, removeFromGroup, createGroup, addToGroup, sleepTab, sleepOtherTabs, neverSleepSite, closeSelectedTabs, closeTab, closeOtherTabs, closeTabsToRight, reopenClosedTab, installedBrowsers, installSite, openInBrowser, groupBySite } from "@/lib/browser-client";
 import type { ExternalBrowser } from "@type/browser";
@@ -47,10 +48,15 @@ function TabMenuItem(props: Omit<ComponentProps<typeof PopupMenuItem>, "style">)
   return (
     <PopupMenuItem
       {...props}
-      style={bookmarkItemStyle(settings?.tabMenuTextSize, settings?.tabMenuPadding, {
-        text: TAB_SIZE.menuText,
-        padding: TAB_SIZE.menuPadding,
-      })}
+      style={bookmarkItemStyle(
+        settings?.tabMenuTextSize,
+        settings?.tabMenuPadding,
+        { text: TAB_SIZE.menuText, padding: TAB_SIZE.menuPadding },
+        {
+          height: metric(settings?.tabMenuHeight, CHROME.tabMenuHeight),
+          icon: metric(settings?.tabMenuIconSize, CHROME.tabMenuIconSize),
+        },
+      )}
     />
   );
 }
@@ -76,7 +82,7 @@ export function TabContextMenu({ tabId }: TabMenuProps) {
 
   if (!tab) {
     return (
-      <PopupFrame id="tab-menu" width={260} ready={snapshot.loaded}>
+      <PopupFrame id="tab-menu" width={metric(settings?.tabMenuWidth, CHROME.tabMenuWidth)} ready={snapshot.loaded}>
         <div id="tab-menu-missing" className="px-3 py-2 text-sm text-zinc-500">
           That tab is closed.
         </div>
@@ -106,7 +112,7 @@ export function TabContextMenu({ tabId }: TabMenuProps) {
   };
 
   return (
-    <PopupFrame id="tab-menu" width={260} ready={snapshot.loaded}>
+    <PopupFrame id="tab-menu" width={metric(settings?.tabMenuWidth, CHROME.tabMenuWidth)} ready={snapshot.loaded}>
       <PopupMenu id="tab-menu-items" label="Tab">
         <TabMenuItem
           id="tab-menu-new-right"

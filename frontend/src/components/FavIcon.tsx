@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Bookmark, Code, Database, Download, Folder, Globe, History, ImageDown, LayoutGrid, PartyPopper, Puzzle, Settings, Sparkles } from "lucide-react";
+import { useEffect, useState, type CSSProperties } from "react";
+import { Bookmark, Code, Database, Download, Folder, Globe, History, ImageDown, LayoutGrid, Paintbrush, PartyPopper, Puzzle, Settings, Sparkles } from "lucide-react";
 import { cn } from "../lib/cn";
 import { faviconFor } from "../lib/format";
 
@@ -11,6 +11,7 @@ const INTERNAL_ICONS: Record<string, typeof Globe> = {
   "ce://history": History,
   "ce://extensions": Puzzle,
   "ce://settings": Settings,
+  "ce://styles": Paintbrush,
   "ce://newtab": Sparkles,
   "ce://capture-editor": ImageDown,
   "ce://rewrites": Code,
@@ -23,9 +24,10 @@ type FavIconProps = {
   url: string;
   src?: string | null;
   className?: string;
+  style?: CSSProperties;
 };
 
-export function FavIcon({ id, url, src, className }: FavIconProps) {
+export function FavIcon({ id, url, src, className, style }: FavIconProps) {
   const candidate = src ?? faviconFor(url);
   const [failed, setFailed] = useState(false);
 
@@ -35,10 +37,10 @@ export function FavIcon({ id, url, src, className }: FavIconProps) {
 
   const Internal = INTERNAL_ICONS[url.split(/[?#]/, 1)[0]];
   if (Internal) {
-    return <Internal id={id} className={cn("size-4 shrink-0 text-sky-400", className)} aria-hidden />;
+    return <Internal id={id} className={cn("size-4 shrink-0 text-sky-400", className)} style={style} aria-hidden />;
   }
   if (!candidate || failed) {
-    return <Globe id={id} className={cn("size-4 shrink-0 text-zinc-400", className)} aria-hidden />;
+    return <Globe id={id} className={cn("size-4 shrink-0 text-zinc-400", className)} style={style} aria-hidden />;
   }
   return (
     <img
@@ -47,6 +49,7 @@ export function FavIcon({ id, url, src, className }: FavIconProps) {
       alt=""
       draggable={false}
       className={cn("size-4 shrink-0 rounded-sm object-contain", className)}
+      style={style}
       onError={() => setFailed(true)}
     />
   );

@@ -10,6 +10,7 @@ import {
   Minus,
   PanelLeft,
   PanelTop,
+  Paintbrush,
   PartyPopper,
   Plus,
   Puzzle,
@@ -35,6 +36,7 @@ import {
   sendUiCommand,
   zoomTab,
 } from "../lib/browser-client";
+import { menuIconClass, menuRowClass } from "../lib/chrome-metrics";
 import { cn } from "../lib/cn";
 import { focusRing } from "../lib/focus-ring";
 import { useEffect, useState } from "react";
@@ -132,8 +134,8 @@ export function AppMenu() {
             ))
           : null}
         <PopupMenuSeparator id="app-menu-separator-2" />
-        <div id="app-menu-zoom" className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm">
-          <ZoomIn id="app-menu-zoom-icon" className="size-4 shrink-0 text-zinc-400" aria-hidden />
+        <div id="app-menu-zoom" className={cn("flex items-center gap-2.5 rounded-lg", menuRowClass)}>
+          <ZoomIn id="app-menu-zoom-icon" className={cn(menuIconClass, "text-zinc-400")} aria-hidden />
           <span id="app-menu-zoom-label" className="flex-1">
             Zoom
           </span>
@@ -174,7 +176,7 @@ export function AppMenu() {
         <PopupMenuItem
           id="app-menu-devtools"
           icon={<Code />}
-          label="Open Web Developer Tools"
+          label={snapshot.devtools ? "Close Web Developer Tools" : "Open Web Developer Tools"}
           shortcut="F12"
           disabled={!active}
           onClick={run(async () => {
@@ -190,6 +192,7 @@ export function AppMenu() {
           label="What's new"
           onClick={openPage(update?.current ? `ce://whats-new?version=${encodeURIComponent(update.current)}` : "ce://whats-new")}
         />
+        <PopupMenuItem id="app-menu-styles" icon={<Paintbrush />} label="Styles" onClick={openPage("ce://styles")} />
         <PopupMenuItem id="app-menu-settings" icon={<Settings />} label="Settings" onClick={openPage("ce://settings")} />
         <PopupMenuItem id="app-menu-exit" icon={<LogOut />} label="Exit" onClick={() => void closeWindow()} />
       </PopupMenu>

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { BookmarkNode, BookmarkTree, BrowserSettings, ClosedEntry, PageRules, TabsSnapshot } from "../../../types/browser";
 import { applyFontPreview, applyThemePreview, publishAppearance, publishFont } from "./appearance";
+import { applyChromeMetrics } from "./chrome-metrics";
 import {
   currentWindowLabel as browserWindowLabel,
   getPageRules,
@@ -142,6 +143,8 @@ export function useTabs() {
     workspace,
     workspaces: snapshot.workspaces ?? [],
     split: mine?.split ?? null,
+    devtools: mine?.devtools ?? null,
+    viewport: mine?.viewport ?? null,
     peekUrl: mine?.peekUrl ?? null,
     groups,
     selectedIds: selectedIds.length > 0 ? selectedIds : activeId === null ? [] : [activeId],
@@ -320,6 +323,7 @@ export function useAppearanceState() {
     publishAppearance(settings.theme, settings.colorMode);
     publishFont(settings.uiFont);
     publishZoom(settings.uiZoom);
+    applyChromeMetrics(settings);
   }, [settings]);
   useEffect(() => {
     const unlisten = onThemePreview((preview) => applyThemePreview(preview.theme, preview.commit));

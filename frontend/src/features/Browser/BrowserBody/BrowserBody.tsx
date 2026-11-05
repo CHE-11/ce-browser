@@ -1,10 +1,12 @@
 import type { RefObject } from "react";
 import type { BrowserSettings, ExtensionInfo, SplitView, TabInfo } from "@type/browser";
 import type { WindowTabsState } from "@/lib/use-browser";
+import { DevtoolsDivider } from "@/components/DevtoolsDivider";
 import { PageFailure } from "@/components/PageFailure";
 import { SplitDivider } from "@/components/SplitDivider";
 import { VerticalTabs } from "../BrowserHeader/Tabs/VerticalTabs";
 import { VerticalToolbar } from "./VerticalToolbar/VerticalToolbar";
+import { ViewportBar } from "./ViewportBar";
 
 type BrowserBodyProps = {
   snapshot: WindowTabsState;
@@ -31,31 +33,46 @@ export function BrowserBody({
   showToolStrip,
   extensions,
 }: BrowserBodyProps) {
+  const devtools = snapshot.devtools;
+  const pagesWidth = devtools?.visible ? `calc(${devtools.ratio * 100}% - 3px)` : "100%";
+  const showViewportBar = Boolean(devtools?.visible || snapshot.viewport);
   return (
     <div id="browser-body" className="flex min-h-0 flex-1">
       {vertical && settings && !snapshot.fullscreen ? (
         <VerticalTabs ref={sidebarRef} snapshot={snapshot} settings={settings} />
       ) : null}
       <div id="browser-page-area" className="relative flex min-w-0 flex-1 items-center justify-center bg-zinc-950">
-        {activeTab && !activeTab.loaded && !activeTab.failure ? (
-          <span id="browser-page-loading" className="text-sm text-zinc-500">
-            Loading {activeTab.title || activeTab.url}
-          </span>
-        ) : null}
-        {splitShown && split
-          ? [
-              { id: split.left, style: { left: 0, width: `calc(${split.ratio * 100}% - 3px)` } },
-              { id: split.right, style: { right: 0, width: `calc(${(1 - split.ratio) * 100}% - 3px)` } },
-            ].map(({ id, style }) => {
-              const tab = snapshot.tabs.find((item) => item.id === id);
-              return tab?.failure ? (
-                <PageFailure key={id} tab={tab} failure={tab.failure} className="absolute inset-y-0" style={style} />
-              ) : null;
-            })
-          : activeTab?.failure
-            ? <PageFailure tab={activeTab} failure={activeTab.failure} className="absolute inset-0" />
-            : null}
-        {splitShown && split ? <SplitDivider split={split} activeId={snapshot.activeId} /> : null}
+        <div id="browser-pages" className="absolute inset-y-0 left-0" style={{ width: pagesWidth }}>
+          {showViewportBar ? (
+            <ViewportBar
+              width={snapshot.viewport?.width ?? 0}
+              height={snapshot.viewport?.height ?? 0}
+              cutout={snapshot.viewport?.cutout ?? true}
+              homeBar={snapshot.viewport?.homeBar ?? true}
+              devtoolsTabId={devtools ? snapshot.activeId : null}
+            />
+          ) : null}
+          {activeTab && !activeTab.loaded && !activeTab.failure ? (
+            <span id="browser-page-loading" className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
+              Loading {activeTab.title || activeTab.url}
+            </span>
+          ) : null}
+          {splitShown && split
+            ? [
+                { id: split.left, style: { left: 0, width: `calc(${split.ratio * 100}% - 3px)` } },
+                { id: split.right, style: { right: 0, width: `calc(${(1 - split.ratio) * 100}% - 3px)` } },
+              ].map(({ id, style }) => {
+                const tab = snapshot.tabs.find((item) => item.id === id);
+                return tab?.failure ? (
+                  <PageFailure key={id} tab={tab} failure={tab.failure} className="absolute inset-y-0" style={style} />
+                ) : null;
+              })
+            : activeTab?.failure
+              ? <PageFailure tab={activeTab} failure={activeTab.failure} className="absolute inset-0" />
+              : null}
+          {splitShown && split ? <SplitDivider split={split} activeId={snapshot.activeId} /> : null}
+        </div>
+        {devtools?.visible ? <DevtoolsDivider ratio={devtools.ratio} /> : null}
       </div>
       {showToolStrip ? (
         <VerticalToolbar ref={toolbarRef} activeTab={activeTab} extensions={extensions} settings={settings} />

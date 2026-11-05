@@ -2,11 +2,12 @@ import { FavIcon } from "@/components/FavIcon";
 import { IconButton } from "@/components/IconButton";
 import { PopupFrame } from "@/components/PopupFrame";
 import { closePopup, createTab, navigate } from "@/lib/browser-client";
+import { CHROME, historyIconClass, historyMetaClass, historyRowClass, historyTitleClass, metric } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { focusRow } from "@/lib/focus-ring";
 import { hostOf } from "@/lib/format";
 import { absoluteTime, relativeTime } from "@/lib/time";
-import { useHistoryState, useTabs } from "@/lib/use-browser";
+import { useHistoryState, useSettings, useTabs } from "@/lib/use-browser";
 import { HistoryItem } from "@type/browser";
 import { History, SquareArrowOutUpRight, X } from "lucide-react";
 
@@ -31,21 +32,22 @@ function HistoryPopoverRow({ item, activeId }: { item: HistoryItem; activeId: nu
       type="button"
       title={item.url}
       className={cn(
-        "flex w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-zinc-800",
+        "flex w-full items-center gap-3 rounded-md text-left hover:bg-zinc-800",
+        historyRowClass,
         focusRow,
       )}
       onClick={() => openVisit(item.url, activeId)}
     >
-      <FavIcon id={`${domId}-icon`} url={item.url} className="size-4" />
+      <FavIcon id={`${domId}-icon`} url={item.url} className={historyIconClass} />
       <span id={`${domId}-body`} className="min-w-0 flex-1">
-        <span id={`${domId}-title`} className="block truncate text-sm text-zinc-100">
+        <span id={`${domId}-title`} className={historyTitleClass}>
           {title}
         </span>
-        <span id={`${domId}-host`} className="block truncate text-xs text-zinc-500">
+        <span id={`${domId}-host`} className={cn(historyMetaClass, "block")}>
           {hostOf(item.url)}
         </span>
       </span>
-      <span id={`${domId}-time`} className="shrink-0 text-xs text-zinc-500" title={absoluteTime(when)}>
+      <span id={`${domId}-time`} className={cn(historyMetaClass, "shrink-0")} title={absoluteTime(when)}>
         {relativeTime(when)}
       </span>
     </button>
@@ -54,11 +56,12 @@ function HistoryPopoverRow({ item, activeId }: { item: HistoryItem; activeId: nu
 
 export function HistoryPopover() {
   const { history, loaded } = useHistoryState();
+  const settings = useSettings();
   const { activeId } = useTabs();
   const recent = history.slice(0, PANEL_LIMIT);
 
   return (
-    <PopupFrame id="history-popover" width={380} maxHeight={520} ready={loaded}>
+    <PopupFrame id="history-popover" width={metric(settings?.historyPanelWidth, CHROME.historyPanelWidth)} maxHeight={520} ready={loaded}>
       <div id="history-popover-header" className="flex items-center justify-between gap-2 py-1 pr-1 pl-4">
         <h2 id="history-popover-title" className="text-sm font-medium">
           History

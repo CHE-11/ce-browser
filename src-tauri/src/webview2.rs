@@ -19,7 +19,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, EnumChildWindows, GA_PARENT, GA_ROOT, GA_ROOTOWNER, GWL_EXSTYLE, GetAncestor,
-    GetClientRect, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, HC_ACTION, HWND_TOP,
+    GetClientRect, GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, HC_ACTION, HWND_TOP,
     IsChild, IsWindowVisible, MSLLHOOKSTRUCT, PostMessageW, SWP_NOACTIVATE, SWP_NOZORDER,
     SWP_SHOWWINDOW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
     SetWindowsHookExW, WH_MOUSE_LL, WM_APP, WM_CREATE, WM_MOUSEWHEEL, WM_NCACTIVATE, WM_NCDESTROY,
@@ -890,6 +890,42 @@ fn page_at_pointer(point: POINT) -> Option<ZoomHit> {
     }
 }
 
+pub enum HoveredView {
+    /// Browser chrome: header, tab strip, sidebars, tool strip.
+    Chrome(String),
+    /// The tab page under the pointer.
+    Page(u32),
+}
+
+/// What the pointer is over. Built-in pages are `Page`; the caller tells them apart by address.
+pub fn hovered_view() -> Option<HoveredView> {
+    let mut point = POINT::default();
+    if unsafe { GetCursorPos(&mut point) }.is_err() {
+        return None;
+    }
+    if let Some(hook) = ancestor_host(point) {
+        return match &hook.kind {
+            ZoomKind::Page(id) => Some(HoveredView::Page(*id)),
+            ZoomKind::Ui(window) => Some(inspect_ui(point, window)),
+        };
+    }
+    if let Some(page) = page_at_pointer(point)
+        && page.id != 0
+    {
+        return Some(HoveredView::Page(page.id));
+    }
+    None
+}
+
+fn inspect_ui(point: POINT, window: &str) -> HoveredView {
+    if let Some(page) = page_containing(point)
+        && page.id != 0
+    {
+        return HoveredView::Page(page.id);
+    }
+    HoveredView::Chrome(window.to_string())
+}
+
 /// Page under the pointer, or the header when the pointer is on the browser chrome.
 fn classify(point: POINT) -> Option<ZoomHit> {
     if let Some(hook) = ancestor_host(point) {
@@ -1595,6 +1631,87 @@ pub fn attach_page_hooks(app: &AppHandle, webview: &Webview, id: u32) {
             eprintln!("WebView2 hooks for tab {id}: {error}");
         }
     });
+}
+
+/// The inspector is not a tab. Downloads and permission prompts stay off it, and the only
+/// browser shortcut it takes is the one that closes the dock, so the tools keep their own keys.
+pub fn attach_devtools_hooks(app: &AppHandle, webview: &Webview) {
+    let app = app.clone();
+    let _ = webview.with_webview(move |platform| {
+        if let Err(error) = devtools_hooks(&app, &platform) {
+            eprintln!("WebView2 hooks for developer tools: {error}");
+        }
+    });
+}
+
+fn devtools_hooks(app: &AppHandle, platform: &PlatformWebview) -> windows::core::Result<()> {
+    let controller = platform.controller();
+    let core = core(platform)?;
+    let mut token = 0i64;
+    let app = app.clone();
+    unsafe {
+        controller.add_AcceleratorKeyPressed(
+            &AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                let mut kind = COREWEBVIEW2_KEY_EVENT_KIND::default();
+                args.KeyEventKind(&mut kind)?;
+                if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+                    && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+                {
+                    return Ok(());
+                }
+                let mut key = 0u32;
+                args.VirtualKey(&mut key)?;
+                let action = shortcuts::action_for(
+                    key,
+                    key_down(VK_CONTROL),
+                    key_down(VK_SHIFT),
+                    key_down(VK_MENU),
+                    Target::Page,
+                );
+                if matches!(action, Some(shortcuts::Action::DevTools)) {
+                    args.SetHandled(true)?;
+                    shortcuts::dispatch(&app, shortcuts::Action::DevTools);
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+        core.add_PermissionRequested(
+            &PermissionRequestedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                hide_default_permission_ui(&args);
+                let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+                let _ = args.PermissionKind(&mut kind);
+                let state = if kind == COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ {
+                    COREWEBVIEW2_PERMISSION_STATE_ALLOW
+                } else {
+                    COREWEBVIEW2_PERMISSION_STATE_DENY
+                };
+                let _ = args.SetState(state);
+                save_permission_choice(&args, false);
+                Ok(())
+            })),
+            &mut token,
+        )?;
+        if let Ok(core4) = core.cast::<ICoreWebView2_4>() {
+            core4.add_DownloadStarting(
+                &DownloadStartingEventHandler::create(Box::new(move |_, args| {
+                    if let Some(args) = args {
+                        let _ = args.SetHandled(true);
+                        let _ = args.SetCancel(true);
+                    }
+                    Ok(())
+                })),
+                &mut token,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::core::Result<()> {
@@ -3711,6 +3828,127 @@ pub fn security_state(webview: &Webview) -> Option<serde_json::Value> {
     serde_json::from_str(&state?).ok()
 }
 
+/// Stops a DevTools screencast and any device-metrics override so the page view is the real page.
+pub fn release_page_emulation(webview: &Webview) {
+    let timeout = Duration::from_secs(2);
+    let _ = call_cdp_json(webview, "Page.stopScreencast", "{}", timeout, "screencast");
+    let _ = call_cdp_json(
+        webview,
+        "Emulation.clearDeviceMetricsOverride",
+        "{}",
+        timeout,
+        "viewport",
+    );
+}
+
+/// Hears DevTools start a screencast and turns that into a resize of this page instead of a
+/// second rendered view. One subscription per page view.
+pub fn watch_screencast(app: AppHandle, id: u32, webview: &Webview) {
+    if !note_screencast_watch(id, webview.label()) {
+        return;
+    }
+    let _ = webview.with_webview(move |platform| {
+        let Ok(core) = core(&platform) else {
+            return;
+        };
+        let Ok(receiver) = (unsafe {
+            core.GetDevToolsProtocolEventReceiver(&HSTRING::from("Page.screencastFrame"))
+        }) else {
+            return;
+        };
+        let handler =
+            DevToolsProtocolEventReceivedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                let raw = read_pwstr(|value| unsafe { args.ParameterObjectAsJson(value) });
+                let app = app.clone();
+                std::thread::spawn(move || absorb_screencast(&app, id, &raw));
+                Ok(())
+            }));
+        let mut token = 0i64;
+        let _ = unsafe { receiver.add_DevToolsProtocolEventReceived(&handler, &mut token) };
+    });
+}
+
+fn note_screencast_watch(id: u32, label: &str) -> bool {
+    static WATCHED: std::sync::OnceLock<Mutex<std::collections::HashMap<u32, String>>> =
+        std::sync::OnceLock::new();
+    let watched = WATCHED.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    let mut watched = watched.lock().expect("screencast");
+    if watched.get(&id).map(String::as_str) == Some(label) {
+        return false;
+    }
+    watched.insert(id, label.to_string());
+    true
+}
+
+fn absorb_screencast(app: &AppHandle, id: u32, frame: &str) {
+    static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if BUSY.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        return;
+    }
+    let Some(webview) = crate::tabs::page_view(app, id) else {
+        BUSY.store(false, std::sync::atomic::Ordering::Release);
+        return;
+    };
+    let timeout = Duration::from_secs(2);
+    let _ = call_cdp_json(&webview, "Page.stopScreencast", "{}", timeout, "screencast");
+    let metrics = call_cdp_json(&webview, "Page.getLayoutMetrics", "{}", timeout, "viewport").ok();
+    let frame_value = serde_json::from_str::<serde_json::Value>(frame).ok();
+    let (width, height) = screencast_size(metrics.as_ref(), frame_value.as_ref());
+    let _ = call_cdp_json(
+        &webview,
+        "Emulation.clearDeviceMetricsOverride",
+        "{}",
+        timeout,
+        "viewport",
+    );
+    crate::tabs::adopt_screencast(app, id, width, height);
+    BUSY.store(false, std::sync::atomic::Ordering::Release);
+}
+
+fn screencast_size(
+    metrics: Option<&serde_json::Value>,
+    frame: Option<&serde_json::Value>,
+) -> (u32, u32) {
+    css_layout_size(metrics.unwrap_or(&serde_json::Value::Null))
+        .or_else(|| {
+            frame.and_then(|frame| {
+                let width = frame.pointer("/metadata/deviceWidth").and_then(json_u32);
+                let height = frame.pointer("/metadata/deviceHeight").and_then(json_u32);
+                match (width, height) {
+                    (Some(width), Some(height)) if usable_viewport(width, height) => {
+                        Some((width, height))
+                    }
+                    _ => None,
+                }
+            })
+        })
+        .unwrap_or((390, 844))
+}
+
+fn css_layout_size(value: &serde_json::Value) -> Option<(u32, u32)> {
+    let width = value
+        .pointer("/cssLayoutViewport/clientWidth")
+        .and_then(json_u32)?;
+    let height = value
+        .pointer("/cssLayoutViewport/clientHeight")
+        .and_then(json_u32)?;
+    usable_viewport(width, height).then_some((width, height))
+}
+
+fn json_u32(value: &serde_json::Value) -> Option<u32> {
+    let number = value
+        .as_f64()
+        .or_else(|| value.as_u64().map(|n| n as f64))?;
+    (number.is_finite() && number > 0.0).then_some(number.round() as u32)
+}
+
+fn usable_viewport(width: u32, height: u32) -> bool {
+    (240..=1600).contains(&width) && (240..=1600).contains(&height)
+}
+
 /// JavaScript heap of one page, used when its renderer process cannot be matched.
 pub fn js_heap_used(webview: &Webview) -> Option<u64> {
     let timeout = Duration::from_millis(400);
@@ -3735,6 +3973,28 @@ pub fn js_heap_used(webview: &Webview) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::{WheelBand, page_keeps_light_scheme, wheel_band, wheel_steps};
+
+    #[test]
+    fn a_device_sized_page_is_kept() {
+        let metrics = serde_json::json!({
+            "cssLayoutViewport": { "clientWidth": 390.0, "clientHeight": 844.0 }
+        });
+        assert_eq!(super::screencast_size(Some(&metrics), None), (390, 844));
+    }
+
+    #[test]
+    fn a_full_desktop_mirror_starts_as_a_phone() {
+        let metrics = serde_json::json!({
+            "cssLayoutViewport": { "clientWidth": 1920.0, "clientHeight": 1080.0 }
+        });
+        let frame = serde_json::json!({
+            "metadata": { "deviceWidth": 1920, "deviceHeight": 1080 }
+        });
+        assert_eq!(
+            super::screencast_size(Some(&metrics), Some(&frame)),
+            (390, 844)
+        );
+    }
 
     #[test]
     fn gmail_stays_on_the_light_scheme() {

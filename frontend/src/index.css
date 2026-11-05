@@ -556,3 +556,68 @@ html[data-backdrop] #browser .bg-zinc-900 {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Chrome size defaults. The browser UI and popups replace these from settings. A Styles preview sets them on itself. */
+:root {
+  --menu-text: 0.875rem;
+  --menu-padding: 0.625rem;
+  --menu-height: 2.25rem;
+  --menu-icon: 1rem;
+  --item-icon: 1.15em;
+  --tab-close: 1.25rem;
+  --toolbar-height: 2.5rem;
+  --toolbar-button: 2rem;
+  --toolbar-icon: 1rem;
+  --address-height: 2rem;
+  --address-text: 0.875rem;
+  --omnibox-row-height: 2.25rem;
+  --omnibox-text: 0.875rem;
+  --omnibox-icon: 1rem;
+  --omnibox-url: 0.75rem;
+  --downloads-text: 0.875rem;
+  --downloads-padding: 0.75rem;
+  --downloads-row-padding: 0.5rem;
+  --downloads-icon: 2rem;
+  --history-text: 0.875rem;
+  --history-meta: 0.75rem;
+  --history-padding: 0.75rem;
+  --history-row-padding: 0.5rem;
+  --history-icon: 1rem;
+  --palette-input-height: 3rem;
+  --palette-row-height: 2.5rem;
+  --palette-text: 0.875rem;
+  --palette-hint: 0.75rem;
+}
+
+/* Address bar and the side tool strip. Other icon buttons keep size-8. */
+#address-bar.chrome-toolbar {
+  height: var(--toolbar-height, 2.5rem);
+}
+
+.chrome-tool-strip {
+  width: calc(var(--toolbar-button, 2rem) + 1rem);
+  min-width: calc(var(--toolbar-button, 2rem) + 1rem);
+  max-width: calc(var(--toolbar-button, 2rem) + 1rem);
+}
+
+.chrome-toolbar .chrome-toolbar-button,
+.chrome-tool-strip .chrome-toolbar-button {
+  width: var(--toolbar-button, 2rem);
+  height: var(--toolbar-button, 2rem);
+}
+
+.chrome-toolbar .chrome-toolbar-button > svg:not(.absolute),
+.chrome-tool-strip .chrome-toolbar-button > svg:not(.absolute),
+.chrome-toolbar .chrome-toolbar-button > img.size-4,
+.chrome-tool-strip .chrome-toolbar-button > img.size-4 {
+  width: var(--toolbar-icon, 1rem);
+  height: var(--toolbar-icon, 1rem);
+}
+
+.chrome-address-field {
+  height: var(--address-height, 2rem);
+}
+
+.chrome-address-text {
+  font-size: var(--address-text, 0.875rem);
+}

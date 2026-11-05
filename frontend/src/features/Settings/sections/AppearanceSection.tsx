@@ -7,6 +7,7 @@ import { backdropSupport, getUserStyles, sendFontPreview, sendThemePreview, show
 import { cn } from "@/lib/cn";
 import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, PAGE_ZOOM_LEVELS, stepPageZoom, ZOOM_STEP } from "@/lib/zoom";
 import type { BackdropSupport, ToastPosition } from "@type/browser";
+import { STYLES_LINK_HINT, STYLES_LINK_LABEL, STYLES_LINK_TEXT, StylesLink } from "@/features/Styles/StylesLink";
 import { SETTINGS_SECTIONS } from "../settings-sections";
 import {
   inputClass,
@@ -98,6 +99,11 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
     "Decrease web page zoom",
     "Increase web page zoom",
     `${pageZoom}%`,
+    STYLES_LINK_LABEL,
+    STYLES_LINK_HINT,
+    STYLES_LINK_TEXT,
+    "styles",
+    "editor",
     TOAST_LABEL,
     TOAST_HINT,
     "notification",
@@ -111,6 +117,7 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
 
   return (
     <Section id={section.id} title={section.title}>
+      <StylesLink id="settings-styles-link" search={["sizes", "height", "icon", "padding", "toolbar", "menu"]} />
       <Row id="settings-site-accent" setting="siteAccent" label={ACCENT_LABEL} hint={ACCENT_HINT}>
         <Toggle id="settings-site-accent-toggle" checked={settings.siteAccent} onChange={(value) => onUpdate({ siteAccent: value })} />
       </Row>

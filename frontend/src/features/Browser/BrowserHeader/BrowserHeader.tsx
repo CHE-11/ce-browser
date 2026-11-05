@@ -54,6 +54,8 @@ export function BrowserHeader({
           activeId={snapshot.activeId}
           textSize={settings?.bookmarksBarTextSize}
           padding={settings?.bookmarksBarPadding}
+          iconSize={settings?.bookmarksBarIconSize}
+          height={settings?.bookmarksBarHeight}
           folderIcons={settings?.bookmarksBarFolderIcons ?? true}
         />
       ) : null}

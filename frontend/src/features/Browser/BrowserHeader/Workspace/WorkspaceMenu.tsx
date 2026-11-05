@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Check, Pencil, Plus, Trash2 } from "lucide-react";
 import type { TabGroupColor, Workspace } from "../../../../../../types/browser";
 import { closePopup, createWorkspace, deleteWorkspace, renameWorkspace, switchWorkspace } from "../../../../lib/browser-client";
+import { menuRowClass } from "../../../../lib/chrome-metrics";
 import { cn } from "../../../../lib/cn";
 import { GROUP_COLORS, groupColorClasses } from "../../../../lib/tab-rows";
 import { useTabs } from "../../../../lib/use-browser";
@@ -141,12 +142,12 @@ export function WorkspaceMenu() {
             <div
               key={workspace.id}
               id={domId}
-              className={cn("group flex h-9 items-center gap-1 rounded-lg pl-2 pr-1 hover:bg-zinc-800", current && "bg-zinc-800")}
+              className={cn("group flex items-center gap-1 rounded-lg hover:bg-zinc-800", menuRowClass, current && "bg-zinc-800")}
             >
               <button
                 id={`${domId}-switch`}
                 type="button"
-                className="flex h-full min-w-0 flex-1 items-center gap-2.5 text-left text-sm text-zinc-100"
+                className="flex h-full min-w-0 flex-1 items-center gap-2.5 text-left text-[length:var(--menu-text)] text-zinc-100"
                 onClick={() => switchTo(workspace.id)}
               >
                 <span id={`${domId}-dot`} className={cn("size-2.5 shrink-0 rounded-full", groupColorClasses(workspace.color).swatch)} />

@@ -1,6 +1,7 @@
 import { useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { IconButton } from "@/components/IconButton";
 import { openDownload, createTab, pauseDownload, resumeDownload, cancelDownload, showDownloadInFolder, removeDownload, dragDownload } from "@/lib/browser-client";
+import { downloadsIconClass, downloadsRowClass, downloadsTextClass } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { formatBytes, hostOf } from "@/lib/format";
 import { relativeTime } from "@/lib/time";
@@ -187,7 +188,8 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
     <div
       id={domId}
       className={cn(
-        "group flex items-center gap-3 rounded-md px-3 py-2 hover:bg-zinc-800/70",
+        "group flex items-center gap-3 rounded-md hover:bg-zinc-800/70",
+        compact ? downloadsRowClass : "px-3 py-2",
         completed && "cursor-grab",
         !here && "opacity-60",
         !compact && "border border-zinc-800 bg-zinc-900 py-3",
@@ -195,7 +197,7 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
       aria-disabled={!here}
       onPointerDown={completed ? beginFileDrag : undefined}
     >
-      <TypeIcon id={`${domId}-icon`} className={cn("shrink-0", compact ? "size-8" : "size-6", typeClass)} aria-hidden />
+      <TypeIcon id={`${domId}-icon`} className={cn("shrink-0", compact ? downloadsIconClass : "size-6", typeClass)} aria-hidden />
       <div id={`${domId}-body`} className="min-w-0 flex-1">
         <button
           id={`${domId}-name`}
@@ -203,7 +205,8 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
           disabled={!completed}
           title={nameTitle}
           className={cn(
-            "block max-w-full truncate text-left text-sm",
+            "block max-w-full truncate text-left",
+            compact ? downloadsTextClass : "text-sm",
             completed ? "cursor-grab text-zinc-100 hover:underline" : "cursor-default text-zinc-300",
             !here && "cursor-not-allowed",
             (item.state === "cancelled" || item.state === "interrupted") && "line-through decoration-zinc-500",

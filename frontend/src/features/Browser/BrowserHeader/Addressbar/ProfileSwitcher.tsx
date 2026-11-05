@@ -3,6 +3,7 @@ import { Check, Plus, Settings } from "lucide-react";
 import type { BrowserProfile } from "@type/browser";
 import { Menu, MenuItem, MenuSeparator } from "@/components/Menu";
 import { PopupFrame } from "@/components/PopupFrame";
+import { menuRowClass } from "@/lib/chrome-metrics";
 import { closeThisPopup, createTab, listProfiles, openProfile } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { focusRow } from "@/lib/focus-ring";
@@ -72,7 +73,8 @@ export function ProfileSwitcher() {
             disabled={opening !== null}
             title={profile.current ? "This window" : `Open ${profile.name}`}
             className={cn(
-              "flex h-9 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm text-zinc-100 hover:bg-zinc-800 disabled:opacity-40",
+              "flex w-full items-center gap-2.5 rounded-lg text-left text-zinc-100 hover:bg-zinc-800 disabled:opacity-40",
+              menuRowClass,
               focusRow,
               profile.current && "bg-zinc-800",
             )}

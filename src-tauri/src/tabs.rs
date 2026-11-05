@@ -13,7 +13,7 @@ use tauri::{
 };
 use url::Url;
 
-use crate::{history, paths, session, settings, webview2};
+use crate::{devtools, history, paths, session, settings, webview2};
 
 pub const WINDOW: &str = "main";
 pub const UI: &str = "ui";
@@ -42,9 +42,19 @@ pub const GROUP_COLORS: &[&str] = &[
 /// `user-gesture-required` drops speaker audio that starts after the click returns, which
 /// is how a call plays the other person. `AUTOPLAY_GUARD_SCRIPT` is what keeps a page quiet
 /// until a click or key press inside it. Selecting the tab does not count.
-const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
+///
+/// `--remote-debugging-port=0` lets each profile pick a free localhost port and write it to
+/// `DevToolsActivePort`. The docked inspector loads from that port. Any process on this machine
+/// can attach for the life of the session. The same argument string is required on every webview
+/// that shares a profile: WebView2 rejects a second webview whose environment options differ.
+const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --remote-debugging-port=0";
 /// Logical px between the two split panes. The browser UI shows through it as the divider.
 const SPLIT_GAP: f64 = 6.0;
+/// Share of the page area kept for pages when developer tools are docked. The tools take the rest.
+/// The divider in the browser UI uses the same limits.
+const DEVTOOLS_RATIO: f64 = 0.62;
+const DEVTOOLS_RATIO_MIN: f64 = 0.35;
+const DEVTOOLS_RATIO_MAX: f64 = 0.8;
 const MAX_WORKSPACES: usize = 20;
 
 #[derive(Debug, Clone, Serialize)]
@@ -160,6 +170,28 @@ pub struct SplitInfo {
     pub ratio: f64,
 }
 
+/// Docked inspector for one window. Absent until the user opens it.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevtoolsDock {
+    /// Share of the page area the pages keep. Tools take the rest.
+    pub ratio: f64,
+    /// The column is on screen. Fullscreen keeps the dock open with this false.
+    pub visible: bool,
+}
+
+/// CSS pixel size of the page view. The webview itself is this size, centered under the device bar.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageViewport {
+    pub width: u32,
+    pub height: u32,
+    /// Black cutout over the top of the page, like an iPhone island.
+    pub cutout: bool,
+    /// Home indicator along the bottom of the page.
+    pub home_bar: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowTabs {
@@ -168,10 +200,12 @@ pub struct WindowTabs {
     pub fullscreen: bool,
     pub workspace: String,
     pub split: Option<SplitInfo>,
+    /// Docked page inspector. Empty until the user opens it.
+    pub devtools: Option<DevtoolsDock>,
     /// Address of the open peek, if any.
     pub peek_url: Option<String>,
-    /// `phone`, `tablet`, `laptop`, or empty for the full page.
-    pub device: String,
+    /// Set while the page view is a fixed CSS size. Empty uses the whole page area.
+    pub viewport: Option<PageViewport>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -290,6 +324,46 @@ struct Split {
     ratio: f64,
 }
 
+struct DevtoolsState {
+    open: bool,
+    pending: bool,
+    ready: bool,
+    ratio: f64,
+    tab: Option<u32>,
+    page: Option<String>,
+    epoch: u64,
+    job: u64,
+    inflight: bool,
+}
+
+impl DevtoolsState {
+    fn new() -> Self {
+        Self {
+            open: false,
+            pending: false,
+            ready: false,
+            ratio: DEVTOOLS_RATIO,
+            tab: None,
+            page: None,
+            epoch: 0,
+            job: 0,
+            inflight: false,
+        }
+    }
+
+    fn engaged(&self) -> bool {
+        self.open || self.pending
+    }
+
+    /// Drops in-flight inspector work. The returned epoch is the only one allowed to finish.
+    fn cancel_work(&mut self) -> u64 {
+        self.job = self.job.wrapping_add(1);
+        self.epoch = self.epoch.wrapping_add(1);
+        self.inflight = false;
+        self.epoch
+    }
+}
+
 struct WindowChrome {
     label: String,
     ui: String,
@@ -307,11 +381,17 @@ struct WindowChrome {
     /// Page views on screen and where each one sits.
     shown: Vec<(String, Slot)>,
     split: Option<Split>,
+    devtools: DevtoolsState,
     workspace: String,
     /// Active tab of each workspace this window has left, so switching back returns to it.
     active_by_workspace: HashMap<String, u32>,
-    /// `phone`, `tablet`, `laptop`, or empty.
-    device: String,
+    /// CSS size of the page view. Empty uses the whole page area.
+    viewport: Option<(u32, u32)>,
+    viewport_cutout: bool,
+    viewport_home: bool,
+    /// Screencast frames just after the bar was closed are the same session, not a new request.
+    screencast_suppress: bool,
+    screencast_at: Instant,
     /// Resident bookmarks tab for this window. Its page stays loaded while shelved.
     bookmarks: Option<u32>,
     /// The window is closing, so the resident bookmarks tab is destroyed with the rest.
@@ -332,9 +412,16 @@ impl WindowChrome {
             toast: None,
             shown: Vec::new(),
             split: None,
+            devtools: DevtoolsState::new(),
             workspace: DEFAULT_WORKSPACE.to_string(),
             active_by_workspace: HashMap::new(),
-            device: String::new(),
+            viewport: None,
+            viewport_cutout: true,
+            viewport_home: true,
+            screencast_suppress: false,
+            screencast_at: Instant::now()
+                .checked_sub(Duration::from_secs(60))
+                .unwrap_or_else(Instant::now),
             bookmarks: None,
             discarding: false,
         }
@@ -656,8 +743,14 @@ impl TabsState {
                         right: split.right,
                         ratio: split.ratio,
                     }),
+                    devtools: published_devtools(chrome),
                     peek_url: None,
-                    device: chrome.device.clone(),
+                    viewport: chrome.viewport.map(|(width, height)| PageViewport {
+                        width,
+                        height,
+                        cutout: chrome.viewport_cutout,
+                        home_bar: chrome.viewport_home,
+                    }),
                 })
                 .collect(),
             groups: self.groups.clone(),
@@ -744,6 +837,16 @@ fn with_state<T>(app: &AppHandle, change: impl FnOnce(&mut TabsState) -> T) -> T
     let state = app.state::<Tabs>();
     let mut guard = state.inner().0.lock().expect("tabs lock");
     change(&mut guard)
+}
+
+fn published_devtools(chrome: &WindowChrome) -> Option<DevtoolsDock> {
+    if !chrome.devtools.engaged() {
+        return None;
+    }
+    Some(DevtoolsDock {
+        ratio: chrome.devtools.ratio,
+        visible: chrome.devtools.open && chrome.devtools.ready && !chrome.fullscreen,
+    })
 }
 
 pub fn snapshot(app: &AppHandle) -> TabsSnapshot {
@@ -1201,6 +1304,7 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
             if finished {
                 remember_visit(&load_app, id);
                 place_pages(&load_app, &owner, false);
+                apply_device_chrome(&load_app, &owner);
                 crate::system::attach_open_file(&load_app, id, payload.url().as_str());
             }
             let active = lock(&load_app).active_of(&owner) == Some(id);
@@ -2230,39 +2334,193 @@ pub fn fit_device(page_w: u32, page_h: u32, want_w: u32, want_h: u32) -> (u32, u
     (x, y, width, height)
 }
 
-fn device_pixels(
-    device: &str,
-    page: PhysicalSize<u32>,
-    scale: f64,
-) -> Option<(u32, u32, u32, u32)> {
-    let (css_w, css_h) = match device {
-        "phone" => (390u32, 844u32),
-        "tablet" => (768, 1024),
-        "laptop" => (1280, 800),
-        _ => return None,
-    };
-    let want_w = (f64::from(css_w) * scale).round().max(1.0) as u32;
-    let want_h = (f64::from(css_h) * scale).round().max(1.0) as u32;
-    Some(fit_device(page.width, page.height, want_w, want_h))
+/// Height of the device bar drawn above the page, in CSS pixels. The page view starts below it.
+const VIEWPORT_BAR: f64 = 36.0;
+const VIEWPORT_MIN: u32 = 200;
+const VIEWPORT_MAX: u32 = 3840;
+
+fn clamp_viewport(width: u32, height: u32) -> Option<(u32, u32)> {
+    if width < VIEWPORT_MIN || height < VIEWPORT_MIN {
+        return None;
+    }
+    Some((width.min(VIEWPORT_MAX), height.min(VIEWPORT_MAX)))
 }
 
-pub fn set_device(app: &AppHandle, window: &str, device: &str) -> Result<(), String> {
-    let device = match device {
-        "" | "off" => String::new(),
-        "phone" | "tablet" | "laptop" => device.to_string(),
-        _ => return Err("Unknown device.".into()),
+/// Centers a CSS viewport in the page column, under the device bar.
+fn viewport_frame(
+    viewport: Option<(u32, u32)>,
+    page_w: u32,
+    page_h: u32,
+    scale: f64,
+) -> Option<(i32, i32, u32, u32)> {
+    let (css_w, css_h) = viewport?;
+    let bar = (VIEWPORT_BAR * scale).round() as u32;
+    let avail_h = page_h.saturating_sub(bar).max(1);
+    let want_w = (f64::from(css_w) * scale).round().max(1.0) as u32;
+    let want_h = (f64::from(css_h) * scale).round().max(1.0) as u32;
+    let (x, y, width, height) = fit_device(page_w, avail_h, want_w, want_h);
+    Some((x as i32, y as i32 + bar as i32, width, height))
+}
+
+pub fn set_viewport(
+    app: &AppHandle,
+    window: &str,
+    width: u32,
+    height: u32,
+    cutout: bool,
+    home_bar: bool,
+) {
+    let Some(size) = clamp_viewport(width, height) else {
+        clear_viewport(app, window);
+        return;
     };
     let found = with_state(app, |state| {
-        state
-            .chrome_mut(window)
-            .map(|chrome| chrome.device = device)
+        let chrome = state.chrome_mut(window)?;
+        chrome.screencast_suppress = false;
+        let same = chrome.viewport == Some(size)
+            && chrome.viewport_cutout == cutout
+            && chrome.viewport_home == home_bar;
+        if same {
+            return None;
+        }
+        let resized = chrome.viewport != Some(size);
+        chrome.viewport = Some(size);
+        chrome.viewport_cutout = cutout;
+        chrome.viewport_home = home_bar;
+        Some(resized)
+    });
+    let Some(resized) = found else {
+        return;
+    };
+    if resized {
+        place_pages(app, window, true);
+        release_viewport_emulation(app, window);
+    }
+    emit_tabs(app);
+    apply_device_chrome(app, window);
+}
+
+pub fn clear_viewport(app: &AppHandle, window: &str) {
+    let found = with_state(app, |state| {
+        let chrome = state.chrome_mut(window)?;
+        chrome.screencast_suppress = true;
+        chrome.screencast_at = Instant::now();
+        chrome.viewport.take().map(|_| ())
     });
     if found.is_none() {
-        return Err("That window is not open.".into());
+        return;
     }
     place_pages(app, window, true);
     emit_tabs(app);
-    Ok(())
+    apply_device_chrome(app, window);
+    release_viewport_emulation(app, window);
+}
+
+fn device_chrome_script(cutout: bool, home: bool, portrait: bool) -> String {
+    format!(
+        r#"(function(cutout, home, portrait) {{
+  var root = document.getElementById("ce-device-chrome");
+  if (!cutout && !home) {{
+    if (root) root.remove();
+    return;
+  }}
+  if (!root) {{
+    root = document.createElement("div");
+    root.id = "ce-device-chrome";
+    var parent = document.documentElement || document.body;
+    if (!parent) return;
+    parent.appendChild(root);
+  }}
+  root.setAttribute("style", "position:fixed;inset:0;z-index:2147483646;pointer-events:none;");
+  var island = "";
+  if (cutout) {{
+    island = portrait
+      ? '<div id="ce-device-cutout" style="position:absolute;top:11px;left:50%;width:min(126px,34vw);height:37px;transform:translateX(-50%);background:#000;border-radius:20px;"></div>'
+      : '<div id="ce-device-cutout" style="position:absolute;left:11px;top:50%;width:37px;height:min(126px,34vh);transform:translateY(-50%);background:#000;border-radius:20px;"></div>';
+  }}
+  var bar = home
+    ? '<div id="ce-device-home" style="position:absolute;left:50%;bottom:8px;width:min(134px,36vw);height:5px;transform:translateX(-50%);border-radius:999px;background:rgba(235,235,235,0.92);box-shadow:0 0 0 0.5px rgba(0,0,0,0.45);"></div>'
+    : "";
+  root.innerHTML = island + bar;
+}})({cutout}, {home}, {portrait})"#,
+        cutout = cutout,
+        home = home,
+        portrait = portrait,
+    )
+}
+
+fn apply_device_chrome(app: &AppHandle, window: &str) {
+    let plan = with_state(app, |state| {
+        let chrome = state.chrome(window)?;
+        let id = chrome.active?;
+        let Some((width, height)) = chrome.viewport.filter(|_| !chrome.fullscreen) else {
+            return Some((id, false, false, true));
+        };
+        Some((
+            id,
+            chrome.viewport_cutout,
+            chrome.viewport_home,
+            height >= width,
+        ))
+    });
+    let Some((id, cutout, home, portrait)) = plan else {
+        return;
+    };
+    let Some(webview) = page_view(app, id) else {
+        return;
+    };
+    let _ = webview.eval(device_chrome_script(cutout, home, portrait));
+}
+
+/// DevTools started a screencast of this tab. The second view is stopped, and the page webview
+/// takes that size instead. A burst of frames after the bar was closed does not open it again.
+pub fn adopt_screencast(app: &AppHandle, id: u32, width: u32, height: u32) {
+    let Some(size) = clamp_viewport(width, height) else {
+        return;
+    };
+    let Some(window) = with_state(app, |state| state.tab_window(id)) else {
+        return;
+    };
+    let apply = with_state(app, |state| {
+        let chrome = state.chrome_mut(&window)?;
+        let gap = chrome.screencast_at.elapsed();
+        chrome.screencast_at = Instant::now();
+        if chrome.screencast_suppress && gap < Duration::from_millis(700) {
+            return None;
+        }
+        chrome.screencast_suppress = false;
+        if chrome.viewport == Some(size) {
+            return None;
+        }
+        chrome.viewport = Some(size);
+        Some(())
+    });
+    if apply.is_none() {
+        return;
+    }
+    place_pages(app, &window, true);
+    emit_tabs(app);
+    apply_device_chrome(app, &window);
+}
+
+fn release_viewport_emulation(app: &AppHandle, window: &str) {
+    let Some(id) = with_state(app, |state| state.active_of(window)) else {
+        return;
+    };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let Some(webview) = page_view(&app, id) else {
+            return;
+        };
+        webview2::release_page_emulation(&webview);
+    });
+}
+
+fn watch_screencast(app: &AppHandle, id: u32) {
+    let Some(webview) = page_view(app, id) else {
+        return;
+    };
+    webview2::watch_screencast(app.clone(), id, &webview);
 }
 
 pub fn note_error(app: &AppHandle, id: u32) {
@@ -2770,6 +3028,7 @@ fn parked_position() -> LogicalPosition<f64> {
 /// Puts the active page on screen once it has painted, beside its split partner when it has one.
 /// Until then the previous page stays, so opening or closing a tab does not flash the window through.
 fn place_pages(app: &AppHandle, window: &str, resize: bool) {
+    devtools_follow(app, window);
     let (position, page_size) = page_rect(app, window);
     let scale = app
         .get_window(window)
@@ -2779,14 +3038,16 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         let active = state.active_of(window);
         let chrome = state.chrome(window)?;
         let fullscreen = chrome.fullscreen;
-        let device = chrome.device.clone();
+        let viewport = chrome.viewport.filter(|_| !fullscreen);
         let previous = chrome.shown.clone();
         let split = chrome.split.filter(|split| {
-            device.is_empty()
+            viewport.is_none()
                 && !fullscreen
                 && active.is_some_and(|id| id == split.left || id == split.right)
         });
         let ratio = split.map(|split| split.ratio).unwrap_or(0.5);
+        let dock_ratio = (chrome.devtools.open && chrome.devtools.ready && !fullscreen)
+            .then_some(chrome.devtools.ratio);
         let failed = |id: u32| {
             state
                 .tabs
@@ -2862,9 +3123,9 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         if let Some(chrome) = state.chrome_mut(window) {
             chrome.shown = shown.clone();
         }
-        Some((shown, parked, changed, ratio, wake, device))
+        Some((shown, parked, changed, ratio, wake, viewport, dock_ratio))
     });
-    let Some((shown, parked, changed, ratio, wake, device)) = plan else {
+    let Some((shown, parked, changed, ratio, wake, viewport, dock_ratio)) = plan else {
         return;
     };
     for label in &wake {
@@ -2879,10 +3140,28 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         return;
     }
     let gap = (SPLIT_GAP * scale).round() as i32;
-    let left_width = (((page_size.width as f64) * ratio).round() as i32 - gap / 2).max(1);
+    let (content_width, tools_slot) = match dock_ratio {
+        Some(dock_ratio) => {
+            let pages = (((page_size.width as f64) * dock_ratio).round() as i32 - gap / 2).max(1);
+            let tools_x = pages + gap;
+            let tools_width = (page_size.width as i32 - tools_x).max(1);
+            (pages as u32, Some((tools_x, tools_width as u32)))
+        }
+        None => (page_size.width, None),
+    };
+    let left_width = (((content_width as f64) * ratio).round() as i32 - gap / 2).max(1);
     let right_x = left_width + gap;
-    let right_width = (page_size.width as i32 - right_x).max(1);
-    let fitted = device_pixels(&device, page_size, scale);
+    let right_width = (content_width as i32 - right_x).max(1);
+    // The device bar is drawn above the page whenever tools are docked or a size is set.
+    // The tools column stays full height; only the page view moves down.
+    let show_bar = dock_ratio.is_some() || viewport.is_some();
+    let bar_px = if show_bar {
+        (VIEWPORT_BAR * scale).round() as i32
+    } else {
+        0
+    };
+    let page_height = (page_size.height as i32 - bar_px).max(1) as u32;
+    let fitted = viewport_frame(viewport, content_width, page_size.height, scale);
     for (label, slot) in &shown {
         let Some(webview) = app.get_webview(label) else {
             continue;
@@ -2892,11 +3171,11 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
                 (dx as i32, dy as i32, width, height)
             } else {
                 let (x, width) = match slot {
-                    Slot::Full => (0, page_size.width as i32),
+                    Slot::Full => (0, content_width as i32),
                     Slot::Left => (0, left_width),
                     Slot::Right => (right_x, right_width),
                 };
-                (x, 0, width as u32, page_size.height)
+                (x, bar_px, width as u32, page_height)
             };
         let _ = webview.set_size(PhysicalSize::new(width, height));
         let _ = webview.set_position(PhysicalPosition::new(position.x + x, position.y + y));
@@ -2904,6 +3183,14 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
     for label in parked {
         if let Some(webview) = app.get_webview(&label) {
             let _ = webview.set_size(page_size);
+            let _ = webview.set_position(parked_position());
+        }
+    }
+    if let Some(webview) = app.get_webview(&devtools::label(window)) {
+        if let Some((x, width)) = tools_slot {
+            let _ = webview.set_size(PhysicalSize::new(width, page_size.height));
+            let _ = webview.set_position(PhysicalPosition::new(position.x + x, position.y));
+        } else {
             let _ = webview.set_position(parked_position());
         }
     }
@@ -4316,6 +4603,422 @@ fn apply_extension_popout_zoom(app: &AppHandle, zoom: f64, ratio: f64) {
 }
 
 pub fn open_devtools(app: &AppHandle, id: u32) {
+    let Some(window) = with_state(app, |state| state.tab_window(id)) else {
+        return;
+    };
+    let close = with_state(app, |state| {
+        state
+            .chrome(&window)
+            .is_some_and(|chrome| chrome.devtools.engaged())
+    });
+    if close {
+        close_devtools(app, &window);
+        return;
+    }
+    let Some(epoch) = with_state(app, |state| {
+        let devtools = &mut state.chrome_mut(&window)?.devtools;
+        devtools.pending = true;
+        devtools.ready = false;
+        Some(devtools.cancel_work())
+    }) else {
+        return;
+    };
+    emit_tabs(app);
+    let app = app.clone();
+    std::thread::spawn(move || open_devtools_worker(&app, &window, id, epoch));
+}
+
+fn close_devtools(app: &AppHandle, window: &str) {
+    let label = devtools::label(window);
+    with_state(app, |state| {
+        let Some(chrome) = state.chrome_mut(window) else {
+            return;
+        };
+        chrome.devtools.cancel_work();
+        chrome.devtools.open = false;
+        chrome.devtools.pending = false;
+        chrome.devtools.ready = false;
+        chrome.devtools.tab = None;
+        chrome.devtools.page = None;
+        chrome.screencast_suppress = true;
+        chrome.screencast_at = Instant::now();
+        chrome.viewport = None;
+    });
+    if let Some(webview) = app.get_webview(&label) {
+        let _ = webview.close();
+    }
+    place_pages(app, window, true);
+    emit_tabs(app);
+    apply_device_chrome(app, window);
+    release_viewport_emulation(app, window);
+    focus_active(app, window);
+}
+
+fn open_devtools_worker(app: &AppHandle, window: &str, id: u32, epoch: u64) {
+    if !devtools_epoch_is(app, window, epoch) {
+        return;
+    }
+    let Some(target) = devtools_target(app, window, id) else {
+        fail_devtools_open(app, window, epoch, id);
+        return;
+    };
+    let url = match devtools::inspector_for(&target.webview, &target.profile) {
+        Ok(url) => url,
+        Err(error) => {
+            eprintln!("docked devtools: {error}");
+            fail_devtools_open(app, window, epoch, id);
+            return;
+        }
+    };
+    if !devtools_epoch_is(app, window, epoch) {
+        return;
+    }
+    if let Err(error) = mount_devtools(app, window, &url) {
+        eprintln!("docked devtools: {error}");
+        fail_devtools_open(app, window, epoch, id);
+        return;
+    }
+    if !devtools_epoch_is(app, window, epoch) {
+        if let Some(webview) = app.get_webview(&devtools::label(window)) {
+            let _ = webview.close();
+        }
+        return;
+    }
+    let watched = target.id;
+    let applied = with_state(app, |state| {
+        let Some(devtools) = state.chrome_mut(window).map(|chrome| &mut chrome.devtools) else {
+            return false;
+        };
+        if devtools.epoch != epoch {
+            return false;
+        }
+        devtools.pending = false;
+        devtools.open = true;
+        devtools.ready = true;
+        devtools.tab = Some(target.id);
+        devtools.page = Some(target.page);
+        true
+    });
+    if !applied {
+        if let Some(webview) = app.get_webview(&devtools::label(window)) {
+            let _ = webview.close();
+        }
+        return;
+    }
+    place_pages(app, window, true);
+    emit_tabs(app);
+    watch_screencast(app, watched);
+    if let Some(webview) = app.get_webview(&devtools::label(window)) {
+        let _ = webview.set_focus();
+    }
+}
+
+fn fail_devtools_open(app: &AppHandle, window: &str, epoch: u64, id: u32) {
+    let popout = with_state(app, |state| {
+        let Some(devtools) = state.chrome_mut(window).map(|chrome| &mut chrome.devtools) else {
+            return false;
+        };
+        if devtools.epoch != epoch {
+            return false;
+        }
+        devtools.pending = false;
+        devtools.open = false;
+        true
+    });
+    if !popout {
+        return;
+    }
+    emit_tabs(app);
+    if let Some(webview) = page_view(app, id) {
+        webview.open_devtools();
+    }
+}
+
+struct DevtoolsTarget {
+    id: u32,
+    webview: Webview,
+    profile: std::path::PathBuf,
+    page: String,
+}
+
+struct FollowJob {
+    job: u64,
+    epoch: u64,
+    tab: u32,
+}
+
+enum FollowEnd {
+    Ignore,
+    Layout,
+    Again,
+}
+
+fn devtools_target(app: &AppHandle, window: &str, prefer: u32) -> Option<DevtoolsTarget> {
+    let id = with_state(app, |state| {
+        let in_window = state.tab_window(prefer).as_deref() == Some(window);
+        if in_window {
+            Some(prefer)
+        } else {
+            state.active_of(window)
+        }
+    })?;
+    let _ = ensure_webview(app, id);
+    let page = with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .find(|tab| tab.info.id == id)
+            .and_then(|tab| tab.webview.clone())
+    })?;
+    let webview = app.get_webview(&page)?;
+    Some(DevtoolsTarget {
+        id,
+        webview,
+        profile: tab_profile_dir(app, id),
+        page,
+    })
+}
+
+fn tab_profile_dir(app: &AppHandle, id: u32) -> std::path::PathBuf {
+    let container = with_state(app, |state| {
+        let tab = state.tabs.iter().find(|tab| tab.info.id == id)?;
+        let group = tab.info.group_id?;
+        state
+            .groups
+            .iter()
+            .find(|item| item.id == group)
+            .map(|item| item.container.clone())
+            .filter(|container| !container.is_empty())
+    });
+    match container {
+        Some(container) => crate::privacy::container_dir(app, &container),
+        None => paths::profile_dir(app),
+    }
+}
+
+fn devtools_epoch_is(app: &AppHandle, window: &str, epoch: u64) -> bool {
+    with_state(app, |state| {
+        state
+            .chrome(window)
+            .is_some_and(|chrome| chrome.devtools.epoch == epoch)
+    })
+}
+
+fn mount_devtools(app: &AppHandle, window: &str, url: &str) -> Result<(), String> {
+    let label = devtools::label(window);
+    let parsed = Url::parse(url).map_err(|error| error.to_string())?;
+    if let Some(webview) = app.get_webview(&label) {
+        return webview.navigate(parsed).map_err(|error| error.to_string());
+    }
+    let host = app
+        .get_window(window)
+        .ok_or("The browser window is missing.")?;
+    let (_, size) = page_rect(app, window);
+    let painted_app = app.clone();
+    let builder = base_builder(app, &label, WebviewUrl::External(parsed))
+        .disable_drag_drop_handler()
+        .background_color(Color(24, 24, 27, 255))
+        .focused(false)
+        .on_new_window(|_url, _features| NewWindowResponse::Deny)
+        .on_page_load(move |webview, payload| {
+            devtools_painted(
+                &painted_app,
+                webview.label(),
+                matches!(payload.event(), PageLoadEvent::Finished),
+                payload.url().as_str(),
+            );
+        });
+    let webview = host
+        .add_child(builder, parked_position(), size)
+        .map_err(|error| error.to_string())?;
+    webview2::attach_devtools_hooks(app, &webview);
+    Ok(())
+}
+
+fn is_inspector_document(url: &str) -> bool {
+    url.contains("/devtools/devtools_app.html") || url.contains("/devtools/inspector.html")
+}
+
+fn devtools_painted(app: &AppHandle, label: &str, finished: bool, url: &str) {
+    if !finished || !is_inspector_document(url) {
+        return;
+    }
+    let Some(window) = label.strip_prefix(devtools::LABEL_PREFIX) else {
+        return;
+    };
+    let window = window.to_string();
+    let show = with_state(app, |state| {
+        let devtools = &mut state.chrome_mut(&window)?.devtools;
+        if !devtools.engaged() || devtools.ready {
+            return None;
+        }
+        devtools.ready = true;
+        Some(())
+    });
+    if show.is_some() {
+        place_pages(app, &window, true);
+        emit_tabs(app);
+    }
+}
+
+/// Points an open dock at the window's active tab when that tab is no longer the one it shows.
+fn devtools_follow(app: &AppHandle, window: &str) {
+    let Some(job) = with_state(app, |state| {
+        let (open, inflight, active, epoch, aimed_tab, aimed_page) = {
+            let chrome = state.chrome(window)?;
+            (
+                chrome.devtools.open,
+                chrome.devtools.inflight,
+                chrome.active,
+                chrome.devtools.epoch,
+                chrome.devtools.tab,
+                chrome.devtools.page.clone(),
+            )
+        };
+        if !open || inflight {
+            return None;
+        }
+        let active = active?;
+        let page = state
+            .tabs
+            .iter()
+            .find(|tab| tab.info.id == active)
+            .and_then(|tab| tab.webview.clone())?;
+        if aimed_tab == Some(active) && aimed_page.as_deref() == Some(page.as_str()) {
+            return None;
+        }
+        let devtools = &mut state.chrome_mut(window)?.devtools;
+        devtools.job = devtools.job.wrapping_add(1);
+        devtools.inflight = true;
+        Some(FollowJob {
+            job: devtools.job,
+            epoch,
+            tab: active,
+        })
+    }) else {
+        return;
+    };
+    let app = app.clone();
+    let window = window.to_string();
+    std::thread::spawn(move || run_devtools_follow(&app, &window, job));
+}
+
+fn run_devtools_follow(app: &AppHandle, window: &str, job: FollowJob) {
+    let outcome = (|| -> Result<(u32, String), String> {
+        if !devtools_job_is(app, window, job.job) {
+            return Err("cancelled".into());
+        }
+        let target = devtools_target(app, window, job.tab).ok_or("This page is not loaded yet.")?;
+        let url = devtools::inspector_for(&target.webview, &target.profile)?;
+        if !devtools_job_is(app, window, job.job) {
+            return Err("cancelled".into());
+        }
+        mount_devtools(app, window, &url)?;
+        if !devtools_job_is(app, window, job.job) {
+            if let Some(webview) = app.get_webview(&devtools::label(window)) {
+                let _ = webview.close();
+            }
+            return Err("cancelled".into());
+        }
+        Ok((target.id, target.page))
+    })();
+    match outcome {
+        Ok(applied) => finish_devtools_follow(app, window, &job, Some(applied)),
+        Err(error) => {
+            if error != "cancelled" {
+                eprintln!("docked devtools: {error}");
+            }
+            finish_devtools_follow(app, window, &job, None);
+        }
+    }
+}
+
+fn finish_devtools_follow(
+    app: &AppHandle,
+    window: &str,
+    job: &FollowJob,
+    applied: Option<(u32, String)>,
+) {
+    let watched = applied.as_ref().map(|(id, _)| *id);
+    let end = with_state(app, |state| {
+        let Some(devtools) = state.chrome_mut(window).map(|chrome| &mut chrome.devtools) else {
+            return FollowEnd::Ignore;
+        };
+        if devtools.job != job.job {
+            return FollowEnd::Ignore;
+        }
+        devtools.inflight = false;
+        if devtools.epoch != job.epoch {
+            return if devtools.open {
+                FollowEnd::Again
+            } else {
+                FollowEnd::Ignore
+            };
+        }
+        if let Some((id, page)) = applied {
+            devtools.tab = Some(id);
+            devtools.page = Some(page);
+            return FollowEnd::Layout;
+        }
+        FollowEnd::Ignore
+    });
+    match end {
+        FollowEnd::Layout => {
+            place_pages(app, window, true);
+            if let Some(id) = watched {
+                watch_screencast(app, id);
+            }
+        }
+        FollowEnd::Again => devtools_follow(app, window),
+        FollowEnd::Ignore => {}
+    }
+}
+
+fn devtools_job_is(app: &AppHandle, window: &str, job: u64) -> bool {
+    with_state(app, |state| {
+        state
+            .chrome(window)
+            .is_some_and(|chrome| chrome.devtools.job == job)
+    })
+}
+
+fn clamp_devtools_ratio(ratio: f64) -> f64 {
+    if ratio.is_finite() {
+        ratio.clamp(DEVTOOLS_RATIO_MIN, DEVTOOLS_RATIO_MAX)
+    } else {
+        DEVTOOLS_RATIO
+    }
+}
+
+/// Ctrl+Shift+I. A website under the pointer opens its docked tools. The browser chrome and
+/// built-in pages open the native tools for the webview being hovered.
+pub fn inspect_hovered(app: &AppHandle) {
+    match webview2::hovered_view() {
+        Some(webview2::HoveredView::Chrome(window)) => open_ui_devtools(app, &window),
+        Some(webview2::HoveredView::Page(id)) => {
+            if page_is_app(app, id) {
+                open_popout_devtools(app, id);
+            } else {
+                open_devtools(app, id);
+            }
+        }
+        None => {
+            if let Some(id) = active_id(app) {
+                if page_is_app(app, id) {
+                    open_popout_devtools(app, id);
+                } else {
+                    open_devtools(app, id);
+                }
+            }
+        }
+    }
+}
+
+fn page_is_app(app: &AppHandle, id: u32) -> bool {
+    tab_page_url(app, id).is_some_and(|url| url.starts_with(paths::INTERNAL_SCHEME))
+}
+
+fn open_popout_devtools(app: &AppHandle, id: u32) {
     if let Some(webview) = page_view(app, id) {
         webview.open_devtools();
     }
@@ -5326,6 +6029,25 @@ pub fn set_split_ratio(app: &AppHandle, window: &str, ratio: f64) {
     }
 }
 
+pub fn set_devtools_ratio(app: &AppHandle, window: &str, ratio: f64) {
+    let changed = with_state(app, |state| {
+        let devtools = &mut state.chrome_mut(window)?.devtools;
+        if !devtools.open {
+            return None;
+        }
+        let ratio = clamp_devtools_ratio(ratio);
+        if (devtools.ratio - ratio).abs() < 0.001 {
+            return None;
+        }
+        devtools.ratio = ratio;
+        Some(())
+    });
+    if changed.is_some() {
+        place_pages(app, window, true);
+        emit_tabs(app);
+    }
+}
+
 /// A page view took focus. Clicking into the other half of a split makes that tab active,
 /// and clicking a tab while a peek is open closes the peek.
 pub fn page_focused(app: &AppHandle, id: u32) {
@@ -5349,6 +6071,7 @@ pub fn page_focused(app: &AppHandle, id: u32) {
     });
     if changed.is_some() {
         emit_tabs(app);
+        devtools_follow(app, &window);
     }
 }
 
@@ -6120,6 +6843,20 @@ pub fn tab_page_url(app: &AppHandle, id: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debugging_port_is_ephemeral_and_local() {
+        assert!(WEBVIEW_BROWSER_ARGS.contains("--remote-debugging-port=0"));
+        assert!(!WEBVIEW_BROWSER_ARGS.contains("remote-allow-origins"));
+    }
+
+    #[test]
+    fn devtools_column_stays_wide_enough_to_use() {
+        assert_eq!(clamp_devtools_ratio(0.0), DEVTOOLS_RATIO_MIN);
+        assert_eq!(clamp_devtools_ratio(1.0), DEVTOOLS_RATIO_MAX);
+        assert_eq!(clamp_devtools_ratio(0.5), 0.5);
+        assert_eq!(clamp_devtools_ratio(f64::NAN), DEVTOOLS_RATIO);
+    }
 
     #[test]
     fn remote_pages_keep_their_own_canvas() {
