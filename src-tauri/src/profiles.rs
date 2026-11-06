@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::ffi::OsString;
 use std::fs;
 use std::os::windows::ffi::OsStringExt;
@@ -1395,7 +1396,26 @@ fn profile_is_open(id: &str) -> bool {
 
 static PROFILE_MUTEX: OnceLock<usize> = OnceLock::new();
 
+thread_local! {
+    static LOADING_PROFILES: Cell<bool> = const { Cell::new(false) };
+}
+
+struct ProfileLoadGuard;
+
+impl Drop for ProfileLoadGuard {
+    fn drop(&mut self) {
+        LOADING_PROFILES.with(|flag| flag.set(false));
+    }
+}
+
 fn load(app: &AppHandle) -> ProfilesFile {
+    // Icon redraw looks up the profile folder, and that lookup loads profiles. A nested load
+    // only reads the file, or the redraw recurses until the stack overflows.
+    let nested = LOADING_PROFILES.with(|flag| flag.replace(true));
+    if nested {
+        return read_profiles_file(&registry_path(app));
+    }
+    let _guard = ProfileLoadGuard;
     let mut file: ProfilesFile = crate::sync_conflicts::read_json(app, &registry_path(app));
     ensure_default(&mut file);
     migrate_default(&mut file);
@@ -1409,18 +1429,26 @@ fn load(app: &AppHandle) -> ProfilesFile {
     file
 }
 
+fn profile_folder(app: &AppHandle, file: &ProfilesFile, id: &str) -> PathBuf {
+    paths::data_root(app).join(folder_of(file, id))
+}
+
 fn is_false(value: &bool) -> bool {
     !*value
 }
 
 /// Replaces a saved browser mark when it is not the current logo.
 fn redraw_browser_marks(app: &AppHandle, file: &mut ProfilesFile) -> bool {
+    let dirs: Vec<PathBuf> = file
+        .profiles
+        .iter()
+        .map(|profile| profile_folder(app, file, &profile.id))
+        .collect();
     let mut changed = false;
-    for profile in &mut file.profiles {
+    for (profile, dir) in file.profiles.iter_mut().zip(dirs) {
         if !crate::profile_icons::is_mark(&profile.icon) {
             continue;
         }
-        let dir = paths::profile_data_dir(app, &profile.id);
         let Ok(Some(fresh)) = composed_icon(profile, &dir) else {
             continue;
         };
@@ -1446,14 +1474,18 @@ fn redraw_browser_marks(app: &AppHandle, file: &mut ProfilesFile) -> bool {
 
 /// Clears the retired name-on-icon flag and redraws any icon that still has the name.
 fn drop_icon_text(app: &AppHandle, file: &mut ProfilesFile) -> bool {
+    let dirs: Vec<PathBuf> = file
+        .profiles
+        .iter()
+        .map(|profile| profile_folder(app, file, &profile.id))
+        .collect();
     let mut changed = false;
-    for profile in &mut file.profiles {
+    for (profile, dir) in file.profiles.iter_mut().zip(dirs) {
         if !profile.icon_text {
             continue;
         }
         profile.icon_text = false;
         changed = true;
-        let dir = paths::profile_data_dir(app, &profile.id);
         let _ = fs::create_dir_all(&dir);
         if let Err(error) = rebuild_icon(profile, &dir) {
             eprintln!("profile icon: {error}");
