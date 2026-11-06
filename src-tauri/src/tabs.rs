@@ -326,10 +326,13 @@ struct Split {
 }
 
 struct DevtoolsState {
-    open: bool,
-    pending: bool,
+    /// Tabs that have their own dock. Switching tabs does not add one.
+    tabs: HashSet<u32>,
+    /// Tab whose dock is still attaching.
+    pending: Option<u32>,
     ready: bool,
     ratio: f64,
+    /// Tab the inspector webview is aimed at.
     tab: Option<u32>,
     page: Option<String>,
     epoch: u64,
@@ -340,8 +343,8 @@ struct DevtoolsState {
 impl DevtoolsState {
     fn new() -> Self {
         Self {
-            open: false,
-            pending: false,
+            tabs: HashSet::new(),
+            pending: None,
             ready: false,
             ratio: DEVTOOLS_RATIO,
             tab: None,
@@ -352,8 +355,26 @@ impl DevtoolsState {
         }
     }
 
-    fn engaged(&self) -> bool {
-        self.open || self.pending
+    fn wants(&self, id: u32) -> bool {
+        self.tabs.contains(&id) || self.pending == Some(id)
+    }
+
+    /// The dock is on screen for `active`. Another tab's dock stays closed.
+    fn visible_for(&self, active: Option<u32>) -> bool {
+        active.is_some_and(|id| self.tabs.contains(&id) && self.ready && self.tab == Some(id))
+    }
+
+    /// Drops `id`. `true` when this window has no dock left.
+    fn release(&mut self, id: u32) -> bool {
+        self.tabs.remove(&id);
+        if self.pending == Some(id) {
+            self.cancel_work();
+            self.pending = None;
+        }
+        if self.tab == Some(id) {
+            self.ready = false;
+        }
+        self.tabs.is_empty() && self.pending.is_none()
     }
 
     /// Drops in-flight inspector work. The returned epoch is the only one allowed to finish.
@@ -841,12 +862,13 @@ fn with_state<T>(app: &AppHandle, change: impl FnOnce(&mut TabsState) -> T) -> T
 }
 
 fn published_devtools(chrome: &WindowChrome) -> Option<DevtoolsDock> {
-    if !chrome.devtools.engaged() {
+    let active = chrome.active?;
+    if !chrome.devtools.wants(active) {
         return None;
     }
     Some(DevtoolsDock {
         ratio: chrome.devtools.ratio,
-        visible: chrome.devtools.open && chrome.devtools.ready && !chrome.fullscreen,
+        visible: chrome.devtools.visible_for(Some(active)) && !chrome.fullscreen,
     })
 }
 
@@ -2239,7 +2261,7 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
         let _ = created.set_position(PhysicalPosition::new(position.x + 48, position.y + 48));
     }
     crate::peek::close(app, &source);
-    let next = with_state(app, |state| {
+    let (next, drop_dock) = with_state(app, |state| {
         let next = state
             .strip_indexes(&source)
             .into_iter()
@@ -2263,12 +2285,15 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
         if let Some(chrome) = state.chrome_mut(&label) {
             chrome.workspace = workspace;
         }
+        let drop_dock = state
+            .chrome_mut(&source)
+            .is_some_and(|chrome| chrome.devtools.release(id));
         state.normalize_groups();
         if state.active_of(&source) == Some(id) {
             state.set_window_active(&source, next);
         }
         state.set_window_active(&label, Some(id));
-        next
+        (next, drop_dock)
     });
     // Closing the source window destroys webviews Tauri still owns, so the last tab is
     // rebuilt on the new window instead of reparented.
@@ -2305,10 +2330,16 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
             let _ = window.close();
         }
     } else if let Some(next) = next {
+        if drop_dock {
+            close_devtools(app, &source);
+        }
         ensure_webview(app, next)?;
         place_pages(app, &source, false);
         layout(app, &source);
     } else {
+        if drop_dock {
+            close_devtools(app, &source);
+        }
         create_tab_on(app, &source, None, false, None)?;
     }
     ensure_webview(app, id)?;
@@ -3187,7 +3218,7 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
                 && active.is_some_and(|id| id == split.left || id == split.right)
         });
         let ratio = split.map(|split| split.ratio).unwrap_or(0.5);
-        let dock_ratio = (chrome.devtools.open && chrome.devtools.ready && !fullscreen)
+        let dock_ratio = (chrome.devtools.visible_for(active) && !fullscreen)
             .then_some(chrome.devtools.ratio);
         // A tab that failed, or whose next document has not painted, keeps its view off
         // screen so the browser UI behind can show why or that it is still loading.
@@ -3521,6 +3552,9 @@ fn close_tab_inner(app: &AppHandle, id: u32) -> Result<Option<ClosedTab>, String
         let strip_empty = state.strip_indexes(&window).is_empty();
         let last_window = state.windows.len() <= 1;
         state.forget_tab(id, &window);
+        let drop_dock = state
+            .chrome_mut(&window)
+            .is_some_and(|chrome| chrome.devtools.release(id));
         Some((
             tab.webview,
             was_active,
@@ -3530,14 +3564,27 @@ fn close_tab_inner(app: &AppHandle, id: u32) -> Result<Option<ClosedTab>, String
             last_window,
             window,
             remembered,
+            drop_dock,
         ))
     });
-    let Some((label, was_active, next, empty, strip_empty, last_window, window, remembered)) =
-        result
+    let Some((
+        label,
+        was_active,
+        next,
+        empty,
+        strip_empty,
+        last_window,
+        window,
+        remembered,
+        drop_dock,
+    )) = result
     else {
         return Ok(None);
     };
     crate::thumbnails::forget(id);
+    if drop_dock {
+        close_devtools(app, &window);
+    }
     if empty || strip_empty {
         retire_webview(app, label);
         if last_window || !empty {
@@ -4792,23 +4839,61 @@ pub fn open_devtools(app: &AppHandle, id: u32) {
     let close = with_state(app, |state| {
         state
             .chrome(&window)
-            .is_some_and(|chrome| chrome.devtools.engaged())
+            .is_some_and(|chrome| chrome.devtools.wants(id))
     });
     if close {
-        close_devtools(app, &window);
+        close_devtools_tab(app, &window, id);
         return;
     }
-    let Some(epoch) = with_state(app, |state| {
-        let devtools = &mut state.chrome_mut(&window)?.devtools;
-        devtools.pending = true;
+    let plan = with_state(app, |state| {
+        let page = state
+            .tabs
+            .iter()
+            .find(|tab| tab.info.id == id)
+            .and_then(|tab| tab.webview.clone());
+        let Some(devtools) = state.chrome_mut(&window).map(|chrome| &mut chrome.devtools) else {
+            return None;
+        };
+        if devtools.tab == Some(id) && page.is_some() && devtools.page == page && devtools.ready {
+            devtools.tabs.insert(id);
+            devtools.pending = None;
+            return Some(None);
+        }
+        devtools.pending = Some(id);
         devtools.ready = false;
-        Some(devtools.cancel_work())
-    }) else {
+        Some(Some(devtools.cancel_work()))
+    });
+    let Some(epoch) = plan else {
+        return;
+    };
+    let Some(epoch) = epoch else {
+        place_pages(app, &window, true);
+        emit_tabs(app);
+        watch_screencast(app, id);
+        if let Some(webview) = app.get_webview(&devtools::label(&window)) {
+            let _ = webview.set_focus();
+        }
         return;
     };
     emit_tabs(app);
     let app = app.clone();
     std::thread::spawn(move || open_devtools_worker(&app, &window, id, epoch));
+}
+
+/// Turns the dock off for one tab. The window's inspector stays while another tab still has one.
+fn close_devtools_tab(app: &AppHandle, window: &str, id: u32) {
+    let last = with_state(app, |state| {
+        state
+            .chrome_mut(window)
+            .is_some_and(|chrome| chrome.devtools.release(id))
+    });
+    if last {
+        close_devtools(app, window);
+        return;
+    }
+    place_pages(app, window, true);
+    emit_tabs(app);
+    focus_active(app, window);
 }
 
 fn close_devtools(app: &AppHandle, window: &str) {
@@ -4818,8 +4903,8 @@ fn close_devtools(app: &AppHandle, window: &str) {
             return;
         };
         chrome.devtools.cancel_work();
-        chrome.devtools.open = false;
-        chrome.devtools.pending = false;
+        chrome.devtools.tabs.clear();
+        chrome.devtools.pending = None;
         chrome.devtools.ready = false;
         chrome.devtools.tab = None;
         chrome.devtools.page = None;
@@ -4862,37 +4947,50 @@ fn open_devtools_worker(app: &AppHandle, window: &str, id: u32, epoch: u64) {
         return;
     }
     if !devtools_epoch_is(app, window, epoch) {
-        if let Some(webview) = app.get_webview(&devtools::label(window)) {
-            let _ = webview.close();
-        }
+        drop_inspector_if_idle(app, window);
         return;
     }
     let watched = target.id;
     let applied = with_state(app, |state| {
+        let alive = state.index_of(target.id).is_some();
         let Some(devtools) = state.chrome_mut(window).map(|chrome| &mut chrome.devtools) else {
             return false;
         };
-        if devtools.epoch != epoch {
+        if devtools.epoch != epoch || !alive {
             return false;
         }
-        devtools.pending = false;
-        devtools.open = true;
+        if devtools.pending == Some(target.id) {
+            devtools.pending = None;
+        }
+        devtools.tabs.insert(target.id);
         devtools.ready = true;
         devtools.tab = Some(target.id);
         devtools.page = Some(target.page);
         true
     });
     if !applied {
-        if let Some(webview) = app.get_webview(&devtools::label(window)) {
-            let _ = webview.close();
-        }
+        drop_inspector_if_idle(app, window);
         return;
     }
     place_pages(app, window, true);
     emit_tabs(app);
     watch_screencast(app, watched);
-    if let Some(webview) = app.get_webview(&devtools::label(window)) {
+    if with_state(app, |state| state.active_of(window) == Some(watched))
+        && let Some(webview) = app.get_webview(&devtools::label(window))
+    {
         let _ = webview.set_focus();
+    }
+}
+
+/// Closes the inspector webview when no tab in `window` still has a dock.
+fn drop_inspector_if_idle(app: &AppHandle, window: &str) {
+    let idle = with_state(app, |state| {
+        state.chrome(window).is_some_and(|chrome| {
+            chrome.devtools.tabs.is_empty() && chrome.devtools.pending.is_none()
+        })
+    });
+    if idle && let Some(webview) = app.get_webview(&devtools::label(window)) {
+        let _ = webview.close();
     }
 }
 
@@ -4904,11 +5002,13 @@ fn fail_devtools_open(app: &AppHandle, window: &str, epoch: u64, id: u32) {
         if devtools.epoch != epoch {
             return false;
         }
-        devtools.pending = false;
-        devtools.open = false;
-        true
+        if devtools.pending == Some(id) {
+            devtools.pending = None;
+        }
+        devtools.tabs.is_empty()
     });
     if !popout {
+        emit_tabs(app);
         return;
     }
     emit_tabs(app);
@@ -4938,12 +5038,7 @@ enum FollowEnd {
 
 fn devtools_target(app: &AppHandle, window: &str, prefer: u32) -> Option<DevtoolsTarget> {
     let id = with_state(app, |state| {
-        let in_window = state.tab_window(prefer).as_deref() == Some(window);
-        if in_window {
-            Some(prefer)
-        } else {
-            state.active_of(window)
-        }
+        (state.tab_window(prefer).as_deref() == Some(window)).then_some(prefer)
     })?;
     let _ = ensure_webview(app, id);
     let page = with_state(app, |state| {
@@ -4999,6 +5094,7 @@ fn mount_devtools(app: &AppHandle, window: &str, url: &str) -> Result<(), String
     let (_, size) = page_rect(app, window);
     let painted_app = app.clone();
     let builder = base_builder(app, &label, WebviewUrl::External(parsed))
+        .initialization_script(devtools::PREFER_ELEMENTS_SCRIPT)
         .disable_drag_drop_handler()
         .background_color(Color(24, 24, 27, 255))
         .focused(false)
@@ -5032,7 +5128,9 @@ fn devtools_painted(app: &AppHandle, label: &str, finished: bool, url: &str) {
     let window = window.to_string();
     let show = with_state(app, |state| {
         let devtools = &mut state.chrome_mut(&window)?.devtools;
-        if !devtools.engaged() || devtools.ready {
+        let aimed = devtools.tab;
+        let wanted = aimed.is_some_and(|id| devtools.wants(id)) || devtools.pending.is_some();
+        if !wanted || devtools.ready {
             return None;
         }
         devtools.ready = true;
@@ -5044,24 +5142,28 @@ fn devtools_painted(app: &AppHandle, label: &str, finished: bool, url: &str) {
     }
 }
 
-/// Points an open dock at the window's active tab when that tab is no longer the one it shows.
+/// Reattaches the inspector when the active tab's own dock is aimed at an old page.
+/// A tab that never had tools opened does not take the dock.
 fn devtools_follow(app: &AppHandle, window: &str) {
     let Some(job) = with_state(app, |state| {
-        let (open, inflight, active, epoch, aimed_tab, aimed_page) = {
+        let (inflight, active, epoch, aimed_tab, aimed_page, docked) = {
             let chrome = state.chrome(window)?;
             (
-                chrome.devtools.open,
                 chrome.devtools.inflight,
                 chrome.active,
                 chrome.devtools.epoch,
                 chrome.devtools.tab,
                 chrome.devtools.page.clone(),
+                chrome.devtools.tabs.clone(),
             )
         };
-        if !open || inflight {
+        if inflight {
             return None;
         }
         let active = active?;
+        if !docked.contains(&active) {
+            return None;
+        }
         let page = state
             .tabs
             .iter()
@@ -5073,6 +5175,7 @@ fn devtools_follow(app: &AppHandle, window: &str) {
         let devtools = &mut state.chrome_mut(window)?.devtools;
         devtools.job = devtools.job.wrapping_add(1);
         devtools.inflight = true;
+        devtools.ready = false;
         Some(FollowJob {
             job: devtools.job,
             epoch,
@@ -5132,7 +5235,7 @@ fn finish_devtools_follow(
         }
         devtools.inflight = false;
         if devtools.epoch != job.epoch {
-            return if devtools.open {
+            return if !devtools.tabs.is_empty() {
                 FollowEnd::Again
             } else {
                 FollowEnd::Ignore
@@ -5200,22 +5303,22 @@ fn window_width(app: &AppHandle, window: &str) -> f64 {
 pub fn inspect_hovered(app: &AppHandle) {
     match webview2::hovered_view() {
         Some(webview2::HoveredView::Chrome(window)) => open_ui_devtools(app, &window),
-        Some(webview2::HoveredView::Page(id)) => {
-            if page_is_app(app, id) {
-                open_popout_devtools(app, id);
-            } else {
-                open_devtools(app, id);
-            }
-        }
+        Some(webview2::HoveredView::Page(id)) => inspect_page(app, id),
         None => {
             if let Some(id) = active_id(app) {
-                if page_is_app(app, id) {
-                    open_popout_devtools(app, id);
-                } else {
-                    open_devtools(app, id);
-                }
+                inspect_page(app, id);
             }
         }
+    }
+}
+
+/// The tools for one page. A website opens the docked inspector. A built-in page opens
+/// WebView2's own window, which can see the app's document.
+pub fn inspect_page(app: &AppHandle, id: u32) {
+    if page_is_app(app, id) {
+        open_popout_devtools(app, id);
+    } else {
+        open_devtools(app, id);
     }
 }
 
@@ -6238,8 +6341,9 @@ pub fn set_devtools_ratio(app: &AppHandle, window: &str, ratio: f64) {
     let (_, page) = page_rect(app, window);
     let ratio = clamp_devtools_ratio(ratio, page.width as f64, window_width(app, window));
     let changed = with_state(app, |state| {
+        let active = state.active_of(window);
         let devtools = &mut state.chrome_mut(window)?.devtools;
-        if !devtools.open {
+        if !active.is_some_and(|id| devtools.wants(id)) {
             return None;
         }
         if (devtools.ratio - ratio).abs() < 0.001 {
@@ -6276,8 +6380,8 @@ pub fn page_focused(app: &AppHandle, id: u32) {
         Some(())
     });
     if changed.is_some() {
+        place_pages(app, &window, true);
         emit_tabs(app);
-        devtools_follow(app, &window);
     }
 }
 

@@ -2055,6 +2055,8 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                 &ContextMenuRequestedEventHandler::create(Box::new(move |_, args| {
                     if let Some(args) = args {
                         let _ = add_page_items(&menu_app, &environment, &args, id);
+                        let _ = add_plain_page_items(&menu_app, &environment, &args, id);
+                        let _ = redirect_inspect(&menu_app, &environment, &args, id);
                     }
                     Ok(())
                 })),
@@ -3360,6 +3362,41 @@ fn attach_downloads(app: &AppHandle, core: &ICoreWebView2) -> windows::core::Res
     }
 }
 
+/// The page menu's Inspect row opens the docked inspector, the same one Ctrl+Shift+I uses.
+fn redirect_inspect(
+    app: &AppHandle,
+    environment: &ICoreWebView2Environment9,
+    args: &ICoreWebView2ContextMenuRequestedEventArgs,
+    id: u32,
+) -> windows::core::Result<()> {
+    unsafe {
+        let items = args.MenuItems()?;
+        let mut count = 0u32;
+        items.Count(&mut count)?;
+        for index in 0..count {
+            let item = items.GetValueAtIndex(index)?;
+            if read_pwstr(|value| item.Name(value)) != "inspect" {
+                continue;
+            }
+            let label = read_pwstr(|value| item.Label(value));
+            let label = if label.is_empty() {
+                "Inspect".to_string()
+            } else {
+                label
+            };
+            drop(item);
+            items.RemoveValueAtIndex(index)?;
+            let menu_app = app.clone();
+            let replacement = menu_command(environment, &label, move || {
+                tabs::inspect_page(&menu_app, id);
+            })?;
+            items.InsertValueAtIndex(index, &replacement)?;
+            return Ok(());
+        }
+        Ok(())
+    }
+}
+
 /// A menu entry that runs `action` on a worker thread when chosen.
 fn menu_command(
     environment: &ICoreWebView2Environment9,
@@ -3383,6 +3420,104 @@ fn menu_command(
             &mut token,
         )?;
         Ok(item)
+    }
+}
+
+/// Copy and bookmark on a plain page click. They sit above Inspect.
+fn add_plain_page_items(
+    app: &AppHandle,
+    environment: &ICoreWebView2Environment9,
+    args: &ICoreWebView2ContextMenuRequestedEventArgs,
+    id: u32,
+) -> windows::core::Result<()> {
+    let Some(page) = plain_web_page(args)? else {
+        return Ok(());
+    };
+    let copy_app = app.clone();
+    let page_url = page.clone();
+    let copy = menu_command(environment, "Copy page address", move || {
+        crate::page_menu::copy_page_address(&copy_app, id, &page_url);
+    })?;
+    let bookmark_app = app.clone();
+    let bookmark = menu_command(environment, "Bookmark this page", move || {
+        crate::page_menu::bookmark_page(&bookmark_app, id);
+    })?;
+    unsafe {
+        let items = args.MenuItems()?;
+        let mut count = 0u32;
+        items.Count(&mut count)?;
+        let inspect = (0..count).find(|&index| {
+            items
+                .GetValueAtIndex(index)
+                .is_ok_and(|item| read_pwstr(|value| item.Name(value)) == "inspect")
+        });
+        let (insert_at, above_separator) = match inspect {
+            Some(index) if index > 0 && item_is_separator(&items, index - 1) => (index - 1, true),
+            Some(index) => (index, false),
+            None => (count, false),
+        };
+        if above_separator {
+            items.InsertValueAtIndex(insert_at, &copy)?;
+            items.InsertValueAtIndex(insert_at + 1, &bookmark)?;
+        } else {
+            let separator = environment.CreateContextMenuItem(
+                &HSTRING::new(),
+                None::<&IStream>,
+                COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
+            )?;
+            items.InsertValueAtIndex(insert_at, &separator)?;
+            items.InsertValueAtIndex(insert_at + 1, &copy)?;
+            items.InsertValueAtIndex(insert_at + 2, &bookmark)?;
+        }
+        Ok(())
+    }
+}
+
+fn item_is_separator(items: &ICoreWebView2ContextMenuItemCollection, index: u32) -> bool {
+    unsafe {
+        let Ok(item) = items.GetValueAtIndex(index) else {
+            return false;
+        };
+        let mut kind = COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND::default();
+        item.Kind(&mut kind).is_ok() && kind == COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR
+    }
+}
+
+/// An `http` or `https` page click that is not a link, a selection, an image, or a text field.
+fn plain_web_page(
+    args: &ICoreWebView2ContextMenuRequestedEventArgs,
+) -> windows::core::Result<Option<String>> {
+    unsafe {
+        let target = args.ContextMenuTarget()?;
+        if read_bool(|value| target.IsEditable(value)) {
+            return Ok(None);
+        }
+        if read_bool(|value| target.HasLinkUri(value))
+            && !read_pwstr(|value| target.LinkUri(value)).is_empty()
+        {
+            return Ok(None);
+        }
+        if read_bool(|value| target.HasSelection(value))
+            && !read_pwstr(|value| target.SelectionText(value))
+                .trim()
+                .is_empty()
+        {
+            return Ok(None);
+        }
+        let mut kind = COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND::default();
+        let _ = target.Kind(&mut kind);
+        if kind == COREWEBVIEW2_CONTEXT_MENU_TARGET_KIND_IMAGE
+            && read_bool(|value| target.HasSourceUri(value))
+            && !read_pwstr(|value| target.SourceUri(value)).is_empty()
+        {
+            return Ok(None);
+        }
+        let page = read_pwstr(|value| target.PageUri(value));
+        if page.starts_with("http://") || page.starts_with("https://") {
+            Ok(Some(page))
+        } else {
+            Ok(None)
+        }
     }
 }
 

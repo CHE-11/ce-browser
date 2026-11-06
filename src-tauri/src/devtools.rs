@@ -17,6 +17,88 @@ use crate::webview2;
 
 pub const LABEL_PREFIX: &str = "devtools-";
 
+/// Runs before the docked inspector's own scripts. Seeds Elements as the open panel, then
+/// moves off Welcome if Edge selects it after the release notes load. A panel the user already
+/// picked in this session is left as it is. The page stays hidden until that panel is showing.
+pub const PREFER_ELEMENTS_SCRIPT: &str = r#"(function () {
+  var root = document.documentElement;
+  if (!root) return;
+  try {
+    var selected = localStorage.getItem("panel-selected-tab");
+    if (!selected || selected === '"welcome"' || selected === "welcome") {
+      localStorage.setItem("panel-selected-tab", '"elements"');
+    }
+    var tabs = {};
+    try { tabs = JSON.parse(localStorage.getItem("closeable-tabs") || "{}"); } catch (e) { tabs = {}; }
+    if (!tabs || typeof tabs !== "object") tabs = {};
+    if (tabs.welcome !== false) {
+      tabs.welcome = false;
+      localStorage.setItem("closeable-tabs", JSON.stringify(tabs));
+    }
+    var notes = {};
+    try { notes = JSON.parse(localStorage.getItem("cloud-release-notes") || "{}"); } catch (e) { notes = {}; }
+    if (!notes || typeof notes !== "object") notes = {};
+    if (notes.shouldOpenWelcome !== false) {
+      notes.shouldOpenWelcome = false;
+      localStorage.setItem("cloud-release-notes", JSON.stringify(notes));
+    }
+  } catch (e) {}
+  root.style.visibility = "hidden";
+  var started = Date.now();
+  var timer = setInterval(function () {
+    var name = selectedTab();
+    if (name === "welcome") {
+      var elements = findTab("elements");
+      if (elements) elements.click();
+      if (Date.now() - started > 4000) reveal();
+      return;
+    }
+    if (name || Date.now() - started > 4000) reveal();
+  }, 50);
+  function reveal() {
+    clearInterval(timer);
+    root.style.visibility = "";
+  }
+  function selectedTab() {
+    var tab = null;
+    walk(function (node) {
+      if (tab) return;
+      if (node.getAttribute && node.getAttribute("role") === "tab" && node.getAttribute("aria-selected") === "true") {
+        tab = node;
+      }
+    });
+    return tab ? tabName(tab) : "";
+  }
+  function findTab(name) {
+    var found = null;
+    walk(function (node) {
+      if (found) return;
+      if (node.getAttribute && node.getAttribute("role") === "tab" && tabName(node) === name) found = node;
+    });
+    return found;
+  }
+  function tabName(node) {
+    var title = node.querySelector && node.querySelector(".tabbed-pane-header-tab-title");
+    var text = (title && title.textContent) || node.getAttribute("aria-label") || "";
+    if (!text && node.shadowRoot) text = node.shadowRoot.textContent || "";
+    if (!text) text = node.textContent || "";
+    return text.replace(/\s+/g, " ").trim().toLowerCase().split(" ")[0];
+  }
+  function walk(visit) {
+    var stack = [document];
+    while (stack.length) {
+      var node = stack.pop();
+      if (!node) continue;
+      if (node.nodeType === 1) visit(node);
+      if (node.shadowRoot) stack.push(node.shadowRoot);
+      var kids = node.childNodes;
+      if (!kids) continue;
+      for (var i = kids.length - 1; i >= 0; i--) stack.push(kids[i]);
+    }
+  }
+})();
+"#;
+
 const CLOSEABLE_TABS: &str = "closeable-tabs";
 const RELEASE_NOTES: &str = "cloud-release-notes";
 const VERSION_SEEN: &str = "release-note-version-seen";
@@ -24,10 +106,14 @@ const SELECTED_TAB: &str = "panel-selected-tab";
 
 /// Closes Edge's Welcome tool before WebView2 reads `profile`.
 ///
-/// The native inspector and the docked one share this profile, and both open Welcome from it.
-/// Welcome stays closed when `closeable-tabs` records it shut and the release-notes blob has
-/// `shouldOpenWelcome` off. The file is patched once per folder, before the first environment
-/// for that folder exists; a later rewrite would race the running browser.
+/// The native inspector reads this file. Welcome stays closed when `closeable-tabs` records it
+/// shut, the release-notes blob has `shouldOpenWelcome` off, and the open panel is Elements
+/// when nothing else was chosen. The file is patched once per folder, before the first
+/// environment for that folder exists; a later rewrite would race the running browser.
+///
+/// The docked inspector is a normal page on the debugging port, so it does not read this file.
+/// Its port changes every launch, and the fresh page would open Welcome. `PREFER_ELEMENTS_SCRIPT`
+/// runs in that page instead.
 pub fn suppress_welcome(profile: &Path) {
     static CLAIMED: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
     let claimed = CLAIMED.get_or_init(|| Mutex::new(HashSet::new()));
@@ -231,12 +317,21 @@ fn disable_welcome_reopen(prefs: &mut Map<String, Value>) -> bool {
     changed
 }
 
+/// Elements is the panel Welcome was standing in for. A real choice, such as Console, stays.
 fn leave_welcome_panel(prefs: &mut Map<String, Value>) -> bool {
-    if prefs.get(SELECTED_TAB).and_then(Value::as_str) != Some("\"welcome\"") {
+    let welcome_is_open = prefs
+        .get(SELECTED_TAB)
+        .and_then(Value::as_str)
+        .is_none_or(panel_is_welcome);
+    if !welcome_is_open {
         return false;
     }
     prefs.insert(SELECTED_TAB.into(), Value::String("\"elements\"".into()));
     true
+}
+
+fn panel_is_welcome(panel: &str) -> bool {
+    matches!(panel, "\"welcome\"" | "welcome" | "")
 }
 
 /// A DevTools setting is a JSON string. `None` means the stored text is not an object.
@@ -434,6 +529,7 @@ mod tests {
         let root = read_preferences(&dir);
         assert_eq!(setting(&root, CLOSEABLE_TABS)["welcome"], false);
         assert_eq!(setting(&root, RELEASE_NOTES)["shouldOpenWelcome"], false);
+        assert_eq!(root["devtools"]["preferences"][SELECTED_TAB], "\"elements\"");
         let _ = std::fs::remove_dir_all(dir);
     }
 

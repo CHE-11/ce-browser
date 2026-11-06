@@ -73,6 +73,27 @@ pub fn search_selection(app: &AppHandle, id: u32, text: &str) {
     let _ = tabs::open_beside(app, id, url, false);
 }
 
+/// The page address with tracking parameters removed. Other addresses stay as they are.
+pub fn page_address(settings: &settings::BrowserSettings, page: &str) -> String {
+    privacy::rewrite(settings, page).unwrap_or_else(|| page.to_string())
+}
+
+pub fn copy_page_address(app: &AppHandle, id: u32, page: &str) {
+    let window = window_of(app, id);
+    let address = page_address(&settings::get(app), page);
+    match ocr::copy_text(&address) {
+        Ok(()) => undo::notice(app, &window, "Copied the page address"),
+        Err(error) => undo::notice(app, &window, &error),
+    }
+}
+
+/// Opens the bookmark editor, the same one Ctrl+D uses.
+pub fn bookmark_page(app: &AppHandle, id: u32) {
+    let window = window_of(app, id);
+    crate::popup::close_all(app, &window, false);
+    tabs::send_command(app, &window, "bookmark");
+}
+
 pub fn copy_link_to_text(app: &AppHandle, id: u32, page: &str, selection: &str) {
     let window = window_of(app, id);
     match link_to_text(&settings::get(app), page, selection) {
@@ -196,6 +217,23 @@ mod tests {
         let link = link_to_text(&settings, "https://example.com/", text).expect("link");
         assert!(link.ends_with("#:~:text=one%20two%20three%20four,nine%20ten%20eleven%20twelve"));
         assert!(link_to_text(&settings, "ce://settings", "x").is_none());
+    }
+
+    #[test]
+    fn a_page_address_drops_tracking_parameters() {
+        let mut settings = settings::BrowserSettings::default();
+        settings.strip_tracking = true;
+        assert_eq!(
+            page_address(
+                &settings,
+                "https://example.com/a?utm_source=x&id=1#section"
+            ),
+            "https://example.com/a?id=1#section"
+        );
+        assert_eq!(
+            page_address(&settings, "https://example.com/plain"),
+            "https://example.com/plain"
+        );
     }
 
     #[test]
