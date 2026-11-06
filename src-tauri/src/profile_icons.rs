@@ -215,7 +215,13 @@ pub fn is_glyph(id: &str) -> bool {
     })
 }
 
-/// False for browser marks, which are drawn in fixed colors.
+pub fn is_mark(id: &str) -> bool {
+    PRESETS
+        .iter()
+        .any(|preset| preset.id == id && matches!(preset.kind, IconKind::Mark(_)))
+}
+
+/// False for browser marks, which keep their own colors.
 pub fn is_tinted(id: &str) -> bool {
     if id.is_empty() || id == "default" {
         return true;
@@ -254,7 +260,7 @@ pub fn render_icon(icon_id: &str, color_id: &str) -> Result<RgbaImage, String> {
             None => source().clone(),
         },
         IconKind::Symbol(symbol, hue) => draw_symbol(symbol, tint.unwrap_or(hue)),
-        IconKind::Mark(mark) => draw_mark(mark),
+        IconKind::Mark(mark) => return Ok(draw_mark(mark)),
     };
     sized(colored)
 }
@@ -736,334 +742,26 @@ fn fill_rect(image: &mut RgbaImage, x: f32, y: f32, width: f32, height: f32, col
     fill_round_rect(image, x, y, width, height, 0.0, color);
 }
 
-fn rgba(red: u8, green: u8, blue: u8) -> Rgba<u8> {
-    Rgba([red, green, blue, 255])
-}
-
 fn draw_mark(mark: Mark) -> RgbaImage {
-    let mut image = RgbaImage::from_pixel(256, 256, Rgba([0, 0, 0, 0]));
-    match mark {
-        Mark::Chrome => draw_wheel(
-            &mut image,
-            rgba(0xEA, 0x43, 0x35),
-            rgba(0x34, 0xA8, 0x53),
-            rgba(0xFB, 0xBC, 0x05),
-            rgba(0x42, 0x85, 0xF4),
-        ),
-        Mark::Chromium => draw_wheel(
-            &mut image,
-            rgba(0x7B, 0xAA, 0xF7),
-            rgba(0x1A, 0x73, 0xE8),
-            rgba(0x17, 0x4E, 0xA6),
-            rgba(0x1A, 0x73, 0xE8),
-        ),
-        Mark::Edge => draw_edge(&mut image),
-        Mark::Firefox => draw_firefox(&mut image),
-        Mark::Opera => draw_opera(&mut image),
-        Mark::Safari => draw_safari(&mut image),
-        Mark::Brave => draw_brave(&mut image),
-        Mark::Vivaldi => draw_vivaldi(&mut image),
-        Mark::Tor => draw_tor(&mut image),
-    }
-    image
-}
-
-/// Chrome-style wheel. `top`, `right`, and `left` are the outer thirds; `center` is the hub.
-fn draw_wheel(
-    image: &mut RgbaImage,
-    top: Rgba<u8>,
-    right: Rgba<u8>,
-    left: Rgba<u8>,
-    center: Rgba<u8>,
-) {
-    let (cx, cy, radius) = (128.0, 128.0, 116.0);
-    fill_sector(image, cx, cy, radius, 300.0, 60.0, top);
-    fill_sector(image, cx, cy, radius, 60.0, 180.0, right);
-    fill_sector(image, cx, cy, radius, 180.0, 300.0, left);
-    fill_circle(image, cx, cy, 68.0, rgba(255, 255, 255));
-    fill_circle(image, cx, cy, 46.0, center);
-}
-
-fn draw_opera(image: &mut RgbaImage) {
-    fill_circle(image, 128.0, 128.0, 116.0, rgba(0xFF, 0x1B, 0x2D));
-    fill_circle(image, 128.0, 128.0, 64.0, rgba(255, 255, 255));
-}
-
-fn draw_vivaldi(image: &mut RgbaImage) {
-    fill_circle(image, 128.0, 128.0, 116.0, rgba(0xEF, 0x39, 0x39));
-    fill_polygon(
-        image,
-        &[
-            (68.0, 76.0),
-            (106.0, 76.0),
-            (128.0, 150.0),
-            (150.0, 76.0),
-            (188.0, 76.0),
-            (142.0, 196.0),
-            (114.0, 196.0),
-        ],
-        rgba(255, 255, 255),
-    );
-}
-
-fn draw_tor(image: &mut RgbaImage) {
-    let purple = rgba(0x7D, 0x46, 0x98);
-    let pale = rgba(0xF6, 0xEE, 0xF8);
-    let mid = rgba(0xC4, 0x8E, 0xD4);
-    fill_circle(image, 128.0, 128.0, 116.0, purple);
-    fill_round_rect(image, 120.0, 42.0, 16.0, 48.0, 7.0, pale);
-    fill_circle(image, 128.0, 154.0, 72.0, pale);
-    fill_circle(image, 128.0, 162.0, 50.0, mid);
-    fill_circle(image, 128.0, 168.0, 30.0, pale);
-    fill_circle(image, 128.0, 174.0, 14.0, purple);
-}
-
-fn draw_safari(image: &mut RgbaImage) {
-    fill_circle(image, 128.0, 128.0, 116.0, rgba(0xD5, 0xDC, 0xE6));
-    fill_circle(image, 128.0, 128.0, 106.0, rgba(0x1F, 0x6F, 0xE5));
-    fill_circle(image, 128.0, 128.0, 90.0, rgba(255, 255, 255));
-    for index in 0..12 {
-        let (x, y) = polar(128.0, 128.0, 76.0, index as f32 * 30.0);
-        let radius = if index % 3 == 0 { 3.4 } else { 1.8 };
-        fill_circle(image, x, y, radius, rgba(0x9A, 0xA8, 0xBA));
-    }
-    draw_needle(
-        image,
-        128.0,
-        128.0,
-        36.0 + 180.0,
-        62.0,
-        13.0,
-        rgba(0xB7, 0xC2, 0xD0),
-    );
-    draw_needle(
-        image,
-        128.0,
-        128.0,
-        36.0,
-        68.0,
-        13.0,
-        rgba(0xC4, 0x45, 0x3C),
-    );
-    draw_needle(
-        image,
-        128.0,
-        128.0,
-        36.0 + 180.0,
-        58.0,
-        10.0,
-        rgba(255, 255, 255),
-    );
-    draw_needle(
-        image,
-        128.0,
-        128.0,
-        36.0,
-        64.0,
-        10.0,
-        rgba(0xE1, 0x06, 0x00),
-    );
-    fill_circle(image, 128.0, 128.0, 9.0, rgba(0xE6, 0xEC, 0xF2));
-    fill_circle(image, 128.0, 128.0, 4.5, rgba(0x1F, 0x6F, 0xE5));
-}
-
-fn draw_needle(
-    image: &mut RgbaImage,
-    cx: f32,
-    cy: f32,
-    deg: f32,
-    len: f32,
-    half: f32,
-    color: Rgba<u8>,
-) {
-    let rad = deg.to_radians();
-    let (sin, cos) = rad.sin_cos();
-    let forward = (sin, -cos);
-    let right = (cos, sin);
-    let tip = (cx + forward.0 * len, cy + forward.1 * len);
-    let left = (cx + right.0 * half, cy + right.1 * half);
-    let right_point = (cx - right.0 * half, cy - right.1 * half);
-    fill_polygon(image, &[tip, left, right_point], color);
-}
-
-/// A tapering ribbon: blue at the outer tail, green at the inner tip.
-fn draw_edge(image: &mut RgbaImage) {
-    let steps = 280;
-    let mut tip = (128.0, 128.0);
-    let mut aim = 0.0;
-    for step in 0..steps {
-        let t = step as f32 / (steps - 1) as f32;
-        let theta = 230.0 + t * 470.0;
-        let thickness = 46.0 - t * 30.0;
-        let orbit = if t < 0.72 {
-            114.0 - thickness * 0.5
-        } else {
-            let u = (t - 0.72) / 0.28;
-            let rim = 114.0 - thickness * 0.5;
-            rim + (34.0 - rim) * u
-        };
-        let (x, y) = polar(128.0, 128.0, orbit.max(6.0), theta);
-        fill_circle(image, x, y, (thickness * 0.5).max(3.5), edge_color(t));
-        tip = (x, y);
-        aim = theta;
-    }
-    let (fx, fy) = polar(0.0, 0.0, 1.0, aim + 28.0);
-    let (px, py) = (-fy, fx);
-    fill_polygon(
-        image,
-        &[
-            (tip.0 + fx * 22.0, tip.1 + fy * 22.0),
-            (tip.0 + px * 8.0, tip.1 + py * 8.0),
-            (tip.0 - px * 8.0, tip.1 - py * 8.0),
-        ],
-        rgba(0x3C, 0xC8, 0x5A),
-    );
-    clip_circle(image, 128.0, 128.0, 116.0);
-}
-
-fn edge_color(t: f32) -> Rgba<u8> {
-    let (start, end, blend) = if t < 0.42 {
-        ((0x0C_u8, 0x59, 0xB0), (0x1A, 0xA8, 0xE2), t / 0.42)
-    } else {
-        ((0x1A, 0xA8, 0xE2), (0x3C, 0xC8, 0x5A), (t - 0.42) / 0.58)
+    // 256px marks from https://github.com/alrra/browser-logos. The logos belong to their owners.
+    let bytes: &[u8] = match mark {
+        Mark::Chrome => include_bytes!("../icons/browsers/chrome.png"),
+        Mark::Chromium => include_bytes!("../icons/browsers/chromium.png"),
+        Mark::Edge => include_bytes!("../icons/browsers/edge.png"),
+        Mark::Firefox => include_bytes!("../icons/browsers/firefox.png"),
+        Mark::Opera => include_bytes!("../icons/browsers/opera.png"),
+        Mark::Safari => include_bytes!("../icons/browsers/safari.png"),
+        Mark::Brave => include_bytes!("../icons/browsers/brave.png"),
+        Mark::Vivaldi => include_bytes!("../icons/browsers/vivaldi.png"),
+        Mark::Tor => include_bytes!("../icons/browsers/tor.png"),
     };
-    rgba(
-        lerp_u8(start.0, end.0, blend),
-        lerp_u8(start.1, end.1, blend),
-        lerp_u8(start.2, end.2, blend),
-    )
-}
-
-fn lerp_u8(start: u8, end: u8, t: f32) -> u8 {
-    (start as f32 + (end as f32 - start as f32) * t.clamp(0.0, 1.0)).round() as u8
-}
-
-fn draw_firefox(image: &mut RgbaImage) {
-    let orange = rgba(0xFF, 0x71, 0x39);
-    let yellow = rgba(0xFF, 0xD2, 0x3A);
-    let deep = rgba(0xE0, 0x3E, 0x00);
-    let purple = rgba(0x8E, 0x24, 0xAA);
-    let blue = rgba(0x00, 0x62, 0xD6);
-    let cyan = rgba(0x00, 0xC2, 0xF0);
-    let ink = rgba(0x3A, 0x15, 0x10);
-    fill_circle(image, 128.0, 128.0, 116.0, orange);
-    fill_ellipse(image, 74.0, 150.0, 32.0, 58.0, -0.8, purple);
-    fill_ellipse(image, 80.0, 138.0, 14.0, 32.0, -0.8, rgba(0xE0, 0x40, 0xA0));
-    fill_circle(image, 140.0, 172.0, 58.0, blue);
-    fill_ellipse(image, 140.0, 158.0, 56.0, 16.0, -0.25, cyan);
-    fill_polygon(
-        image,
-        &[(92.0, 108.0), (114.0, 58.0), (134.0, 104.0)],
-        yellow,
-    );
-    fill_polygon(
-        image,
-        &[(100.0, 106.0), (114.0, 72.0), (126.0, 104.0)],
-        deep,
-    );
-    fill_polygon(
-        image,
-        &[(126.0, 100.0), (164.0, 56.0), (170.0, 112.0)],
-        yellow,
-    );
-    fill_polygon(
-        image,
-        &[(136.0, 102.0), (160.0, 70.0), (162.0, 110.0)],
-        deep,
-    );
-    fill_ellipse(image, 124.0, 132.0, 52.0, 44.0, 0.0, yellow);
-    fill_ellipse(image, 146.0, 154.0, 24.0, 16.0, 0.2, rgba(0xFF, 0xE4, 0x90));
-    fill_circle(image, 158.0, 156.0, 6.0, ink);
-    fill_circle(image, 108.0, 126.0, 5.5, ink);
-    fill_circle(image, 140.0, 122.0, 5.5, ink);
-    fill_circle(image, 110.0, 124.0, 2.0, rgba(255, 255, 255));
-    fill_circle(image, 142.0, 120.0, 2.0, rgba(255, 255, 255));
-    clip_circle(image, 128.0, 128.0, 116.0);
-}
-
-fn draw_brave(image: &mut RgbaImage) {
-    let orange = rgba(0xFB, 0x54, 0x2B);
-    let white = rgba(255, 255, 255);
-    fill_circle(image, 128.0, 128.0, 116.0, orange);
-    for deg in [210.0, 245.0, 280.0, 320.0, 0.0, 40.0, 80.0, 115.0, 150.0] {
-        let (x, y) = polar(128.0, 134.0, 46.0, deg);
-        fill_circle(image, x, y, 24.0, white);
-    }
-    fill_polygon(image, &[(102.0, 96.0), (116.0, 50.0), (132.0, 98.0)], white);
-    fill_polygon(image, &[(154.0, 96.0), (140.0, 50.0), (124.0, 98.0)], white);
-    fill_circle(image, 128.0, 142.0, 40.0, white);
-    fill_ellipse(image, 128.0, 166.0, 18.0, 12.0, 0.0, white);
-    fill_circle(image, 128.0, 186.0, 12.0, white);
-    fill_circle(image, 114.0, 136.0, 5.5, orange);
-    fill_circle(image, 142.0, 136.0, 5.5, orange);
-    fill_circle(image, 116.0, 134.0, 2.0, white);
-    fill_circle(image, 144.0, 134.0, 2.0, white);
-    fill_polygon(
-        image,
-        &[(128.0, 148.0), (120.0, 160.0), (136.0, 160.0)],
-        orange,
-    );
-    clip_circle(image, 128.0, 128.0, 116.0);
-}
-
-/// `deg` is clockwise from 12 o'clock.
-fn polar(cx: f32, cy: f32, radius: f32, deg: f32) -> (f32, f32) {
-    let rad = deg.to_radians();
-    (cx + radius * rad.sin(), cy - radius * rad.cos())
-}
-
-fn fill_sector(
-    image: &mut RgbaImage,
-    cx: f32,
-    cy: f32,
-    radius: f32,
-    start: f32,
-    end: f32,
-    color: Rgba<u8>,
-) {
-    if radius <= 0.0 {
-        return;
-    }
-    let x0 = (cx - radius).floor().max(0.0) as u32;
-    let y0 = (cy - radius).floor().max(0.0) as u32;
-    let x1 = (cx + radius).ceil().min(image.width() as f32 - 1.0) as u32;
-    let y1 = (cy + radius).ceil().min(image.height() as f32 - 1.0) as u32;
-    let radius_sq = radius * radius;
-    for y in y0..=y1 {
-        for x in x0..=x1 {
-            let dx = x as f32 + 0.5 - cx;
-            let dy = y as f32 + 0.5 - cy;
-            if dx * dx + dy * dy > radius_sq {
-                continue;
-            }
-            let deg = dx.atan2(-dy).to_degrees().rem_euclid(360.0);
-            if angle_in(deg, start, end) {
-                image.put_pixel(x, y, color);
-            }
-        }
-    }
-}
-
-fn angle_in(deg: f32, start: f32, end: f32) -> bool {
-    let start = start.rem_euclid(360.0);
-    let end = end.rem_euclid(360.0);
-    if start <= end {
-        deg >= start && deg < end
+    let image = image::load_from_memory(bytes)
+        .expect("browser logo")
+        .to_rgba8();
+    if image.dimensions() == (256, 256) {
+        image
     } else {
-        deg >= start || deg < end
-    }
-}
-
-fn clip_circle(image: &mut RgbaImage, cx: f32, cy: f32, radius: f32) {
-    let radius_sq = radius * radius;
-    for y in 0..image.height() {
-        for x in 0..image.width() {
-            let dx = x as f32 + 0.5 - cx;
-            let dy = y as f32 + 0.5 - cy;
-            if dx * dx + dy * dy > radius_sq {
-                image.put_pixel(x, y, Rgba([0, 0, 0, 0]));
-            }
-        }
+        image::imageops::resize(&image, 256, 256, FilterType::Lanczos3)
     }
 }
 
@@ -1160,7 +858,7 @@ mod tests {
         assert!(has_near(&chrome, [0xEA, 0x43, 0x35]));
         assert!(has_near(&chrome, [0x34, 0xA8, 0x53]));
         assert!(has_near(&chrome, [0xFB, 0xBC, 0x05]));
-        assert!(has_near(&chrome, [0x42, 0x85, 0xF4]));
+        assert!(has_near(&chrome, [0x1A, 0x73, 0xE8]));
     }
 
     fn has_near(image: &RgbaImage, target: [u8; 3]) -> bool {

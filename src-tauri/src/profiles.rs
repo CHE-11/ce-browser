@@ -1401,7 +1401,9 @@ fn load(app: &AppHandle) -> ProfilesFile {
     migrate_default(&mut file);
     migrate_icon_colors(&mut file);
     assign_folders(&mut file);
-    if drop_icon_text(app, &mut file) {
+    let mut changed = drop_icon_text(app, &mut file);
+    changed |= redraw_browser_marks(app, &mut file);
+    if changed {
         let _ = save(app, &file);
     }
     file
@@ -1409,6 +1411,37 @@ fn load(app: &AppHandle) -> ProfilesFile {
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+/// Replaces a saved browser mark when it is not the current logo.
+fn redraw_browser_marks(app: &AppHandle, file: &mut ProfilesFile) -> bool {
+    let mut changed = false;
+    for profile in &mut file.profiles {
+        if !crate::profile_icons::is_mark(&profile.icon) {
+            continue;
+        }
+        let dir = paths::profile_data_dir(app, &profile.id);
+        let Ok(Some(fresh)) = composed_icon(profile, &dir) else {
+            continue;
+        };
+        if crate::profile_icons::read_png(&dir.join("window-icon.png"))
+            .ok()
+            .as_ref()
+            == Some(&fresh)
+        {
+            continue;
+        }
+        let _ = fs::create_dir_all(&dir);
+        if let Err(error) = rebuild_icon(profile, &dir) {
+            eprintln!("profile icon: {error}");
+            continue;
+        }
+        if let Err(error) = refresh_shell_icons(app, profile) {
+            eprintln!("profile icon: {error}");
+        }
+        changed = true;
+    }
+    changed
 }
 
 /// Clears the retired name-on-icon flag and redraws any icon that still has the name.
