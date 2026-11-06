@@ -9,6 +9,21 @@ use image::{ExtendedColorType, ImageEncoder, Rgba, RgbaImage};
 enum IconKind {
     Logo(Option<f32>),
     Symbol(Symbol, f32),
+    /// A browser mark drawn in its own colors. Background tints do not apply.
+    Mark(Mark),
+}
+
+#[derive(Clone, Copy)]
+enum Mark {
+    Chrome,
+    Chromium,
+    Edge,
+    Firefox,
+    Opera,
+    Safari,
+    Brave,
+    Vivaldi,
+    Tor,
 }
 
 #[derive(Clone, Copy)]
@@ -114,6 +129,51 @@ const PRESETS: &[Preset] = &[
         label: "Shopping",
         kind: IconKind::Symbol(Symbol::Bag, 16.0),
     },
+    Preset {
+        id: "chrome",
+        label: "Chrome",
+        kind: IconKind::Mark(Mark::Chrome),
+    },
+    Preset {
+        id: "edge",
+        label: "Edge",
+        kind: IconKind::Mark(Mark::Edge),
+    },
+    Preset {
+        id: "firefox",
+        label: "Firefox",
+        kind: IconKind::Mark(Mark::Firefox),
+    },
+    Preset {
+        id: "opera",
+        label: "Opera",
+        kind: IconKind::Mark(Mark::Opera),
+    },
+    Preset {
+        id: "safari",
+        label: "Safari",
+        kind: IconKind::Mark(Mark::Safari),
+    },
+    Preset {
+        id: "brave",
+        label: "Brave",
+        kind: IconKind::Mark(Mark::Brave),
+    },
+    Preset {
+        id: "vivaldi",
+        label: "Vivaldi",
+        kind: IconKind::Mark(Mark::Vivaldi),
+    },
+    Preset {
+        id: "chromium",
+        label: "Chromium",
+        kind: IconKind::Mark(Mark::Chromium),
+    },
+    Preset {
+        id: "tor",
+        label: "Tor",
+        kind: IconKind::Mark(Mark::Tor),
+    },
 ];
 
 #[derive(Clone)]
@@ -121,6 +181,8 @@ pub struct IconChoice {
     pub id: &'static str,
     pub label: &'static str,
     pub preview: String,
+    /// Background colors apply. Browser marks keep their own colors.
+    pub colorable: bool,
 }
 
 pub fn default_png() -> &'static [u8] {
@@ -144,6 +206,20 @@ pub fn preview(id: &str) -> Option<String> {
 
 /// A glyph the icon grid can select. Color names are backgrounds, not icons.
 pub fn is_glyph(id: &str) -> bool {
+    PRESETS.iter().any(|preset| {
+        preset.id == id
+            && matches!(
+                preset.kind,
+                IconKind::Logo(None) | IconKind::Symbol(_, _) | IconKind::Mark(_)
+            )
+    })
+}
+
+/// False for browser marks, which are drawn in fixed colors.
+pub fn is_tinted(id: &str) -> bool {
+    if id.is_empty() || id == "default" {
+        return true;
+    }
     PRESETS.iter().any(|preset| {
         preset.id == id && matches!(preset.kind, IconKind::Logo(None) | IconKind::Symbol(_, _))
     })
@@ -178,6 +254,7 @@ pub fn render_icon(icon_id: &str, color_id: &str) -> Result<RgbaImage, String> {
             None => source().clone(),
         },
         IconKind::Symbol(symbol, hue) => draw_symbol(symbol, tint.unwrap_or(hue)),
+        IconKind::Mark(mark) => draw_mark(mark),
     };
     sized(colored)
 }
@@ -285,6 +362,7 @@ fn cached_choices() -> &'static Vec<IconChoice> {
                     id: preset.id,
                     label: preset.label,
                     preview: data_url(&png),
+                    colorable: !matches!(preset.kind, IconKind::Mark(_)),
                 })
             })
             .collect()
@@ -298,11 +376,13 @@ fn cached_colors() -> &'static Vec<IconChoice> {
             id: "default",
             label: "Default",
             preview: swatch_preview(None),
+            colorable: false,
         }];
         choices.extend(COLORS.iter().map(|(id, label, hue)| IconChoice {
             id,
             label,
             preview: swatch_preview(Some(*hue)),
+            colorable: false,
         }));
         choices
     })
@@ -656,34 +736,335 @@ fn fill_rect(image: &mut RgbaImage, x: f32, y: f32, width: f32, height: f32, col
     fill_round_rect(image, x, y, width, height, 0.0, color);
 }
 
-/// Draws the first 10 characters of `name` at the top center. An empty name leaves the icon unchanged.
-pub fn stamp_name(image: &RgbaImage, name: &str) -> Result<RgbaImage, String> {
-    let label: String = name.trim().chars().take(10).collect();
-    if label.is_empty() {
-        return Ok(image.clone());
+fn rgba(red: u8, green: u8, blue: u8) -> Rgba<u8> {
+    Rgba([red, green, blue, 255])
+}
+
+fn draw_mark(mark: Mark) -> RgbaImage {
+    let mut image = RgbaImage::from_pixel(256, 256, Rgba([0, 0, 0, 0]));
+    match mark {
+        Mark::Chrome => draw_wheel(
+            &mut image,
+            rgba(0xEA, 0x43, 0x35),
+            rgba(0x34, 0xA8, 0x53),
+            rgba(0xFB, 0xBC, 0x05),
+            rgba(0x42, 0x85, 0xF4),
+        ),
+        Mark::Chromium => draw_wheel(
+            &mut image,
+            rgba(0x7B, 0xAA, 0xF7),
+            rgba(0x1A, 0x73, 0xE8),
+            rgba(0x17, 0x4E, 0xA6),
+            rgba(0x1A, 0x73, 0xE8),
+        ),
+        Mark::Edge => draw_edge(&mut image),
+        Mark::Firefox => draw_firefox(&mut image),
+        Mark::Opera => draw_opera(&mut image),
+        Mark::Safari => draw_safari(&mut image),
+        Mark::Brave => draw_brave(&mut image),
+        Mark::Vivaldi => draw_vivaldi(&mut image),
+        Mark::Tor => draw_tor(&mut image),
     }
-    let fill = text_coverage(image.width(), image.height(), &label)?;
-    let halo = dilate(&fill, image.width() as usize, image.height() as usize, 2);
-    let mut out = image.clone();
-    for (index, pixel) in out.pixels_mut().enumerate() {
-        let fill_alpha = fill[index];
-        let halo_alpha = halo[index];
-        if fill_alpha == 0 && halo_alpha == 0 {
-            continue;
-        }
-        let (red, green, blue, alpha) = if fill_alpha > 0 {
-            (255, 255, 255, fill_alpha)
+    image
+}
+
+/// Chrome-style wheel. `top`, `right`, and `left` are the outer thirds; `center` is the hub.
+fn draw_wheel(
+    image: &mut RgbaImage,
+    top: Rgba<u8>,
+    right: Rgba<u8>,
+    left: Rgba<u8>,
+    center: Rgba<u8>,
+) {
+    let (cx, cy, radius) = (128.0, 128.0, 116.0);
+    fill_sector(image, cx, cy, radius, 300.0, 60.0, top);
+    fill_sector(image, cx, cy, radius, 60.0, 180.0, right);
+    fill_sector(image, cx, cy, radius, 180.0, 300.0, left);
+    fill_circle(image, cx, cy, 68.0, rgba(255, 255, 255));
+    fill_circle(image, cx, cy, 46.0, center);
+}
+
+fn draw_opera(image: &mut RgbaImage) {
+    fill_circle(image, 128.0, 128.0, 116.0, rgba(0xFF, 0x1B, 0x2D));
+    fill_circle(image, 128.0, 128.0, 64.0, rgba(255, 255, 255));
+}
+
+fn draw_vivaldi(image: &mut RgbaImage) {
+    fill_circle(image, 128.0, 128.0, 116.0, rgba(0xEF, 0x39, 0x39));
+    fill_polygon(
+        image,
+        &[
+            (68.0, 76.0),
+            (106.0, 76.0),
+            (128.0, 150.0),
+            (150.0, 76.0),
+            (188.0, 76.0),
+            (142.0, 196.0),
+            (114.0, 196.0),
+        ],
+        rgba(255, 255, 255),
+    );
+}
+
+fn draw_tor(image: &mut RgbaImage) {
+    let purple = rgba(0x7D, 0x46, 0x98);
+    let pale = rgba(0xF6, 0xEE, 0xF8);
+    let mid = rgba(0xC4, 0x8E, 0xD4);
+    fill_circle(image, 128.0, 128.0, 116.0, purple);
+    fill_round_rect(image, 120.0, 42.0, 16.0, 48.0, 7.0, pale);
+    fill_circle(image, 128.0, 154.0, 72.0, pale);
+    fill_circle(image, 128.0, 162.0, 50.0, mid);
+    fill_circle(image, 128.0, 168.0, 30.0, pale);
+    fill_circle(image, 128.0, 174.0, 14.0, purple);
+}
+
+fn draw_safari(image: &mut RgbaImage) {
+    fill_circle(image, 128.0, 128.0, 116.0, rgba(0xD5, 0xDC, 0xE6));
+    fill_circle(image, 128.0, 128.0, 106.0, rgba(0x1F, 0x6F, 0xE5));
+    fill_circle(image, 128.0, 128.0, 90.0, rgba(255, 255, 255));
+    for index in 0..12 {
+        let (x, y) = polar(128.0, 128.0, 76.0, index as f32 * 30.0);
+        let radius = if index % 3 == 0 { 3.4 } else { 1.8 };
+        fill_circle(image, x, y, radius, rgba(0x9A, 0xA8, 0xBA));
+    }
+    draw_needle(
+        image,
+        128.0,
+        128.0,
+        36.0 + 180.0,
+        62.0,
+        13.0,
+        rgba(0xB7, 0xC2, 0xD0),
+    );
+    draw_needle(
+        image,
+        128.0,
+        128.0,
+        36.0,
+        68.0,
+        13.0,
+        rgba(0xC4, 0x45, 0x3C),
+    );
+    draw_needle(
+        image,
+        128.0,
+        128.0,
+        36.0 + 180.0,
+        58.0,
+        10.0,
+        rgba(255, 255, 255),
+    );
+    draw_needle(
+        image,
+        128.0,
+        128.0,
+        36.0,
+        64.0,
+        10.0,
+        rgba(0xE1, 0x06, 0x00),
+    );
+    fill_circle(image, 128.0, 128.0, 9.0, rgba(0xE6, 0xEC, 0xF2));
+    fill_circle(image, 128.0, 128.0, 4.5, rgba(0x1F, 0x6F, 0xE5));
+}
+
+fn draw_needle(
+    image: &mut RgbaImage,
+    cx: f32,
+    cy: f32,
+    deg: f32,
+    len: f32,
+    half: f32,
+    color: Rgba<u8>,
+) {
+    let rad = deg.to_radians();
+    let (sin, cos) = rad.sin_cos();
+    let forward = (sin, -cos);
+    let right = (cos, sin);
+    let tip = (cx + forward.0 * len, cy + forward.1 * len);
+    let left = (cx + right.0 * half, cy + right.1 * half);
+    let right_point = (cx - right.0 * half, cy - right.1 * half);
+    fill_polygon(image, &[tip, left, right_point], color);
+}
+
+/// A tapering ribbon: blue at the outer tail, green at the inner tip.
+fn draw_edge(image: &mut RgbaImage) {
+    let steps = 280;
+    let mut tip = (128.0, 128.0);
+    let mut aim = 0.0;
+    for step in 0..steps {
+        let t = step as f32 / (steps - 1) as f32;
+        let theta = 230.0 + t * 470.0;
+        let thickness = 46.0 - t * 30.0;
+        let orbit = if t < 0.72 {
+            114.0 - thickness * 0.5
         } else {
-            (16, 16, 20, halo_alpha)
+            let u = (t - 0.72) / 0.28;
+            let rim = 114.0 - thickness * 0.5;
+            rim + (34.0 - rim) * u
         };
-        let cover = alpha as f32 / 255.0;
-        let keep = 1.0 - cover;
-        pixel[0] = (red as f32 * cover + pixel[0] as f32 * keep).round() as u8;
-        pixel[1] = (green as f32 * cover + pixel[1] as f32 * keep).round() as u8;
-        pixel[2] = (blue as f32 * cover + pixel[2] as f32 * keep).round() as u8;
-        pixel[3] = pixel[3].max(alpha);
+        let (x, y) = polar(128.0, 128.0, orbit.max(6.0), theta);
+        fill_circle(image, x, y, (thickness * 0.5).max(3.5), edge_color(t));
+        tip = (x, y);
+        aim = theta;
     }
-    Ok(out)
+    let (fx, fy) = polar(0.0, 0.0, 1.0, aim + 28.0);
+    let (px, py) = (-fy, fx);
+    fill_polygon(
+        image,
+        &[
+            (tip.0 + fx * 22.0, tip.1 + fy * 22.0),
+            (tip.0 + px * 8.0, tip.1 + py * 8.0),
+            (tip.0 - px * 8.0, tip.1 - py * 8.0),
+        ],
+        rgba(0x3C, 0xC8, 0x5A),
+    );
+    clip_circle(image, 128.0, 128.0, 116.0);
+}
+
+fn edge_color(t: f32) -> Rgba<u8> {
+    let (start, end, blend) = if t < 0.42 {
+        ((0x0C_u8, 0x59, 0xB0), (0x1A, 0xA8, 0xE2), t / 0.42)
+    } else {
+        ((0x1A, 0xA8, 0xE2), (0x3C, 0xC8, 0x5A), (t - 0.42) / 0.58)
+    };
+    rgba(
+        lerp_u8(start.0, end.0, blend),
+        lerp_u8(start.1, end.1, blend),
+        lerp_u8(start.2, end.2, blend),
+    )
+}
+
+fn lerp_u8(start: u8, end: u8, t: f32) -> u8 {
+    (start as f32 + (end as f32 - start as f32) * t.clamp(0.0, 1.0)).round() as u8
+}
+
+fn draw_firefox(image: &mut RgbaImage) {
+    let orange = rgba(0xFF, 0x71, 0x39);
+    let yellow = rgba(0xFF, 0xD2, 0x3A);
+    let deep = rgba(0xE0, 0x3E, 0x00);
+    let purple = rgba(0x8E, 0x24, 0xAA);
+    let blue = rgba(0x00, 0x62, 0xD6);
+    let cyan = rgba(0x00, 0xC2, 0xF0);
+    let ink = rgba(0x3A, 0x15, 0x10);
+    fill_circle(image, 128.0, 128.0, 116.0, orange);
+    fill_ellipse(image, 74.0, 150.0, 32.0, 58.0, -0.8, purple);
+    fill_ellipse(image, 80.0, 138.0, 14.0, 32.0, -0.8, rgba(0xE0, 0x40, 0xA0));
+    fill_circle(image, 140.0, 172.0, 58.0, blue);
+    fill_ellipse(image, 140.0, 158.0, 56.0, 16.0, -0.25, cyan);
+    fill_polygon(
+        image,
+        &[(92.0, 108.0), (114.0, 58.0), (134.0, 104.0)],
+        yellow,
+    );
+    fill_polygon(
+        image,
+        &[(100.0, 106.0), (114.0, 72.0), (126.0, 104.0)],
+        deep,
+    );
+    fill_polygon(
+        image,
+        &[(126.0, 100.0), (164.0, 56.0), (170.0, 112.0)],
+        yellow,
+    );
+    fill_polygon(
+        image,
+        &[(136.0, 102.0), (160.0, 70.0), (162.0, 110.0)],
+        deep,
+    );
+    fill_ellipse(image, 124.0, 132.0, 52.0, 44.0, 0.0, yellow);
+    fill_ellipse(image, 146.0, 154.0, 24.0, 16.0, 0.2, rgba(0xFF, 0xE4, 0x90));
+    fill_circle(image, 158.0, 156.0, 6.0, ink);
+    fill_circle(image, 108.0, 126.0, 5.5, ink);
+    fill_circle(image, 140.0, 122.0, 5.5, ink);
+    fill_circle(image, 110.0, 124.0, 2.0, rgba(255, 255, 255));
+    fill_circle(image, 142.0, 120.0, 2.0, rgba(255, 255, 255));
+    clip_circle(image, 128.0, 128.0, 116.0);
+}
+
+fn draw_brave(image: &mut RgbaImage) {
+    let orange = rgba(0xFB, 0x54, 0x2B);
+    let white = rgba(255, 255, 255);
+    fill_circle(image, 128.0, 128.0, 116.0, orange);
+    for deg in [210.0, 245.0, 280.0, 320.0, 0.0, 40.0, 80.0, 115.0, 150.0] {
+        let (x, y) = polar(128.0, 134.0, 46.0, deg);
+        fill_circle(image, x, y, 24.0, white);
+    }
+    fill_polygon(image, &[(102.0, 96.0), (116.0, 50.0), (132.0, 98.0)], white);
+    fill_polygon(image, &[(154.0, 96.0), (140.0, 50.0), (124.0, 98.0)], white);
+    fill_circle(image, 128.0, 142.0, 40.0, white);
+    fill_ellipse(image, 128.0, 166.0, 18.0, 12.0, 0.0, white);
+    fill_circle(image, 128.0, 186.0, 12.0, white);
+    fill_circle(image, 114.0, 136.0, 5.5, orange);
+    fill_circle(image, 142.0, 136.0, 5.5, orange);
+    fill_circle(image, 116.0, 134.0, 2.0, white);
+    fill_circle(image, 144.0, 134.0, 2.0, white);
+    fill_polygon(
+        image,
+        &[(128.0, 148.0), (120.0, 160.0), (136.0, 160.0)],
+        orange,
+    );
+    clip_circle(image, 128.0, 128.0, 116.0);
+}
+
+/// `deg` is clockwise from 12 o'clock.
+fn polar(cx: f32, cy: f32, radius: f32, deg: f32) -> (f32, f32) {
+    let rad = deg.to_radians();
+    (cx + radius * rad.sin(), cy - radius * rad.cos())
+}
+
+fn fill_sector(
+    image: &mut RgbaImage,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    start: f32,
+    end: f32,
+    color: Rgba<u8>,
+) {
+    if radius <= 0.0 {
+        return;
+    }
+    let x0 = (cx - radius).floor().max(0.0) as u32;
+    let y0 = (cy - radius).floor().max(0.0) as u32;
+    let x1 = (cx + radius).ceil().min(image.width() as f32 - 1.0) as u32;
+    let y1 = (cy + radius).ceil().min(image.height() as f32 - 1.0) as u32;
+    let radius_sq = radius * radius;
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            let dx = x as f32 + 0.5 - cx;
+            let dy = y as f32 + 0.5 - cy;
+            if dx * dx + dy * dy > radius_sq {
+                continue;
+            }
+            let deg = dx.atan2(-dy).to_degrees().rem_euclid(360.0);
+            if angle_in(deg, start, end) {
+                image.put_pixel(x, y, color);
+            }
+        }
+    }
+}
+
+fn angle_in(deg: f32, start: f32, end: f32) -> bool {
+    let start = start.rem_euclid(360.0);
+    let end = end.rem_euclid(360.0);
+    if start <= end {
+        deg >= start && deg < end
+    } else {
+        deg >= start || deg < end
+    }
+}
+
+fn clip_circle(image: &mut RgbaImage, cx: f32, cy: f32, radius: f32) {
+    let radius_sq = radius * radius;
+    for y in 0..image.height() {
+        for x in 0..image.width() {
+            let dx = x as f32 + 0.5 - cx;
+            let dy = y as f32 + 0.5 - cy;
+            if dx * dx + dy * dy > radius_sq {
+                image.put_pixel(x, y, Rgba([0, 0, 0, 0]));
+            }
+        }
+    }
 }
 
 pub fn read_png(path: &Path) -> Result<RgbaImage, String> {
@@ -700,157 +1081,6 @@ pub fn read_png(path: &Path) -> Result<RgbaImage, String> {
         256,
         FilterType::Lanczos3,
     ))
-}
-
-fn text_coverage(width: u32, height: u32, label: &str) -> Result<Vec<u8>, String> {
-    use std::ffi::c_void;
-
-    use windows::Win32::Foundation::COLORREF;
-    use windows::Win32::Foundation::RECT;
-    use windows::Win32::Graphics::Gdi::{
-        ANTIALIASED_QUALITY, BITMAPINFO, BITMAPINFOHEADER, CLIP_DEFAULT_PRECIS, CreateCompatibleDC,
-        CreateDIBSection, CreateFontW, DEFAULT_CHARSET, DEFAULT_PITCH, DIB_RGB_COLORS, DT_CENTER,
-        DT_NOPREFIX, DT_SINGLELINE, DT_TOP, DeleteDC, DeleteObject, DrawTextW, FW_SEMIBOLD,
-        GetTextExtentPoint32W, OUT_DEFAULT_PRECIS, SelectObject, SetBkMode, SetTextColor,
-        TRANSPARENT,
-    };
-    use windows::core::w;
-
-    let mut wide: Vec<u16> = label.encode_utf16().collect();
-    let margin = 36i32;
-    let top = 18i32;
-    let limit = width as i32 - margin * 2;
-    unsafe {
-        let memory = CreateCompatibleDC(None);
-        if memory.is_invalid() {
-            return Err("The icon text could not be drawn.".into());
-        }
-        let info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: width as i32,
-                biHeight: -(height as i32),
-                biPlanes: 1,
-                biBitCount: 32,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let mut bits: *mut c_void = std::ptr::null_mut();
-        let bitmap = match CreateDIBSection(Some(memory), &info, DIB_RGB_COLORS, &mut bits, None, 0)
-        {
-            Ok(bitmap) => bitmap,
-            Err(_) => {
-                let _ = DeleteDC(memory);
-                return Err("The icon text could not be drawn.".into());
-            }
-        };
-        if bits.is_null() {
-            let _ = DeleteObject(bitmap.into());
-            let _ = DeleteDC(memory);
-            return Err("The icon text could not be drawn.".into());
-        }
-        let previous_bitmap = SelectObject(memory, bitmap.into());
-        let mut height_px = 40i32;
-        let mut chosen = None;
-        let mut previous_font = None;
-        while height_px >= 16 {
-            let font = CreateFontW(
-                -height_px,
-                0,
-                0,
-                0,
-                FW_SEMIBOLD.0 as i32,
-                0,
-                0,
-                0,
-                DEFAULT_CHARSET,
-                OUT_DEFAULT_PRECIS,
-                CLIP_DEFAULT_PRECIS,
-                ANTIALIASED_QUALITY,
-                DEFAULT_PITCH.0 as u32,
-                w!("Segoe UI"),
-            );
-            if font.is_invalid() {
-                height_px -= 2;
-                continue;
-            }
-            let replaced = SelectObject(memory, font.into());
-            if previous_font.is_none() {
-                previous_font = Some(replaced);
-            }
-            let mut size = windows::Win32::Foundation::SIZE::default();
-            let measured = GetTextExtentPoint32W(memory, &wide, &mut size);
-            if measured.as_bool() && (size.cx <= limit || height_px <= 16) {
-                chosen = Some(font);
-                break;
-            }
-            SelectObject(memory, replaced);
-            let _ = DeleteObject(font.into());
-            height_px -= 2;
-        }
-        let Some(font) = chosen else {
-            SelectObject(memory, previous_bitmap);
-            let _ = DeleteObject(bitmap.into());
-            let _ = DeleteDC(memory);
-            return Err("The icon text could not be drawn.".into());
-        };
-        let _ = SetBkMode(memory, TRANSPARENT);
-        let _ = SetTextColor(memory, COLORREF(0x00FF_FFFF));
-        let count = (width * height) as usize;
-        std::ptr::write_bytes(bits, 0, count * 4);
-        let mut rect = RECT {
-            left: margin,
-            top,
-            right: width as i32 - margin,
-            bottom: height as i32,
-        };
-        DrawTextW(
-            memory,
-            &mut wide,
-            &mut rect,
-            DT_CENTER | DT_TOP | DT_SINGLELINE | DT_NOPREFIX,
-        );
-        let bytes = std::slice::from_raw_parts(bits.cast::<u8>(), count * 4);
-        let mut coverage = vec![0u8; count];
-        for (pixel, chunk) in coverage.iter_mut().zip(bytes.chunks_exact(4)) {
-            *pixel = chunk[0].max(chunk[1]).max(chunk[2]);
-        }
-        if let Some(previous_font) = previous_font {
-            SelectObject(memory, previous_font);
-        }
-        SelectObject(memory, previous_bitmap);
-        let _ = DeleteObject(font.into());
-        let _ = DeleteObject(bitmap.into());
-        let _ = DeleteDC(memory);
-        Ok(coverage)
-    }
-}
-
-fn dilate(source: &[u8], width: usize, height: usize, radius: i32) -> Vec<u8> {
-    let mut out = vec![0u8; source.len()];
-    let radius_sq = radius * radius;
-    for y in 0..height {
-        for x in 0..width {
-            let mut best = 0u8;
-            for dy in -radius..=radius {
-                for dx in -radius..=radius {
-                    if dx * dx + dy * dy > radius_sq {
-                        continue;
-                    }
-                    let next_x = x as i32 + dx;
-                    let next_y = y as i32 + dy;
-                    if next_x < 0 || next_y < 0 || next_x >= width as i32 || next_y >= height as i32
-                    {
-                        continue;
-                    }
-                    best = best.max(source[next_y as usize * width + next_x as usize]);
-                }
-            }
-            out[y * width + x] = best;
-        }
-    }
-    out
 }
 
 #[cfg(test)]
@@ -888,22 +1118,6 @@ mod tests {
     }
 
     #[test]
-    fn stamped_name_changes_the_top_and_keeps_ten_letters() {
-        let image = image::RgbaImage::from_pixel(256, 256, image::Rgba([20, 80, 160, 255]));
-        let stamped = stamp_name(&image, "Workbench profile").unwrap();
-        let changed = (16..90)
-            .any(|y| (36..220).any(|x| stamped.get_pixel(x, y).0 != image.get_pixel(x, y).0));
-        assert!(changed);
-        let lower_same = (150..240)
-            .all(|y| (0..256).all(|x| stamped.get_pixel(x, y).0 == image.get_pixel(x, y).0));
-        assert!(lower_same);
-        let ten = stamp_name(&image, "AAAAAAAAAA").unwrap();
-        let eleven = stamp_name(&image, "AAAAAAAAAAB").unwrap();
-        assert_eq!(ten.as_raw(), eleven.as_raw());
-        assert_eq!(stamp_name(&image, "   ").unwrap().as_raw(), image.as_raw());
-    }
-
-    #[test]
     fn a_background_color_changes_the_symbol() {
         let own = render_icon("heart", "").unwrap();
         let teal = render_icon("heart", "teal").unwrap();
@@ -913,5 +1127,49 @@ mod tests {
                 .any(|(left, right)| left.0 != right.0)
         );
         assert!(render_icon("nope", "teal").is_err());
+    }
+
+    #[test]
+    fn browser_marks_keep_their_colors() {
+        let chrome = render_icon("chrome", "").unwrap();
+        let tinted = render_icon("chrome", "rose").unwrap();
+        assert_eq!(chrome.as_raw(), tinted.as_raw());
+        assert!(is_glyph("chrome"));
+        assert!(!is_tinted("chrome"));
+        assert!(is_tinted("default"));
+        assert!(is_tinted(""));
+        assert!(is_tinted("heart"));
+        let listed = choices();
+        let chrome_choice = listed.iter().find(|choice| choice.id == "chrome").unwrap();
+        assert_eq!(chrome_choice.label, "Chrome");
+        assert!(!chrome_choice.colorable);
+        assert!(
+            listed
+                .iter()
+                .any(|choice| choice.id == "heart" && choice.colorable)
+        );
+        for id in [
+            "chrome", "edge", "firefox", "opera", "safari", "brave", "vivaldi", "chromium", "tor",
+        ] {
+            assert!(is_glyph(id), "{id}");
+            assert!(!is_tinted(id), "{id}");
+            let image = render(id).unwrap();
+            assert_eq!(image.dimensions(), (256, 256));
+            assert!(image.pixels().any(|pixel| pixel.0[3] > 0));
+        }
+        assert!(has_near(&chrome, [0xEA, 0x43, 0x35]));
+        assert!(has_near(&chrome, [0x34, 0xA8, 0x53]));
+        assert!(has_near(&chrome, [0xFB, 0xBC, 0x05]));
+        assert!(has_near(&chrome, [0x42, 0x85, 0xF4]));
+    }
+
+    fn has_near(image: &RgbaImage, target: [u8; 3]) -> bool {
+        image.pixels().any(|pixel| {
+            let [red, green, blue, alpha] = pixel.0;
+            alpha > 200
+                && (red as i16 - target[0] as i16).abs() < 8
+                && (green as i16 - target[1] as i16).abs() < 8
+                && (blue as i16 - target[2] as i16).abs() < 8
+        })
     }
 }

@@ -1610,10 +1610,6 @@ export function setProfileIcon(id: string, iconId: string, path?: string) {
   return invoke<BrowserProfile[]>("set_profile_icon", { id, iconId, path });
 }
 
-export function setProfileIconText(id: string, enabled: boolean) {
-  return invoke<BrowserProfile[]>("set_profile_icon_text", { id, enabled });
-}
-
 export function setProfileIconColor(id: string, colorId: string) {
   return invoke<BrowserProfile[]>("set_profile_icon_color", { id, colorId });
 }

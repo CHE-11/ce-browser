@@ -63,8 +63,8 @@ struct ProfileRecord {
     /// File name of the generated `.ico` inside the profile folder.
     #[serde(default)]
     icon_file: String,
-    /// First 10 letters of the profile name, drawn at the top of the icon.
-    #[serde(default)]
+    /// Retired. Older profiles drew the name on the icon. Still read so those files load.
+    #[serde(default, skip_serializing_if = "is_false")]
     icon_text: bool,
     /// Background color id. Empty keeps the icon's own color.
     #[serde(default)]
@@ -107,8 +107,6 @@ pub struct ProfileInfo {
     pub icon_id: String,
     /// PNG data URL of the icon used for this profile.
     pub icon: String,
-    /// The profile name is drawn on the icon.
-    pub icon_text: bool,
     /// Background color id. Empty keeps the icon's own color.
     pub icon_color: String,
 }
@@ -119,6 +117,8 @@ pub struct ProfileIconChoice {
     pub id: String,
     pub label: String,
     pub icon: String,
+    /// Background colors apply. Browser marks keep their own colors.
+    pub colorable: bool,
 }
 
 pub fn read_args() {
@@ -238,7 +238,6 @@ pub fn list(app: &AppHandle) -> Vec<ProfileInfo> {
                 start_menu: Path::new(&profile.shortcut).is_file(),
                 icon_id,
                 icon,
-                icon_text: profile.icon_text,
                 icon_color: profile.icon_color,
                 id: profile.id,
                 name: profile.name,
@@ -262,6 +261,7 @@ fn map_icon_choices(choices: Vec<crate::profile_icons::IconChoice>) -> Vec<Profi
             id: choice.id.to_string(),
             label: choice.label.to_string(),
             icon: choice.preview,
+            colorable: choice.colorable,
         })
         .collect()
 }
@@ -316,6 +316,9 @@ pub fn set_icon_color(
     if file.profiles[index].icon == "custom" {
         return Err("An uploaded image keeps its own background.".into());
     }
+    if !crate::profile_icons::is_tinted(&file.profiles[index].icon) {
+        return Err("That icon keeps its own colors.".into());
+    }
     file.profiles[index].icon_color = if color_id == "default" {
         String::new()
     } else {
@@ -329,33 +332,7 @@ pub fn set_icon_color(
     Ok(list(app))
 }
 
-pub fn set_icon_text(app: &AppHandle, id: &str, enabled: bool) -> Result<Vec<ProfileInfo>, String> {
-    let mut file = load(app);
-    let Some(index) = file.profiles.iter().position(|profile| profile.id == id) else {
-        return Err("That profile no longer exists.".into());
-    };
-    file.profiles[index].icon_text = enabled;
-    let dir = paths::profile_data_dir(app, id);
-    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    rebuild_icon(&mut file.profiles[index], &dir)?;
-    save(app, &file)?;
-    refresh_shell_icons(app, &file.profiles[index])?;
-    Ok(list(app))
-}
-
 const ICON_BASE: &str = "window-icon-base.png";
-
-fn shown_icon(
-    image: &image::RgbaImage,
-    name: &str,
-    text: bool,
-) -> Result<image::RgbaImage, String> {
-    if text {
-        crate::profile_icons::stamp_name(image, name)
-    } else {
-        Ok(image.clone())
-    }
-}
 
 fn rebuild_icon(profile: &mut ProfileRecord, dir: &Path) -> Result<(), String> {
     match composed_icon(profile, dir)? {
@@ -372,8 +349,7 @@ fn rebuild_icon(profile: &mut ProfileRecord, dir: &Path) -> Result<(), String> {
 
 fn composed_icon(profile: &ProfileRecord, dir: &Path) -> Result<Option<image::RgbaImage>, String> {
     if profile.icon == "custom" {
-        let base = base_image(profile, dir)?;
-        return Ok(Some(shown_icon(&base, &profile.name, profile.icon_text)?));
+        return Ok(Some(base_image(profile, dir)?));
     }
     let icon_id = if profile.icon.is_empty() {
         "default"
@@ -381,14 +357,12 @@ fn composed_icon(profile: &ProfileRecord, dir: &Path) -> Result<Option<image::Rg
         profile.icon.as_str()
     };
     let image = crate::profile_icons::render_icon(icon_id, &profile.icon_color)?;
-    let shown = shown_icon(&image, &profile.name, profile.icon_text)?;
     if (profile.icon.is_empty() || profile.icon == "default")
-        && !profile.icon_text
         && !crate::profile_icons::is_color(&profile.icon_color)
     {
         return Ok(None);
     }
-    Ok(Some(shown))
+    Ok(Some(image))
 }
 
 fn base_image(profile: &ProfileRecord, dir: &Path) -> Result<image::RgbaImage, String> {
@@ -1055,11 +1029,7 @@ fn webview_file(name: &str, cookies: bool, logins: bool, site_data: bool) -> boo
 }
 
 fn apply_copied_icon(app: &AppHandle, source: &ProfileRecord, new_id: &str) -> Result<(), String> {
-    if source.icon.is_empty()
-        && source.icon_file.is_empty()
-        && !source.icon_text
-        && source.icon_color.is_empty()
-    {
+    if source.icon.is_empty() && source.icon_file.is_empty() && source.icon_color.is_empty() {
         return Ok(());
     }
     let mut file = load(app);
@@ -1070,7 +1040,6 @@ fn apply_copied_icon(app: &AppHandle, source: &ProfileRecord, new_id: &str) -> R
         .ok_or("That profile no longer exists.")?;
     record.icon.clone_from(&source.icon);
     record.icon_file.clone_from(&source.icon_file);
-    record.icon_text = source.icon_text;
     record.icon_color.clone_from(&source.icon_color);
     let updated = record.clone();
     save(app, &file)?;
@@ -1432,7 +1401,35 @@ fn load(app: &AppHandle) -> ProfilesFile {
     migrate_default(&mut file);
     migrate_icon_colors(&mut file);
     assign_folders(&mut file);
+    if drop_icon_text(app, &mut file) {
+        let _ = save(app, &file);
+    }
     file
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Clears the retired name-on-icon flag and redraws any icon that still has the name.
+fn drop_icon_text(app: &AppHandle, file: &mut ProfilesFile) -> bool {
+    let mut changed = false;
+    for profile in &mut file.profiles {
+        if !profile.icon_text {
+            continue;
+        }
+        profile.icon_text = false;
+        changed = true;
+        let dir = paths::profile_data_dir(app, &profile.id);
+        let _ = fs::create_dir_all(&dir);
+        if let Err(error) = rebuild_icon(profile, &dir) {
+            eprintln!("profile icon: {error}");
+        }
+        if let Err(error) = refresh_shell_icons(app, profile) {
+            eprintln!("profile icon: {error}");
+        }
+    }
+    changed
 }
 
 /// The default profile used to be named `ce-browser` and kept that folder in a sync folder.
@@ -1673,7 +1670,6 @@ fn relaunch_icon(app: &AppHandle, id: &str) -> String {
 
 fn uses_saved_icon(profile: &ProfileRecord) -> bool {
     profile.icon == "custom"
-        || profile.icon_text
         || crate::profile_icons::is_color(&profile.icon_color)
         || (!profile.icon.is_empty() && profile.icon != "default")
 }

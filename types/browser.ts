@@ -1446,8 +1446,6 @@ export type BrowserProfile = {
   iconId: string;
   /** PNG data URL of the icon used for the window, Start menu, and taskbar. */
   icon: string;
-  /** The first 10 letters of the profile name are drawn on the icon. */
-  iconText: boolean;
   /** Background color id. Empty keeps the icon's own color. */
   iconColor: string;
 };
@@ -1457,6 +1455,8 @@ export type ProfileIconChoice = {
   label: string;
   /** PNG data URL. */
   icon: string;
+  /** Background colors apply. Browser marks keep their own colors. */
+  colorable: boolean;
 };
 
 export type OmniboxSuggestion = {

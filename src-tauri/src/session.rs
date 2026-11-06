@@ -357,7 +357,10 @@ mod tests {
         .collect();
         let merged = merge_startup_pins(saved, &["https://mail.example.com/".into()]);
         let urls: Vec<&str> = merged.iter().map(|tab| tab.url.as_str()).collect();
-        assert_eq!(urls, vec!["https://mail.example.com", "https://news.example/"]);
+        assert_eq!(
+            urls,
+            vec!["https://mail.example.com", "https://news.example/"]
+        );
         assert!(merged[0].pinned);
         assert!(!merged[1].pinned);
     }

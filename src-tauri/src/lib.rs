@@ -1994,21 +1994,6 @@ fn set_profile_icon_color(
 }
 
 #[tauri::command]
-fn set_profile_icon_text(
-    app: AppHandle,
-    id: String,
-    enabled: bool,
-) -> Result<Vec<ProfileInfo>, String> {
-    let profiles = profiles::set_icon_text(&app, &id, enabled);
-    if id == profiles::active_id() {
-        if let Some(window) = app.get_window(tabs::WINDOW) {
-            profiles::apply_window_icon(&app, &window);
-        }
-    }
-    profiles.map(|profiles| publish_profiles(&app, profiles))
-}
-
-#[tauri::command]
 fn pin_profile_taskbar(app: AppHandle, id: String) -> Result<Vec<ProfileInfo>, String> {
     profiles::pin_taskbar(&app, &id).map(|profiles| publish_profiles(&app, profiles))
 }
@@ -2431,7 +2416,6 @@ pub fn run() {
             list_profile_icon_colors,
             set_profile_icon,
             set_profile_icon_color,
-            set_profile_icon_text,
             pin_profile_taskbar,
             unpin_profile_taskbar
         ])

@@ -5,15 +5,40 @@
 //! process on this machine can attach for the life of the session. WebView2 keeps the port on
 //! localhost.
 
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tauri::Webview;
 
 use crate::webview2;
 
 pub const LABEL_PREFIX: &str = "devtools-";
+
+const CLOSEABLE_TABS: &str = "closeable-tabs";
+const RELEASE_NOTES: &str = "cloud-release-notes";
+const VERSION_SEEN: &str = "release-note-version-seen";
+const SELECTED_TAB: &str = "panel-selected-tab";
+
+/// Closes Edge's Welcome tool before WebView2 reads `profile`.
+///
+/// The native inspector and the docked one share this profile, and both open Welcome from it.
+/// Welcome stays closed when `closeable-tabs` records it shut and the release-notes blob has
+/// `shouldOpenWelcome` off. The file is patched once per folder, before the first environment
+/// for that folder exists; a later rewrite would race the running browser.
+pub fn suppress_welcome(profile: &Path) {
+    static CLAIMED: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+    let claimed = CLAIMED.get_or_init(|| Mutex::new(HashSet::new()));
+    let mut claimed = claimed.lock().expect("devtools profiles");
+    if !claimed.insert(profile.to_path_buf()) {
+        return;
+    }
+    if suppress_welcome_file(profile).is_err() {
+        claimed.remove(profile);
+    }
+}
 
 pub fn label(window: &str) -> String {
     format!("{LABEL_PREFIX}{window}")
@@ -127,6 +152,151 @@ fn is_inspector(item: &Value) -> bool {
         .is_some_and(|url| url.contains("/devtools/inspector.html"))
 }
 
+fn suppress_welcome_file(profile: &Path) -> std::io::Result<()> {
+    let path = profile
+        .join("EBWebView")
+        .join("Default")
+        .join("Preferences");
+    let mut root = match std::fs::read(&path) {
+        Ok(bytes) if bytes.iter().all(|byte| byte.is_ascii_whitespace()) => {
+            Value::Object(Map::new())
+        }
+        Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+            Ok(value) if value.is_object() => value,
+            _ => return Ok(()),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Value::Object(Map::new()),
+        Err(error) => return Err(error),
+    };
+    if !hide_welcome(&mut root) {
+        return Ok(());
+    }
+    let text = serde_json::to_string(&root).map_err(std::io::Error::other)?;
+    write_preferences(&path, &text)
+}
+
+/// `true` when Welcome's stored state changed. Other preferences are left in place.
+fn hide_welcome(root: &mut Value) -> bool {
+    let Some(prefs) = preference_map(root) else {
+        return false;
+    };
+    let mut changed = false;
+    changed |= close_welcome_tab(prefs);
+    changed |= disable_welcome_reopen(prefs);
+    changed |= leave_welcome_panel(prefs);
+    changed
+}
+
+fn preference_map(root: &mut Value) -> Option<&mut Map<String, Value>> {
+    let root = root.as_object_mut()?;
+    let devtools = root
+        .entry("devtools")
+        .or_insert_with(|| Value::Object(Map::new()));
+    let devtools = devtools.as_object_mut()?;
+    let prefs = devtools
+        .entry("preferences")
+        .or_insert_with(|| Value::Object(Map::new()));
+    prefs.as_object_mut()
+}
+
+fn close_welcome_tab(prefs: &mut Map<String, Value>) -> bool {
+    let Some(mut tabs) = setting_object(prefs, CLOSEABLE_TABS) else {
+        return false;
+    };
+    if tabs.get("welcome").and_then(Value::as_bool) == Some(false) {
+        return false;
+    }
+    tabs.insert("welcome".into(), Value::Bool(false));
+    set_setting(prefs, CLOSEABLE_TABS, &tabs);
+    true
+}
+
+fn disable_welcome_reopen(prefs: &mut Map<String, Value>) -> bool {
+    let Some(mut notes) = setting_object(prefs, RELEASE_NOTES) else {
+        return false;
+    };
+    let mut changed = false;
+    if notes.get("shouldOpenWelcome").and_then(Value::as_bool) != Some(false) {
+        notes.insert("shouldOpenWelcome".into(), Value::Bool(false));
+        set_setting(prefs, RELEASE_NOTES, &notes);
+        changed = true;
+    }
+    if let Some(version) = notes.get("edgeVersion").and_then(Value::as_i64) {
+        let behind = seen_version(prefs).is_none_or(|seen| seen < version);
+        if behind {
+            prefs.insert(VERSION_SEEN.into(), Value::String(version.to_string()));
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn leave_welcome_panel(prefs: &mut Map<String, Value>) -> bool {
+    if prefs.get(SELECTED_TAB).and_then(Value::as_str) != Some("\"welcome\"") {
+        return false;
+    }
+    prefs.insert(SELECTED_TAB.into(), Value::String("\"elements\"".into()));
+    true
+}
+
+/// A DevTools setting is a JSON string. `None` means the stored text is not an object.
+fn setting_object(prefs: &Map<String, Value>, key: &str) -> Option<Map<String, Value>> {
+    match prefs.get(key) {
+        None => Some(Map::new()),
+        Some(Value::String(text)) => {
+            serde_json::from_str::<Value>(text)
+                .ok()
+                .and_then(|value| match value {
+                    Value::Object(map) => Some(map),
+                    _ => None,
+                })
+        }
+        Some(_) => None,
+    }
+}
+
+fn set_setting(prefs: &mut Map<String, Value>, key: &str, value: &Map<String, Value>) {
+    let text = serde_json::to_string(&Value::Object(value.clone())).unwrap_or_else(|_| "{}".into());
+    prefs.insert(key.into(), Value::String(text));
+}
+
+fn seen_version(prefs: &Map<String, Value>) -> Option<i64> {
+    let text = prefs.get(VERSION_SEEN)?.as_str()?;
+    text.trim().trim_matches('"').parse().ok()
+}
+
+fn write_preferences(path: &Path, text: &str) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let temporary = path.with_file_name("Preferences.welcome.tmp");
+    std::fs::write(&temporary, text)?;
+    match std::fs::rename(&temporary, path) {
+        Ok(()) => Ok(()),
+        Err(_) if path.exists() => replace_preferences(path, &temporary),
+        Err(error) => {
+            let _ = std::fs::remove_file(&temporary);
+            Err(error)
+        }
+    }
+}
+
+/// Windows rename will not replace an existing file. Move the current file aside first, and put
+/// it back if the new file cannot take its place.
+fn replace_preferences(path: &Path, temporary: &Path) -> std::io::Result<()> {
+    let backup = path.with_file_name("Preferences.welcome.bak");
+    if let Err(error) = std::fs::rename(path, &backup) {
+        let _ = std::fs::remove_file(temporary);
+        return Err(error);
+    }
+    if let Err(error) = std::fs::rename(temporary, path) {
+        let _ = std::fs::rename(&backup, path);
+        return Err(error);
+    }
+    let _ = std::fs::remove_file(backup);
+    Ok(())
+}
+
 fn local_inspector(port: u16, target_id: &str) -> String {
     // `inspector.html` registers the screencast app, which draws a second copy of the page
     // inside the tools. `devtools_app.html` is the tools only; the page stays the real webview.
@@ -192,5 +362,117 @@ mod tests {
         assert_eq!(target_id_of(&nested).as_deref(), Some("abc"));
         assert_eq!(target_id_of(&flat).as_deref(), Some("def"));
         assert_eq!(target_id_of(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn welcome_closes_without_dropping_other_devtools_state() {
+        let mut root = serde_json::json!({
+            "profile": {"name": "kept"},
+            "devtools": {
+                "preferences": {
+                    "closeable-tabs": "{\"network\":true,\"welcome\":true}",
+                    "cloud-release-notes": "{\"edgeVersion\":156,\"shouldOpenWelcome\":true,\"header\":{\"title\":\"What's New\"}}",
+                    "release-note-version-seen": "100",
+                    "panel-selected-tab": "\"welcome\"",
+                    "inspectorVersion": "47"
+                }
+            }
+        });
+        assert!(hide_welcome(&mut root));
+        assert_eq!(root["profile"]["name"], "kept");
+        assert_eq!(root["devtools"]["preferences"]["inspectorVersion"], "47");
+        assert_eq!(setting(&root, CLOSEABLE_TABS)["welcome"], false);
+        assert_eq!(setting(&root, CLOSEABLE_TABS)["network"], true);
+        assert_eq!(setting(&root, RELEASE_NOTES)["shouldOpenWelcome"], false);
+        assert_eq!(
+            setting(&root, RELEASE_NOTES)["header"]["title"],
+            "What's New"
+        );
+        assert_eq!(root["devtools"]["preferences"][VERSION_SEEN], "156");
+        assert_eq!(
+            root["devtools"]["preferences"][SELECTED_TAB],
+            "\"elements\""
+        );
+    }
+
+    #[test]
+    fn a_closed_welcome_tool_is_left_alone() {
+        let mut root = serde_json::json!({
+            "devtools": {
+                "preferences": {
+                    "closeable-tabs": "{\"welcome\":false,\"network\":true}",
+                    "cloud-release-notes": "{\"edgeVersion\":156,\"shouldOpenWelcome\":false}",
+                    "release-note-version-seen": "\"200\"",
+                    "panel-selected-tab": "\"console\""
+                }
+            }
+        });
+        let before = root.clone();
+        assert!(!hide_welcome(&mut root));
+        assert_eq!(root, before);
+    }
+
+    #[test]
+    fn an_older_seen_version_catches_up_when_welcome_is_already_closed() {
+        let mut root = serde_json::json!({
+            "devtools": {
+                "preferences": {
+                    "closeable-tabs": "{\"welcome\":false}",
+                    "cloud-release-notes": "{\"edgeVersion\":156,\"shouldOpenWelcome\":false}",
+                    "release-note-version-seen": "\"100\""
+                }
+            }
+        });
+        assert!(hide_welcome(&mut root));
+        assert_eq!(root["devtools"]["preferences"][VERSION_SEEN], "156");
+    }
+
+    #[test]
+    fn a_new_profile_starts_with_welcome_closed() {
+        let dir = temp_profile("fresh");
+        suppress_welcome_file(&dir).unwrap();
+        let root = read_preferences(&dir);
+        assert_eq!(setting(&root, CLOSEABLE_TABS)["welcome"], false);
+        assert_eq!(setting(&root, RELEASE_NOTES)["shouldOpenWelcome"], false);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_preferences_file_that_does_not_parse_is_left_alone() {
+        let dir = temp_profile("bad");
+        let path = dir.join("EBWebView").join("Default").join("Preferences");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "{").unwrap();
+        suppress_welcome(&dir);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn welcome_is_patched_once_per_folder() {
+        let dir = temp_profile("once");
+        suppress_welcome(&dir);
+        let path = dir.join("EBWebView").join("Default").join("Preferences");
+        std::fs::write(&path, "{}").unwrap();
+        suppress_welcome(&dir);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn setting(root: &Value, key: &str) -> Value {
+        let text = root["devtools"]["preferences"][key].as_str().unwrap();
+        serde_json::from_str(text).unwrap()
+    }
+
+    fn read_preferences(dir: &Path) -> Value {
+        let path = dir.join("EBWebView").join("Default").join("Preferences");
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    fn temp_profile(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("ce-browser-welcome-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
     }
 }

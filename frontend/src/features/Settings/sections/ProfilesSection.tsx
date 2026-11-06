@@ -19,7 +19,6 @@ import {
   saveProfileShortcut,
   setProfileIcon,
   setProfileIconColor,
-  setProfileIconText,
   showSavedFile,
   unpinProfileTaskbar,
 } from "@/lib/browser-client";
@@ -64,13 +63,14 @@ function profileTerms(profile: BrowserProfile, icons: ProfileIconChoice[], color
       profile.current
         ? "This window, the Start menu, and the taskbar button use this icon."
         : "The Start menu and taskbar shortcut update now. That profile's window uses the icon the next time it opens.",
-      "Show Icon Text",
-      "Background",
-      ...colors.flatMap((color) => [color.label, color.id]),
+      "Browsers",
       "Choose an image",
       "Image",
       ...icons.flatMap((choice) => [choice.label, choice.id]),
     );
+    if (iconTakesColor(profile, icons)) {
+      terms.push("Background", ...colors.flatMap((color) => [color.label, color.id]));
+    }
   }
   return terms;
 }
@@ -265,7 +265,6 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
           onDownloadShortcut={() => downloadProfileShortcut(profile, onError)}
           onShortcut={() => runProfiles(() => installProfileShortcut(profile.id))}
           onRemove={() => setPendingDelete(profile.id)}
-          onIconText={(enabled) => runProfiles(() => setProfileIconText(profile.id, enabled))}
           onChooseIcon={(iconId, path) => runProfiles(() => setProfileIcon(profile.id, iconId, path))}
           onChooseColor={(colorId) => runProfiles(() => setProfileIconColor(profile.id, colorId))}
           onPickFile={() =>
@@ -306,6 +305,14 @@ export function ProfilesSection({ settings, query, onError, onMatch, revision }:
   );
 }
 
+function iconTakesColor(profile: BrowserProfile, icons: ProfileIconChoice[]) {
+  if (profile.iconId === "custom") {
+    return false;
+  }
+  const choice = icons.find((item) => item.id === profile.iconId);
+  return choice?.colorable !== false;
+}
+
 function shortcutFileName(name: string) {
   const cleaned = name.replace(/[<>:"/\\|?*]/g, " ").replace(/\s+/g, " ").trim();
   return `ce-browser ${cleaned || "profile"}.lnk`;
@@ -340,7 +347,6 @@ function ProfileCard({
   onDownloadShortcut,
   onShortcut,
   onRemove,
-  onIconText,
   onChooseIcon,
   onChooseColor,
   onPickFile,
@@ -358,7 +364,6 @@ function ProfileCard({
   onDownloadShortcut: () => void;
   onShortcut: () => void;
   onRemove: () => void;
-  onIconText: (enabled: boolean) => void;
   onChooseIcon: (iconId: string, path?: string) => void;
   onChooseColor: (colorId: string) => void;
   onPickFile: () => void;
@@ -447,39 +452,19 @@ function ProfileCard({
               ? "This window, the Start menu, and the taskbar button use this icon."
               : "The Start menu and taskbar shortcut update now. That profile's window uses the icon the next time it opens."}
           </p>
-          <label id={`settings-profile-${profile.id}-icon-text`} className="flex items-center gap-2 text-xs text-zinc-300">
-            <input
-              id={`settings-profile-${profile.id}-icon-text-input`}
-              type="checkbox"
-              checked={profile.iconText}
-              disabled={working}
-              onChange={(event) => onIconText(event.target.checked)}
-            />
-            Show Icon Text
-          </label>
           <div id={`settings-profile-${profile.id}-icon-grid`} className="grid grid-cols-4 gap-2 sm:grid-cols-8">
-            {icons.map((choice) => {
-              const selected = profile.iconId === choice.id;
-              return (
-                <button
+            {icons
+              .filter((choice) => choice.colorable)
+              .map((choice) => (
+                <IconChoiceButton
                   key={choice.id}
-                  id={`settings-profile-${profile.id}-icon-${choice.id}`}
-                  type="button"
-                  title={choice.label}
-                  disabled={working}
-                  className={cn(
-                    "flex flex-col items-center gap-1 rounded-md border p-1.5",
-                    selected ? "border-sky-500 ring-1 ring-sky-500" : "border-zinc-700 hover:border-zinc-500",
-                  )}
-                  onClick={() => onChooseIcon(choice.id)}
-                >
-                  <img id={`settings-profile-${profile.id}-icon-${choice.id}-image`} src={choice.icon} alt="" className="size-10 rounded" />
-                  <span id={`settings-profile-${profile.id}-icon-${choice.id}-label`} className="truncate text-[11px] text-zinc-400">
-                    {choice.label}
-                  </span>
-                </button>
-              );
-            })}
+                  profileId={profile.id}
+                  choice={choice}
+                  selected={profile.iconId === choice.id}
+                  working={working}
+                  onChoose={() => onChooseIcon(choice.id)}
+                />
+              ))}
             <button
               id={`settings-profile-${profile.id}-icon-file`}
               type="button"
@@ -501,7 +486,26 @@ function ProfileCard({
               </span>
             </button>
           </div>
-          {profile.iconId !== "custom" ? (
+          <div id={`settings-profile-${profile.id}-browsers`} className="flex flex-col gap-2">
+            <p id={`settings-profile-${profile.id}-browsers-label`} className="text-xs text-zinc-400">
+              Browsers
+            </p>
+            <div id={`settings-profile-${profile.id}-browser-grid`} className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+              {icons
+                .filter((choice) => !choice.colorable)
+                .map((choice) => (
+                  <IconChoiceButton
+                    key={choice.id}
+                    profileId={profile.id}
+                    choice={choice}
+                    selected={profile.iconId === choice.id}
+                    working={working}
+                    onChoose={() => onChooseIcon(choice.id)}
+                  />
+                ))}
+            </div>
+          </div>
+          {iconTakesColor(profile, icons) ? (
             <div id={`settings-profile-${profile.id}-colors`} className="flex flex-col gap-2">
               <p id={`settings-profile-${profile.id}-colors-label`} className="text-xs text-zinc-400">
                 Background
@@ -533,6 +537,39 @@ function ProfileCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function IconChoiceButton({
+  profileId,
+  choice,
+  selected,
+  working,
+  onChoose,
+}: {
+  profileId: string;
+  choice: ProfileIconChoice;
+  selected: boolean;
+  working: boolean;
+  onChoose: () => void;
+}) {
+  return (
+    <button
+      id={`settings-profile-${profileId}-icon-${choice.id}`}
+      type="button"
+      title={choice.label}
+      disabled={working}
+      className={cn(
+        "flex flex-col items-center gap-1 rounded-md border p-1.5",
+        selected ? "border-sky-500 ring-1 ring-sky-500" : "border-zinc-700 hover:border-zinc-500",
+      )}
+      onClick={onChoose}
+    >
+      <img id={`settings-profile-${profileId}-icon-${choice.id}-image`} src={choice.icon} alt="" className="size-10 rounded" />
+      <span id={`settings-profile-${profileId}-icon-${choice.id}-label`} className="truncate text-[11px] text-zinc-400">
+        {choice.label}
+      </span>
+    </button>
   );
 }
 
