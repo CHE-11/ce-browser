@@ -1770,7 +1770,6 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
     let controller = platform.controller();
     let core = core(platform)?;
     pin_profile_scheme(&core);
-    clear_automation_flag(&core);
     attach_accelerators(app, &controller, Target::Page)?;
     let mut token = 0i64;
 
@@ -2315,7 +2314,6 @@ pub fn forget_early_script(id: u32) {
         .lock()
         .expect("protocol script")
         .remove(&id);
-    forget_browser_identity(id);
 }
 
 fn microphone_scripts() -> &'static Mutex<HashSet<u32>> {
@@ -2579,14 +2577,6 @@ fn attach_adblock(
                     let uri = read_pwstr(|value| args.Uri(value));
                     if let Some(core) = &sender
                         && defer_page_scheme(id, core, &args, &uri)
-                    {
-                        return Ok(());
-                    }
-                    let custom_agent = crate::page_rules::user_agent_for(&navigation_app, &uri)
-                        .is_some_and(|agent| !agent.is_empty());
-                    if !custom_agent
-                        && let Some(core) = &sender
-                        && defer_browser_identity(id, core, &args, &uri)
                     {
                         return Ok(());
                     }
@@ -3087,461 +3077,22 @@ fn form_escape(value: &str) -> String {
     out
 }
 
-/// Google rejects sign-in when the client hints name "Microsoft Edge WebView2".
-/// The brand is removed from the runtime's own list, so the GREASE entry Edge
-/// generated stays put. The first remote navigation waits until that override is
-/// installed. A site with its own user agent is left alone.
-fn defer_browser_identity(
-    id: u32,
-    core: &ICoreWebView2,
-    args: &ICoreWebView2NavigationStartingEventArgs,
-    uri: &str,
-) -> bool {
-    if !remote_document(uri) || identity_settled(id) {
-        if identity_ready(id) {
-            reapply_browser_identity(core);
-        }
-        return false;
-    }
-    let redirected = read_bool(|value| unsafe { args.IsRedirected(value) });
-    if redirected || unsafe { args.SetCancel(true) }.is_err() {
-        ensure_browser_identity(id, core, None);
-        return false;
-    }
-    ensure_browser_identity(id, core, Some(uri.to_string()));
-    true
-}
-
-fn remote_document(url: &str) -> bool {
-    let Ok(parsed) = url::Url::parse(url) else {
-        return false;
-    };
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return false;
-    }
-    match parsed.host_str().unwrap_or("") {
-        "" | "localhost" | "127.0.0.1" | "tauri.localhost" | "::1" => false,
-        host if host.ends_with(".localhost") => false,
-        _ => true,
-    }
-}
-
-#[derive(Clone)]
-enum CachedIdentity {
-    Clean,
-    Override(String),
-}
-
-enum IdentityPlan {
-    Override(String),
-    Clean,
-    Unknown,
-}
-
-fn identity_cache() -> &'static Mutex<Option<CachedIdentity>> {
-    static CACHE: std::sync::OnceLock<Mutex<Option<CachedIdentity>>> = std::sync::OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(None))
-}
-
-fn identity_ready_ids() -> &'static Mutex<HashSet<u32>> {
-    static IDS: std::sync::OnceLock<Mutex<HashSet<u32>>> = std::sync::OnceLock::new();
-    IDS.get_or_init(Default::default)
-}
-
-fn identity_skips() -> &'static Mutex<HashSet<u32>> {
-    static IDS: std::sync::OnceLock<Mutex<HashSet<u32>>> = std::sync::OnceLock::new();
-    IDS.get_or_init(Default::default)
-}
-
-fn identity_inflight() -> &'static Mutex<HashSet<u32>> {
-    static IDS: std::sync::OnceLock<Mutex<HashSet<u32>>> = std::sync::OnceLock::new();
-    IDS.get_or_init(Default::default)
-}
-
-fn identity_ready(id: u32) -> bool {
-    identity_ready_ids()
-        .lock()
-        .expect("browser identity")
-        .contains(&id)
-}
-
-fn identity_settled(id: u32) -> bool {
-    identity_ready(id)
-        || identity_skips()
-            .lock()
-            .expect("browser identity")
-            .contains(&id)
-}
-
-fn forget_browser_identity(id: u32) {
-    identity_ready_ids()
-        .lock()
-        .expect("browser identity")
-        .remove(&id);
-    identity_skips()
-        .lock()
-        .expect("browser identity")
-        .remove(&id);
-    identity_inflight()
-        .lock()
-        .expect("browser identity")
-        .remove(&id);
-    identity_resumes()
-        .lock()
-        .expect("browser identity")
-        .remove(&id);
-}
-
-fn identity_resumes() -> &'static Mutex<HashMap<u32, String>> {
-    static RESUMES: std::sync::OnceLock<Mutex<HashMap<u32, String>>> = std::sync::OnceLock::new();
-    RESUMES.get_or_init(Default::default)
-}
-
-fn cached_identity() -> Option<CachedIdentity> {
-    identity_cache().lock().expect("browser identity").clone()
-}
-
-fn store_identity(kind: CachedIdentity) {
-    let mut cache = identity_cache().lock().expect("browser identity");
-    if cache.is_none() {
-        *cache = Some(kind);
-    }
-}
-
-fn reapply_browser_identity(core: &ICoreWebView2) {
-    let Some(CachedIdentity::Override(params)) = cached_identity() else {
-        return;
-    };
-    call_cdp(core, "Emulation.setUserAgentOverride", &params);
-}
-
-fn ensure_browser_identity(id: u32, core: &ICoreWebView2, resume: Option<String>) {
-    if let Some(uri) = resume {
-        identity_resumes()
-            .lock()
-            .expect("browser identity")
-            .insert(id, uri);
-    }
-    if !identity_inflight()
-        .lock()
-        .expect("browser identity")
-        .insert(id)
-    {
-        return;
-    }
-    clear_automation_flag(core);
-    match cached_identity() {
-        Some(CachedIdentity::Clean) => finish_identity(id, core, true),
-        Some(CachedIdentity::Override(params)) => apply_identity_override(id, core, params),
-        None => read_browser_identity(id, core),
-    }
-}
-
-fn read_browser_identity(id: u32, core: &ICoreWebView2) {
-    let params = serde_json::json!({
-        "expression": BROWSER_IDENTITY_SCRIPT,
-        "awaitPromise": true,
-        "returnByValue": true,
-    })
-    .to_string();
-    let held = MainThread::new(core.clone());
-    let handler =
-        CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, body| {
-            let core = held.into_inner();
-            if result.is_err() {
-                eprintln!("WebView2 browser identity: {result:?}");
-                finish_identity(id, &core, false);
-                return Ok(());
-            }
-            let Some(snapshot) = snapshot_from_evaluate(&body) else {
-                finish_identity(id, &core, false);
-                return Ok(());
-            };
-            match plan_browser_identity(&snapshot) {
-                IdentityPlan::Clean => {
-                    store_identity(CachedIdentity::Clean);
-                    finish_identity(id, &core, true);
-                }
-                IdentityPlan::Unknown => finish_identity(id, &core, false),
-                IdentityPlan::Override(params) => apply_identity_override(id, &core, params),
-            }
-            Ok(())
-        }));
-    if let Err(error) = call_cdp_handler(core, "Runtime.evaluate", &params, &handler) {
-        eprintln!("WebView2 browser identity: {error}");
-        finish_identity(id, core, false);
-    }
-}
-
-fn apply_identity_override(id: u32, core: &ICoreWebView2, params: String) {
-    let held = MainThread::new(core.clone());
-    let remember = params.clone();
-    let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, _| {
-        let core = held.into_inner();
-        if result.is_err() {
-            eprintln!("WebView2 browser identity: {result:?}");
-            finish_identity(id, &core, false);
-            return Ok(());
-        }
-        store_identity(CachedIdentity::Override(remember));
-        finish_identity(id, &core, true);
-        Ok(())
-    }));
-    if let Err(error) = call_cdp_handler(core, "Emulation.setUserAgentOverride", &params, &handler)
-    {
-        eprintln!("WebView2 browser identity: {error}");
-        finish_identity(id, core, false);
-    }
-}
-
-fn finish_identity(id: u32, core: &ICoreWebView2, ok: bool) {
-    identity_inflight()
-        .lock()
-        .expect("browser identity")
-        .remove(&id);
-    let resume = identity_resumes()
-        .lock()
-        .expect("browser identity")
-        .remove(&id);
-    if ok {
-        identity_ready_ids()
-            .lock()
-            .expect("browser identity")
-            .insert(id);
-    } else {
-        identity_skips()
-            .lock()
-            .expect("browser identity")
-            .insert(id);
-    }
-    if let Some(uri) = resume {
-        let _ = unsafe { core.Navigate(&HSTRING::from(uri)) };
-    }
-}
-
-fn snapshot_from_evaluate(body: &str) -> Option<serde_json::Value> {
-    let parsed: serde_json::Value = serde_json::from_str(body).ok()?;
-    if parsed.get("exceptionDetails").is_some() {
-        return None;
-    }
-    parsed.pointer("/result/value").cloned()
-}
-
-fn plan_browser_identity(snapshot: &serde_json::Value) -> IdentityPlan {
-    let ua = snapshot
-        .get("ua")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    if ua.is_empty() {
-        return IdentityPlan::Unknown;
-    }
-    if let Some(params) = browser_identity_params(snapshot) {
-        return IdentityPlan::Override(params);
-    }
-    let brands = snapshot.get("brands").unwrap_or(&serde_json::Value::Null);
-    let full = snapshot
-        .pointer("/values/fullVersionList")
-        .unwrap_or(&serde_json::Value::Null);
-    if brand_list_has_webview(brands) || brand_list_has_webview(full) {
-        return IdentityPlan::Unknown;
-    }
-    let saw_brands =
-        |list: &serde_json::Value| list.as_array().is_some_and(|items| !items.is_empty());
-    if saw_brands(brands) || saw_brands(full) {
-        IdentityPlan::Clean
-    } else {
-        IdentityPlan::Unknown
-    }
-}
-
-/// `None` when the snapshot already describes Edge, without a WebView brand.
-fn browser_identity_params(snapshot: &serde_json::Value) -> Option<String> {
-    let ua_raw = snapshot.get("ua").and_then(|value| value.as_str())?;
-    let ua = strip_webview_user_agent(ua_raw);
-    if ua.is_empty() {
-        return None;
-    }
-    let brands = snapshot
-        .get("brands")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!([]));
-    let values = snapshot
-        .get("values")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!({}));
-    let full = values
-        .get("fullVersionList")
-        .cloned()
-        .unwrap_or_else(|| serde_json::json!([]));
-    let dirty = ua != ua_raw || brand_list_has_webview(&brands) || brand_list_has_webview(&full);
-    if !dirty {
-        return None;
-    }
-    let brands = filter_webview_brands(&brands);
-    let full_source = if full.as_array().is_some_and(|items| !items.is_empty()) {
-        full
-    } else {
-        brands.clone()
-    };
-    let full = filter_webview_brands(&full_source);
-    if brands.as_array().is_some_and(|items| items.is_empty()) {
-        return None;
-    }
-    let platform = text_field(snapshot, "platform").unwrap_or_else(|| "Windows".to_string());
-    let nav_platform = text_field(snapshot, "navPlatform").unwrap_or_else(|| "Win32".to_string());
-    let metadata = serde_json::json!({
-        "brands": brands,
-        "fullVersionList": full,
-        "platform": platform,
-        "platformVersion": text_field(&values, "platformVersion").unwrap_or_default(),
-        "architecture": text_field(&values, "architecture").unwrap_or_default(),
-        "model": text_field(&values, "model").unwrap_or_default(),
-        "mobile": snapshot.get("mobile").and_then(|value| value.as_bool()).unwrap_or(false),
-        "bitness": text_field(&values, "bitness").unwrap_or_default(),
-        "wow64": values.get("wow64").and_then(|value| value.as_bool()).unwrap_or(false),
-    });
-    Some(
-        serde_json::json!({
-            "userAgent": ua,
-            "platform": nav_platform,
-            "userAgentMetadata": metadata,
-        })
-        .to_string(),
-    )
-}
-
-fn text_field(value: &serde_json::Value, key: &str) -> Option<String> {
-    value
-        .get(key)
-        .and_then(|item| item.as_str())
-        .filter(|item| !item.is_empty())
-        .map(str::to_string)
-}
-
-fn brand_name(item: &serde_json::Value) -> Option<&str> {
-    item.get("brand").and_then(|value| value.as_str())
-}
-
-fn brand_list_has_webview(list: &serde_json::Value) -> bool {
-    list.as_array().is_some_and(|items| {
-        items.iter().any(|item| {
-            brand_name(item).is_some_and(|brand| brand.to_ascii_lowercase().contains("webview"))
-        })
-    })
-}
-
-fn filter_webview_brands(list: &serde_json::Value) -> serde_json::Value {
-    let Some(items) = list.as_array() else {
-        return serde_json::json!([]);
-    };
-    serde_json::Value::Array(
-        items
-            .iter()
-            .filter(|item| match brand_name(item) {
-                Some(brand) => !brand.to_ascii_lowercase().contains("webview"),
-                None => true,
-            })
-            .cloned()
-            .collect(),
-    )
-}
-
-const BROWSER_IDENTITY_SCRIPT: &str = r#"(() => {
-  const data = navigator.userAgentData;
-  const readList = (list) => Array.from(list || []).map((item) => ({
-    brand: String((item && item.brand) || ""),
-    version: String((item && item.version) || "")
-  }));
-  const basic = {
-    ua: navigator.userAgent || "",
-    mobile: !!(data && data.mobile),
-    platform: (data && data.platform) || "",
-    navPlatform: navigator.platform || "",
-    brands: data && data.brands ? readList(data.brands) : []
-  };
-  if (!data || !data.getHighEntropyValues) return basic;
-  return data.getHighEntropyValues([
-    "architecture",
-    "bitness",
-    "fullVersionList",
-    "model",
-    "platformVersion",
-    "wow64"
-  ]).then((values) => {
-    basic.values = {
-      architecture: values.architecture || "",
-      bitness: values.bitness || "",
-      model: values.model || "",
-      platformVersion: values.platformVersion || "",
-      wow64: !!values.wow64,
-      fullVersionList: readList(values.fullVersionList)
-    };
-    if (values.platform) basic.platform = values.platform;
-    return basic;
-  }).catch(() => basic);
-})()"#;
-
-fn clear_automation_flag(core: &ICoreWebView2) {
-    call_cdp(
-        core,
-        "Emulation.setAutomationOverride",
-        r#"{"enabled":false}"#,
-    );
-}
-
-fn call_cdp(core: &ICoreWebView2, method: &str, params: &str) {
-    let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|_, _| Ok(())));
-    let _ = call_cdp_handler(core, method, params, &handler);
-}
-
-fn call_cdp_handler(
-    core: &ICoreWebView2,
-    method: &str,
-    params: &str,
-    handler: &ICoreWebView2CallDevToolsProtocolMethodCompletedHandler,
-) -> windows::core::Result<()> {
-    let method = HSTRING::from(method);
-    let params = HSTRING::from(params);
-    unsafe { core.CallDevToolsProtocolMethod(&method, &params, handler) }
-}
-
 /// Drops the WebView2 client-hint brand before the request leaves.
 ///
 /// Prime Video's player CDN answers 403 when `Sec-CH-UA` names "Microsoft Edge WebView2",
-/// and the page then never receives `WebLoader.js`. Google's account page refuses sign-in
-/// for the same brand. Edge itself is left in the hint.
+/// and the page then never receives `WebLoader.js`. Edge itself is left in the hint.
 fn strip_webview_client_hints(headers: &ICoreWebView2HttpRequestHeaders) {
-    if let Ok(iterator) = unsafe { headers.GetIterator() } {
-        for (name, value) in header_rows(&iterator) {
-            rewrite_named_hint(headers, &name, &value);
-        }
-    }
     rewrite_client_hint(headers, windows::core::w!("Sec-CH-UA"));
     rewrite_client_hint(headers, windows::core::w!("Sec-CH-UA-Full-Version-List"));
     let agent = header_value(headers, windows::core::w!("User-Agent"));
-    rewrite_named_hint(headers, "User-Agent", &agent);
-}
-
-fn rewrite_named_hint(headers: &ICoreWebView2HttpRequestHeaders, name: &str, value: &str) {
-    if !client_hint_name(name) || !value.to_ascii_lowercase().contains("webview") {
+    if !agent.to_ascii_lowercase().contains("webview") {
         return;
     }
-    let cleaned = if name.eq_ignore_ascii_case("user-agent") {
-        strip_webview_user_agent(value)
-    } else {
-        strip_webview_brand(value)
-    };
-    if cleaned.is_empty() || cleaned == value {
+    let cleaned = strip_webview_user_agent(&agent);
+    if cleaned.is_empty() || cleaned == agent {
         return;
     }
-    let name = HSTRING::from(name);
-    let _ = unsafe { headers.RemoveHeader(&name) };
-    let _ = unsafe { headers.SetHeader(&name, &HSTRING::from(cleaned)) };
-}
-
-fn client_hint_name(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    lower == "user-agent" || lower.starts_with("sec-ch-ua")
+    let _ = unsafe { headers.SetHeader(windows::core::w!("User-Agent"), &HSTRING::from(cleaned)) };
 }
 
 fn header_value(headers: &ICoreWebView2HttpRequestHeaders, name: windows::core::PCWSTR) -> String {
@@ -3630,8 +3181,6 @@ fn webview_token_len(lower: &str) -> usize {
 
 /// Runs before every frame's own scripts. Prime Video treats `chrome.webview` as its native
 /// shell and then crashes on the missing host object (`Element not found` / `0x80070490`).
-/// Google's sign-in page treats that object, and a client-hint brand of
-/// "Microsoft Edge WebView2", as an embedded browser and refuses the account.
 /// The real bridge stays on `__ceHost` for this browser's own page scripts.
 pub const WEBVIEW_CLOAK_SCRIPT: &str = r#"(function () {
   if (window.__ceCloak) return;
@@ -3655,7 +3204,6 @@ pub const WEBVIEW_CLOAK_SCRIPT: &str = r#"(function () {
   hideWebView(chromeObj);
   patchIpc();
   spoofClientHints();
-  hideWebDriver();
 
   function appHost(host) {
     host = String(host || "").toLowerCase();
@@ -3676,55 +3224,20 @@ pub const WEBVIEW_CLOAK_SCRIPT: &str = r#"(function () {
   }
   function hideWebView(chromeObj) {
     if (!chromeObj) return;
-    var copy = {};
-    var seen = {};
-    var source = chromeObj;
-    while (source && source !== Object.prototype) {
-      var names = [];
-      try { names = Object.getOwnPropertyNames(source); } catch (error) { names = []; }
-      for (var i = 0; i < names.length; i++) {
-        var key = names[i];
-        if (key === "webview" || seen[key]) continue;
-        seen[key] = true;
-        try {
-          var desc = Object.getOwnPropertyDescriptor(source, key);
-          if (desc) Object.defineProperty(copy, key, desc);
-        } catch (error) {}
-      }
-      try { source = Object.getPrototypeOf(source); } catch (error) { break; }
-    }
-    var replaced = false;
-    try {
-      Object.defineProperty(window, "chrome", {
-        configurable: true,
-        enumerable: true,
-        writable: true,
-        value: copy
-      });
-      replaced = window.chrome === copy;
-    } catch (error) {}
-    if (!replaced) {
-      try { window.chrome = copy; replaced = window.chrome === copy; } catch (error) {}
-    }
-    if (replaced) return;
     try { delete chromeObj.webview; } catch (error) {}
+    var still = false;
+    try { still = !!chromeObj.webview; } catch (error) { still = true; }
+    if (!still) return;
     try {
       Object.defineProperty(chromeObj, "webview", {
-        configurable: false,
+        configurable: true,
         enumerable: false,
         get: function () { return undefined; },
         set: function () {}
       });
-    } catch (error) {}
-  }
-  function hideWebDriver() {
-    try {
-      if (!navigator.webdriver) return;
-      Object.defineProperty(Navigator.prototype, "webdriver", {
-        configurable: true,
-        get: function () { return false; }
-      });
-    } catch (error) {}
+    } catch (error) {
+      try { chromeObj.webview = undefined; } catch (ignored) {}
+    }
   }
   function patchIpc() {
     var host = window.__ceHost;
@@ -4874,87 +4387,6 @@ mod tests {
     fn an_edge_user_agent_is_left_alone() {
         let agent = "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0";
         assert_eq!(super::strip_webview_user_agent(agent), agent);
-    }
-
-    #[test]
-    fn local_pages_keep_their_own_client_hints() {
-        assert!(!super::remote_document("http://localhost:1420/"));
-        assert!(!super::remote_document(
-            "https://tauri.localhost/index.html"
-        ));
-        assert!(!super::remote_document("ce://newtab"));
-        assert!(super::remote_document(
-            "https://accounts.google.com/v3/signin/identifier"
-        ));
-    }
-
-    #[test]
-    fn webview_brands_are_left_out_of_the_browser_identity() {
-        let snapshot = serde_json::json!({
-            "ua": "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
-            "mobile": false,
-            "platform": "Windows",
-            "navPlatform": "Win32",
-            "brands": [
-                {"brand": "Not_A Brand", "version": "24"},
-                {"brand": "Chromium", "version": "126"},
-                {"brand": "Microsoft Edge", "version": "126"},
-                {"brand": "Microsoft Edge WebView2", "version": "126"}
-            ],
-            "values": {
-                "fullVersionList": [
-                    {"brand": "Not_A Brand", "version": "24.0.0.0"},
-                    {"brand": "Chromium", "version": "126.0.0.0"},
-                    {"brand": "Microsoft Edge", "version": "126.0.0.0"},
-                    {"brand": "Microsoft Edge WebView2", "version": "126.0.0.0"}
-                ],
-                "platformVersion": "15.0.0",
-                "architecture": "x86",
-                "bitness": "64",
-                "model": "",
-                "wow64": false
-            }
-        });
-        let super::IdentityPlan::Override(params) = super::plan_browser_identity(&snapshot) else {
-            panic!("expected an override");
-        };
-        assert!(!params.to_ascii_lowercase().contains("webview"));
-        assert!(params.contains("Microsoft Edge"));
-        assert!(params.contains("Not_A Brand"));
-        assert!(params.contains("15.0.0"));
-        assert!(params.contains("Win32"));
-    }
-
-    #[test]
-    fn an_edge_brand_list_needs_no_identity_override() {
-        let snapshot = serde_json::json!({
-            "ua": "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
-            "brands": [
-                {"brand": "Chromium", "version": "126"},
-                {"brand": "Microsoft Edge", "version": "126"}
-            ],
-            "values": {
-                "fullVersionList": [
-                    {"brand": "Microsoft Edge", "version": "126.0.0.0"}
-                ]
-            }
-        });
-        assert!(matches!(
-            super::plan_browser_identity(&snapshot),
-            super::IdentityPlan::Clean
-        ));
-    }
-
-    #[test]
-    fn an_empty_brand_list_is_not_treated_as_edge() {
-        let snapshot = serde_json::json!({
-            "ua": "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
-            "brands": []
-        });
-        assert!(matches!(
-            super::plan_browser_identity(&snapshot),
-            super::IdentityPlan::Unknown
-        ));
     }
 
     #[test]

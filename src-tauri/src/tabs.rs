@@ -43,11 +43,8 @@ pub const GROUP_COLORS: &[&str] = &[
 /// is how a call plays the other person. `AUTOPLAY_GUARD_SCRIPT` is what keeps a page quiet
 /// until a click or key press inside it. Selecting the tab does not count.
 ///
-/// `--remote-debugging-port=0` lets each profile pick a free localhost port and write it to
-/// `DevToolsActivePort`. The docked inspector loads from that port. Any process on this machine
-/// can attach for the life of the session. The same argument string is required on every webview
-/// that shares a profile: WebView2 rejects a second webview whose environment options differ.
-const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --remote-debugging-port=0";
+/// `browser_args` adds the debugging port the docked inspector loads from.
+const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
 /// Logical px between the two split panes. The browser UI shows through it as the divider.
 const SPLIT_GAP: f64 = 6.0;
 /// Share of the page area kept for pages when developer tools are docked. The tools take the rest.
@@ -941,7 +938,7 @@ fn page_builder(app: &AppHandle, id: u32, label: &str, url: WebviewUrl) -> Webvi
     if let Some(container) = container {
         let dir = crate::privacy::container_dir(app, &container);
         let mut builder = WebviewBuilder::new(label, url)
-            .additional_browser_args(WEBVIEW_BROWSER_ARGS)
+            .additional_browser_args(&browser_args(&dir))
             .data_directory(dir)
             .browser_extensions_enabled(false)
             .zoom_hotkeys_enabled(false);
@@ -981,15 +978,64 @@ fn container_environment(app: &AppHandle, container: &str) -> Option<webview2::W
 }
 
 pub fn base_builder(app: &AppHandle, label: &str, url: WebviewUrl) -> WebviewBuilder<Wry> {
+    let dir = paths::profile_dir(app);
     let mut builder = WebviewBuilder::new(label, url)
-        .additional_browser_args(WEBVIEW_BROWSER_ARGS)
-        .data_directory(paths::profile_dir(app))
+        .additional_browser_args(&browser_args(&dir))
+        .data_directory(dir)
         .browser_extensions_enabled(true)
         .zoom_hotkeys_enabled(false);
     if let Some(environment) = any_ui(app).and_then(|ui| webview2::environment_of(&ui)) {
         builder = builder.with_environment(environment);
     }
     builder
+}
+
+/// `None` when no free port could be found. That folder then runs without a debugging port.
+fn debugging_ports() -> &'static Mutex<HashMap<std::path::PathBuf, Option<u16>>> {
+    static PORTS: std::sync::OnceLock<Mutex<HashMap<std::path::PathBuf, Option<u16>>>> =
+        std::sync::OnceLock::new();
+    PORTS.get_or_init(Default::default)
+}
+
+/// Chromium args for the WebView2 environment that uses the data folder `dir`.
+///
+/// The docked inspector loads from a localhost debugging port. Any process on this machine can
+/// attach for the life of the session. `--remote-debugging-port=0` would let Chromium pick it,
+/// but port 0 also turns on its automation mode (`navigator.webdriver` is true), and Google
+/// sign-in refuses an automated browser. So a free port is picked here, once per folder: every
+/// webview on one folder must pass the same string, or WebView2 rejects the later ones.
+fn browser_args(dir: &std::path::Path) -> String {
+    let port = *debugging_ports()
+        .lock()
+        .expect("debugging ports")
+        .entry(dir.to_path_buf())
+        .or_insert_with(free_local_port);
+    debugging_args(port)
+}
+
+fn free_local_port() -> Option<u16> {
+    std::net::TcpListener::bind(("127.0.0.1", 0))
+        .and_then(|listener| listener.local_addr())
+        .map(|address| address.port())
+        .ok()
+        .filter(|port| *port != 0)
+}
+
+fn debugging_args(port: Option<u16>) -> String {
+    match port {
+        Some(port) => format!("{WEBVIEW_BROWSER_ARGS} --remote-debugging-port={port}"),
+        None => WEBVIEW_BROWSER_ARGS.to_string(),
+    }
+}
+
+/// The debugging port given to the WebView2 environment for `dir`, once one has been created.
+pub fn debugging_port(dir: &std::path::Path) -> Option<u16> {
+    debugging_ports()
+        .lock()
+        .expect("debugging ports")
+        .get(dir)
+        .copied()
+        .flatten()
 }
 
 pub fn resolve(app: &AppHandle, input: &str) -> Url {
@@ -6937,9 +6983,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn debugging_port_is_ephemeral_and_local() {
-        assert!(WEBVIEW_BROWSER_ARGS.contains("--remote-debugging-port=0"));
-        assert!(!WEBVIEW_BROWSER_ARGS.contains("remote-allow-origins"));
+    fn debugging_port_is_fixed_and_local() {
+        let args = debugging_args(Some(9333));
+        assert!(args.ends_with(" --remote-debugging-port=9333"));
+        assert!(!args.contains("--remote-debugging-port=0"));
+        assert!(!args.contains("remote-allow-origins"));
+        assert!(!debugging_args(None).contains("remote-debugging"));
+        assert!(!WEBVIEW_BROWSER_ARGS.contains("remote-debugging"));
+    }
+
+    #[test]
+    fn one_folder_keeps_one_debugging_port() {
+        let dir = std::env::temp_dir().join("ce-browser-debugging-port-test");
+        let first = browser_args(&dir);
+        assert_eq!(browser_args(&dir), first);
+        let port = debugging_port(&dir).expect("a free port");
+        assert!(port != 0);
+        assert!(first.ends_with(&format!(" --remote-debugging-port={port}")));
     }
 
     #[test]

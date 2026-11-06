@@ -180,7 +180,7 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
             }
             tab
         })
-        .filter(|tab| !tab.url.trim().is_empty())
+        .filter(|tab| restorable(&tab.url))
         .collect();
     let active_origin = file
         .active_index
@@ -259,6 +259,12 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
     tabs::ensure_bookmarks_host(app, tabs::WINDOW)
 }
 
+/// A tab with no address, or one left on `about:blank`, has nothing to reopen.
+fn restorable(url: &str) -> bool {
+    let url = url.trim();
+    !url.is_empty() && !url.to_ascii_lowercase().starts_with("about:blank")
+}
+
 /// Settings pins open first. A tab already in the session keeps its title and favicon and is pinned.
 /// It matches the pin the same way the reopen-pins button does, so a redirected pin is not opened twice.
 /// Extra pinned copies of the same address on a pin's site are dropped.
@@ -306,7 +312,7 @@ fn merge_startup_pins(saved: Vec<SessionTabFile>, pins: &[String]) -> Vec<Sessio
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionFile, SessionTabFile, merge_startup_pins};
+    use super::{SessionFile, SessionTabFile, merge_startup_pins, restorable};
 
     fn tab(url: &str, pinned: bool) -> SessionTabFile {
         SessionTabFile {
@@ -335,6 +341,25 @@ mod tests {
                 .iter()
                 .any(|workspace| workspace.id == crate::tabs::DEFAULT_WORKSPACE)
         );
+    }
+
+    #[test]
+    fn blank_pinned_tabs_are_not_restored() {
+        let saved: Vec<SessionTabFile> = vec![
+            tab("about:blank", true),
+            tab("https://mail.example.com", true),
+            tab(" about:blank#blocked", true),
+            tab("", false),
+            tab("https://news.example/", false),
+        ]
+        .into_iter()
+        .filter(|tab| restorable(&tab.url))
+        .collect();
+        let merged = merge_startup_pins(saved, &["https://mail.example.com/".into()]);
+        let urls: Vec<&str> = merged.iter().map(|tab| tab.url.as_str()).collect();
+        assert_eq!(urls, vec!["https://mail.example.com", "https://news.example/"]);
+        assert!(merged[0].pinned);
+        assert!(!merged[1].pinned);
     }
 
     #[test]

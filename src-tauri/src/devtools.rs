@@ -1,9 +1,9 @@
 //! Docked DevTools loads the WebView2 runtime's own inspector.
 //!
-//! `--remote-debugging-port=0` makes each profile pick a free localhost port and write it to
-//! `DevToolsActivePort`. The inspector page is served by that runtime, so it stays in step with
-//! Edge updates. Any process on this machine can attach for the life of the session. The port is
-//! not a fixed number, and WebView2 keeps it on localhost.
+//! Each data folder gets a free localhost port, picked once per run by `tabs::browser_args`.
+//! The inspector page is served by that runtime, so it stays in step with Edge updates. Any
+//! process on this machine can attach for the life of the session. WebView2 keeps the port on
+//! localhost.
 
 use std::path::Path;
 use std::time::Duration;
@@ -21,7 +21,8 @@ pub fn label(window: &str) -> String {
 
 /// Inspector URL for `webview`. Call this off the main thread: the protocol call waits there.
 pub fn inspector_for(webview: &Webview, profile: &Path) -> Result<String, String> {
-    let port = wait_for_port(profile)
+    let port = crate::tabs::debugging_port(profile)
+        .or_else(|| wait_for_port(profile))
         .ok_or_else(|| "DevTools did not open a local debugging port.".to_string())?;
     let info = webview2::call_cdp_json(
         webview,
