@@ -2581,7 +2581,7 @@ fn attach_adblock(
                         return Ok(());
                     }
                     crate::page_errors::note_navigation(id, &uri);
-                    tabs::navigation_started(&navigation_app, id);
+                    tabs::navigation_started(&navigation_app, id, &uri);
                     tabs::clear_errors(&navigation_app, id);
                     tabs::clear_accent(&navigation_app, id);
                     if let Some(next) = crate::privacy::rewrite_navigation(&navigation_app, &uri) {

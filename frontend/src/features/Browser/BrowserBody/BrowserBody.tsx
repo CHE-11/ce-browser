@@ -5,6 +5,7 @@ import { DevtoolsDivider } from "@/components/DevtoolsDivider";
 import { PageFailure } from "@/components/PageFailure";
 import { SplitDivider } from "@/components/SplitDivider";
 import { VerticalTabs } from "../BrowserHeader/Tabs/VerticalTabs";
+import { PageLoading, pagePending } from "./PageLoading";
 import { VerticalToolbar } from "./VerticalToolbar/VerticalToolbar";
 import { ViewportBar } from "./ViewportBar";
 import { ViewportHandles } from "./ViewportHandles";
@@ -61,24 +62,25 @@ export function BrowserBody({
               homeBar={snapshot.viewport.homeBar}
             />
           ) : null}
-          {activeTab && !activeTab.loaded && !activeTab.failure ? (
-            <span id="browser-page-loading" className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
-              Loading {activeTab.title || activeTab.url}
-            </span>
-          ) : null}
           {splitShown && split
             ? [
                 { id: split.left, style: { left: 0, width: `calc(${split.ratio * 100}% - 3px)` } },
                 { id: split.right, style: { right: 0, width: `calc(${(1 - split.ratio) * 100}% - 3px)` } },
               ].map(({ id, style }) => {
                 const tab = snapshot.tabs.find((item) => item.id === id);
-                return tab?.failure ? (
-                  <PageFailure key={id} tab={tab} failure={tab.failure} className="absolute inset-y-0" style={style} />
-                ) : null;
+                if (tab?.failure) {
+                  return <PageFailure key={id} tab={tab} failure={tab.failure} className="absolute inset-y-0" style={style} />;
+                }
+                if (pagePending(tab)) {
+                  return <PageLoading key={id} tab={tab} className="absolute inset-y-0" style={style} />;
+                }
+                return null;
               })
             : activeTab?.failure
               ? <PageFailure tab={activeTab} failure={activeTab.failure} className="absolute inset-0" />
-              : null}
+              : pagePending(activeTab)
+                ? <PageLoading tab={activeTab} className="absolute inset-0" />
+                : null}
           {splitShown && split ? <SplitDivider split={split} activeId={snapshot.activeId} /> : null}
         </div>
         {devtools?.visible ? <DevtoolsDivider ratio={devtools.ratio} /> : null}

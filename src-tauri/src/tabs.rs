@@ -288,6 +288,11 @@ struct Tab {
     webview: Option<String>,
     /// The first navigation finished, so the webview can cover the page without a white frame.
     painted: bool,
+    /// The next main-frame navigation should park this page. Set before `info.url` changes,
+    /// because the navigation event then sees the address it is already going to.
+    blank_next: bool,
+    /// Parked while a different document loads, so the previous page does not stay on screen.
+    blank: bool,
     /// The current title belongs to `info.url`, not the page this tab showed before.
     title_ready: bool,
     /// Last time the page was on screen. The sleep timer counts from here.
@@ -1220,6 +1225,8 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                 pending_url: Some(tab.url.clone()),
                 webview: None,
                 painted: false,
+                blank_next: false,
+                blank: false,
                 title_ready: false,
                 last_shown: Instant::now(),
                 hidden: false,
@@ -1342,6 +1349,8 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
                 tab.info.url = url;
                 if finished {
                     tab.painted = true;
+                    tab.blank = false;
+                    tab.blank_next = false;
                 }
                 if let Some(factor) = extension_zoom {
                     tab.info.zoom = factor;
@@ -2272,6 +2281,8 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
             tab.info.loaded = false;
             tab.info.loading = false;
             tab.painted = false;
+            tab.blank = false;
+            tab.blank_next = false;
             Some((webview, pending, display))
         });
         if let Some((webview, pending, display)) = saved {
@@ -2683,23 +2694,89 @@ pub fn awake_ids(app: &AppHandle) -> HashSet<u32> {
     })
 }
 
-/// A main-frame navigation began. A failure is cleared, so the page view shows again.
+/// A main-frame navigation began. A failure is cleared, so the page view shows again,
+/// unless this navigation is leaving the document on screen. That page is parked and the
+/// browser UI shows through until the next document has painted.
 /// Runs inside the WebView2 event on the main thread, so moving views is left to a task.
-pub fn navigation_started(app: &AppHandle, id: u32) {
+pub fn navigation_started(app: &AppHandle, id: u32, uri: &str) {
     crate::page_errors::clear_unresponsive(id);
-    let recovered = with_state(app, |state| {
+    let target = displayed_navigation(app, uri);
+    let plan = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
         tab.info.unresponsive = false;
         tab.info.progress = 10;
-        tab.info.failure.take().map(|_| tab.info.window.clone())
+        let recovered = tab.info.failure.take().map(|_| tab.info.window.clone());
+        let mut blank = false;
+        if let Some(target) = target {
+            let switching = !same_document(&tab.info.url, &target);
+            if tab.info.url != target {
+                if switching {
+                    tab.title_ready = false;
+                }
+                tab.info.url = target;
+            }
+            if tab.blank_next || switching {
+                tab.blank_next = false;
+                tab.info.loading = true;
+                blank = tab.painted && !tab.blank;
+            } else {
+                tab.blank_next = false;
+            }
+        }
+        Some((recovered, blank))
     });
     emit_tabs(app);
-    if let Some(window) = recovered {
+    let Some((recovered, blank)) = plan else {
+        return;
+    };
+    if blank {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            hold_page(&app, id);
+        });
+    } else if let Some(window) = recovered {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             place_pages(&app, &window, true);
             emit_tabs(&app);
         });
+    }
+}
+
+/// Address the main frame is going to, or nothing for an intermediate `about:` hop.
+fn displayed_navigation(app: &AppHandle, uri: &str) -> Option<String> {
+    let uri = uri.trim();
+    if uri.is_empty() || uri.to_ascii_lowercase().starts_with("about:") {
+        return None;
+    }
+    Some(paths::display_url(app, uri))
+}
+
+/// Same page, ignoring a hash. A reload and an in-page jump keep the document on screen.
+fn same_document(left: &str, right: &str) -> bool {
+    fn identity(value: &str) -> Option<String> {
+        let mut url = Url::parse(value).ok()?;
+        url.set_fragment(None);
+        Some(url.to_string())
+    }
+    match (identity(left), identity(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => left == right,
+    }
+}
+
+/// Parks a page that is still waiting on a different document.
+fn hold_page(app: &AppHandle, id: u32) {
+    let window = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        if !tab.info.loading || !tab.painted || tab.blank || tab.info.failure.is_some() {
+            return None;
+        }
+        tab.blank = true;
+        Some(tab.info.window.clone())
+    });
+    if let Some(window) = window {
+        place_pages(app, &window, false);
     }
 }
 
@@ -2731,6 +2808,8 @@ pub fn set_failure(app: &AppHandle, id: u32, kind: &str, code: &str, detail: Str
         });
         tab.info.progress = 100;
         tab.info.loading = false;
+        tab.blank = false;
+        tab.blank_next = false;
         Some(tab.info.window.clone())
     });
     if let Some(window) = window {
@@ -3086,8 +3165,9 @@ fn parked_position() -> LogicalPosition<f64> {
     LogicalPosition::new(-10000.0, -10000.0)
 }
 
-/// Puts the active page on screen once it has painted, beside its split partner when it has one.
-/// Until then the previous page stays, so opening or closing a tab does not flash the window through.
+/// Puts each painted page on screen, beside its split partner when it has one.
+/// A tab that has not painted yet, or is waiting on a different document, leaves the
+/// browser UI showing through instead of keeping the previous page up.
 fn place_pages(app: &AppHandle, window: &str, resize: bool) {
     devtools_follow(app, window);
     let (position, page_size) = page_rect(app, window);
@@ -3109,55 +3189,30 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         let ratio = split.map(|split| split.ratio).unwrap_or(0.5);
         let dock_ratio = (chrome.devtools.open && chrome.devtools.ready && !fullscreen)
             .then_some(chrome.devtools.ratio);
-        let failed = |id: u32| {
-            state
-                .tabs
-                .iter()
-                .any(|tab| tab.info.id == id && tab.info.failure.is_some())
-        };
-        // A tab that failed keeps its view off screen, so the browser UI behind can explain why.
+        // A tab that failed, or whose next document has not painted, keeps its view off
+        // screen so the browser UI behind can show why or that it is still loading.
         let painted_view = |id: u32| {
             state
                 .tabs
                 .iter()
-                .find(|tab| tab.info.id == id && tab.painted && tab.info.failure.is_none())
+                .find(|tab| {
+                    tab.info.id == id && tab.painted && !tab.blank && tab.info.failure.is_none()
+                })
                 .and_then(|tab| tab.webview.clone())
         };
-        let paired =
-            split.and_then(
-                |split| match (painted_view(split.left), painted_view(split.right)) {
-                    (Some(left), Some(right)) => {
-                        Some(vec![(left, Slot::Left), (right, Slot::Right)])
-                    }
-                    (Some(left), None) if failed(split.right) => Some(vec![(left, Slot::Left)]),
-                    (None, Some(right)) if failed(split.left) => Some(vec![(right, Slot::Right)]),
-                    (None, None) if failed(split.left) && failed(split.right) => Some(Vec::new()),
-                    _ => None,
-                },
-            );
-        let shown = paired.unwrap_or_else(|| {
-            if active.is_some_and(failed) {
-                return Vec::new();
+        let shown = if let Some(split) = split {
+            match (painted_view(split.left), painted_view(split.right)) {
+                (Some(left), Some(right)) => vec![(left, Slot::Left), (right, Slot::Right)],
+                (Some(left), None) => vec![(left, Slot::Left)],
+                (None, Some(right)) => vec![(right, Slot::Right)],
+                (None, None) => Vec::new(),
             }
-            let ready = active.and_then(painted_view);
-            let fallback = || {
-                previous
-                    .first()
-                    .map(|(label, _)| label.clone())
-                    .filter(|label| {
-                        state.tabs.iter().any(|tab| {
-                            tab.info.window == window
-                                && tab.painted
-                                && tab.info.failure.is_none()
-                                && tab.webview.as_ref() == Some(label)
-                        })
-                    })
-            };
-            ready
-                .or_else(fallback)
+        } else {
+            active
+                .and_then(painted_view)
                 .map(|label| vec![(label, Slot::Full)])
                 .unwrap_or_default()
-        });
+        };
         let changed = previous != shown;
         let parked: Vec<String> = state
             .indexes_in(window)
@@ -4050,19 +4105,39 @@ pub fn navigate(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
     if with_state(app, |state| state.is_resident_bookmarks(id)) {
         return leave_bookmarks(app, id, url);
     }
-    let label = with_state(app, |state| {
+    let (label, hold) = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
+        let mut hold = false;
+        if !same_document(&tab.info.url, &display) {
+            tab.title_ready = false;
+            hold = tab.painted;
+            tab.blank_next = hold;
+        }
         tab.info.url = display.clone();
         tab.info.loading = true;
         if tab.webview.is_none() {
             tab.pending_url = Some(url.clone());
         }
-        Some(tab.webview.clone())
+        Some((tab.webview.clone(), hold))
     })
     .ok_or("That tab is no longer open.")?;
+    if hold {
+        hold_page(app, id);
+    }
     match label.and_then(|label| app.get_webview(&label)) {
         Some(webview) => {
-            webview.navigate(url).map_err(|error| error.to_string())?;
+            if let Err(error) = webview.navigate(url) {
+                let window = with_state(app, |state| {
+                    let tab = state.tab_mut(id)?;
+                    tab.blank = false;
+                    tab.blank_next = false;
+                    Some(tab.info.window.clone())
+                });
+                if let Some(window) = window {
+                    place_pages(app, &window, false);
+                }
+                return Err(error.to_string());
+            }
             if display != paths::NEW_TAB {
                 let _ = webview.set_focus();
             }
@@ -6818,6 +6893,8 @@ fn rebuild_page(app: &AppHandle, id: u32) -> Result<(), String> {
         tab.info.loaded = false;
         tab.info.loading = false;
         tab.painted = false;
+        tab.blank = false;
+        tab.blank_next = false;
         tab.hidden = false;
         tab.info.sleeping = false;
         Some((webview, url, window))
@@ -7021,6 +7098,28 @@ mod tests {
     }
 
     #[test]
+    fn hash_changes_keep_the_same_document() {
+        assert!(same_document(
+            "https://example.com/a",
+            "https://example.com/a#section"
+        ));
+        assert!(same_document(
+            "https://example.com/a#one",
+            "https://example.com/a#two"
+        ));
+        assert!(!same_document(
+            "https://example.com/a",
+            "https://example.com/b"
+        ));
+        assert!(!same_document(
+            "https://example.com/a",
+            "https://other.example/a"
+        ));
+        assert!(same_document("not a url", "not a url"));
+        assert!(!same_document("not a url", "https://example.com"));
+    }
+
+    #[test]
     fn remote_pages_keep_their_own_canvas() {
         assert!(remote_scheme("https://mail.google.com/"));
         assert!(remote_scheme("http://example.com"));
@@ -7064,6 +7163,8 @@ mod tests {
             pending_url: None,
             webview: None,
             painted: false,
+            blank_next: false,
+            blank: false,
             title_ready: false,
             last_shown: Instant::now(),
             hidden: false,
