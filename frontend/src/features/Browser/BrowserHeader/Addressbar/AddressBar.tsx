@@ -78,6 +78,7 @@ import { reorderToolbar, splitToolbar, toolbarPinned } from "../../../../lib/too
 import { buildSuggestions, inlineCompletion, looksLikeUrl } from "../../../../lib/omnibox";
 import { flattenBookmarks, type WindowTabsState } from "../../../../lib/use-browser";
 import { focusRing } from "../../../../lib/focus-ring";
+import { useStickyAudio } from "../../../../lib/use-sticky-audio";
 import { IconButton } from "../../../../components/IconButton";
 import { LoadBar } from "../../../../components/LoadBar";
 import { WindowControls } from "../../../../components/WindowControls";
@@ -134,6 +135,7 @@ function pageOrigin(url: string) {
 export function AddressBar({ snapshot, bookmarks, downloads, history, extensions, settings, windowControls = false }: AddressBarProps) {
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const activeId = activeTab?.id ?? null;
+  const showSpeakers = useStickyAudio(activeId, !!activeTab?.audible, !!activeTab?.muted);
   const split = snapshot.split ?? null;
   const inSplit = !!split && activeId !== null && (split.left === activeId || split.right === activeId);
   const activeIndex = snapshot.tabs.findIndex((tab) => tab.id === activeId);
@@ -792,11 +794,11 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
             {storeBusy ? "Working…" : storeAction === "update" ? "Update" : "Install"}
           </button>
         ) : null}
-        {activeTab && (activeTab.audible || activeTab.muted) ? (
+        {activeTab && showSpeakers ? (
           <button
             id="address-speakers"
             type="button"
-            title={activeTab.muted ? "Unmute this tab" : "This tab is playing sound"}
+            title={activeTab.muted ? "Unmute this tab" : "Mute this tab"}
             aria-label={activeTab.muted ? "Unmute this tab" : "Mute this tab"}
             className={cn(
               "inline-flex size-6 shrink-0 items-center justify-center rounded-full hover:bg-zinc-700",

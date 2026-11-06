@@ -10,6 +10,7 @@ import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
 import { TAB_SIZE, tabItemStyle } from "@/lib/tab-size";
 import { useSettings } from "@/lib/use-browser";
 import { hoverTab, leaveTab } from "@/lib/tab-hover";
+import { useStickyAudio } from "@/lib/use-sticky-audio";
 import { groupColorClasses } from "@/lib/tab-rows";
 import { TabInfo } from "@type/browser";
 import { TabAlertDot } from "./TabAlertDot";
@@ -57,6 +58,7 @@ export function TabItem({
   onDragOver,
 }: TabItemProps) {
   const settings = useSettings();
+  const showAudio = useStickyAudio(tab.id, tab.audible, tab.muted);
   const quietActive = QUIET_TAB_THEMES.has(settings?.theme ?? document.documentElement.dataset.theme ?? "");
   const hoverPreview = settings?.tabHoverPreview !== false;
   const tabWidth = settings?.tabWidth ?? TAB_SIZE.width;
@@ -73,7 +75,6 @@ export function TabItem({
   const accent = settings?.siteAccent && tab.accent && !tab.pinned ? tab.accent : null;
   const pinBorder = (settings?.pinTabBorder ?? true) && tab.pinned ? tab.accent : null;
   const domId = `tab-${tab.id}`;
-  const showAudio = tab.audible || tab.muted;
   const alert = tabProblemTitle(tab, heavy);
   const accentFill = accent && active ? accentTint(accent, 0.28) : undefined;
   const chromeTab = !vertical && active;
