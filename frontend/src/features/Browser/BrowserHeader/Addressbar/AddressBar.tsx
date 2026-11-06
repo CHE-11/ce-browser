@@ -426,6 +426,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         window.setTimeout(() => setDownloadFlash(false), 1600);
         const anchor = downloadsRef.current;
         if (anchor) {
+          // The page keeps the keyboard. A click outside the panel still closes it.
           void openPopup("downloads", anchor, { focus: false });
         }
       }),

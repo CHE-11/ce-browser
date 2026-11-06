@@ -1176,6 +1176,80 @@ pub fn close_top(app: &AppHandle, window: &str) {
     }
 }
 
+struct DownloadsClick {
+    window: String,
+    key: String,
+    focus: bool,
+    anchor: Bounds,
+    labels: Vec<String>,
+}
+
+/// A mouse button went down at screen px. The downloads panel closes when that point is
+/// outside it. Opening the panel without focus leaves the page focused, so the click never
+/// blurs the panel and `lost_focus` does not run. A click on the button that opened it is
+/// remembered, so that click still toggles the panel shut instead of opening it again.
+pub fn dismiss_downloads_outside(app: &AppHandle, x: i32, y: i32) {
+    if app.try_state::<Popups>().is_none() || crate::downloads::dragging_file() {
+        return;
+    }
+    let hits = with(app, |state| {
+        state
+            .stacks
+            .iter()
+            .filter_map(|(window, stack)| {
+                let first = stack.levels.first()?;
+                (first.kind == "downloads").then(|| DownloadsClick {
+                    window: window.clone(),
+                    key: first.key(),
+                    focus: first.focus,
+                    anchor: first.anchor,
+                    labels: stack
+                        .levels
+                        .iter()
+                        .map(|level| level.label.clone())
+                        .collect(),
+                })
+            })
+            .collect::<Vec<_>>()
+    });
+    let point_x = f64::from(x);
+    let point_y = f64::from(y);
+    for hit in hits {
+        let inside = hit.labels.iter().any(|label| {
+            app.get_window(label)
+                .is_some_and(|popup| webview2::client_contains_screen_point(hwnd_of(&popup), x, y))
+        });
+        if inside {
+            continue;
+        }
+        let on_anchor = point_on_anchor(hit.anchor, point_x, point_y);
+        close_all(app, &hit.window, false);
+        with(app, |state| {
+            let Some(stack) = state.stacks.get_mut(&hit.window) else {
+                return;
+            };
+            if on_anchor {
+                if !hit.focus {
+                    stack.closed_key = Some(hit.key.clone());
+                    stack.closed_at = Some(Instant::now());
+                }
+            } else {
+                stack.closed_key = None;
+                stack.closed_at = None;
+            }
+        });
+    }
+}
+
+/// The toolbar button, plus a few px, so the click that opened the panel still counts as that button.
+fn point_on_anchor(anchor: Bounds, x: f64, y: f64) -> bool {
+    const SLOP: f64 = 8.0;
+    x >= anchor.x - SLOP
+        && y >= anchor.y - SLOP
+        && x < anchor.right() + SLOP
+        && y < anchor.bottom() + SLOP
+}
+
 /// A popup's page lost focus. The stack closes unless focus went to another of its windows.
 /// Popups that never took focus, like the omnibox, are closed by whoever opened them.
 pub fn lost_focus(app: &AppHandle, label: &str) {

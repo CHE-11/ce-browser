@@ -11,7 +11,7 @@ import { DownloadRow } from "./DownloadRow";
 
 const PANEL_LIMIT = 8;
 
-export function DownloadsPanel() {
+export function DownloadsPopover() {
   const { downloads, loaded } = useDownloadsState();
   const settings = useSettings();
   const recent = downloads.slice(0, PANEL_LIMIT);

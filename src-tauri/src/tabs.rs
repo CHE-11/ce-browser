@@ -3143,7 +3143,8 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
     };
     let mut dock_clamped = false;
     if let Some(share) = dock_ratio {
-        let clamped = clamp_devtools_ratio(share, page_size.width as f64, window_width(app, window));
+        let clamped =
+            clamp_devtools_ratio(share, page_size.width as f64, window_width(app, window));
         if (clamped - share).abs() > 0.001 {
             dock_clamped = true;
             with_state(app, |state| {
@@ -6951,7 +6952,10 @@ mod tests {
         assert!((min_ratio - 0.125).abs() < 1e-9);
         assert!((max_ratio - 0.875).abs() < 1e-9);
         assert_eq!(clamp_devtools_ratio(0.5, 1000.0, 1000.0), 0.5);
-        assert_eq!(clamp_devtools_ratio(f64::NAN, 1000.0, 1000.0), DEVTOOLS_RATIO);
+        assert_eq!(
+            clamp_devtools_ratio(f64::NAN, 1000.0, 1000.0),
+            DEVTOOLS_RATIO
+        );
     }
 
     #[test]
@@ -7253,7 +7257,10 @@ mod tests {
         assert!(y + height as i32 <= 1000 - 12);
 
         let (x, y, width, height) = viewport_frame(Some((1180, 1400)), 800, 900, 1.0).unwrap();
-        assert_eq!((x, y, width, height), (12, 36 + 12, 800 - 24, 900 - 36 - 24));
+        assert_eq!(
+            (x, y, width, height),
+            (12, 36 + 12, 800 - 24, 900 - 36 - 24)
+        );
     }
 
     #[test]

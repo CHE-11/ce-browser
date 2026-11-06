@@ -1,8 +1,8 @@
 //! Tracking-parameter removal, HTTPS-only, permissions, containers and the network log.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tauri::window::WindowBuilder;
