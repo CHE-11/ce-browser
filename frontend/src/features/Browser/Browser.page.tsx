@@ -110,7 +110,10 @@ export function BrowserPage() {
       const height = header.getBoundingClientRect().height;
       const top = Math.ceil(height);
       // Pages are placed on the next whole pixel. This starts the strip beside them there too.
-      header.closest("#browser")?.style.setProperty("--chrome-top-slack", `${top - height}px`);
+      const browser = header.closest("#browser");
+      if (browser instanceof HTMLElement) {
+        browser.style.setProperty("--chrome-top-slack", `${top - height}px`);
+      }
       const left = sidebarRef.current ? Math.ceil(sidebarRef.current.getBoundingClientRect().width) : 0;
       const right = toolbarRef.current ? Math.ceil(toolbarRef.current.getBoundingClientRect().width) : 0;
       void setUiInsets(top, left, right, 0);
