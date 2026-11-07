@@ -173,8 +173,8 @@ fn drive(
             limit += auto.max_steps.max(1);
         }
         if budget > 0 {
-            let used = with_run(id, |state| state.run.tokens_in + state.run.tokens_out)
-                .unwrap_or(0);
+            let used =
+                with_run(id, |state| state.run.tokens_in + state.run.tokens_out).unwrap_or(0);
             if used >= budget {
                 let more = runs::ask_more(
                     app,
@@ -402,7 +402,9 @@ fn render(messages: &[ChatMessage]) -> String {
             ChatMessage::Assistant { text, calls } => {
                 let calls: Vec<String> = calls
                     .iter()
-                    .map(|call| format!("{}({})", call.name, clip(&call.arguments.to_string(), 200)))
+                    .map(|call| {
+                        format!("{}({})", call.name, clip(&call.arguments.to_string(), 200))
+                    })
                     .collect();
                 format!("AGENT: {} {}", clip(text, 600), calls.join(", "))
             }

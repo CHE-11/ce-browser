@@ -17,7 +17,7 @@ import { StepList, type RunStepMode } from "./StepList";
 import { TriggerList } from "./TriggerList";
 import { rowsFromVariables, variablesFromRows, type VariableRow } from "./VariablesEditor";
 
-type EditorTab = "steps" | "triggers" | "settings" | "runs";
+export type FlowEditorTab = "steps" | "triggers" | "settings" | "runs";
 
 /** What the page does for the editor. Each one works on the saved flow. */
 export type FlowEditorAction = "duplicate" | "export" | "delete";
@@ -33,6 +33,8 @@ type FlowEditorProps = {
   pickTabs: TabInfo[];
   /** Step to scroll to, from the address. */
   focusStep: number | null;
+  /** Section shown when the editor opens. */
+  initialTab?: FlowEditorTab;
   /** Filled in by the editor so the page can save before leaving. */
   saveRef: MutableRefObject<(() => Promise<boolean>) | null>;
   onDirtyChange: (dirty: boolean) => void;
@@ -56,6 +58,7 @@ export function FlowEditor({
   schedulerPaused,
   pickTabs,
   focusStep,
+  initialTab = "steps",
   saveRef,
   onDirtyChange,
   onSaved,
@@ -74,7 +77,7 @@ export function FlowEditor({
   const [script, setScript] = useState<string | null>(null);
   const [runTab, setRunTab] = useState<number | "own">("own");
   const [chosenPickTab, setChosenPickTab] = useState<number | null>(null);
-  const [tab, setTab] = useState<EditorTab>("steps");
+  const [tab, setTab] = useState<FlowEditorTab>(initialTab);
 
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
@@ -258,7 +261,7 @@ export function FlowEditor({
   }, []);
 
   const enabledTriggers = draft.triggers.filter((trigger) => trigger.enabled).length;
-  const tabs: { value: EditorTab; label: string; count?: number; warn?: boolean }[] = [
+  const tabs: { value: FlowEditorTab; label: string; count?: number; warn?: boolean }[] = [
     { value: "steps", label: "Steps", count: draft.steps.length, warn: Object.keys(issues.steps).length > 0 },
     { value: "triggers", label: "Triggers", count: enabledTriggers, warn: Object.keys(issues.triggers).length > 0 },
     { value: "settings", label: "Settings" },
@@ -267,7 +270,7 @@ export function FlowEditor({
   const watchesPage = draft.triggers.some((trigger) => trigger.kind === "pageChange");
 
   return (
-    <section id="flow-editor" className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+    <section id="flow-editor" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
       <FlowEditorHeader
         flow={draft}
         dirty={dirty}
@@ -289,7 +292,7 @@ export function FlowEditor({
         onMenu={menu}
       />
 
-      <nav id="flow-editor-tabs" role="tablist" aria-label="Flow sections" className="flex gap-1 border-b border-zinc-800 px-6">
+      <nav id="flow-editor-tabs" role="tablist" aria-label="Flow sections" className="flex flex-wrap gap-1 border-b border-zinc-800 px-3">
         {tabs.map((item) => (
           <button
             id={`flow-editor-tab-${item.value}`}
@@ -316,7 +319,7 @@ export function FlowEditor({
         ))}
       </nav>
 
-      <div id="flow-editor-body" className="flex flex-col gap-4 px-6 py-5">
+      <div id="flow-editor-body" className="flex flex-col gap-4 px-3 py-5">
         {error ? (
           <p id="flow-editor-error" role="alert" className="flex items-start gap-2 rounded-md bg-red-950/60 px-3 py-2 text-sm text-red-300">
             <span id="flow-editor-error-text" className="min-w-0 flex-1">

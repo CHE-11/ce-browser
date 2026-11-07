@@ -47,6 +47,27 @@
       }
     },
     {
+      "label": "tsc",
+      "type": "shell",
+      "command": "pnpm ts:check",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "statusbar": {
+          "hide": false,
+          "color": "#16c498"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always"
+      }
+    },
+    {
       "label": "Bump",
       "type": "shell",
       "command": "pnpm version:bump",

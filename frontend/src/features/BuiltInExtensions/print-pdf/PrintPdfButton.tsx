@@ -57,7 +57,12 @@ export function PrintPdfButton({ activeTab, settings }: PrintPdfButtonProps) {
         const state = contentStateFrom(format);
         const built = buildDocument(parsePage(page), page, state, format);
         const html = await renderOffscreen(built.html, state, contentBox(format).width);
-        await printHtmlToPdf(html, pdfOptions(format, page.title || request.title, page.url || request.url), path);
+        await printHtmlToPdf(
+          html,
+          pdfOptions(format, page.title || request.title, page.url || request.url),
+          path,
+          request.tabId,
+        );
       }
       result.set("status", "saved");
       result.set("path", path);

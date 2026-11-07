@@ -105,8 +105,8 @@ mod tests {
 
     #[test]
     fn older_files_load() {
-        let stored: Stored = serde_json::from_str(r#"{"runs":[{"run":{"id":3,"goal":"x"}}]}"#)
-            .expect("parse");
+        let stored: Stored =
+            serde_json::from_str(r#"{"runs":[{"run":{"id":3,"goal":"x"}}]}"#).expect("parse");
         assert_eq!(stored.runs[0].run.id, 3);
         assert!(stored.runs[0].transcript.is_empty());
         let empty: Stored = serde_json::from_str("{}").expect("parse");

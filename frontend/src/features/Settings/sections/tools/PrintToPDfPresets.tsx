@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Plus, RotateCcw, Trash2 } from "lucide-react";
-import type { PrintEditorSettings, PrintPaper, PrintPreset } from "@type/browser";
+import type { PrintEditorSettings, PrintFont, PrintPaper, PrintPreset } from "@type/browser";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import {
   CLEANUP_OPTIONS,
+  FONT_GROUPS,
   FONT_OPTIONS,
   IMAGE_OPTIONS,
   MARGIN_OPTIONS,
@@ -16,6 +17,7 @@ import {
   paperOptionLabel,
   papersInGroup,
   presetHint,
+  printFontStack,
 } from "@features/BuiltInExtensions/print-pdf/print-options";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
@@ -26,8 +28,52 @@ export const PRESETS_HINT = "Named recipes in the Print to PDF menu. Each one sa
 
 const selectClass = cn(inputClass, "max-w-80");
 
+const CUSTOM_HINT = "Width and height in inches, from 1 to 50.";
+
 function patchPreset(presets: PrintPreset[], id: string, change: Partial<PrintPreset>) {
   return presets.map((preset) => (preset.id === id ? { ...preset, ...change } : preset));
+}
+
+function InchesField({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: number;
+  onChange: (inches: number) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? (value > 0 ? String(value) : "");
+
+  return (
+    <label id={`${id}-label`} className="flex min-w-0 flex-1 flex-col gap-1">
+      <span id={`${id}-caption`} className="text-xs text-zinc-400">
+        {label}
+      </span>
+      <input
+        id={id}
+        className={inputClass}
+        inputMode="decimal"
+        placeholder="Inches"
+        value={shown}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (next !== "" && !/^\d*\.?\d*$/.test(next)) {
+            return;
+          }
+          setDraft(next);
+          const parsed = next === "" || next === "." ? 0 : Number(next);
+          if (Number.isFinite(parsed)) {
+            onChange(parsed);
+          }
+        }}
+        onBlur={() => setDraft(null)}
+      />
+    </label>
+  );
 }
 
 function NameField({ id, value, onCommit }: { id: string; value: string; onCommit: (name: string) => void }) {
@@ -83,7 +129,7 @@ function PresetFields({
   print: PrintEditorSettings;
   onChange: (change: Partial<PrintPreset>) => void;
 }) {
-  const showCustom = preset.paper === "custom" || customPaperReady(print);
+  const customReady = customPaperReady(preset);
 
   return (
     <div id={`settings-print-preset-${preset.id}-fields`} className="flex flex-col gap-4 px-5 pb-4">
@@ -155,13 +201,33 @@ function PresetFields({
             onChange={(event) => onChange({ textSize: Number(event.target.value) })}
           />
         </label>
-        <Segmented
-          id={`settings-print-preset-${preset.id}-font`}
-          label="Font"
-          value={preset.font}
-          options={FONT_OPTIONS}
-          onChange={(font) => onChange({ font })}
-        />
+        <label id={`settings-print-preset-${preset.id}-font-label`} className="flex flex-col gap-1">
+          <span id={`settings-print-preset-${preset.id}-font-caption`} className="text-xs text-zinc-400">
+            Font
+          </span>
+          <select
+            id={`settings-print-preset-${preset.id}-font`}
+            className={selectClass}
+            style={{ fontFamily: printFontStack(preset.font) }}
+            value={preset.font}
+            onChange={(event) => onChange({ font: event.target.value as PrintFont })}
+          >
+            {FONT_GROUPS.map((group) => (
+              <optgroup id={`settings-print-preset-${preset.id}-font-${group.id}`} key={group.id} label={group.label}>
+                {FONT_OPTIONS.filter((option) => option.group === group.id).map((option) => (
+                  <option
+                    id={`settings-print-preset-${preset.id}-font-${option.value}`}
+                    key={option.value}
+                    value={option.value}
+                    style={{ fontFamily: option.stack }}
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
       </fieldset>
       <fieldset id={`settings-print-preset-${preset.id}-images`} className="flex flex-col gap-2">
         <legend id={`settings-print-preset-${preset.id}-images-legend`} className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -197,17 +263,21 @@ function PresetFields({
       </fieldset>
       <fieldset id={`settings-print-preset-${preset.id}-page`} className="flex flex-col gap-2">
         <legend id={`settings-print-preset-${preset.id}-page-legend`} className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-          Page
+          Page Size
         </legend>
         <label id={`settings-print-preset-${preset.id}-paper-label`} className="flex flex-col gap-1">
-          <span id={`settings-print-preset-${preset.id}-paper-caption`} className="text-xs text-zinc-400">
-            Paper size
-          </span>
           <select
             id={`settings-print-preset-${preset.id}-paper`}
             className={selectClass}
             value={preset.paper}
-            onChange={(event) => onChange({ paper: event.target.value as PrintPaper })}
+            onChange={(event) => {
+              const paper = event.target.value as PrintPaper;
+              if (paper === "custom" && !customPaperReady(preset) && customPaperReady(print)) {
+                onChange({ paper, customWidth: print.customWidth, customHeight: print.customHeight });
+                return;
+              }
+              onChange({ paper });
+            }}
           >
             {PAPER_GROUPS.map((group) => (
               <optgroup id={`settings-print-preset-${preset.id}-paper-${group.id}`} key={group.id} label={group.label}>
@@ -218,21 +288,33 @@ function PresetFields({
                 ))}
               </optgroup>
             ))}
-            {showCustom ? (
-              <optgroup id={`settings-print-preset-${preset.id}-paper-custom`} label="Custom">
-                <option id={`settings-print-preset-${preset.id}-paper-custom-option`} value="custom">
-                  {paperOptionLabel("custom", print)}
-                </option>
-              </optgroup>
-            ) : null}
+            <optgroup id={`settings-print-preset-${preset.id}-paper-custom`} label="Custom">
+              <option id={`settings-print-preset-${preset.id}-paper-custom-option`} value="custom">
+                {customReady ? paperOptionLabel("custom", preset) : "Custom"}
+              </option>
+            </optgroup>
           </select>
         </label>
         {preset.paper === "custom" ? (
-          <p id={`settings-print-preset-${preset.id}-custom-hint`} className="text-xs text-zinc-500">
-            {customPaperReady(print)
-              ? "Uses the custom size under Page sizes."
-              : "Set a custom width and height under Page sizes. Until then this recipe uses Letter."}
-          </p>
+          <div id={`settings-print-preset-${preset.id}-custom`} className="flex max-w-80 flex-col gap-2">
+            <div id={`settings-print-preset-${preset.id}-custom-size`} className="flex gap-3">
+              <InchesField
+                id={`settings-print-preset-${preset.id}-custom-width`}
+                label="Width"
+                value={preset.customWidth}
+                onChange={(customWidth) => onChange({ customWidth })}
+              />
+              <InchesField
+                id={`settings-print-preset-${preset.id}-custom-height`}
+                label="Height"
+                value={preset.customHeight}
+                onChange={(customHeight) => onChange({ customHeight })}
+              />
+            </div>
+            <p id={`settings-print-preset-${preset.id}-custom-hint`} className="text-xs text-zinc-500">
+              {customReady ? CUSTOM_HINT : `${CUSTOM_HINT} Enter both before this recipe uses the custom size. Until then it uses Letter.`}
+            </p>
+          </div>
         ) : null}
         <Segmented
           id={`settings-print-preset-${preset.id}-orientation`}
@@ -276,13 +358,13 @@ function PresetFields({
   );
 }
 
-export function PrintPresets({
-  print,
-  onChange,
-}: {
+interface Props {
   print: PrintEditorSettings;
   onChange: (next: PrintEditorSettings) => void;
-}) {
+}
+
+export function PrintToPDfPresets({ print, onChange }: Props) {
+
   const [openId, setOpenId] = useState<string | null>(null);
   const { changed, reset } = useSettingChanged(["printEditor.presets"]);
   const presets = print.presets ?? [];

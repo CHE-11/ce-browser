@@ -141,11 +141,40 @@ export const IMAGE_OPTIONS: { value: PrintImageSize; label: string }[] = [
   { value: "none", label: "None" },
 ];
 
-export const FONT_OPTIONS: { value: PrintFont; label: string }[] = [
-  { value: "original", label: "Original" },
-  { value: "serif", label: "Serif" },
-  { value: "sans", label: "Sans" },
+export type PrintFontGroup = "page" | "serif" | "sans" | "mono";
+
+export const FONT_GROUPS: { id: PrintFontGroup; label: string }[] = [
+  { id: "page", label: "Page" },
+  { id: "serif", label: "Serif" },
+  { id: "sans", label: "Sans" },
+  { id: "mono", label: "Mono" },
 ];
+
+/** Windows faces the PDF can request. `stack` is omitted for the page's own fonts. */
+export const FONT_OPTIONS: { value: PrintFont; label: string; group: PrintFontGroup; stack?: string }[] = [
+  { value: "original", label: "Original", group: "page" },
+  { value: "serif", label: "Serif", group: "serif", stack: "Georgia, Cambria, 'Times New Roman', serif" },
+  { value: "georgia", label: "Georgia", group: "serif", stack: "Georgia, serif" },
+  { value: "cambria", label: "Cambria", group: "serif", stack: "Cambria, Georgia, serif" },
+  { value: "constantia", label: "Constantia", group: "serif", stack: "Constantia, Georgia, serif" },
+  { value: "palatino", label: "Palatino", group: "serif", stack: "'Palatino Linotype', Palatino, 'Book Antiqua', serif" },
+  { value: "times", label: "Times New Roman", group: "serif", stack: "'Times New Roman', Times, serif" },
+  { value: "sans", label: "Sans", group: "sans", stack: "system-ui, 'Segoe UI', Roboto, Arial, sans-serif" },
+  { value: "segoe", label: "Segoe UI", group: "sans", stack: "'Segoe UI', sans-serif" },
+  { value: "calibri", label: "Calibri", group: "sans", stack: "Calibri, 'Segoe UI', sans-serif" },
+  { value: "aptos", label: "Aptos", group: "sans", stack: "Aptos, Calibri, 'Segoe UI', sans-serif" },
+  { value: "arial", label: "Arial", group: "sans", stack: "Arial, Helvetica, sans-serif" },
+  { value: "verdana", label: "Verdana", group: "sans", stack: "Verdana, Geneva, sans-serif" },
+  { value: "candara", label: "Candara", group: "sans", stack: "Candara, 'Segoe UI', sans-serif" },
+  { value: "trebuchet", label: "Trebuchet MS", group: "sans", stack: "'Trebuchet MS', sans-serif" },
+  { value: "consolas", label: "Consolas", group: "mono", stack: "Consolas, 'Cascadia Mono', monospace" },
+  { value: "cascadia", label: "Cascadia Mono", group: "mono", stack: "'Cascadia Mono', Consolas, monospace" },
+  { value: "courier", label: "Courier New", group: "mono", stack: "'Courier New', Courier, monospace" },
+];
+
+export function printFontStack(font: PrintFont) {
+  return FONT_OPTIONS.find((option) => option.value === font)?.stack;
+}
 
 export const MARGIN_OPTIONS: { value: PrintMargins; label: string }[] = [
   { value: "none", label: "None" },
@@ -182,6 +211,8 @@ function articlePreset(): PrintPreset {
     font: "original",
     showHeader: true,
     paper: "letter",
+    customWidth: 0,
+    customHeight: 0,
     landscape: false,
     margins: "normal",
     headerFooter: false,
@@ -244,6 +275,9 @@ export function applyPrintPreset(settings: PrintEditorSettings, presetId: string
     font: preset.font,
     showHeader: preset.showHeader,
     paper: preset.paper,
+    ...(preset.paper === "custom"
+      ? { customWidth: preset.customWidth, customHeight: preset.customHeight }
+      : {}),
     landscape: preset.landscape,
     margins: preset.margins,
     headerFooter: preset.headerFooter,

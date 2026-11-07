@@ -636,7 +636,9 @@ pub fn hotkey(app: &AppHandle, slot: usize) {
         if !found && paused_only {
             system::toast(
                 "Automations",
-                &format!("The flow on hotkey slot {slot} is paused. Resume it in ce://automations."),
+                &format!(
+                    "The flow on hotkey slot {slot} is paused. Resume it in ce://automations."
+                ),
                 "",
             );
         } else if !found {

@@ -1,5 +1,5 @@
 import { forwardRef, useRef, useState, type DragEvent } from "react";
-import { PanelRight, PanelTop } from "lucide-react";
+import { ListCollapse, PanelRight, PanelTop } from "lucide-react";
 import type { BrowserSettings, ExtensionInfo, TabInfo } from "@type/browser";
 import { ToolbarIcon } from "@features/BuiltInExtensions";
 import { builtinTool } from "@features/BuiltInExtensions/builtin";
@@ -89,7 +89,8 @@ export function ToolbarEntry({
         stacked ? "flex shrink-0 flex-col items-center" : "inline-flex",
         vertical ? "w-full py-0.5" : stacked && (labeled ? "w-max px-1.5 py-0" : "w-12 py-0.5"),
         labeled && vertical && "gap-0 px-0.5 py-0",
-        labeled && "group rounded-md hover:bg-zinc-800 hover:text-zinc-100 [&_.chrome-toolbar-button]:rounded-md [&_.chrome-toolbar-button]:hover:bg-transparent",
+        labeled &&
+          "group rounded-md hover:bg-zinc-800 hover:text-zinc-100 has-[[data-active=true]]:bg-zinc-800 has-[[data-active=true]]:text-zinc-100 [&_.chrome-toolbar-button]:rounded-md [&_.chrome-toolbar-button]:hover:bg-transparent has-[[data-active=true]]:[&_.chrome-toolbar-button]:bg-transparent",
         dragging && "opacity-40",
       )}
       {...(listDrag
@@ -124,7 +125,7 @@ export function ToolbarEntry({
         <span
           id={`${domId}-label`}
           className={cn(
-            "pointer-events-none min-w-0 px-0.5 text-center text-[8px] leading-none text-zinc-400 group-hover:text-zinc-100",
+            "pointer-events-none min-w-0 px-0.5 text-center text-[8px] leading-none text-zinc-400 group-hover:text-zinc-100 group-has-[[data-active=true]]:text-zinc-100",
             vertical
               ? "-mt-1.5 line-clamp-2 w-full wrap-break-word pb-1"
               : "-mt-1 w-max whitespace-nowrap pb-0.5",
@@ -247,7 +248,7 @@ export const ToolsToolbar = forwardRef<HTMLElement, ToolsToolbarProps>(function 
       <div
         id="tools-toolbar-dock"
         className={cn(
-          "flex shrink-0 items-center justify-center",
+          "flex shrink-0 items-center justify-center gap-1",
           vertical ? "h-[var(--toolbar-height)] border-b border-zinc-800" : "justify-self-start px-1",
         )}
       >
@@ -262,6 +263,14 @@ export const ToolsToolbar = forwardRef<HTMLElement, ToolsToolbarProps>(function 
           ) : (
             <PanelRight id="tools-toolbar-layout-icon" aria-hidden />
           )}
+        </IconButton>
+        <IconButton
+          id="tools-toolbar-collapse"
+          label="Collapse toolbar - Ctrl + Shift + T will show it again"
+          disabled={!settings}
+          onClick={() => settings && void saveSettings({ ...settings, showToolsToolbar: false })}
+        >
+          <ListCollapse id="tools-toolbar-collapse-icon" aria-hidden />
         </IconButton>
       </div>
       <div

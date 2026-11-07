@@ -2849,6 +2849,31 @@ fn hold_page(app: &AppHandle, id: u32) {
     }
 }
 
+/// The document was parsed, but the load event never arrived. Show the page.
+/// `url` is the address at DOMContentLoaded, so a newer navigation is left alone.
+pub fn release_settled_page(app: &AppHandle, id: u32, url: &str) {
+    let window = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        if !tab.info.loading
+            || tab.info.failure.is_some()
+            || tab.info.progress < 70
+            || tab.info.url != url
+        {
+            return None;
+        }
+        tab.info.loading = false;
+        tab.info.progress = 100;
+        tab.painted = true;
+        tab.blank = false;
+        tab.blank_next = false;
+        Some(tab.info.window.clone())
+    });
+    if let Some(window) = window {
+        place_pages(app, &window, false);
+        emit_tabs(app);
+    }
+}
+
 /// Moves the load bar forward. It never goes back while one navigation runs.
 pub fn set_progress(app: &AppHandle, id: u32, progress: u8) {
     let changed = with_state(app, |state| {

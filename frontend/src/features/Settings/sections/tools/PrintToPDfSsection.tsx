@@ -3,6 +3,7 @@ import { RotateCcw } from "lucide-react";
 import type { PrintEditorSettings } from "@type/browser";
 import { IconButton } from "@/components/IconButton";
 import {
+  FONT_OPTIONS,
   PAPER_GROUPS,
   PAPER_SIZES,
   customPaperReady,
@@ -12,7 +13,7 @@ import {
 } from "@features/BuiltInExtensions/print-pdf/print-options";
 import { SETTINGS_SECTIONS } from "../../settings-sections";
 import { inputClass, matchesQuery, Section, useReportMatch, useSettingChanged, type SettingsSectionProps } from "../../SettingsControls";
-import { PRESETS_HINT, PRESETS_LABEL, PrintPresets } from "./PrintPresets";
+import { PRESETS_HINT, PRESETS_LABEL, PrintToPDfPresets } from "./PrintToPDfPresets";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-print")!;
 
@@ -67,7 +68,7 @@ function InchesField({
   );
 }
 
-export function PrintSection({ settings, query, onUpdate, onMatch }: SettingsSectionProps) {
+export function PrintToPDfSsection({ settings, query, onUpdate, onMatch }: SettingsSectionProps) {
   const print = settings.printEditor;
   const labels = (Object.keys(PAPER_SIZES) as (keyof typeof PAPER_SIZES)[]).map((paper) => PAPER_SIZES[paper].label);
   const presetText = (print.presets ?? []).flatMap((preset) => [preset.name, presetHint(preset)]);
@@ -85,6 +86,8 @@ export function PrintSection({ settings, query, onUpdate, onMatch }: SettingsSec
     "pdf",
     "preset",
     "cleanup",
+    "font",
+    ...FONT_OPTIONS.map((option) => option.label),
     ...labels,
     ...presetText,
   );
@@ -107,7 +110,7 @@ export function PrintSection({ settings, query, onUpdate, onMatch }: SettingsSec
 
   return (
     <Section id={section.id} title={section.title}>
-      <PrintPresets print={print} onChange={(printEditor) => onUpdate({ printEditor })} />
+      <PrintToPDfPresets print={print} onChange={(printEditor: any) => onUpdate({ printEditor })} />
       <div id="settings-print-papers" className="flex flex-col gap-4 px-5 py-3">
         <div id="settings-print-papers-heading" className="flex items-start justify-between gap-3">
           <div id="settings-print-papers-text" className="min-w-0">

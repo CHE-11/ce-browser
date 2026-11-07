@@ -1580,12 +1580,12 @@ fn read_body(response: ureq::Response) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        ChatMessage, ChatPart, ToolCall, ToolSpec, anthropic_body, anthropic_text,
+        ChatMessage, ChatPart, ToolCall, ToolSpec, Usage, anthropic_body, anthropic_text,
         anthropic_tool_reply, anthropic_tools_body, attach_thinking, attach_tool_thinking,
         chat_tools_require_reasoning_none, chat_url, claude_models_url, http_error, messages_url,
         model_accepts_thinking, model_ids, model_page, models_url, openai_body, openai_text,
         openai_tool_reply, openai_tools_body, read_anthropic_stream, read_openai_stream,
-        recent_text_models, text_chat_model, transport_error, Usage,
+        recent_text_models, text_chat_model, transport_error,
     };
 
     fn tool_history() -> (Vec<ChatMessage>, Vec<ToolSpec>) {
@@ -1949,7 +1949,13 @@ data: [DONE]\n";
         assert_eq!(reply.calls.len(), 1);
         assert_eq!(reply.calls[0].name, "click");
         assert_eq!(reply.calls[0].arguments["ref"], 4);
-        assert_eq!(reply.usage, Usage { input: 10, output: 3 });
+        assert_eq!(
+            reply.usage,
+            Usage {
+                input: 10,
+                output: 3
+            }
+        );
 
         let claude = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":20,\"output_tokens\":1}}}\n\n\
 data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
@@ -1963,7 +1969,13 @@ data: {\"type\":\"message_stop\"}\n";
         assert_eq!(reply.text, "Done");
         assert_eq!(reply.calls[0].id, "t1");
         assert_eq!(reply.calls[0].arguments["summary"], "ok");
-        assert_eq!(reply.usage, Usage { input: 20, output: 7 });
+        assert_eq!(
+            reply.usage,
+            Usage {
+                input: 20,
+                output: 7
+            }
+        );
     }
 
     #[test]

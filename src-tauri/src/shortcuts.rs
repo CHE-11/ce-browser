@@ -769,9 +769,15 @@ mod tests {
     #[test]
     fn ctrl_shift_t_shows_or_hides_tools() {
         let rows = effective(&[]);
-        let tools = rows.iter().find(|row| row.action == "toggle-tools").expect("tools");
+        let tools = rows
+            .iter()
+            .find(|row| row.action == "toggle-tools")
+            .expect("tools");
         assert_eq!(tools.keys, vec!["ctrl+shift+t".to_string()]);
-        let reopen = rows.iter().find(|row| row.action == "reopen-tab").expect("reopen");
+        let reopen = rows
+            .iter()
+            .find(|row| row.action == "reopen-tab")
+            .expect("reopen");
         assert_eq!(reopen.keys, vec!["ctrl+shift+z".to_string()]);
 
         let saved = vec![ShortcutBinding {
@@ -782,11 +788,17 @@ mod tests {
         }];
         let rows = effective(&saved);
         assert_eq!(
-            rows.iter().find(|row| row.action == "reopen-tab").expect("reopen").keys,
+            rows.iter()
+                .find(|row| row.action == "reopen-tab")
+                .expect("reopen")
+                .keys,
             vec!["ctrl+shift+z".to_string()]
         );
         assert_eq!(
-            rows.iter().find(|row| row.action == "toggle-tools").expect("tools").keys,
+            rows.iter()
+                .find(|row| row.action == "toggle-tools")
+                .expect("tools")
+                .keys,
             vec!["ctrl+shift+t".to_string()]
         );
     }

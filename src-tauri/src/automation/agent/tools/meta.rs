@@ -305,7 +305,8 @@ fn delegate(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
 }
 
 fn wait_agents(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
-    let limit = Duration::from_secs_f64(arg_f64(args, "seconds").unwrap_or(120.0).clamp(5.0, 600.0));
+    let limit =
+        Duration::from_secs_f64(arg_f64(args, "seconds").unwrap_or(120.0).clamp(5.0, 600.0));
     let start = Instant::now();
     loop {
         let working = runs::active_children(ctx.id);
@@ -322,7 +323,10 @@ fn wait_agents(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
                 .collect();
             return step(
                 "Wait for helpers",
-                format!("Still working: {}. Finished helpers' results follow as messages.", list.join(", ")),
+                format!(
+                    "Still working: {}. Finished helpers' results follow as messages.",
+                    list.join(", ")
+                ),
             );
         }
         runs::pause(ctx.id, Duration::from_millis(800)).map_err(|_| "Stopped.".to_string())?;

@@ -38,6 +38,7 @@ mod placement;
 mod popup;
 mod prices;
 mod print;
+mod print_images;
 mod privacy;
 mod profile_archive;
 mod profile_icons;
@@ -762,13 +763,29 @@ async fn print_html_to_pdf(
     html: String,
     options: PdfOptions,
     path: String,
+    tab_id: Option<u32>,
 ) -> Result<(), String> {
-    blocking(move || print::print_html_to_pdf(&app, &html, options, &PathBuf::from(path))).await
+    blocking(move || print::print_html_to_pdf(&app, &html, options, &PathBuf::from(path), tab_id))
+        .await
 }
 
 #[tauri::command]
-async fn print_html_dialog(app: AppHandle, html: String) -> Result<(), String> {
-    blocking(move || print::print_html_dialog(&app, &html)).await
+async fn print_html_dialog(
+    app: AppHandle,
+    html: String,
+    tab_id: Option<u32>,
+) -> Result<(), String> {
+    blocking(move || print::print_html_dialog(&app, &html, tab_id)).await
+}
+
+#[tauri::command]
+async fn embed_print_images(
+    app: AppHandle,
+    html: String,
+    page_url: String,
+    tab_id: Option<u32>,
+) -> Result<String, String> {
+    blocking(move || Ok(print_images::embed(&app, &html, &page_url, tab_id))).await
 }
 
 #[tauri::command]
@@ -2665,6 +2682,7 @@ pub fn run() {
             print_tab_to_pdf,
             print_html_to_pdf,
             print_html_dialog,
+            embed_print_images,
             open_saved_file,
             show_saved_file,
             list_bookmarks,

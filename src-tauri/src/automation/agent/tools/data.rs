@@ -13,7 +13,9 @@ use crate::bookmarks::{self, BookmarkNode};
 use crate::settings::{self, AutomationSettings};
 use crate::{boards, downloads, files, history_index, ocr, system, tabs};
 
-use super::{Ctx, Done, Kind, Tool, arg_bool, arg_list, arg_str, arg_u32, halt, object, step, tool};
+use super::{
+    Ctx, Done, Kind, Tool, arg_bool, arg_list, arg_str, arg_u32, halt, object, step, tool,
+};
 
 const FLOW_TIMEOUT: Duration = Duration::from_secs(900);
 
@@ -195,7 +197,10 @@ fn extract_rows(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
             name => clip(name.trim(), 80),
         };
         let info = extract::save_rows(ctx.app, &name, &page_url(ctx), rows)?;
-        detail.push_str(&format!("\n\nSaved as dataset \"{}\" ({}).", info.name, info.id));
+        detail.push_str(&format!(
+            "\n\nSaved as dataset \"{}\" ({}).",
+            info.name, info.id
+        ));
     }
     step(format!("Extract {count} rows"), detail)
 }
@@ -225,7 +230,11 @@ fn crawl(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
         })
         .unwrap_or_default();
     step(
-        format!("Crawl {} pages into \"{}\"", urls.len(), clip(&info.name, 40)),
+        format!(
+            "Crawl {} pages into \"{}\"",
+            urls.len(),
+            clip(&info.name, 40)
+        ),
         format!(
             "{} rows saved as dataset \"{}\" ({}).\n{rows}",
             info.rows, info.name, info.id
@@ -240,7 +249,10 @@ fn list_flows(ctx: &mut Ctx, _args: &Value) -> Result<Done, String> {
         if list.is_empty() {
             "The user has no saved flows.".into()
         } else {
-            clip(&serde_json::to_string_pretty(&list).unwrap_or_default(), 8000)
+            clip(
+                &serde_json::to_string_pretty(&list).unwrap_or_default(),
+                8000,
+            )
         },
     )
 }
@@ -352,7 +364,10 @@ fn bookmark_find(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
 fn bookmark_add(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     let info = tabs::tab_info(ctx.app, ctx.tab);
     let url = match arg_str(args, "url") {
-        url if url.trim().is_empty() => info.as_ref().map(|info| info.url.clone()).unwrap_or_default(),
+        url if url.trim().is_empty() => info
+            .as_ref()
+            .map(|info| info.url.clone())
+            .unwrap_or_default(),
         url => tabs::resolve(ctx.app, &url).to_string(),
     };
     if !url.starts_with("http://") && !url.starts_with("https://") {
@@ -437,7 +452,12 @@ fn pin_to_board(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
         )?,
     };
     halt(ctx)?;
-    boards::pin_page(ctx.app, ctx.tab, &board.id, arg_bool(args, "fullPage", false))?;
+    boards::pin_page(
+        ctx.app,
+        ctx.tab,
+        &board.id,
+        arg_bool(args, "fullPage", false),
+    )?;
     step(
         format!("Pin the page to \"{}\"", clip(&board.name, 40)),
         format!("Pinned to the board \"{}\".", board.name),
@@ -476,7 +496,9 @@ fn save_file(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     if content.len() > 5_000_000 {
         return Err("That file is too large.".into());
     }
-    let dir = settings::get(ctx.app).download_dir(ctx.app).join("ce-agent");
+    let dir = settings::get(ctx.app)
+        .download_dir(ctx.app)
+        .join("ce-agent");
     fs::create_dir_all(&dir).map_err(|error| format!("Couldn't make the folder. {error}"))?;
     let path = files::unique_path(&dir, &name);
     files::write_text_file(&path, &content)?;

@@ -51,7 +51,10 @@ pub struct Ctx<'a> {
 
 pub enum Done {
     /// The label shows in the panel; a blank label adds no step. The detail goes to the model.
-    Step { label: String, detail: String },
+    Step {
+        label: String,
+        detail: String,
+    },
     Finish(&'static str, String),
 }
 
@@ -114,8 +117,8 @@ pub fn all(auto: &AutomationSettings, helper: bool, access: &AgentAccess) -> Vec
 fn permitted(name: &str, access: &AgentAccess) -> bool {
     match name {
         "open_tab" | "switch_tab" | "list_tabs" | "read_tab" | "close_tab" => access.tabs,
-        "search_history" | "bookmark_find" | "bookmark_add" | "list_downloads"
-        | "pin_to_board" | "list_flows" | "run_flow" => access.browser_data,
+        "search_history" | "bookmark_find" | "bookmark_add" | "list_downloads" | "pin_to_board"
+        | "list_flows" | "run_flow" => access.browser_data,
         "save_file" | "upload" => access.files,
         "copy_to_clipboard" => access.clipboard,
         "remember" | "recall" | "forget" => access.memory,
@@ -160,9 +163,11 @@ mod tests {
             agent_memory: false,
             ..AutomationSettings::default()
         };
-        assert!(!all(&forgetful, false, &open)
-            .iter()
-            .any(|tool| tool.spec.name == "remember"));
+        assert!(
+            !all(&forgetful, false, &open)
+                .iter()
+                .any(|tool| tool.spec.name == "remember")
+        );
         let narrow = AgentAccess {
             sites: "site".into(),
             tabs: false,
@@ -170,7 +175,14 @@ mod tests {
             ..AgentAccess::default()
         };
         let narrow = all(&everything, false, &narrow);
-        for name in ["open_tab", "save_file", "upload", "crawl", "delegate", "run_script"] {
+        for name in [
+            "open_tab",
+            "save_file",
+            "upload",
+            "crawl",
+            "delegate",
+            "run_script",
+        ] {
             assert!(!narrow.iter().any(|tool| tool.spec.name == name), "{name}");
         }
     }

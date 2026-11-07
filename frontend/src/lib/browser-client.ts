@@ -1117,12 +1117,17 @@ export function printTabToPdf(id: number, options: PdfOptions, path: string) {
   return invoke<void>("print_tab_to_pdf", { id, options, path });
 }
 
-export function printHtmlToPdf(html: string, options: PdfOptions, path: string) {
-  return invoke<void>("print_html_to_pdf", { html, options, path });
+export function printHtmlToPdf(html: string, options: PdfOptions, path: string, tabId?: number) {
+  return invoke<void>("print_html_to_pdf", { html, options, path, tabId });
 }
 
-export function printHtmlDialog(html: string) {
-  return invoke<void>("print_html_dialog", { html });
+export function printHtmlDialog(html: string, tabId?: number) {
+  return invoke<void>("print_html_dialog", { html, tabId });
+}
+
+/** Copies remote images into HTML so the saved document still shows them offline. */
+export function embedPrintImages(html: string, pageUrl: string, tabId?: number) {
+  return invoke<string>("embed_print_images", { html, pageUrl, tabId });
 }
 
 export function openSavedFile(path: string) {

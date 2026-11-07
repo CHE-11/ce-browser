@@ -18,6 +18,8 @@ use crate::{paths, settings, tabs, webview2};
 
 /// CSS pixels kept for the page when the panel grows.
 const MIN_PAGE: f64 = 320.0;
+/// The agent column stops here. The automations column may grow to half the page instead.
+const AGENT_MAX: f64 = 720.0;
 
 struct Drag {
     window: String,
@@ -74,7 +76,12 @@ fn toggle_kind(
     let want = open.unwrap_or(!showing);
     if want {
         ensure_kind(app, window, kind)?;
-        tabs::set_side_panel(app, window, kind, open_width(app));
+        tabs::set_side_panel(
+            app,
+            window,
+            kind,
+            fitted_width(app, window, kind, saved_width(app)),
+        );
         if focus {
             let label = panel_label(window, kind);
             if let Some(view) = app.get_webview(&label) {
@@ -109,8 +116,32 @@ fn ensure_kind(app: &AppHandle, window: &str, kind: tabs::SidePanel) -> Result<(
     }
 }
 
-fn open_width(app: &AppHandle) -> f64 {
+fn saved_width(app: &AppHandle) -> f64 {
     settings::get(app).agent_panel_width as f64
+}
+
+/// Saved column width, limited to what this panel may take in `window`.
+fn fitted_width(app: &AppHandle, window: &str, kind: tabs::SidePanel, width: f64) -> f64 {
+    let Some(geom) = geometry(app, window) else {
+        return width.clamp(f64::from(settings::AGENT_PANEL_WIDTH_PX.0), AGENT_MAX);
+    };
+    width_beside_pointer(
+        geom.client,
+        geom.left,
+        geom.right,
+        geom.client - geom.right - width,
+        0.0,
+        column_max(kind, &geom),
+    )
+}
+
+/// Automations may cover half the area the page and the column share. The agent panel stays narrower.
+fn column_max(kind: tabs::SidePanel, geom: &Geom) -> f64 {
+    if kind != tabs::SidePanel::Automations {
+        return AGENT_MAX;
+    }
+    let span = (geom.client - geom.right.max(0.0) - geom.left.max(0.0)).max(0.0);
+    span * 0.5
 }
 
 /// Follows the left button and resizes `window`'s open panel until the button comes up.
@@ -239,7 +270,14 @@ fn apply_drag(app: &AppHandle) {
         }
         state.grab.unwrap_or(0.0)
     };
-    let next = width_beside_pointer(geom.client, geom.left, geom.right, cursor, grab);
+    let next = width_beside_pointer(
+        geom.client,
+        geom.left,
+        geom.right,
+        cursor,
+        grab,
+        column_max(tabs::side_panel(app, &window), &geom),
+    );
     tabs::resize_agent_panel(app, &window, next);
 }
 
@@ -254,6 +292,7 @@ fn clamped_width(app: &AppHandle, window: &str, width: f64) -> Option<f64> {
         geom.right,
         geom.client - geom.right - width,
         0.0,
+        column_max(tabs::side_panel(app, window), &geom),
     ))
 }
 
@@ -296,9 +335,16 @@ fn left_down() -> bool {
 
 /// Panel width when the pointer is `cursor` CSS pixels from the window's left edge.
 /// `grab` is how far that pointer sits to the right of the panel's left edge.
-fn width_beside_pointer(client: f64, left: f64, right: f64, cursor: f64, grab: f64) -> f64 {
+fn width_beside_pointer(
+    client: f64,
+    left: f64,
+    right: f64,
+    cursor: f64,
+    grab: f64,
+    max: f64,
+) -> f64 {
     let min = f64::from(settings::AGENT_PANEL_WIDTH_PX.0);
-    let max = f64::from(settings::AGENT_PANEL_WIDTH_PX.1);
+    let max = if max.is_finite() { max } else { AGENT_MAX };
     if ![client, left, right, cursor, grab]
         .iter()
         .all(|value| value.is_finite())
@@ -331,7 +377,7 @@ fn ensure_view(app: &AppHandle, window: &str, label: &str, page: &str) -> Result
         .add_child(
             builder,
             LogicalPosition::new(-10000.0, -10000.0),
-            LogicalSize::new(open_width(app), 400.0),
+            LogicalSize::new(saved_width(app), 400.0),
         )
         .map_err(|error| error.to_string())?;
     webview2::attach_panel_hooks(app, &view);
@@ -344,27 +390,53 @@ mod tests {
 
     #[test]
     fn the_left_edge_follows_the_pointer() {
-        assert_eq!(width_beside_pointer(1200.0, 0.0, 48.0, 800.0, 0.0), 352.0);
+        assert_eq!(
+            width_beside_pointer(1200.0, 0.0, 48.0, 800.0, 0.0, 720.0),
+            352.0
+        );
     }
 
     #[test]
     fn the_grab_keeps_the_edge_from_jumping() {
-        assert_eq!(width_beside_pointer(1200.0, 0.0, 48.0, 776.0, 4.0), 380.0);
+        assert_eq!(
+            width_beside_pointer(1200.0, 0.0, 48.0, 776.0, 4.0, 720.0),
+            380.0
+        );
     }
 
     #[test]
     fn the_width_stays_between_the_limits() {
-        assert_eq!(width_beside_pointer(1600.0, 0.0, 0.0, 0.0, 0.0), 720.0);
-        assert_eq!(width_beside_pointer(1600.0, 0.0, 0.0, 1500.0, 0.0), 280.0);
+        assert_eq!(
+            width_beside_pointer(1600.0, 0.0, 0.0, 0.0, 0.0, 720.0),
+            720.0
+        );
+        assert_eq!(
+            width_beside_pointer(1600.0, 0.0, 0.0, 1500.0, 0.0, 720.0),
+            280.0
+        );
+    }
+
+    #[test]
+    fn the_automations_column_may_cover_half_the_page() {
+        assert_eq!(
+            width_beside_pointer(2000.0, 0.0, 0.0, 0.0, 0.0, 1000.0),
+            1000.0
+        );
     }
 
     #[test]
     fn a_narrow_window_keeps_the_minimum() {
-        assert_eq!(width_beside_pointer(500.0, 0.0, 0.0, 0.0, 0.0), 280.0);
+        assert_eq!(
+            width_beside_pointer(500.0, 0.0, 0.0, 0.0, 0.0, 250.0),
+            280.0
+        );
     }
 
     #[test]
     fn a_bad_pointer_keeps_the_default() {
-        assert_eq!(width_beside_pointer(f64::NAN, 0.0, 0.0, 0.0, 0.0), 380.0);
+        assert_eq!(
+            width_beside_pointer(f64::NAN, 0.0, 0.0, 0.0, 0.0, 720.0),
+            380.0
+        );
     }
 }

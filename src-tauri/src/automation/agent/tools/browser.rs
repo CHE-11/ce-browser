@@ -211,7 +211,11 @@ fn click(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
         FlowStep {
             kind: "click".into(),
             target,
-            keys: if button == "left" { String::new() } else { button },
+            keys: if button == "left" {
+                String::new()
+            } else {
+                button
+            },
             ..flows::new_step()
         },
     );
@@ -222,11 +226,15 @@ fn click_xy(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     let x = arg_f64(args, "x").ok_or("Missing \"x\".")?;
     let y = arg_f64(args, "y").ok_or("Missing \"y\".")?;
     halt(ctx)?;
-    driver::click_at(ctx.app, ctx.tab, x * ctx.scale, y * ctx.scale, "left", false)?;
-    step(
-        format!("Click at {}, {}", x.round(), y.round()),
-        "Clicked.",
-    )
+    driver::click_at(
+        ctx.app,
+        ctx.tab,
+        x * ctx.scale,
+        y * ctx.scale,
+        "left",
+        false,
+    )?;
+    step(format!("Click at {}, {}", x.round(), y.round()), "Clicked.")
 }
 
 fn type_text(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
@@ -411,7 +419,8 @@ fn wait(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     let seconds = arg_f64(args, "seconds").unwrap_or(2.0).clamp(0.5, 30.0);
     let text = arg_str(args, "text");
     if text.is_empty() {
-        runs::pause(ctx.id, Duration::from_secs_f64(seconds)).map_err(|_| "Stopped.".to_string())?;
+        runs::pause(ctx.id, Duration::from_secs_f64(seconds))
+            .map_err(|_| "Stopped.".to_string())?;
         record(
             ctx,
             FlowStep {

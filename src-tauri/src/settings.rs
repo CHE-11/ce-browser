@@ -57,8 +57,9 @@ const HEIGHT_REM: (f32, f32) = (1.0, 4.0);
 const OPTIONAL_HEIGHT_REM: (f32, f32) = (0.0, 4.0);
 const MENU_WIDTH_PX: (u32, u32) = (160, 480);
 const PANEL_WIDTH_PX: (u32, u32) = (240, 720);
-/// Docked agent panel, in CSS pixels. Narrower than this clips the composer.
-pub const AGENT_PANEL_WIDTH_PX: (u32, u32) = (280, 720);
+/// Docked side column, in CSS pixels. The agent panel stays at most 720 wide when it is open.
+/// The automations panel may use a larger saved width; the window still caps it at half the page.
+pub const AGENT_PANEL_WIDTH_PX: (u32, u32) = (280, 8192);
 pub const AGENT_PANEL_DEFAULT_WIDTH: u32 = 380;
 /// Height of the bookmark editor's place list, in rem.
 const LIST_HEIGHT_REM: (f32, f32) = (8.0, 36.0);
@@ -972,7 +973,26 @@ impl AdblockSettings {
 
 const PRINT_MODES: &[&str] = &["article", "full"];
 const IMAGE_SIZES: &[&str] = &["original", "large", "medium", "small", "none"];
-const PRINT_FONTS: &[&str] = &["original", "serif", "sans"];
+const PRINT_FONTS: &[&str] = &[
+    "original",
+    "serif",
+    "georgia",
+    "cambria",
+    "constantia",
+    "palatino",
+    "times",
+    "sans",
+    "segoe",
+    "calibri",
+    "aptos",
+    "arial",
+    "verdana",
+    "candara",
+    "trebuchet",
+    "consolas",
+    "cascadia",
+    "courier",
+];
 const PAPER_SIZES: &[&str] = &[
     "letter",
     "legal",
@@ -1029,6 +1049,12 @@ pub struct PrintPreset {
     /// Title, source URL and date above the content.
     pub show_header: bool,
     pub paper: String,
+    /// Custom page width in inches when `paper` is `custom`. `0` means it is not set.
+    #[serde(default = "preset_size_missing")]
+    pub custom_width: f64,
+    /// Custom page height in inches when `paper` is `custom`. `0` means it is not set.
+    #[serde(default = "preset_size_missing")]
+    pub custom_height: f64,
     pub landscape: bool,
     pub margins: String,
     pub header_footer: bool,
@@ -1052,6 +1078,8 @@ impl Default for PrintPreset {
             font: "original".into(),
             show_header: true,
             paper: "letter".into(),
+            custom_width: 0.0,
+            custom_height: 0.0,
             landscape: false,
             margins: "normal".into(),
             header_footer: false,
@@ -1169,7 +1197,7 @@ impl PrintEditorSettings {
         self.paper_choices = paper_choices(self.paper_choices);
         self.custom_width = paper_inches(self.custom_width);
         self.custom_height = paper_inches(self.custom_height);
-        self.presets = print_presets(self.presets);
+        self.presets = print_presets(self.presets, self.custom_width, self.custom_height);
         self
     }
 }
@@ -1181,9 +1209,9 @@ fn snap_text_size(value: u32) -> u32 {
 fn preset_id_ok(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
-        && id
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_')
+        && id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
 }
 
 fn preset_name(name: &str) -> String {
@@ -1195,8 +1223,18 @@ fn preset_name(name: &str) -> String {
     }
 }
 
+/// Older files omit a preset's size. `0` is a size the user cleared.
+fn preset_size_missing() -> f64 {
+    -1.0
+}
+
 /// Drops blank and duplicate ids. An empty list stays empty.
-fn print_presets(presets: Vec<PrintPreset>) -> Vec<PrintPreset> {
+/// A custom recipe saved before presets had their own size keeps the editor's custom size.
+fn print_presets(
+    presets: Vec<PrintPreset>,
+    fallback_width: f64,
+    fallback_height: f64,
+) -> Vec<PrintPreset> {
     let mut kept = Vec::new();
     for mut preset in presets {
         if !preset_id_ok(&preset.id) || kept.iter().any(|item: &PrintPreset| item.id == preset.id) {
@@ -1215,6 +1253,13 @@ fn print_presets(presets: Vec<PrintPreset>) -> Vec<PrintPreset> {
         keep(&mut preset.margins, MARGINS, &defaults.margins);
         preset.name = preset_name(&preset.name);
         preset.text_size = snap_text_size(preset.text_size);
+        let size_missing = preset.custom_width < 0.0 && preset.custom_height < 0.0;
+        preset.custom_width = paper_inches(preset.custom_width);
+        preset.custom_height = paper_inches(preset.custom_height);
+        if preset.paper == "custom" && size_missing {
+            preset.custom_width = fallback_width;
+            preset.custom_height = fallback_height;
+        }
         kept.push(preset);
         if kept.len() >= MAX_PRINT_PRESETS {
             break;
@@ -2736,6 +2781,31 @@ mod tests {
         assert_eq!(presets[1].id, "notes");
         assert_eq!(presets[1].name, "Preset");
         assert_eq!(presets[1].font, "original");
+        assert_eq!(presets[0].custom_width, 0.0);
+        assert_eq!(presets[0].custom_height, 0.0);
+    }
+
+    #[test]
+    fn a_preset_keeps_its_own_custom_page_size() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"printEditor":{"customWidth":8.5,"customHeight":11,"presets":[
+                {"id":"card","name":"Card","paper":"custom","customWidth":4,"customHeight":6},
+                {"id":"old","name":"Old","paper":"custom"},
+                {"id":"cleared","name":"Cleared","paper":"custom","customWidth":0,"customHeight":0},
+                {"id":"bad","name":"Bad","paper":"custom","customWidth":80,"customHeight":2}
+            ]}}"#,
+        )
+        .expect("settings parse");
+        let presets = loaded.normalize().print_editor.presets;
+        assert_eq!(presets[0].paper, "custom");
+        assert_eq!(presets[0].custom_width, 4.0);
+        assert_eq!(presets[0].custom_height, 6.0);
+        assert_eq!(presets[1].custom_width, 8.5);
+        assert_eq!(presets[1].custom_height, 11.0);
+        assert_eq!(presets[2].custom_width, 0.0);
+        assert_eq!(presets[2].custom_height, 0.0);
+        assert_eq!(presets[3].custom_width, 0.0);
+        assert_eq!(presets[3].custom_height, 2.0);
     }
 
     #[test]
@@ -2970,7 +3040,7 @@ mod tests {
         assert_eq!(narrow.normalize().agent_panel_width, 280);
         let wide: super::BrowserSettings =
             serde_json::from_str(r#"{"agentPanelWidth":9000}"#).expect("settings parse");
-        assert_eq!(wide.normalize().agent_panel_width, 720);
+        assert_eq!(wide.normalize().agent_panel_width, 8192);
     }
 
     #[test]
@@ -3008,7 +3078,12 @@ mod tests {
         assert!(!saved.ai_blocked("https://example.com"));
         let guard = saved.automation_with_blocks();
         assert!(guard.blocked_sites.iter().any(|site| site == "bank.com"));
-        assert!(guard.blocked_sites.iter().any(|site| site == "shop.example"));
+        assert!(
+            guard
+                .blocked_sites
+                .iter()
+                .any(|site| site == "shop.example")
+        );
     }
 
     #[test]

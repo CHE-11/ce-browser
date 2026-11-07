@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { Circle, ExternalLink, Pause, Play, Square, Workflow } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { Circle, ExternalLink, Plus, Square, Workflow } from "lucide-react";
 import type { Flow, FlowRun, FlowStep, TabInfo } from "@type/browser";
 import { Button } from "@/components/Button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -22,13 +22,17 @@ import {
 } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { focusRow } from "@/lib/focus-ring";
+import { NEW_FLOW } from "@/lib/use-automations-route";
 import { useAppearanceState, useAutomations, useSettings, useTabs } from "@/lib/use-browser";
 import { AutomationsPanelHeader, type AutomationsPanelView } from "./AutomationsPanelHeader";
 import { FlowContextMenu, type FlowAction } from "./FlowContextMenu";
-import { statusDot, stepKindLabel, stepSummary } from "./flow-model";
+import { FlowEditor, type FlowEditorAction, type FlowEditorTab } from "./FlowEditor";
+import { blankFlow, statusDot, stepKindLabel, stepSummary } from "./flow-model";
+import { RunShotDialog, type RunShot } from "./RunShotDialog";
 
 const MIN_PANEL_WIDTH = 280;
-const MAX_PANEL_WIDTH = 720;
+/** Keyboard resize asks for this much. The window still stops the column at half the page. */
+const MAX_PANEL_WIDTH = 8192;
 const DEFAULT_PANEL_WIDTH = 380;
 
 function clampPanelWidth(width: number) {
@@ -60,8 +64,20 @@ export function AutomationsPanelPage() {
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Flow | null>(null);
+  const [draft, setDraft] = useState<Flow | null>(null);
+  const [draftSerial, setDraftSerial] = useState(0);
+  const [editorTab, setEditorTab] = useState<FlowEditorTab>("steps");
+  const [focusStep, setFocusStep] = useState<number | null>(null);
+  const [shot, setShot] = useState<RunShot | null>(null);
+  const [pendingLeave, setPendingLeave] = useState<(() => void) | null>(null);
   const seenRecording = useRef(0);
+  const dirtyRef = useRef(false);
+  const saveRef = useRef<(() => Promise<boolean>) | null>(null);
 
+  const webTabs = useMemo(
+    () => tabs.windowTabs.filter((tab) => /^(https?|file):/i.test(tab.url) && !tab.automated).sort((a, b) => b.lastActive - a.lastActive),
+    [tabs.windowTabs],
+  );
   const flows = useMemo(() => (snapshot?.flows ?? []).slice().sort((a, b) => b.updated - a.updated), [snapshot?.flows]);
   const runs = snapshot?.runs ?? [];
   const recording = snapshot?.recording ?? null;
@@ -69,7 +85,8 @@ export function AutomationsPanelPage() {
   const recordOn = pageTab(activeTab);
   const recordingTab = recording ? tabs.windowTabs.find((tab) => tab.id === recording.tabId) : undefined;
   const recordingTarget = recording?.flowId ? flows.find((flow) => flow.id === recording.flowId) : undefined;
-  const selected = selectedId ? flows.find((flow) => flow.id === selectedId) ?? null : null;
+  const selected = selectedId === NEW_FLOW ? draft : selectedId ? (flows.find((flow) => flow.id === selectedId) ?? null) : null;
+  const editorKey = selectedId === NEW_FLOW ? `draft-${draftSerial}` : (selectedId ?? "");
 
   useEffect(() => {
     document.title = recording ? `Automations · ${recording.steps.length} steps` : "Automations";
@@ -77,11 +94,43 @@ export function AutomationsPanelPage() {
 
   useEffect(() => {
     const started = recording?.started ?? 0;
-    if (started && started !== seenRecording.current) {
-      setView("recording");
+    if (!started || started === seenRecording.current) {
+      return;
     }
     seenRecording.current = started;
+    if (dirtyRef.current) {
+      setPendingLeave(() => () => setView("recording"));
+      return;
+    }
+    setView("recording");
   }, [recording?.started]);
+
+  const onDirtyChange = useCallback((dirty: boolean) => {
+    dirtyRef.current = dirty;
+  }, []);
+
+  const requestLeave = (next: () => void) => {
+    if (!dirtyRef.current) {
+      next();
+      return;
+    }
+    setPendingLeave(() => next);
+  };
+
+  const finishLeave = (next: (() => void) | null) => {
+    dirtyRef.current = false;
+    setPendingLeave(null);
+    next?.();
+  };
+
+  const leaveWithSave = () => {
+    const next = pendingLeave;
+    void saveRef.current?.().then((saved) => {
+      if (saved) {
+        finishLeave(next);
+      }
+    });
+  };
 
   const onResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || resizing.current) {
@@ -112,7 +161,26 @@ export function AutomationsPanelPage() {
 
   const fail = (reason: unknown) => setNotice(reason instanceof Error ? reason.message : String(reason));
 
-  const flowAction = (flow: Flow, action: FlowAction) => {
+  const openFlow = (id: string, tab: FlowEditorTab = "steps", step: number | null = null) => {
+    setDraft(null);
+    setEditorTab(tab);
+    setFocusStep(step);
+    setSelectedId(id);
+    setView("flows");
+  };
+
+  const newFlow = () => {
+    requestLeave(() => {
+      setDraft(blankFlow(recordOn?.url || webTabs[0]?.url || ""));
+      setDraftSerial((serial) => serial + 1);
+      setEditorTab("steps");
+      setFocusStep(null);
+      setSelectedId(NEW_FLOW);
+      setView("flows");
+    });
+  };
+
+  const flowAction = (flow: Flow, action: FlowAction | FlowEditorAction) => {
     const name = flow.name || "the flow";
     setNotice(null);
     switch (action) {
@@ -131,9 +199,8 @@ export function AutomationsPanelPage() {
       case "duplicate":
         void duplicateFlow(flow.id)
           .then((copy) => {
-            setSelectedId(copy.id);
-            setView("flows");
-            setNotice(`Made ${copy.name || "a copy"}.`);
+            openFlow(copy.id);
+            setNotice(copy.paused ? `Made ${copy.name || "a copy"}. Its triggers are paused so it doesn't run twice.` : `Made ${copy.name || "a copy"}.`);
           })
           .catch(fail);
         break;
@@ -149,6 +216,12 @@ export function AutomationsPanelPage() {
           .catch(fail);
         break;
       case "delete":
+        if (!flow.id) {
+          dirtyRef.current = false;
+          setDraft(null);
+          setSelectedId(null);
+          return;
+        }
         setDeleting(flow);
         break;
     }
@@ -170,13 +243,18 @@ export function AutomationsPanelPage() {
       .catch(fail);
   };
 
-  const record = (flowId?: string) => {
-    if (!recordOn) {
-      setNotice("Open a web page to record on.");
-      return;
+  const record = (flowId?: string, tabId?: number) => {
+    const id = tabId ?? recordOn?.id;
+    if (id === undefined) {
+      const message = "Open a web page to record on.";
+      setNotice(message);
+      return Promise.reject(new Error(message));
     }
     setNotice(null);
-    void startFlowRecording(recordOn.id, flowId).catch(fail);
+    return startFlowRecording(id, flowId).catch((reason: unknown) => {
+      fail(reason);
+      throw reason;
+    });
   };
 
   const stop = (save: boolean) => {
@@ -225,11 +303,14 @@ export function AutomationsPanelPage() {
         runCount={runs.length}
         recordedSteps={recording ? recording.steps.length : null}
         onView={(next) => {
-          setNotice(null);
-          if (next === "flows") {
-            setSelectedId(null);
-          }
-          setView(next);
+          requestLeave(() => {
+            setNotice(null);
+            if (next === "flows") {
+              setDraft(null);
+              setSelectedId(null);
+            }
+            setView(next);
+          });
         }}
       />
 
@@ -249,31 +330,50 @@ export function AutomationsPanelPage() {
       ) : view === "runs" ? (
         <RunsBody
           runs={runs}
-          onOpen={(flowId) => {
-            setSelectedId(flowId);
-            setView("flows");
-          }}
+          onOpen={(flowId) => requestLeave(() => openFlow(flowId, "runs"))}
           onStop={(id) => void stopFlowRun(id).catch(fail)}
         />
       ) : selected ? (
-        <FlowBody
+        <FlowEditor
+          key={editorKey}
           flow={selected}
-          running={runs.find((run) => run.flowId === selected.id && run.status === "running")}
-          canRecord={recordOn !== undefined && recording === null}
-          onBack={() => setSelectedId(null)}
-          onRun={() => {
-            setNotice(null);
-            void runFlow(selected.id, recordOn?.id)
-              .then(() => setNotice(`Running ${selected.name || "the flow"}.`))
-              .catch(fail);
+          flows={flows}
+          runs={runs}
+          nextRun={selected.id ? snapshot?.nextRuns?.[selected.id] : undefined}
+          schedulerPaused={snapshot?.schedulerPaused ?? ""}
+          pickTabs={webTabs}
+          focusStep={focusStep}
+          initialTab={editorTab}
+          saveRef={saveRef}
+          onDirtyChange={onDirtyChange}
+          onSaved={(saved) => {
+            dirtyRef.current = false;
+            setDraft(null);
+            setSelectedId(saved.id);
           }}
-          onRecord={() => record(selected.id)}
-          onPause={() => void setFlowPaused(selected.id, !selected.paused).catch(fail)}
-          onOpen={() => void openAutomations(`flow=${selected.id}`)}
-          onStop={(id) => void stopFlowRun(id).catch(fail)}
+          onAction={flowAction}
+          onRecordMore={(flowId, tabId) => record(flowId, tabId)}
+          onOpenFlow={(id, step) => {
+            if (id === selected.id) {
+              setEditorTab("steps");
+              setFocusStep(step ?? null);
+              return;
+            }
+            requestLeave(() => openFlow(id, step !== undefined ? "steps" : "runs", step ?? null));
+          }}
+          onOpenDataset={(id) => void openAutomations(`tab=datasets&dataset=${id}`)}
+          onShowShot={setShot}
         />
       ) : (
-        <FlowIndex flows={flows} runs={runs} query={query} onQuery={setQuery} onOpen={setSelectedId} onAction={flowAction} />
+        <FlowIndex
+          flows={flows}
+          runs={runs}
+          query={query}
+          onQuery={setQuery}
+          onOpen={(id) => openFlow(id)}
+          onNew={newFlow}
+          onAction={flowAction}
+        />
       )}
 
       <footer id="automations-panel-footer" className="flex shrink-0 flex-col gap-2 border-t border-zinc-800 p-3">
@@ -302,7 +402,7 @@ export function AutomationsPanelPage() {
             </Button>
           </div>
         ) : (
-          <Button id="automations-panel-record" size="sm" variant="outline" disabled={!recordOn} onClick={() => record()}>
+          <Button id="automations-panel-record" size="sm" variant="outline" disabled={!recordOn} onClick={() => void record()}>
             <Circle id="automations-panel-record-icon" className="size-3 fill-red-500 text-red-500" aria-hidden />
             {recordOn ? `Record on ${recordOn.title || "this page"}` : "Open a web page to record"}
           </Button>
@@ -315,8 +415,23 @@ export function AutomationsPanelPage() {
         onCancel={() => setDeleting(null)}
         confirm={{ label: "Delete", variant: "destructive", onClick: confirmDelete }}
       >
-        {deleting ? `${deleting.name || "This flow"} and its steps will be removed.` : ""}
+        {deleting ? `${deleting.name || "The flow"} and its triggers are removed. Its past runs stay in History.` : null}
       </ConfirmDialog>
+      <ConfirmDialog
+        id="automations-panel-leave"
+        title="Save your changes?"
+        open={pendingLeave !== null}
+        confirm={{ label: "Save", onClick: leaveWithSave }}
+        alternative={{
+          label: "Discard",
+          variant: "destructive",
+          onClick: () => finishLeave(pendingLeave),
+        }}
+        onCancel={() => setPendingLeave(null)}
+      >
+        {selected?.id ? `${selected.name || "This flow"} has changes that aren't saved.` : "This new flow isn't saved yet."}
+      </ConfirmDialog>
+      <RunShotDialog shot={shot} onClose={() => setShot(null)} />
     </div>
   );
 }
@@ -327,6 +442,7 @@ function FlowIndex({
   query,
   onQuery,
   onOpen,
+  onNew,
   onAction,
 }: {
   flows: Flow[];
@@ -334,6 +450,7 @@ function FlowIndex({
   query: string;
   onQuery: (query: string) => void;
   onOpen: (id: string) => void;
+  onNew: () => void;
   onAction: (flow: Flow, action: FlowAction) => void;
 }) {
   const [menu, setMenu] = useState<{ flow: Flow; x: number; y: number } | null>(null);
@@ -342,15 +459,19 @@ function FlowIndex({
   const menuRunning = menu ? runs.some((run) => run.flowId === menu.flow.id && run.status === "running") : false;
   return (
     <div id="automations-panel-flows-view" className="flex min-h-0 flex-1 flex-col">
-      <div id="automations-panel-search-row" className="px-3 pt-3">
+      <div id="automations-panel-search-row" className="flex items-center gap-2 px-3 pt-3">
         <input
           id="automations-panel-search"
           value={query}
           placeholder="Search flows"
           aria-label="Search flows"
-          className="h-8 w-full rounded-md bg-zinc-900 px-2.5 text-sm text-zinc-100 ring-1 ring-zinc-800 outline-none placeholder:text-zinc-600 focus:ring-rose-500"
+          className="h-8 min-w-0 flex-1 rounded-md bg-zinc-900 px-2.5 text-sm text-zinc-100 ring-1 ring-zinc-800 outline-none placeholder:text-zinc-600 focus:ring-rose-500"
           onChange={(event) => onQuery(event.target.value)}
         />
+        <Button id="automations-panel-new" size="sm" onClick={onNew}>
+          <Plus id="automations-panel-new-icon" className="size-3.5" aria-hidden />
+          New
+        </Button>
       </div>
       <div id="automations-panel-flow-list" className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
         {shown.length === 0 ? (
@@ -406,84 +527,6 @@ function FlowIndex({
           onClose={() => setMenu(null)}
         />
       ) : null}
-    </div>
-  );
-}
-
-function FlowBody({
-  flow,
-  running,
-  canRecord,
-  onBack,
-  onRun,
-  onRecord,
-  onPause,
-  onOpen,
-  onStop,
-}: {
-  flow: Flow;
-  running: FlowRun | undefined;
-  canRecord: boolean;
-  onBack: () => void;
-  onRun: () => void;
-  onRecord: () => void;
-  onPause: () => void;
-  onOpen: () => void;
-  onStop: (id: number) => void;
-}) {
-  return (
-    <div id="automations-panel-flow" className="flex min-h-0 flex-1 flex-col">
-      <div id="automations-panel-flow-bar" className="flex items-center gap-2 px-3 pt-3">
-        <Button id="automations-panel-flow-back" size="sm" variant="ghost" onClick={onBack}>
-          Flows
-        </Button>
-        <h2 id="automations-panel-flow-name" className="min-w-0 flex-1 truncate text-sm font-semibold">
-          {flow.name || "Untitled flow"}
-        </h2>
-      </div>
-      <p id="automations-panel-flow-meta" className="truncate px-3 pt-1 text-xs text-zinc-500">
-        {flow.steps.length} {flow.steps.length === 1 ? "step" : "steps"}
-        {flow.startUrl ? ` · ${flow.startUrl}` : ""}
-      </p>
-      <div id="automations-panel-flow-actions" className="flex flex-wrap gap-2 px-3 py-3">
-        {running ? (
-          <Button id="automations-panel-flow-stop" size="sm" variant="destructiveOutline" onClick={() => onStop(running.id)}>
-            <Square id="automations-panel-flow-stop-icon" className="size-3" aria-hidden />
-            Stop
-          </Button>
-        ) : (
-          <Button id="automations-panel-flow-run" size="sm" variant="primary" onClick={onRun}>
-            <Play id="automations-panel-flow-run-icon" className="size-3.5" aria-hidden />
-            Run
-          </Button>
-        )}
-        <Button id="automations-panel-flow-record" size="sm" variant="outline" disabled={!canRecord} onClick={onRecord}>
-          <Circle id="automations-panel-flow-record-icon" className="size-3 fill-red-500 text-red-500" aria-hidden />
-          Record more
-        </Button>
-        <Button id="automations-panel-flow-pause" size="sm" variant="ghost" onClick={onPause}>
-          <Pause id="automations-panel-flow-pause-icon" className="size-3.5" aria-hidden />
-          {flow.paused ? "Resume schedule" : "Pause schedule"}
-        </Button>
-        <Button id="automations-panel-flow-edit" size="sm" variant="ghost" onClick={onOpen}>
-          <ExternalLink id="automations-panel-flow-edit-icon" className="size-3.5" aria-hidden />
-          Edit
-        </Button>
-      </div>
-      {running ? (
-        <p id="automations-panel-flow-running" className="px-3 pb-2 text-xs text-sky-400">
-          {running.currentLabel || "Starting…"}
-        </p>
-      ) : null}
-      <ol id="automations-panel-flow-steps" className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-        {flow.steps.length === 0 ? (
-          <li id="automations-panel-flow-steps-empty" className="text-sm text-zinc-500">
-            This flow has no steps yet. Record more to add some.
-          </li>
-        ) : (
-          flow.steps.map((step, index) => <StepRow key={step.id || index} id={`automations-panel-flow-step-${index}`} index={index} step={step} />)
-        )}
-      </ol>
     </div>
   );
 }

@@ -17,9 +17,7 @@ fn autonomy_text(level: &str) -> &'static str {
         "auto" => {
             "Auto: sends, posts and sites off the allow list go ahead without asking. Deletes, payments and uploads wait for the user."
         }
-        _ => {
-            "Ask: purchases, sends, deletes and uploads wait for the user's approval."
-        }
+        _ => "Ask: purchases, sends, deletes and uploads wait for the user's approval.",
     }
 }
 
@@ -36,7 +34,10 @@ fn access_text(access: &AgentAccess) -> String {
     };
     let off: Vec<&str> = [
         (!access.tabs, "other tabs"),
-        (!access.browser_data, "history, bookmarks, downloads, boards and flows"),
+        (
+            !access.browser_data,
+            "history, bookmarks, downloads, boards and flows",
+        ),
         (!access.files, "files"),
         (!access.clipboard, "the clipboard"),
         (!access.memory, "memory"),

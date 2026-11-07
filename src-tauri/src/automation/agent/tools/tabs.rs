@@ -92,7 +92,9 @@ fn open_tab(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     if background {
         return step(
             format!("Open {} in the background", clip(url.as_str(), 100)),
-            format!("Opened tab {opened} in the background. Read it with read_tab, or switch_tab to work in it."),
+            format!(
+                "Opened tab {opened} in the background. Read it with read_tab, or switch_tab to work in it."
+            ),
         );
     }
     let _ = tabs::activate(ctx.app, opened);

@@ -879,7 +879,7 @@ export type BrowserSettings = {
   toastPosition: ToastPosition;
   /** Opens these file types in a browser tab. */
   fileHandlers: FileHandler[];
-  /** Width of the docked agent panel, in CSS pixels, 280 to 720. */
+  /** Width of the docked side column, in CSS pixels. The agent panel opens no wider than 720. The automations panel may be saved wider, up to half the page. */
   agentPanelWidth: number;
   /** Prompts offered in the agent panel. */
   agentSuggestions: string[];
@@ -1089,7 +1089,25 @@ export type AdblockStats = {
 
 export type PrintMode = "article" | "full";
 export type PrintImageSize = "original" | "large" | "medium" | "small" | "none";
-export type PrintFont = "original" | "serif" | "sans";
+export type PrintFont =
+  | "original"
+  | "serif"
+  | "georgia"
+  | "cambria"
+  | "constantia"
+  | "palatino"
+  | "times"
+  | "sans"
+  | "segoe"
+  | "calibri"
+  | "aptos"
+  | "arial"
+  | "verdana"
+  | "candara"
+  | "trebuchet"
+  | "consolas"
+  | "cascadia"
+  | "courier";
 export type PaperSize =
   | "letter"
   | "legal"
@@ -1143,6 +1161,10 @@ export type PrintPreset = {
   /** Title, source URL and date above the content. */
   showHeader: boolean;
   paper: PrintPaper;
+  /** Custom page width in inches when `paper` is `custom`. `0` means it is not set. */
+  customWidth: number;
+  /** Custom page height in inches when `paper` is `custom`. `0` means it is not set. */
+  customHeight: number;
   landscape: boolean;
   margins: PrintMargins;
   /** WebView2's own header and footer on every page. */

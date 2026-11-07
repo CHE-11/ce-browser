@@ -421,8 +421,7 @@ pub fn start_with(
         .iter()
         .copied()
         .filter(|id| {
-            *id != tab
-                && tabs::tab_info(app, *id).is_some_and(|other| other.window == info.window)
+            *id != tab && tabs::tab_info(app, *id).is_some_and(|other| other.window == info.window)
         })
         .take(6)
         .collect();
@@ -507,7 +506,10 @@ pub fn continue_run(app: &AppHandle, id: u32, text: &str, tab: Option<u32>) -> R
         state.working = true;
         let earlier = std::mem::take(&mut state.run.result);
         state.follow_up = Some(if state.transcript.is_empty() && !earlier.is_empty() {
-            format!("{text}\n\n(Your earlier answer was: {})", clip(&earlier, 3000))
+            format!(
+                "{text}\n\n(Your earlier answer was: {})",
+                clip(&earlier, 3000)
+            )
         } else {
             text.to_string()
         });
@@ -910,7 +912,9 @@ fn add_step(run: &mut AgentRun, step: AgentStep) {
 }
 
 pub(super) fn push_step(app: &AppHandle, id: u32, kind: &str, text: &str, detail: &str) {
-    with_run(id, |state| add_step(&mut state.run, step(kind, text, detail)));
+    with_run(id, |state| {
+        add_step(&mut state.run, step(kind, text, detail))
+    });
     emit(app);
 }
 
@@ -1026,8 +1030,13 @@ pub(super) fn ask(
             prompt: clip(prompt, 600),
             risk: label.into(),
         });
-        let notify = (state.run.source == "agent")
-            .then(|| (state.run.background, state.run.window.clone(), state.run.goal.clone()));
+        let notify = (state.run.source == "agent").then(|| {
+            (
+                state.run.background,
+                state.run.window.clone(),
+                state.run.goal.clone(),
+            )
+        });
         (approval, notify)
     };
     emit(app);
@@ -1146,8 +1155,7 @@ pub(super) fn finish(app: &AppHandle, id: u32, status: &str, result: &str) {
             state.run.goal.clone(),
         ))
     });
-    let Some(Some((tab, source, status, result, parent, background, window, goal))) = closed
-    else {
+    let Some(Some((tab, source, status, result, parent, background, window, goal))) = closed else {
         return;
     };
     tabs::set_automated(app, tab, false);

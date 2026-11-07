@@ -165,7 +165,10 @@ fn words(text: &str) -> Vec<String> {
 
 fn score(item: &MemoryItem, query: &[String], site: &str) -> usize {
     let text = item.text.to_lowercase();
-    let hits = query.iter().filter(|word| text.contains(word.as_str())).count();
+    let hits = query
+        .iter()
+        .filter(|word| text.contains(word.as_str()))
+        .count();
     let here = !site.is_empty() && item.site == site;
     hits * 2 + usize::from(here) + usize::from(item.pinned)
 }

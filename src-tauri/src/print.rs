@@ -80,7 +80,7 @@ impl PdfOptions {
 
 /// Copies the live document into standalone HTML: no scripts, absolute URLs, lazy images
 /// resolved, and styles that only exist in the CSSOM written out as text.
-const EXTRACT_SCRIPT: &str = r##"(() => {
+const EXTRACT_SCRIPT: &str = r##"(async () => {
   const base = document.baseURI;
   const absolute = (value) => {
     try { return new URL(value, base).href; } catch { return value; }
@@ -177,6 +177,27 @@ const EXTRACT_SCRIPT: &str = r##"(() => {
     const element = document.querySelector(selector);
     return element ? (element.getAttribute("content") || "").trim() : "";
   };
+  const readBlob = async (url) => {
+    try {
+      const blob = await fetch(url).then((response) => response.blob());
+      return await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+        reader.onerror = () => resolve("");
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return "";
+    }
+  };
+  await Promise.all(Array.from(clone.querySelectorAll("[src], [poster]")).map(async (node) => {
+    for (const name of ["src", "poster"]) {
+      const value = node.getAttribute(name) || "";
+      if (!value.startsWith("blob:")) continue;
+      const data = await readBlob(value);
+      if (data) node.setAttribute(name, data);
+    }
+  }));
   return {
     title: (meta("meta[property='og:title']") || document.title || "").trim(),
     url: location.href,
@@ -237,9 +258,11 @@ pub fn print_html_to_pdf(
     html: &str,
     options: PdfOptions,
     path: &Path,
+    tab_id: Option<u32>,
 ) -> Result<(), String> {
     prepare_target(path)?;
-    let (webview, file) = open_host(app, html)?;
+    let html = crate::print_images::embed(app, html, &options.url, tab_id);
+    let (webview, file) = open_host(app, &html)?;
     let result = webview2::print_to_pdf(&webview, path, options.layout());
     let _ = webview.close();
     let _ = std::fs::remove_file(file);
@@ -249,9 +272,10 @@ pub fn print_html_to_pdf(
     result
 }
 
-pub fn print_html_dialog(app: &AppHandle, html: &str) -> Result<(), String> {
+pub fn print_html_dialog(app: &AppHandle, html: &str, tab_id: Option<u32>) -> Result<(), String> {
     close_dialog_host(app);
-    let (webview, file) = open_host(app, html)?;
+    let html = crate::print_images::embed(app, html, "", tab_id);
+    let (webview, file) = open_host(app, &html)?;
     if let Ok(mut host) = DIALOG_HOST.lock() {
         *host = Some((webview.label().to_string(), file));
     }

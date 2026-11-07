@@ -407,9 +407,12 @@ fn scheme_matches(id: u32, want: bool) -> bool {
 }
 
 /// Installs the light override before a Gmail document is parsed, and clears it for every
-/// other page. A redirect is left alone so a form post still completes. Returns true when
-/// this navigation was cancelled and will be started again once the override is in place.
+/// other page. A redirect is left alone: Gmail bounces through accounts.google.com, and
+/// flipping `prefers-color-scheme` on that hop leaves images and styles pending so the load
+/// event never arrives. Returns true when this navigation was cancelled and will be started
+/// again once the override is in place.
 fn defer_page_scheme(
+    app: &AppHandle,
     id: u32,
     core: &ICoreWebView2,
     args: &ICoreWebView2NavigationStartingEventArgs,
@@ -426,15 +429,24 @@ fn defer_page_scheme(
         return false;
     }
     let redirected = read_bool(|value| unsafe { args.IsRedirected(value) });
-    if redirected || unsafe { args.SetCancel(true) }.is_err() {
-        request_page_scheme(id, core, want, None);
+    if redirected {
         return false;
     }
-    request_page_scheme(id, core, want, Some(uri.to_string()));
+    if unsafe { args.SetCancel(true) }.is_err() {
+        request_page_scheme(app, id, core, want, None);
+        return false;
+    }
+    request_page_scheme(app, id, core, want, Some(uri.to_string()));
     true
 }
 
-fn request_page_scheme(id: u32, core: &ICoreWebView2, want: bool, resume: Option<String>) {
+fn request_page_scheme(
+    app: &AppHandle,
+    id: u32,
+    core: &ICoreWebView2,
+    want: bool,
+    resume: Option<String>,
+) {
     if let Ok(mut holds) = scheme_holds().lock() {
         holds.entry(id).or_default().pending = Some(want);
     }
@@ -443,15 +455,17 @@ fn request_page_scheme(id: u32, core: &ICoreWebView2, want: bool, resume: Option
     } else {
         r#"{"features":[]}"#
     };
-    let resume_core = resume.as_ref().map(|_| MainThread::new(core.clone()));
+    let resume_app = resume.as_ref().map(|_| app.clone());
     let resume_now = resume.clone();
     let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, _| {
         note_scheme_result(id, want, result.is_ok(), resume.is_some());
         if result.is_err() {
             eprintln!("WebView2 color scheme: {result:?}");
         }
-        if let (Some(uri), Some(core)) = (resume, resume_core) {
-            let _ = unsafe { core.into_inner().Navigate(&HSTRING::from(uri)) };
+        // Navigate after this callback returns. Calling it here re-enters
+        // NavigationStarting from inside the cancelled one, and Gmail's load never finishes.
+        if let (Some(uri), Some(app)) = (resume, resume_app) {
+            resume_scheme_navigation(&app, id, uri);
         }
         Ok(())
     }));
@@ -461,8 +475,25 @@ fn request_page_scheme(id: u32, core: &ICoreWebView2, want: bool, resume: Option
         note_scheme_result(id, want, false, resume_now.is_some());
         eprintln!("WebView2 color scheme: {error}");
         if let Some(uri) = resume_now {
-            let _ = unsafe { core.Navigate(&HSTRING::from(uri)) };
+            resume_scheme_navigation(app, id, uri);
         }
+    }
+}
+
+/// Starts `uri` again after the color-scheme call has finished, outside NavigationStarting.
+fn resume_scheme_navigation(app: &AppHandle, id: u32, uri: String) {
+    let app = app.clone();
+    let queued = app.clone().run_on_main_thread(move || {
+        let Some(webview) = tabs::page_view(&app, id) else {
+            return;
+        };
+        let Ok(url) = url::Url::parse(&uri) else {
+            return;
+        };
+        let _ = webview.navigate(url);
+    });
+    if let Err(error) = queued {
+        eprintln!("WebView2 color scheme: could not resume navigation: {error}");
     }
 }
 
@@ -2227,6 +2258,17 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
             core2.add_DOMContentLoaded(
                 &DOMContentLoadedEventHandler::create(Box::new(move |_, _| {
                     tabs::set_progress(&dom_app, id, 70);
+                    // Gmail's document is ready here, but its load event can stay pending
+                    // (splash images and a late stylesheet). Show the page instead of
+                    // leaving the tab on the spinner.
+                    let url = tabs::tab_page_url(&dom_app, id).unwrap_or_default();
+                    if !url.is_empty() {
+                        let app = dom_app.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(Duration::from_secs(3));
+                            tabs::release_settled_page(&app, id, &url);
+                        });
+                    }
                     Ok(())
                 })),
                 &mut token,
@@ -2615,7 +2657,7 @@ fn attach_adblock(
                 if let Some(args) = args {
                     let uri = read_pwstr(|value| args.Uri(value));
                     if let Some(core) = &sender
-                        && defer_page_scheme(id, core, &args, &uri)
+                        && defer_page_scheme(&navigation_app, id, core, &args, &uri)
                     {
                         return Ok(());
                     }

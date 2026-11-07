@@ -70,7 +70,9 @@ fn normalize(id: &str) -> String {
             .split('-')
             .map(|part| part.len())
             .eq([4, 2, 2])
-        && id[id.len() - 10..].chars().all(|ch| ch.is_ascii_digit() || ch == '-')
+        && id[id.len() - 10..]
+            .chars()
+            .all(|ch| ch.is_ascii_digit() || ch == '-')
     {
         id.truncate(id.len() - 11);
     }
@@ -231,7 +233,10 @@ mod tests {
     #[test]
     fn ids_meet_across_naming_styles() {
         assert_eq!(normalize("claude-sonnet-5-5-20260928"), "claude-sonnet-5-5");
-        assert_eq!(normalize("anthropic/claude-sonnet-5.5"), "anthropic/claude-sonnet-5-5");
+        assert_eq!(
+            normalize("anthropic/claude-sonnet-5.5"),
+            "anthropic/claude-sonnet-5-5"
+        );
         assert_eq!(normalize("gpt-4o-2024-08-06"), "gpt-4o");
         assert_eq!(normalize("claude-3-5-haiku-latest"), "claude-3-5-haiku");
         assert_eq!(normalize("gpt-6.1-sol"), "gpt-6-1-sol");

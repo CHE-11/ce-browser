@@ -468,14 +468,14 @@ fn parse_export(text: &str) -> Result<Flow, String> {
     if !raw.is_object() || raw.get("steps").is_none_or(|steps| !steps.is_array()) {
         return Err("That file isn't a ce-browser flow.".into());
     }
-    let flow: Flow =
-        serde_json::from_value(raw).map_err(|_| "That file isn't a ce-browser flow.".to_string())?;
+    let flow: Flow = serde_json::from_value(raw)
+        .map_err(|_| "That file isn't a ce-browser flow.".to_string())?;
     Ok(as_new(flow))
 }
 
 pub fn import(app: &AppHandle, path: &str) -> Result<Flow, String> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|error| format!("Couldn't read {path}: {error}"))?;
+    let text =
+        std::fs::read_to_string(path).map_err(|error| format!("Couldn't read {path}: {error}"))?;
     save(app, parse_export(&text)?)
 }
 
@@ -655,9 +655,10 @@ fn launch(
     if options.from_step > 0 && options.from_step >= flow.steps.len() {
         return Err("That step is no longer in the flow.".into());
     }
-    options.to_step = options
-        .to_step
-        .map(|to| to.max(options.from_step).min(flow.steps.len().saturating_sub(1)));
+    options.to_step = options.to_step.map(|to| {
+        to.max(options.from_step)
+            .min(flow.steps.len().saturating_sub(1))
+    });
     if tab.is_none() {
         options.here = false;
     }
@@ -1165,7 +1166,10 @@ fn drive(context: &mut Context) -> &'static str {
         };
         let shot = result.is_err()
             && !stopped(context.run)
-            && result.as_ref().err().is_none_or(|error| error != "Stopped.")
+            && result
+                .as_ref()
+                .err()
+                .is_none_or(|error| error != "Stopped.")
             && save_shot(context.app, context.run, index, context.tab);
         record(
             context.app,
@@ -1830,7 +1834,10 @@ mod tests {
         assert_eq!(removed.len(), 5);
         assert!(removed.iter().all(|run| run.flow_id == "a" && run.id <= 5));
         assert!(runs.iter().any(|run| run.id == 100));
-        assert_eq!(runs.iter().filter(|run| run.flow_id == "a").count(), MAX_FLOW_RUNS + 1);
+        assert_eq!(
+            runs.iter().filter(|run| run.flow_id == "a").count(),
+            MAX_FLOW_RUNS + 1
+        );
 
         let mut many: Vec<FlowRun> = (1..=400)
             .map(|id| run(id, &format!("f{id}"), "failed"))

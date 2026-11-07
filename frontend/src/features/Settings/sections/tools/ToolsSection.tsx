@@ -3,8 +3,8 @@ import { AdBlockSection } from "./AdBlockSection";
 import { AiSection } from "./AiSection";
 import { AutomationSection, McpSection } from "./AutomationSection";
 import { ShoppingSection } from "./ShoppingSection";
-import { PrintSection } from "./PrintSection";
 import { TranslateSection } from "./TranslateSection";
+import { PrintToPDfSsection } from "./PrintToPDfSsection";
 
 export function ToolsSection(props: SettingsSectionProps) {
   return (
@@ -15,7 +15,7 @@ export function ToolsSection(props: SettingsSectionProps) {
       <McpSection {...props} />
       <ShoppingSection {...props} />
       <TranslateSection {...props} />
-      <PrintSection {...props} />
+      <PrintToPDfSsection {...props} />
     </div>
   );
 }

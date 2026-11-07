@@ -1,9 +1,9 @@
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
-import { extractPage, savePrintSettings, defaultDownloadDir, chooseSavePath, printHtmlToPdf, openSavedFile, printHtmlDialog, showSavedFile } from "@/lib/browser-client";
+import { extractPage, embedPrintImages, savePrintSettings, defaultDownloadDir, chooseSavePath, printHtmlToPdf, openSavedFile, printHtmlDialog, showSavedFile } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { useSettings } from "@/lib/use-browser";
-import { ExtractedPage, PrintEditorSettings, PaperSize, PrintPaper } from "@type/browser";
+import { ExtractedPage, PrintEditorSettings, PaperSize, PrintFont, PrintPaper } from "@type/browser";
 import { CircleAlert, RotateCcw, LoaderCircle, Printer, Undo2, Redo2, ArrowUpToLine, Trash2, Copy, X, PencilLine, MousePointerClick, FileDown, FileCheck, FolderOpen } from "lucide-react";
 import { useState, useRef, useEffect, useMemo, useCallback, ReactNode } from "react";
 import { Segmented, OptionRow } from "../PopoverParts";
@@ -12,7 +12,7 @@ import { errorText } from "../use-page-tool";
 import { CleanupKind } from "./cleanup";
 import { FrameEditor } from "./editor-dom";
 import { ContentState, BuiltDocument, contentStateFrom, parsePage, buildDocument, FORMAT_STYLE_ID, formatCss, serializeForPrint, finalizeRendered } from "./print-document";
-import { DEFAULT_PRINT_SETTINGS, contentBox, pdfOptions, MODE_OPTIONS, FONT_OPTIONS, IMAGE_OPTIONS, PAPER_GROUPS, PAPER_SIZES, paperOptionLabel, visiblePapers, MARGIN_OPTIONS } from "./print-options";
+import { DEFAULT_PRINT_SETTINGS, contentBox, pdfOptions, MODE_OPTIONS, FONT_GROUPS, FONT_OPTIONS, IMAGE_OPTIONS, PAPER_GROUPS, PAPER_SIZES, paperOptionLabel, visiblePapers, MARGIN_OPTIONS } from "./print-options";
 
 
 type PrintEditorProps = {
@@ -52,10 +52,11 @@ function editingField(target: EventTarget | null) {
   return !!element && (element.isContentEditable || ["INPUT", "SELECT", "TEXTAREA"].includes(element.tagName));
 }
 
-export function PrintEditor({ tabId }: PrintEditorProps) {
+export function PrintToPDFEditor({ tabId }: PrintEditorProps) {
   const settings = useSettings();
   const [page, setPage] = useState<ExtractedPage | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadLabel, setLoadLabel] = useState("Reading the page…");
   const [attempt, setAttempt] = useState(0);
   const [format, setFormat] = useState<PrintEditorSettings | null>(null);
   const [history, setHistory] = useState<History | null>(null);
@@ -88,10 +89,21 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
     let cancelled = false;
     setLoadError(null);
     setPage(null);
+    setLoadLabel("Reading the page…");
     extractPage(tabId)
-      .then((next) => {
+      .then(async (next) => {
+        if (cancelled) {
+          return;
+        }
+        setLoadLabel("Embedding images…");
+        let html = next.html;
+        try {
+          html = await embedPrintImages(next.html, next.url, tabId);
+        } catch {
+          html = next.html;
+        }
         if (!cancelled) {
-          setPage(next);
+          setPage({ ...next, html });
         }
       })
       .catch((error: unknown) => {
@@ -322,7 +334,7 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
     setBusy("pdf");
     setNotice(null);
     try {
-      await printHtmlToPdf(html, pdfOptions(format, page.title, page.url), path);
+      await printHtmlToPdf(html, pdfOptions(format, page.title, page.url), path, tabId);
       setNotice({ kind: "saved", path });
       if (format.openAfterSave) {
         void openSavedFile(path).catch(() => undefined);
@@ -345,7 +357,7 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
     setBusy("print");
     setNotice(null);
     try {
-      await printHtmlDialog(html);
+      await printHtmlDialog(html, tabId);
     } catch (error) {
       setNotice({ kind: "error", text: errorText(error) });
     } finally {
@@ -454,7 +466,7 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
       <main id="print-editor" className="flex h-screen items-center justify-center bg-zinc-950 text-zinc-400">
         <div id="print-editor-loading" className="flex items-center gap-3 text-sm">
           <LoaderCircle id="print-editor-loading-icon" className="size-5 animate-spin text-sky-400" aria-hidden />
-          Reading the page…
+          <span id="print-editor-loading-text">{loadLabel}</span>
         </div>
       </main>
     );
@@ -666,13 +678,23 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
               />
             </label>
             <FieldLabel id="print-editor-font-label">Font</FieldLabel>
-            <Segmented
+            <select
               id="print-editor-font"
-              label="Font"
+              aria-label="Font"
               value={format.font}
-              options={FONT_OPTIONS}
-              onChange={(font) => updateFormat({ font })}
-            />
+              className="h-8 w-full rounded-md border border-zinc-700 bg-zinc-800 px-2 text-sm text-zinc-100 outline-none focus:border-sky-500"
+              onChange={(event) => updateFormat({ font: event.target.value as PrintFont })}
+            >
+              {FONT_GROUPS.map((group) => (
+                <optgroup id={`print-editor-font-${group.id}`} key={group.id} label={group.label}>
+                  {FONT_OPTIONS.filter((option) => option.group === group.id).map((option) => (
+                    <option id={`print-editor-font-${option.value}`} key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
           </SidebarSection>
 
           <SidebarSection id="print-editor-images" title="Images and color">

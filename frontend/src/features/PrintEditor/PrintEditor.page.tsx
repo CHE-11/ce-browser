@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { PrintEditor } from "@features/BuiltInExtensions/print-pdf/PrintEditor";
+import { PrintToPDFEditor } from "@/features/BuiltInExtensions/print-pdf/PrintToPDFEditor";
 
 type PrintEditorPageProps = {
   params: URLSearchParams;
@@ -10,5 +10,5 @@ export function PrintEditorPage({ params }: PrintEditorPageProps) {
     document.title = "Print to PDF";
   }, []);
 
-  return <PrintEditor tabId={Number(params.get("tab"))} />;
+  return <PrintToPDFEditor tabId={Number(params.get("tab"))} />;
 }

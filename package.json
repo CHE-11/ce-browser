@@ -1,10 +1,11 @@
 {
   "name": "ce-browser",
   "private": true,
-  "version": "0.1.61",
+  "version": "0.1.62",
   "scripts": {
     "dev": "pnpm --dir frontend dev",
     "build": "pnpm --dir frontend build",
+    "ts:check": "pnpm --dir frontend tsc --noEmit",
     "version:bump": "node scripts/bump-version.mjs",
     "build:exe": "node scripts/build-exe.mjs",
     "publish:exe": "node scripts/publish-exe.mjs",

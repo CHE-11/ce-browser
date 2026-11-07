@@ -81,11 +81,11 @@ export function FlowEditorHeader({
   };
 
   return (
-    <header id="flow-editor-header" className="sticky top-0 z-10 flex flex-col gap-1 border-b border-zinc-800 bg-zinc-950/95 px-6 pt-3 pb-2 backdrop-blur">
-      <div id="flow-editor-header-row" className="flex items-center gap-2">
+    <header id="flow-editor-header" className="sticky top-0 z-10 flex flex-col gap-1 border-b border-zinc-800 bg-zinc-950/95 px-3 pt-3 pb-2 backdrop-blur">
+      <div id="flow-editor-header-row" className="flex flex-wrap items-center gap-2">
         <input
           id="flow-editor-name"
-          className="min-w-0 flex-1 bg-transparent text-lg font-semibold text-zinc-100 outline-none placeholder:text-zinc-600"
+          className="min-w-0 flex-1 basis-32 bg-transparent text-lg font-semibold text-zinc-100 outline-none placeholder:text-zinc-600"
           value={flow.name}
           placeholder="Untitled flow"
           onChange={(event) => onNameChange(event.target.value)}
@@ -93,7 +93,7 @@ export function FlowEditorHeader({
         />
         <select
           id="flow-editor-run-tab"
-          className={cn(inputClassName, "w-48")}
+          className={cn(inputClassName, "min-w-0 w-auto flex-1 basis-40")}
           value={runTab}
           onChange={(event) => onRunTabChange(event.target.value === "own" ? "own" : Number(event.target.value))}
           aria-label="Where to run"

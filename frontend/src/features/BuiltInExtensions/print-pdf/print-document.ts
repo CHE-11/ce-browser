@@ -1,5 +1,6 @@
 import { ExtractedPage, PrintEditorSettings, PrintMode } from "@type/browser";
 import { type CleanupKind, type CleanupStats, extractArticle, removeClutter } from "./cleanup";
+import { printFontStack } from "./print-options";
 
 /** Every element of the source page gets a stable id, so edits survive a rebuild. */
 export const ID_ATTR = "data-ce-id";
@@ -243,13 +244,10 @@ export function formatCss(settings: PrintEditorSettings, mode: PrintMode) {
       "a, a * { color: #0b57d0 !important; }",
     );
   }
-  if (settings.font === "serif") {
+  const stack = printFontStack(settings.font);
+  if (stack) {
     rules.push(
-      "body, body *:not(pre):not(code):not(kbd):not(samp) { font-family: Georgia, Cambria, 'Times New Roman', serif !important; }",
-    );
-  } else if (settings.font === "sans") {
-    rules.push(
-      "body, body *:not(pre):not(code):not(kbd):not(samp) { font-family: system-ui, 'Segoe UI', Roboto, Arial, sans-serif !important; }",
+      `body, body *:not(pre):not(code):not(kbd):not(samp) { font-family: ${stack} !important; }`,
     );
   }
   return rules.join("\n");
