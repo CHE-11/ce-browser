@@ -7,7 +7,6 @@ import {
   closeSubmenus,
   closeThisPopup,
   createTab,
-  navigate,
   openFolderAsGroup,
   openPopup,
 } from "@/lib/browser-client";
@@ -19,6 +18,7 @@ import { faviconKey } from "@/lib/format";
 import { usePopupHost } from "@/lib/popup-host";
 import { useBookmarksState, useTabs, findFolder, useSiteFavicons, useSettingsState } from "@/lib/use-browser";
 import { BookmarkNode } from "@type/browser";
+import { openBookmarkLink } from "./BookmarksBar";
 import type { BookmarkMenuTarget } from "./BookmarksBarContextMenu";
 
 type BookmarkFolderMenuProps = {
@@ -66,7 +66,8 @@ export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFol
     { text: BOOKMARK_SIZE.folderText, padding: BOOKMARK_SIZE.folderPadding },
     { icon: metric(settings?.bookmarkFolderIconSize, CHROME.bookmarkFolderIconSize) },
   );
-  const { activeId } = useTabs();
+  const { activeId, tabs } = useTabs();
+  const activePinned = tabs.some((tab) => tab.id === activeId && tab.pinned);
   const host = usePopupHost();
   const level = host?.level ?? 0;
   const folder = findFolder(tree, folderId);
@@ -173,11 +174,7 @@ export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFol
       return;
     }
     const background = event.ctrlKey || event.button === 1;
-    if (background || activeId === null) {
-      void createTab(url, background);
-    } else {
-      void navigate(activeId, url);
-    }
+    openBookmarkLink(url, activeId, event, activePinned);
     if (!background) {
       void closePopup();
     }

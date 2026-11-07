@@ -772,6 +772,12 @@ const COPY_PARTS: &[PartSpec] = &[
         ..bare("passwords")
     },
     PartSpec {
+        files: &["automations.json"],
+        dirs: &["datasets"],
+        settings: &["automation"],
+        ..bare("automation")
+    },
+    PartSpec {
         settings: &["printEditor", "pageCapture", "pageMarkdown"],
         ..bare("print")
     },

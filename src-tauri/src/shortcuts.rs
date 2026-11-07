@@ -50,6 +50,11 @@ pub enum Action {
     TabSwitcher(isize),
     /// The first half of a two-key shortcut. The key is swallowed.
     ChordWait,
+    AgentPanel,
+    /// Starts recording a flow in the active tab, or stops and saves the recording.
+    RecordFlow,
+    /// Runs the flow bound to this hotkey slot, 1 to 9.
+    Flow(usize),
 }
 
 const VK_TAB: u32 = 0x09;
@@ -226,6 +231,15 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             None => Ok(()),
         },
         Action::ChordWait => Ok(()),
+        Action::AgentPanel => crate::automation::panel::toggle(app, &window, None).map(|_| ()),
+        Action::RecordFlow => match active {
+            Some(id) => crate::automation::recorder::toggle(app, id),
+            None => Ok(()),
+        },
+        Action::Flow(slot) => {
+            crate::automation::scheduler::hotkey(app, slot);
+            Ok(())
+        }
     }
 }
 
@@ -262,6 +276,9 @@ fn category_of(action: &str) -> &'static str {
     }
     if action.starts_with("workspace-") {
         return "Workspaces";
+    }
+    if action.starts_with("flow-") || action == "agent-panel" || action == "record-flow" {
+        return "Automation";
     }
     match action {
         "new-tab" | "new-window" | "close-tab" | "close-f4" | "reopen-tab" | "next-tab"
@@ -525,6 +542,13 @@ fn action_from(action: &str) -> Option<Action> {
     if let Some(rest) = action.strip_prefix("workspace-") {
         return rest.parse().ok().map(Action::Workspace);
     }
+    if let Some(rest) = action.strip_prefix("flow-") {
+        return rest
+            .parse()
+            .ok()
+            .filter(|slot| (1..=9).contains(slot))
+            .map(Action::Flow);
+    }
     Some(match action {
         "new-tab" | "new-window" => Action::NewTab,
         "close-tab" | "close-f4" => Action::CloseTab,
@@ -552,6 +576,8 @@ fn action_from(action: &str) -> Option<Action> {
         "sleep-other-tabs" => Action::SleepOtherTabs,
         "tab-switcher" => Action::TabSwitcher(1),
         "tab-switcher-back" => Action::TabSwitcher(-1),
+        "agent-panel" => Action::AgentPanel,
+        "record-flow" => Action::RecordFlow,
         _ => return None,
     })
 }
@@ -630,6 +656,15 @@ pub fn defaults() -> Vec<ShortcutBinding> {
             &format!("workspace-{index}"),
             &format!("Workspace {}", index + 1),
             &format!("ctrl+alt+{}", index + 1),
+        ));
+    }
+    rows.push(bind("agent-panel", "Agent panel", "ctrl+shift+y"));
+    rows.push(bind("record-flow", "Record a flow, or stop recording", ""));
+    for slot in 1..=9 {
+        rows.push(bind(
+            &format!("flow-{slot}"),
+            &format!("Run hotkey flow {slot}"),
+            "",
         ));
     }
     rows

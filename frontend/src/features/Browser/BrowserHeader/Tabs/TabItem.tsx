@@ -1,5 +1,5 @@
 import type { DragEvent, MouseEvent } from "react";
-import { Glasses, Moon, TriangleAlert, Volume2, VolumeX, X } from "lucide-react";
+import { Bot, Glasses, Moon, TriangleAlert, Volume2, VolumeX, X } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
 import { setTabsMuted, selectTabRange, toggleTabSelection, activateTab } from "@/lib/browser-client";
 import { accentTint } from "@/lib/accent";
@@ -130,7 +130,7 @@ export function TabItem({
       id={domId}
       role="tab"
       aria-selected={selected}
-      aria-label={`${tab.title || tab.url}${tab.sleeping ? ", asleep" : ""}${tab.audible ? ", playing sound" : ""}${alert ? `, ${alert}` : ""}`}
+      aria-label={`${tab.title || tab.url}${tab.sleeping ? ", asleep" : ""}${tab.audible ? ", playing sound" : ""}${tab.automated ? ", automated" : ""}${alert ? `, ${alert}` : ""}`}
       title={!hoverPreview && alert ? alert : undefined}
       draggable
       tabIndex={0}
@@ -272,6 +272,9 @@ export function TabItem({
           ) : null}
           {tab.changed ? (
             <span id={`${domId}-changed`} className="size-2 shrink-0 rounded-full bg-sky-400" title="This page changed" />
+          ) : null}
+          {tab.automated ? (
+            <Bot id={`${domId}-automated`} className="size-3 shrink-0 animate-pulse text-sky-400" aria-label="Automation is driving this tab" />
           ) : null}
           {tab.sleeping ? <Moon id={`${domId}-sleeping`} className="size-3 shrink-0 text-zinc-500" aria-label="Sleeping" /> : null}
           {audioButton}

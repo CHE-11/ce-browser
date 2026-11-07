@@ -648,6 +648,96 @@ pub struct BrowserSettings {
     /// Pages that open files of each type inside the browser. Missing means the PDF editor.
     #[serde(default = "default_file_handlers")]
     pub file_handlers: Vec<FileHandler>,
+    /// Agent, recorded flows, schedules and the MCP server. An older file omits this.
+    #[serde(default)]
+    pub automation: AutomationSettings,
+}
+
+pub const DEFAULT_MCP_PORT: u16 = 17345;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AutomationSettings {
+    pub enabled: bool,
+    /// Model for the agent. Blank uses the AI provider's model.
+    pub agent_model: String,
+    /// Actions one agent run may take before it stops.
+    pub max_steps: u32,
+    /// Ask before purchases, sends, deletes, uploads and similar actions.
+    pub confirm_sensitive: bool,
+    /// When not empty, automation may only act on these hosts without asking.
+    pub allowed_sites: Vec<String>,
+    /// Hosts automation never touches.
+    pub blocked_sites: Vec<String>,
+    /// Send a screenshot with each step. Off sends the text snapshot only.
+    pub screenshots_to_model: bool,
+    pub mcp_enabled: bool,
+    pub mcp_port: u16,
+    /// MCP clients may read pages but not click, type or navigate.
+    pub mcp_read_only: bool,
+    /// MCP clients may run scripts in pages.
+    pub mcp_allow_evaluate: bool,
+    /// Scheduled flows and monitors run.
+    pub scheduler_enabled: bool,
+    /// Scheduled runs wait while the PC is on battery.
+    pub pause_on_battery: bool,
+}
+
+impl Default for AutomationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            agent_model: String::new(),
+            max_steps: 30,
+            confirm_sensitive: true,
+            allowed_sites: Vec::new(),
+            blocked_sites: Vec::new(),
+            screenshots_to_model: true,
+            mcp_enabled: false,
+            mcp_port: DEFAULT_MCP_PORT,
+            mcp_read_only: false,
+            mcp_allow_evaluate: false,
+            scheduler_enabled: true,
+            pause_on_battery: true,
+        }
+    }
+}
+
+impl AutomationSettings {
+    fn normalize(mut self) -> Self {
+        self.agent_model = self.agent_model.trim().chars().take(120).collect();
+        self.max_steps = self.max_steps.clamp(5, 200);
+        if self.mcp_port < 1024 {
+            self.mcp_port = DEFAULT_MCP_PORT;
+        }
+        self.allowed_sites = automation_hosts(&self.allowed_sites);
+        self.blocked_sites = automation_hosts(&self.blocked_sites);
+        self
+    }
+}
+
+fn automation_hosts(list: &[String]) -> Vec<String> {
+    let mut sites: Vec<String> = Vec::new();
+    for raw in list {
+        let host = sleep_site_key(raw);
+        let host = if host.is_empty() {
+            crate::adblock::site_key(raw.trim())
+        } else {
+            host
+        };
+        if host.is_empty()
+            || host.len() > 253
+            || host.chars().any(char::is_whitespace)
+            || sites.contains(&host)
+        {
+            continue;
+        }
+        sites.push(host);
+        if sites.len() >= 500 {
+            break;
+        }
+    }
+    sites
 }
 
 const TAB_LAYOUTS: &[&str] = &["horizontal", "vertical"];
@@ -1136,6 +1226,7 @@ impl Default for BrowserSettings {
             last_seen_version: String::new(),
             toast_position: default_toast_position(),
             file_handlers: default_file_handlers(),
+            automation: AutomationSettings::default(),
         }
     }
 }
@@ -1444,6 +1535,7 @@ impl BrowserSettings {
             self.summon_hotkey = default_hotkey();
         }
         self.adblock = self.adblock.normalize();
+        self.automation = self.automation.normalize();
         if !TAB_LAYOUTS.contains(&self.tab_layout.as_str()) {
             self.tab_layout = defaults.tab_layout.clone();
         }

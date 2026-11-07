@@ -16,6 +16,8 @@ import {
   searchHistory,
   sendUiCommand,
   sleepOtherTabs,
+  startFlowRecording,
+  toggleAgentPanel,
   switchWorkspace,
   zoomTab,
 } from "@/lib/browser-client";
@@ -158,6 +160,8 @@ export function CommandPalette() {
       { id: "rewrites", title: "Request rules", hint: "ce://rewrites", group: "Action", run: () => createTab("ce://rewrites") },
       { id: "storage", title: "Site storage", hint: "ce://storage", group: "Action", run: () => createTab("ce://storage") },
       { id: "find", title: "Find in page", hint: "Ctrl+F", group: "Action", run: () => sendUiCommand("find") },
+      { id: "agent-panel", title: "Agent", hint: "Ctrl+Shift+Y", group: "Action", keywords: "ai automate browser task", run: () => toggleAgentPanel(true) },
+      { id: "automations", title: "Automations", hint: "ce://automations", group: "Action", keywords: "flows macros schedule datasets rpa", run: () => createTab("ce://automations") },
       {
         id: "vertical",
         title: settings?.tabLayout === "vertical" ? "Horizontal tabs" : "Vertical tabs",
@@ -178,6 +182,7 @@ export function CommandPalette() {
         { id: "zoom-out", title: "Zoom out", hint: "Ctrl+-", group: "Action", run: () => zoomTab(active.id, "out") },
         { id: "zoom-reset", title: "Reset zoom", hint: "Ctrl+0", group: "Action", run: () => zoomTab(active.id, "reset") },
         { id: "sleep-others", title: "Sleep other tabs", hint: "Free memory", group: "Action", keywords: "suspend", run: () => sleepOtherTabs(active.id) },
+        { id: "record-flow", title: "Record a flow", hint: "This tab", group: "Action", keywords: "macro automation rpa", run: () => startFlowRecording(active.id) },
       );
     }
     const tabs: Hit[] = snapshot.windowTabs.map((tab) => {

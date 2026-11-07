@@ -14,6 +14,8 @@ export const SETTINGS_SECTIONS = [
   { id: "settings-update", title: "Update" },
   { id: "settings-adblock", title: "Ad blocker" },
   { id: "settings-ai", title: "AI" },
+  { id: "settings-automation", title: "Automation" },
+  { id: "settings-mcp", title: "MCP server" },
   { id: "settings-shopping", title: "Shopping" },
   { id: "settings-translate", title: "Translate" },
   { id: "settings-print", title: "Print to PDF" },

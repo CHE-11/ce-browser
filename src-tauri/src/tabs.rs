@@ -101,6 +101,8 @@ pub struct TabInfo {
     pub failure: Option<TabFailure>,
     /// Bytes the page used just before it went to sleep. Zero while awake or when unknown.
     pub sleep_saved: u64,
+    /// An automation run is driving this page. Not written into the session.
+    pub automated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -202,6 +204,8 @@ pub struct WindowTabs {
     pub peek_url: Option<String>,
     /// Set while the page view is a fixed CSS size. Empty uses the whole page area.
     pub viewport: Option<PageViewport>,
+    /// The agent panel is docked beside the pages.
+    pub agent_panel: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -397,6 +401,8 @@ struct WindowChrome {
     ui_right: f64,
     /// Height of the status bar. Zero when it is hidden.
     ui_bottom: f64,
+    /// Width of the docked agent panel in CSS pixels. Zero when it is closed.
+    agent_panel: f64,
     fullscreen: bool,
     /// Toast view drawn over the bottom of the pages. Menus open and close without touching it.
     toast: Option<String>,
@@ -430,6 +436,7 @@ impl WindowChrome {
             ui_left: 0.0,
             ui_right: 0.0,
             ui_bottom: 0.0,
+            agent_panel: 0.0,
             fullscreen: false,
             toast: None,
             shown: Vec::new(),
@@ -773,6 +780,7 @@ impl TabsState {
                         cutout: chrome.viewport_cutout,
                         home_bar: chrome.viewport_home,
                     }),
+                    agent_panel: chrome.agent_panel > 0.0,
                 })
                 .collect(),
             groups: self.groups.clone(),
@@ -1243,6 +1251,7 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                     progress: 0,
                     failure: None,
                     sleep_saved: 0,
+                    automated: false,
                 },
                 pending_url: Some(tab.url.clone()),
                 webview: None,
@@ -3007,6 +3016,7 @@ fn remember_visit(app: &AppHandle, id: u32) {
     };
     history::visit(app, &url, &title);
     crate::history_index::queue(app, id, &url);
+    crate::automation::scheduler::on_visit(app, id, &url);
 }
 
 pub fn update_favicon(app: &AppHandle, id: u32, favicon: Option<String>) {
@@ -3355,6 +3365,7 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
             let _ = webview.set_position(parked_position());
         }
     }
+    place_agent_panel(app, window, position, page_size, scale);
     apply_audio(app, window);
     if !wake.is_empty() || dock_clamped {
         emit_tabs(app);
@@ -3486,6 +3497,7 @@ pub fn close_many(
 
 /// Closes one tab without adding it to the recently closed list. Returns what to remember.
 fn close_tab_inner(app: &AppHandle, id: u32) -> Result<Option<ClosedTab>, String> {
+    crate::automation::tab_closed(app, id);
     let plan = with_state(app, |state| {
         let window = state.tab_window(id)?;
         let resident = state.resident_bookmarks(&window) == Some(id);
@@ -4152,16 +4164,26 @@ pub fn navigate(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
     if with_state(app, |state| state.is_resident_bookmarks(id)) {
         return leave_bookmarks(app, id, url);
     }
+    crate::automation::recorder::note_navigate(app, id, &display);
+    // ce:// pages share one document and differ only in the hash. WebView2 reports no load for
+    // a hash change, so marking one as loading would leave the tab parked and spinning.
+    let current = with_state(app, |state| state.tab_mut(id).map(|tab| tab.info.url.clone()));
+    let in_page = current.as_ref().is_some_and(|current| {
+        url.fragment().is_some() && same_document(resolve(app, current).as_str(), url.as_str())
+    });
     let (label, hold) = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
         let mut hold = false;
         if !same_document(&tab.info.url, &display) {
-            tab.title_ready = false;
-            hold = tab.painted;
+            let page = |address: &str| address.split(['?', '#']).next().unwrap_or("").to_string();
+            if !in_page || page(&tab.info.url) != page(&display) {
+                tab.title_ready = false;
+            }
+            hold = tab.painted && !in_page;
             tab.blank_next = hold;
         }
         tab.info.url = display.clone();
-        tab.info.loading = true;
+        tab.info.loading = !in_page || tab.webview.is_none();
         if tab.webview.is_none() {
             tab.pending_url = Some(url.clone());
         }
@@ -5467,7 +5489,7 @@ fn page_rect(app: &AppHandle, window_label: &str) -> (PhysicalPosition<i32>, Phy
                 (
                     chrome.ui_height,
                     chrome.ui_left,
-                    chrome.ui_right,
+                    chrome.ui_right + chrome.agent_panel,
                     chrome.ui_bottom,
                     chrome.fullscreen,
                 )
@@ -5491,6 +5513,121 @@ fn page_rect(app: &AppHandle, window_label: &str) -> (PhysicalPosition<i32>, Phy
         PhysicalPosition::new(left as i32, top as i32),
         PhysicalSize::new(size.width - left - right, size.height - top - bottom),
     )
+}
+
+pub const AGENT_PANEL_PREFIX: &str = "agent-";
+
+pub fn agent_panel_label(window: &str) -> String {
+    format!("{AGENT_PANEL_PREFIX}{window}")
+}
+
+/// The panel column sits between the pages and the tool strip, full page-area height.
+fn place_agent_panel(
+    app: &AppHandle,
+    window: &str,
+    position: PhysicalPosition<i32>,
+    page_size: PhysicalSize<u32>,
+    scale: f64,
+) {
+    let Some(webview) = app.get_webview(&agent_panel_label(window)) else {
+        return;
+    };
+    let (width, fullscreen) = with_state(app, |state| {
+        state
+            .chrome(window)
+            .map(|chrome| (chrome.agent_panel, chrome.fullscreen))
+            .unwrap_or((0.0, false))
+    });
+    if width <= 0.0 || fullscreen {
+        let _ = webview.set_position(parked_position());
+        return;
+    }
+    let width = ((width * scale).round() as u32).max(1);
+    let _ = webview.set_size(PhysicalSize::new(width, page_size.height));
+    let _ = webview.set_position(PhysicalPosition::new(
+        position.x + page_size.width as i32,
+        position.y,
+    ));
+}
+
+/// Width of the docked agent panel in CSS pixels. Zero when it is closed.
+pub fn agent_panel_width(app: &AppHandle, window: &str) -> f64 {
+    with_state(app, |state| {
+        state
+            .chrome(window)
+            .map(|chrome| chrome.agent_panel)
+            .unwrap_or(0.0)
+    })
+}
+
+/// Opens (`width` > 0) or closes the agent panel column, then lays the pages out again.
+pub fn set_agent_panel(app: &AppHandle, window: &str, width: f64) {
+    let changed = with_state(app, |state| {
+        let chrome = state.chrome_mut(window)?;
+        let width = width.max(0.0);
+        if (chrome.agent_panel - width).abs() < 0.5 {
+            return None;
+        }
+        chrome.agent_panel = width;
+        Some(())
+    });
+    if changed.is_some() {
+        layout(app, window);
+        emit_tabs(app);
+    }
+}
+
+/// Marks a tab as driven by automation. Automated tabs never sleep.
+pub fn set_automated(app: &AppHandle, id: u32, automated: bool) {
+    let changed = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        if tab.info.automated == automated {
+            return None;
+        }
+        tab.info.automated = automated;
+        Some(())
+    });
+    if changed.is_some() {
+        emit_tabs(app);
+    }
+}
+
+/// Creates the page view for a tab that has not loaded yet, such as a restored tab.
+pub fn ensure_page_view(app: &AppHandle, id: u32) -> Result<(), String> {
+    ensure_webview(app, id)
+}
+
+/// The tab's details, including tabs kept off the strip.
+pub fn tab_info(app: &AppHandle, id: u32) -> Option<TabInfo> {
+    with_state(app, |state| {
+        let index = state.index_of(id)?;
+        let mut info = state.tabs[index].info.clone();
+        info.site = paths::site_of(&info.url);
+        Some(info)
+    })
+}
+
+/// Moves a hidden background tab onto its window's strip and selects it.
+pub fn unshelve(app: &AppHandle, id: u32) -> Result<(), String> {
+    let moved = with_state(app, |state| {
+        let index = state.index_of(id)?;
+        if !state.tabs[index].shelf {
+            return Some(false);
+        }
+        let window = state.tabs[index].info.window.clone();
+        let workspace = state.workspace_of(&window);
+        let tab = state.tab_mut(id)?;
+        tab.shelf = false;
+        tab.info.workspace = workspace;
+        Some(true)
+    })
+    .ok_or("That tab is closed.")?;
+    if moved {
+        with_state(app, |state| {
+            state.relocate(id, usize::MAX);
+        });
+    }
+    activate(app, id)
 }
 
 /// The page area of a window in physical pixels, for views drawn over the pages.
@@ -6105,6 +6242,7 @@ pub fn sleep_candidates(app: &AppHandle) -> Vec<u32> {
                     && !residents.contains(&tab.info.id)
                     && !tab.info.loading
                     && !tab.info.pinned
+                    && !tab.info.automated
                     && tab.last_shown.elapsed() >= after
                     && !sleep.never_sleeps(&tab.info.url)
             })
@@ -7263,6 +7401,7 @@ mod tests {
                 progress: 0,
                 failure: None,
                 sleep_saved: 0,
+                automated: false,
             },
             pending_url: None,
             webview: None,

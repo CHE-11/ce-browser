@@ -4,6 +4,10 @@ import type { BookmarkNode, BookmarkTree, BrowserSettings, ClosedEntry, PageRule
 import { applyFontPreview, applyThemePreview, publishAppearance, publishFont } from "./appearance";
 import { applyChromeMetrics } from "./chrome-metrics";
 import {
+  agentRuns,
+  automationsSnapshot,
+  onAgentChanged,
+  onAutomationsChanged,
   currentWindowLabel as browserWindowLabel,
   getPageRules,
   getSettings,
@@ -146,6 +150,7 @@ export function useTabs() {
     devtools: mine?.devtools ?? null,
     viewport: mine?.viewport ?? null,
     peekUrl: mine?.peekUrl ?? null,
+    agentPanel: mine?.agentPanel ?? false,
     groups,
     selectedIds: selectedIds.length > 0 ? selectedIds : activeId === null ? [] : [activeId],
     loaded: live.loaded,
@@ -295,6 +300,18 @@ export function useHistory() {
 export function useExtensions() {
   const { value, error, loaded } = useLiveValue("extensions", listExtensions, onExtensionsChanged);
   return { extensions: value ?? [], error, loaded };
+}
+
+/** Agent and MCP runs, newest first. */
+export function useAgentRuns() {
+  const { value, loaded } = useLiveValue("agent-runs", agentRuns, onAgentChanged);
+  return { runs: value ?? [], loaded };
+}
+
+/** Flows, run history, the current recording, and datasets. */
+export function useAutomations() {
+  const { value, loaded } = useLiveValue("automations", automationsSnapshot, onAutomationsChanged);
+  return { snapshot: value, loaded };
 }
 
 export function useSettingsState() {

@@ -45,6 +45,8 @@ export type TabInfo = {
   failure: TabFailure | null;
   /** Bytes the page used just before it went to sleep. Zero while awake or when unknown. */
   sleepSaved: number;
+  /** An agent, flow, or MCP client is driving this page. */
+  automated: boolean;
 };
 
 export type TabFailureKind = "crashed" | "offline" | "dns" | "certificate" | "timeout" | "refused" | "other";
@@ -122,6 +124,8 @@ export type WindowTabs = {
   peekUrl: string | null;
   /** Fixed CSS size of the page view. Null uses the whole page area. */
   viewport: PageViewport | null;
+  /** The agent panel is docked beside the pages. */
+  agentPanel: boolean;
 };
 
 export type RewriteRule = {
@@ -440,6 +444,7 @@ export type PopupKind =
   | "media-hub"
   | "media-grid"
   | "what-runs"
+  | "extract"
   | "ad-blocker"
   | "extension-pin"
   | "pin-menu"
@@ -870,6 +875,34 @@ export type BrowserSettings = {
   toastPosition: ToastPosition;
   /** Opens these file types in a browser tab. */
   fileHandlers: FileHandler[];
+  /** Agent, recorded flows, schedules, and the MCP server. */
+  automation: AutomationSettings;
+};
+
+export type AutomationSettings = {
+  enabled: boolean;
+  /** Model for the agent. Blank uses the AI provider's model. */
+  agentModel: string;
+  /** Actions one agent run may take before it stops. */
+  maxSteps: number;
+  /** Ask before purchases, sends, deletes, uploads, and similar actions. */
+  confirmSensitive: boolean;
+  /** When not empty, automation may only open these hosts without asking. */
+  allowedSites: string[];
+  /** Hosts automation never touches. */
+  blockedSites: string[];
+  /** Send a screenshot with each step. Off sends the text snapshot only. */
+  screenshotsToModel: boolean;
+  mcpEnabled: boolean;
+  mcpPort: number;
+  /** MCP clients may read pages but not click, type, or navigate. */
+  mcpReadOnly: boolean;
+  /** MCP clients may run scripts in pages. */
+  mcpAllowEvaluate: boolean;
+  /** Scheduled flows and monitors run. */
+  schedulerEnabled: boolean;
+  /** Scheduled runs wait while the PC is on battery. */
+  pauseOnBattery: boolean;
 };
 
 export type ToastPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
@@ -1430,6 +1463,7 @@ export type ProfileCopyPart =
   | "rewrites"
   | "boards"
   | "passwords"
+  | "automation"
   | "print"
   | "window"
   | "icon";
@@ -1551,3 +1585,237 @@ export type OmniboxState = {
   suggestions: OmniboxSuggestion[];
   selected: number;
 };
+
+// Automation
+
+export type AgentStepKind = "think" | "action" | "blocked" | "error" | "user" | "answer";
+
+export type AgentStep = {
+  kind: AgentStepKind;
+  text: string;
+  detail: string;
+  /** Small JPEG data URL of the page after this step. */
+  thumb: string | null;
+  /** Milliseconds since 1970. */
+  at: number;
+};
+
+export type AgentApproval = {
+  id: number;
+  /** `confirm` asks allow or deny. `question` asks for a typed answer. */
+  kind: "confirm" | "question";
+  prompt: string;
+};
+
+export type AgentRunStatus = "running" | "waiting" | "paused" | "done" | "failed" | "stopped";
+
+export type AgentRun = {
+  id: number;
+  /** `agent` for runs started from the panel, `mcp` for actions from an MCP client. */
+  source: "agent" | "mcp";
+  tabId: number;
+  window: string;
+  goal: string;
+  status: AgentRunStatus;
+  steps: AgentStep[];
+  approval: AgentApproval | null;
+  result: string;
+  started: number;
+  /** Zero while the run is active. */
+  finished: number;
+  actions: number;
+  maxSteps: number;
+};
+
+export type McpStatus = {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  /** Address MCP clients connect to. */
+  url: string;
+  /** Bearer token clients send. Stored with DPAPI on this computer. */
+  token: string;
+  error: string | null;
+  /** `mcp.json` entry for Cursor and other MCP clients. */
+  config: string;
+  /** Tool calls served since the browser started. */
+  calls: number;
+};
+
+/** How a recorded step finds its element again. Each field is tried until one matches a single element. */
+export type FlowTarget = {
+  role: string;
+  name: string;
+  text: string;
+  testId: string;
+  css: string;
+  xpath: string;
+  tag: string;
+  /** Plain description for AI healing, such as `the Add to cart button`. */
+  description: string;
+};
+
+export type FlowStepKind =
+  | "navigate"
+  | "click"
+  | "type"
+  | "press"
+  | "select"
+  | "scroll"
+  | "hover"
+  | "wait"
+  | "waitFor"
+  | "back"
+  | "extract"
+  | "ai"
+  | "assert"
+  | "notify"
+  | "upload";
+
+export type FlowStep = {
+  id: string;
+  /** Unknown kinds from newer builds are kept and skipped. */
+  kind: FlowStepKind | (string & {});
+  target: FlowTarget | null;
+  url: string;
+  /** Text to type, text to wait for, or the notification body. `{{var}}` and `{{secret:name}}` are filled in. */
+  text: string;
+  keys: string;
+  values: string[];
+  seconds: number;
+  /** Instruction for `ai` and `extract` steps. */
+  prompt: string;
+  /** Saved selector for `extract` steps. */
+  spec: ExtractSpec | null;
+  /** Pages an `extract` step follows through the list's Next link. */
+  pages: number;
+  /** Keep going when this step fails. */
+  optional: boolean;
+  note: string;
+};
+
+export type FlowTriggerKind = "interval" | "daily" | "weekly" | "startup" | "visit" | "pageChange" | "download" | "hotkey";
+
+export type FlowTrigger = {
+  kind: FlowTriggerKind | (string & {});
+  enabled: boolean;
+  /** Minutes between runs for `interval` and `pageChange`. */
+  minutes: number;
+  /** Local time `HH:MM` for `daily` and `weekly`. */
+  time: string;
+  /** Days for `weekly`, 0 is Sunday. */
+  days: number[];
+  /** Address pattern for `visit` and file pattern for `download`. `*` matches anything. */
+  pattern: string;
+  /** Shortcut slot 1 to 9 for `hotkey`. */
+  slot: number;
+};
+
+export type Flow = {
+  id: string;
+  name: string;
+  description: string;
+  startUrl: string;
+  steps: FlowStep[];
+  triggers: FlowTrigger[];
+  /** Variables available as `{{name}}` in step text. */
+  variables: Record<string, string>;
+  /** Run in a hidden tab instead of the active tab. */
+  background: boolean;
+  /** Show a Windows notification with the result. */
+  notify: boolean;
+  /** For monitors: notify when the AI says this is true of the page. Blank notifies on any change. */
+  monitorPrompt: string;
+  lastRun: number;
+  lastStatus: string;
+  created: number;
+  updated: number;
+};
+
+export type FlowRunStepStatus = "ok" | "healed" | "failed" | "skipped";
+
+export type FlowRunStep = {
+  index: number;
+  kind: string;
+  label: string;
+  status: FlowRunStepStatus;
+  detail: string;
+};
+
+export type FlowRun = {
+  id: number;
+  flowId: string;
+  flowName: string;
+  /** What started the run, such as `manual`, `daily` or `visit`. */
+  trigger: string;
+  status: "running" | "done" | "failed" | "stopped";
+  started: number;
+  finished: number;
+  steps: FlowRunStep[];
+  output: string;
+  /** Dataset written by the run's extract steps. */
+  datasetId: string;
+};
+
+export type FlowRecording = {
+  tabId: number;
+  steps: FlowStep[];
+  started: number;
+};
+
+export type DatasetInfo = {
+  id: string;
+  name: string;
+  /** Page the rows came from. */
+  source: string;
+  columns: string[];
+  rows: number;
+  created: number;
+  updated: number;
+};
+
+export type Dataset = DatasetInfo & {
+  data: Record<string, string>[];
+};
+
+export type AutomationsSnapshot = {
+  flows: Flow[];
+  runs: FlowRun[];
+  recording: FlowRecording | null;
+  datasets: DatasetInfo[];
+};
+
+export type ExtractField = {
+  name: string;
+  /** CSS selector inside each item. Empty uses the item itself. */
+  selector: string;
+  /** `text`, `href`, `src`, `value`, or an attribute name. */
+  attr: string;
+};
+
+export type ExtractSpec = {
+  /** CSS selector that matches every item in the list. */
+  item: string;
+  fields: ExtractField[];
+};
+
+export type ExtractPick = {
+  spec: ExtractSpec;
+  preview: Record<string, string>[];
+};
+
+export type ExtractOptions = {
+  name: string;
+  /** Pages to follow through the list's Next link. 1 reads only this page. */
+  pages: number;
+  /** Text of the Next link. Blank finds it automatically. */
+  nextText: string;
+};
+
+export type SniffedEndpoint = {
+  url: string;
+  /** `fetch` or `xmlhttprequest`. */
+  kind: string;
+};
+
+export type DatasetFormat = "csv" | "json" | "tsv";

@@ -15,6 +15,8 @@ import { BookmarkTree, BookmarkNode } from "@type/browser";
 type BookmarksBarProps = {
   tree: BookmarkTree | null;
   activeId: number | null;
+  /** The selected tab is pinned, so a bookmark opens in a new tab beside it. */
+  activePinned?: boolean;
   /** rem */
   textSize?: number;
   /** rem */
@@ -185,16 +187,16 @@ function openFolderPopup(element: HTMLElement, node: BookmarkNode, dragOpened = 
   });
 }
 
-export function openBookmarkLink(url: string, activeId: number | null, event?: MouseEvent) {
+export function openBookmarkLink(url: string, activeId: number | null, event?: MouseEvent, pinned = false) {
   const background = !!event && (event.ctrlKey || event.button === 1);
-  if (background || activeId === null) {
+  if (background || activeId === null || pinned) {
     void createTab(url, background);
   } else {
     void navigate(activeId, url);
   }
 }
 
-export function BookmarksBar({ tree, activeId, textSize, padding, iconSize, height, folderIcons = true }: BookmarksBarProps) {
+export function BookmarksBar({ tree, activeId, activePinned = false, textSize, padding, iconSize, height, folderIcons = true }: BookmarksBarProps) {
   const items = tree?.bar.children ?? [];
   const icons = useSiteFavicons(items.map((node) => node.url));
   const icon = metric(iconSize, CHROME.bookmarksBarIconSize);
@@ -337,12 +339,12 @@ export function BookmarksBar({ tree, activeId, textSize, padding, iconSize, heig
                   drag.dragged.current = false;
                   return;
                 }
-                openBookmarkLink(node.url ?? "", activeId, event);
+                openBookmarkLink(node.url ?? "", activeId, event, activePinned);
               }}
               onAuxClick={(event) => {
                 if (event.button === 1) {
                   event.preventDefault();
-                  openBookmarkLink(node.url ?? "", activeId, event);
+                  openBookmarkLink(node.url ?? "", activeId, event, activePinned);
                 }
               }}
               {...drag.itemProps(node, index)}

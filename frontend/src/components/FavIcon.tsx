@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { Bookmark, Code, Database, Download, Folder, Globe, History, ImageDown, LayoutGrid, Paintbrush, PartyPopper, Puzzle, Settings, Sparkles } from "lucide-react";
+import { Bookmark, Code, Database, Download, Folder, Globe, History, ImageDown, LayoutGrid, Paintbrush, PartyPopper, Puzzle, Settings, Sparkles, Workflow } from "lucide-react";
 import { cn } from "../lib/cn";
 import { faviconFor } from "../lib/format";
 
@@ -17,6 +17,7 @@ const INTERNAL_ICONS: Record<string, typeof Globe> = {
   "ce://rewrites": Code,
   "ce://storage": Database,
   "ce://whats-new": PartyPopper,
+  "ce://automations": Workflow,
 };
 
 type FavIconProps = {

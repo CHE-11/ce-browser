@@ -37,6 +37,7 @@ import { TranslatePopover } from "@features/BuiltInExtensions/translate/Translat
 import { SelectionTranslatePopover } from "@features/BuiltInExtensions/translate/SelectionTranslate";
 import { WebpageMarkdownPopover } from "@features/BuiltInExtensions/webpage-markdown/WebpageMarkdownPopover";
 import { WhatRunsPopover } from "@features/BuiltInExtensions/what-runs/WhatRunsPopover";
+import { ExtractPopover } from "@features/BuiltInExtensions/automation/ExtractPopover";
 import { CommandPalette } from "@features/CommandPalette/CommandPalette";
 import { TabOverview } from "@/features/Browser/BrowserHeader/Tabs/TabOverview";
 import { TabSearch } from "@/features/Browser/BrowserHeader/Tabs/TabSearch";
@@ -195,6 +196,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <MediaGrid tabId={Number(params.get("id"))} />;
     case "what-runs":
       return <WhatRunsPopover params={params} />;
+    case "extract":
+      return <ExtractPopover params={params} />;
     case "ad-blocker":
       return <AdBlockerPopover params={params} />;
     case "page-controls":

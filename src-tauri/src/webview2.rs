@@ -1561,6 +1561,16 @@ fn clip_round(hwnd: HWND, radius: i32, width: i32, height: i32) {
     }
 }
 
+/// The docked agent panel takes the browser's shortcuts the way the browser UI does.
+pub fn attach_panel_hooks(app: &AppHandle, webview: &Webview) {
+    let app = app.clone();
+    let _ = webview.with_webview(move |platform| {
+        if let Err(error) = attach_accelerators(&app, &platform.controller(), Target::Ui) {
+            eprintln!("WebView2 shortcuts for the agent panel: {error}");
+        }
+    });
+}
+
 pub fn attach_popup_hooks(app: &AppHandle, webview: &Webview, label: &str) {
     let app = app.clone();
     let label = label.to_string();
@@ -1984,6 +1994,9 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                         let _ = message_app.run_on_main_thread(move || {
                             on_protocol(&app, id, &source, &scheme);
                         });
+                    }
+                    Some("ce-record") => {
+                        crate::automation::recorder::on_message(&message_app, id, &message);
                     }
                     Some("ce-speed") => {
                         if let Some(speed) = message.get("speed").and_then(|value| value.as_f64()) {
@@ -3375,7 +3388,7 @@ fn redirect_inspect(
         items.Count(&mut count)?;
         for index in 0..count {
             let item = items.GetValueAtIndex(index)?;
-            if read_pwstr(|value| item.Name(value)) != "inspect" {
+            if !is_inspect_item(&item) {
                 continue;
             }
             let label = read_pwstr(|value| item.Label(value));
@@ -3449,7 +3462,7 @@ fn add_plain_page_items(
         let inspect = (0..count).find(|&index| {
             items
                 .GetValueAtIndex(index)
-                .is_ok_and(|item| read_pwstr(|value| item.Name(value)) == "inspect")
+                .is_ok_and(|item| is_inspect_item(&item))
         });
         let (insert_at, above_separator) = match inspect {
             Some(index) if index > 0 && item_is_separator(&items, index - 1) => (index - 1, true),
@@ -3471,6 +3484,12 @@ fn add_plain_page_items(
         }
         Ok(())
     }
+}
+
+/// WebView2 names this row `inspectElement`. Older runtimes used `inspect`.
+fn is_inspect_item(item: &ICoreWebView2ContextMenuItem) -> bool {
+    let name = read_pwstr(|value| unsafe { item.Name(value) });
+    name.eq_ignore_ascii_case("inspect") || name.eq_ignore_ascii_case("inspectElement")
 }
 
 fn item_is_separator(items: &ICoreWebView2ContextMenuItemCollection, index: u32) -> bool {

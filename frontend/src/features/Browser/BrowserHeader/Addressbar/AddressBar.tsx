@@ -135,6 +135,7 @@ function pageOrigin(url: string) {
 export function AddressBar({ snapshot, bookmarks, downloads, history, extensions, settings, windowControls = false }: AddressBarProps) {
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const activeId = activeTab?.id ?? null;
+  const activePinned = !!activeTab?.pinned;
   const showSpeakers = useStickyAudio(activeId, !!activeTab?.audible, !!activeTab?.muted);
   const split = snapshot.split ?? null;
   const inSplit = !!split && activeId !== null && (split.left === activeId || split.right === activeId);
@@ -353,14 +354,14 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       }
       if (target.kind === "tab" && target.tabId !== undefined) {
         void activateTab(target.tabId);
-      } else if (inNewTab || activeId === null) {
+      } else if (inNewTab || activeId === null || (target.kind === "bookmark" && activePinned)) {
         void createTab(target.url);
       } else {
         setText(target.url);
         void navigate(activeId, target.url);
       }
     },
-    [activeId, dismissSuggestions, finishEditing, text],
+    [activeId, activePinned, dismissSuggestions, finishEditing, text],
   );
 
   const pickRef = useRef(pick);

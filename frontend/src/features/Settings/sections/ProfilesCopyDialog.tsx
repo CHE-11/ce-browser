@@ -128,6 +128,11 @@ export const PROFILE_COPY_CHOICES: {
     hint: "Length and character choices.",
   },
   {
+    id: "automation",
+    label: "Automation",
+    hint: "Agent and MCP settings, recorded flows, schedules, and datasets.",
+  },
+  {
     id: "print",
     label: "Print and capture",
     hint: "Last choices in Print to PDF and Page to PNG.",

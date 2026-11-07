@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from
 import { ChevronRight, ExternalLink, Folder } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "@/components/PopupFrame";
-import { closePopup, closeSubmenus, closeThisPopup, createTab, navigate, openPopup } from "@/lib/browser-client";
+import { closePopup, closeSubmenus, closeThisPopup, createTab, openPopup } from "@/lib/browser-client";
 import { BOOKMARK_DROP_END, useBookmarkDrag } from "@/lib/bookmark-drag";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
@@ -11,6 +11,7 @@ import { faviconKey } from "@/lib/format";
 import { usePopupHost } from "@/lib/popup-host";
 import { useBookmarksState, useTabs, useSiteFavicons, useSettingsState } from "@/lib/use-browser";
 import { BookmarkNode } from "@type/browser";
+import { openBookmarkLink } from "./BookmarksBar";
 import type { BookmarkMenuTarget } from "./BookmarksBarContextMenu";
 
 type BookmarksBarOverflowProps = {
@@ -55,7 +56,8 @@ export function BookmarksBarOverflow({ ids }: BookmarksBarOverflowProps) {
     text: BOOKMARK_SIZE.folderText,
     padding: BOOKMARK_SIZE.folderPadding,
   });
-  const { activeId } = useTabs();
+  const { activeId, tabs } = useTabs();
+  const activePinned = tabs.some((tab) => tab.id === activeId && tab.pinned);
   const host = usePopupHost();
   const level = host?.level ?? 0;
   const barChildren = tree?.bar.children ?? [];
@@ -160,11 +162,7 @@ export function BookmarksBarOverflow({ ids }: BookmarksBarOverflowProps) {
       return;
     }
     const background = event.ctrlKey || event.button === 1;
-    if (background || activeId === null) {
-      void createTab(url, background);
-    } else {
-      void navigate(activeId, url);
-    }
+    openBookmarkLink(url, activeId, event, activePinned);
     if (!background) {
       void closePopup();
     }

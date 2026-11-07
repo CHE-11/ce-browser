@@ -1,4 +1,22 @@
-import { BookOpen, Clapperboard, Eraser, FileText, ImageDown, KeyRound, Languages, Layers, LayoutGrid, Printer, Shield, ShoppingCart, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import {
+  BookOpen,
+  Bot,
+  CircleDot,
+  Clapperboard,
+  Eraser,
+  FileText,
+  ImageDown,
+  KeyRound,
+  Languages,
+  Layers,
+  LayoutGrid,
+  Printer,
+  Shield,
+  ShoppingCart,
+  SlidersHorizontal,
+  TableProperties,
+  type LucideIcon,
+} from "lucide-react";
 
 export type BuiltinTool = {
   id: string;
@@ -89,6 +107,24 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Reading",
     description: "Word count, reading time and reading ease.",
     icon: BookOpen,
+  },
+  {
+    id: "agent",
+    name: "Agent",
+    description: "Let AI do a task in the current tab with real clicks and typing.",
+    icon: Bot,
+  },
+  {
+    id: "record-flow",
+    name: "Record flow",
+    description: "Record what you do in a tab and replay it later or on a schedule.",
+    icon: CircleDot,
+  },
+  {
+    id: "extract",
+    name: "Extract data",
+    description: "Turn lists and tables on a page into a dataset you can export.",
+    icon: TableProperties,
   },
 ];
 

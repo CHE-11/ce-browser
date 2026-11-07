@@ -545,6 +545,341 @@ pub fn complete(
     reply.ok_or_else(|| "The assistant returned nothing.".to_string())
 }
 
+const TOOL_MAX_TOKENS: u32 = 4096;
+
+/// One piece of a chat message. Images are base64 without the `data:` prefix.
+#[derive(Debug, Clone)]
+pub enum ChatPart {
+    Text(String),
+    Image { media_type: String, data: String },
+}
+
+#[derive(Debug, Clone)]
+pub enum ChatMessage {
+    User(Vec<ChatPart>),
+    Assistant { text: String, calls: Vec<ToolCall> },
+    ToolResult { call_id: String, parts: Vec<ChatPart> },
+}
+
+/// A tool the model may call. `parameters` is a JSON Schema object.
+#[derive(Debug, Clone)]
+pub struct ToolSpec {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub parameters: Value,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: Value,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ToolReply {
+    pub text: String,
+    pub calls: Vec<ToolCall>,
+}
+
+fn openai_parts(parts: &[ChatPart]) -> Value {
+    if let [ChatPart::Text(text)] = parts {
+        return json!(text);
+    }
+    Value::Array(
+        parts
+            .iter()
+            .map(|part| match part {
+                ChatPart::Text(text) => json!({ "type": "text", "text": text }),
+                ChatPart::Image { media_type, data } => json!({
+                    "type": "image_url",
+                    "image_url": { "url": format!("data:{media_type};base64,{data}") }
+                }),
+            })
+            .collect(),
+    )
+}
+
+fn part_text(parts: &[ChatPart]) -> String {
+    let mut out = String::new();
+    for part in parts {
+        if let ChatPart::Text(text) = part {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(text);
+        }
+    }
+    out
+}
+
+pub fn openai_tools_body(model: &str, system: &str, messages: &[ChatMessage], tools: &[ToolSpec]) -> Value {
+    let mut out = vec![json!({ "role": "system", "content": system })];
+    // Tool messages carry text only, so their images follow in one user message.
+    let mut pending: Vec<ChatPart> = Vec::new();
+    let flush = |out: &mut Vec<Value>, pending: &mut Vec<ChatPart>| {
+        if pending.is_empty() {
+            return;
+        }
+        let mut parts = vec![ChatPart::Text("Screenshot after the last action:".into())];
+        parts.append(pending);
+        out.push(json!({ "role": "user", "content": openai_parts(&parts) }));
+    };
+    for message in messages {
+        match message {
+            ChatMessage::ToolResult { call_id, parts } => {
+                let text = part_text(parts);
+                out.push(json!({
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": if text.is_empty() { "Done.".to_string() } else { text },
+                }));
+                pending.extend(
+                    parts
+                        .iter()
+                        .filter(|part| matches!(part, ChatPart::Image { .. }))
+                        .cloned(),
+                );
+            }
+            ChatMessage::User(parts) => {
+                flush(&mut out, &mut pending);
+                out.push(json!({ "role": "user", "content": openai_parts(parts) }));
+            }
+            ChatMessage::Assistant { text, calls } => {
+                flush(&mut out, &mut pending);
+                let mut entry = json!({
+                    "role": "assistant",
+                    "content": if text.is_empty() { Value::Null } else { json!(text) },
+                });
+                if !calls.is_empty() {
+                    entry["tool_calls"] = Value::Array(
+                        calls
+                            .iter()
+                            .map(|call| json!({
+                                "id": call.id,
+                                "type": "function",
+                                "function": { "name": call.name, "arguments": call.arguments.to_string() }
+                            }))
+                            .collect(),
+                    );
+                }
+                out.push(entry);
+            }
+        }
+    }
+    flush(&mut out, &mut pending);
+    json!({
+        "model": model,
+        "messages": out,
+        "tools": tools.iter().map(|tool| json!({
+            "type": "function",
+            "function": { "name": tool.name, "description": tool.description, "parameters": tool.parameters }
+        })).collect::<Vec<_>>(),
+        "tool_choice": "auto",
+    })
+}
+
+fn anthropic_parts(parts: &[ChatPart]) -> Vec<Value> {
+    parts
+        .iter()
+        .map(|part| match part {
+            ChatPart::Text(text) => json!({ "type": "text", "text": text }),
+            ChatPart::Image { media_type, data } => json!({
+                "type": "image",
+                "source": { "type": "base64", "media_type": media_type, "data": data }
+            }),
+        })
+        .collect()
+}
+
+pub fn anthropic_tools_body(model: &str, system: &str, messages: &[ChatMessage], tools: &[ToolSpec]) -> Value {
+    let mut out: Vec<Value> = Vec::new();
+    let mut push = |role: &str, blocks: Vec<Value>| {
+        if blocks.is_empty() {
+            return;
+        }
+        // Claude rejects two user turns in a row, so tool results and notes share one.
+        if let Some(last) = out.last_mut()
+            && last["role"] == role
+            && let Some(content) = last["content"].as_array_mut()
+        {
+            content.extend(blocks);
+            return;
+        }
+        out.push(json!({ "role": role, "content": blocks }));
+    };
+    for message in messages {
+        match message {
+            ChatMessage::User(parts) => push("user", anthropic_parts(parts)),
+            ChatMessage::ToolResult { call_id, parts } => {
+                let mut content = anthropic_parts(parts);
+                if content.is_empty() {
+                    content.push(json!({ "type": "text", "text": "Done." }));
+                }
+                push(
+                    "user",
+                    vec![json!({ "type": "tool_result", "tool_use_id": call_id, "content": content })],
+                );
+            }
+            ChatMessage::Assistant { text, calls } => {
+                let mut blocks = Vec::new();
+                if !text.trim().is_empty() {
+                    blocks.push(json!({ "type": "text", "text": text }));
+                }
+                for call in calls {
+                    blocks.push(json!({
+                        "type": "tool_use",
+                        "id": call.id,
+                        "name": call.name,
+                        "input": if call.arguments.is_object() { call.arguments.clone() } else { json!({}) },
+                    }));
+                }
+                push("assistant", blocks);
+            }
+        }
+    }
+    json!({
+        "model": model,
+        "max_tokens": TOOL_MAX_TOKENS,
+        "system": system,
+        "messages": out,
+        "tools": tools.iter().map(|tool| json!({
+            "name": tool.name,
+            "description": tool.description,
+            "input_schema": tool.parameters,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn parse_arguments(raw: &Value) -> Value {
+    match raw {
+        Value::String(text) if text.trim().is_empty() => json!({}),
+        Value::String(text) => serde_json::from_str(text).unwrap_or_else(|_| json!({})),
+        Value::Object(_) => raw.clone(),
+        _ => json!({}),
+    }
+}
+
+pub fn openai_tool_reply(value: &Value) -> ToolReply {
+    let message = value.pointer("/choices/0/message").cloned().unwrap_or(Value::Null);
+    let text = message
+        .get("content")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let calls = message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .map(|calls| {
+            calls
+                .iter()
+                .enumerate()
+                .filter_map(|(index, call)| {
+                    let function = call.get("function")?;
+                    let name = function.get("name")?.as_str()?.to_string();
+                    let id = call
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("call_{index}"));
+                    Some(ToolCall {
+                        id,
+                        name,
+                        arguments: parse_arguments(function.get("arguments").unwrap_or(&Value::Null)),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ToolReply { text, calls }
+}
+
+pub fn anthropic_tool_reply(value: &Value) -> ToolReply {
+    let mut reply = ToolReply::default();
+    let Some(blocks) = value.get("content").and_then(Value::as_array) else {
+        return reply;
+    };
+    for block in blocks {
+        match block.get("type").and_then(Value::as_str) {
+            Some("text") => {
+                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                    if !reply.text.is_empty() {
+                        reply.text.push('\n');
+                    }
+                    reply.text.push_str(text.trim());
+                }
+            }
+            Some("tool_use") => {
+                let id = block.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+                let name = block.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                reply.calls.push(ToolCall {
+                    id: if id.is_empty() { format!("toolu_{}", reply.calls.len()) } else { id },
+                    name,
+                    arguments: parse_arguments(block.get("input").unwrap_or(&Value::Null)),
+                });
+            }
+            _ => {}
+        }
+    }
+    reply
+}
+
+/// One model turn that may call tools. `model` overrides the provider model when it is not blank.
+pub fn complete_tools(
+    app: &AppHandle,
+    current: &settings::BrowserSettings,
+    model: &str,
+    system: &str,
+    messages: &[ChatMessage],
+    tools: &[ToolSpec],
+    timeout: Duration,
+) -> Result<ToolReply, String> {
+    let provider = provider_id(current);
+    let endpoint = endpoint_of(current);
+    if endpoint.is_empty() {
+        return Err("Set an assistant endpoint in Settings, under AI.".into());
+    }
+    let model = model_of(current, model);
+    if model.is_empty() {
+        return Err("Set a model in Settings, under AI.".into());
+    }
+    let key = request_key(app, provider, &endpoint)?;
+    let url = if provider == "claude" {
+        messages_url(&endpoint)
+    } else {
+        chat_url(&endpoint)
+    };
+    if !key.is_empty() && url.contains(&key) {
+        return Err("Couldn't reach the assistant.".into());
+    }
+    let mut body = if provider == "claude" {
+        anthropic_tools_body(&model, system, messages, tools)
+    } else {
+        openai_tools_body(&model, system, messages, tools)
+    };
+    attach_thinking(provider, &model, &slot_thinking(current), &mut body);
+    if provider == "claude" && body["max_tokens"].as_u64().unwrap_or(0) < TOOL_MAX_TOKENS as u64 {
+        body["max_tokens"] = json!(TOOL_MAX_TOKENS);
+    }
+    let text = send(provider, &url, &endpoint, &key, &body, timeout)?;
+    let value: Value =
+        serde_json::from_str(&text).map_err(|_| "The assistant returned nothing.".to_string())?;
+    let reply = if provider == "claude" {
+        anthropic_tool_reply(&value)
+    } else {
+        openai_tool_reply(&value)
+    };
+    if reply.text.is_empty() && reply.calls.is_empty() {
+        return Err("The assistant returned nothing.".into());
+    }
+    Ok(reply)
+}
+
 pub fn list_models(app: &AppHandle) -> Result<Vec<String>, String> {
     let current = settings::get(app);
     let provider = provider_id(&current);
@@ -697,10 +1032,90 @@ fn read_body(response: ureq::Response) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        anthropic_body, anthropic_text, attach_thinking, chat_url, claude_models_url, http_error,
-        messages_url, model_accepts_thinking, model_ids, model_page, models_url, openai_body,
-        openai_text, recent_text_models, text_chat_model, transport_error,
+        ChatMessage, ChatPart, ToolCall, ToolSpec, anthropic_body, anthropic_text,
+        anthropic_tool_reply, anthropic_tools_body, attach_thinking, chat_url, claude_models_url,
+        http_error, messages_url, model_accepts_thinking, model_ids, model_page, models_url,
+        openai_body, openai_text, openai_tool_reply, openai_tools_body, recent_text_models,
+        text_chat_model, transport_error,
     };
+
+    fn tool_history() -> (Vec<ChatMessage>, Vec<ToolSpec>) {
+        let messages = vec![
+            ChatMessage::User(vec![ChatPart::Text("Find socks".into())]),
+            ChatMessage::Assistant {
+                text: "Clicking search.".into(),
+                calls: vec![ToolCall {
+                    id: "call_1".into(),
+                    name: "click".into(),
+                    arguments: serde_json::json!({ "ref": 4 }),
+                }],
+            },
+            ChatMessage::ToolResult {
+                call_id: "call_1".into(),
+                parts: vec![
+                    ChatPart::Text("Clicked.".into()),
+                    ChatPart::Image {
+                        media_type: "image/jpeg".into(),
+                        data: "AAAA".into(),
+                    },
+                ],
+            },
+            ChatMessage::User(vec![ChatPart::Text("Page now:".into())]),
+        ];
+        let tools = vec![ToolSpec {
+            name: "click",
+            description: "Click",
+            parameters: serde_json::json!({ "type": "object", "properties": {} }),
+        }];
+        (messages, tools)
+    }
+
+    #[test]
+    fn openai_tool_bodies_move_images_out_of_tool_messages() {
+        let (messages, tools) = tool_history();
+        let body = openai_tools_body("gpt-5", "sys", &messages, &tools);
+        let list = body["messages"].as_array().unwrap();
+        assert_eq!(list[0]["role"], "system");
+        assert_eq!(list[2]["tool_calls"][0]["function"]["arguments"], "{\"ref\":4}");
+        assert_eq!(list[3]["role"], "tool");
+        assert_eq!(list[3]["content"], "Clicked.");
+        assert_eq!(list[4]["role"], "user");
+        assert_eq!(list[4]["content"][1]["type"], "image_url");
+        assert_eq!(list[5]["content"], "Page now:");
+        assert_eq!(body["tools"][0]["function"]["name"], "click");
+    }
+
+    #[test]
+    fn anthropic_tool_bodies_merge_user_turns() {
+        let (messages, tools) = tool_history();
+        let body = anthropic_tools_body("claude-sonnet-5-5", "sys", &messages, &tools);
+        let list = body["messages"].as_array().unwrap();
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[1]["content"][1]["type"], "tool_use");
+        assert_eq!(list[2]["role"], "user");
+        assert_eq!(list[2]["content"][0]["type"], "tool_result");
+        assert_eq!(list[2]["content"][0]["content"][1]["type"], "image");
+        assert_eq!(list[2]["content"][1]["text"], "Page now:");
+        assert_eq!(body["tools"][0]["input_schema"]["type"], "object");
+    }
+
+    #[test]
+    fn tool_replies_parse_for_both_providers() {
+        let openai = serde_json::json!({ "choices": [{ "message": {
+            "content": null,
+            "tool_calls": [{ "id": "a", "function": { "name": "type", "arguments": "{\"text\":\"hi\"}" } }]
+        } }] });
+        let reply = openai_tool_reply(&openai);
+        assert_eq!(reply.calls[0].name, "type");
+        assert_eq!(reply.calls[0].arguments["text"], "hi");
+        let claude = serde_json::json!({ "content": [
+            { "type": "text", "text": "Typing" },
+            { "type": "tool_use", "id": "t1", "name": "type", "input": { "text": "hi" } }
+        ] });
+        let reply = anthropic_tool_reply(&claude);
+        assert_eq!(reply.text, "Typing");
+        assert_eq!(reply.calls[0].id, "t1");
+    }
 
     #[test]
     fn openai_and_anthropic_bodies_match_each_provider() {

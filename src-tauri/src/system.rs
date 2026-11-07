@@ -1326,6 +1326,10 @@ pub fn saver_active(app: &AppHandle) -> bool {
     settings::get(app).battery_saver && power_is_battery(ac_line())
 }
 
+pub fn on_battery() -> bool {
+    power_is_battery(ac_line())
+}
+
 fn ac_line() -> u8 {
     #[repr(C)]
     struct Power {

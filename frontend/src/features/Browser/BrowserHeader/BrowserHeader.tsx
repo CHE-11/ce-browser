@@ -52,6 +52,7 @@ export function BrowserHeader({
         <BookmarksBar
           tree={bookmarks}
           activeId={snapshot.activeId}
+          activePinned={!!activeTab?.pinned}
           textSize={settings?.bookmarksBarTextSize}
           padding={settings?.bookmarksBarPadding}
           iconSize={settings?.bookmarksBarIconSize}

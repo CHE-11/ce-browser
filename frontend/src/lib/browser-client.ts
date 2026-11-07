@@ -5,6 +5,17 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdblockStats,
+  AgentRun,
+  AutomationsSnapshot,
+  Dataset,
+  DatasetFormat,
+  DatasetInfo,
+  ExtractOptions,
+  ExtractPick,
+  ExtractSpec,
+  Flow,
+  McpStatus,
+  SniffedEndpoint,
   AiKeyStatus,
   BackdropSupport,
   Board,
@@ -1652,4 +1663,188 @@ export function isWindowMaximized() {
 
 export function onWindowResized(handler: () => void) {
   return getCurrentWindow().onResized(() => handler());
+}
+
+// Agent
+
+export function agentStart(tabId: number, goal: string) {
+  return invoke<number>("agent_start", { tabId, goal });
+}
+
+export function agentStop(runId: number) {
+  return invoke<void>("agent_stop", { runId });
+}
+
+export function agentAnswer(runId: number, approvalId: number, allow: boolean) {
+  return invoke<void>("agent_answer", { runId, approvalId, allow });
+}
+
+export function agentReply(runId: number, text: string) {
+  return invoke<void>("agent_reply", { runId, text });
+}
+
+export function agentTakeOver(runId: number) {
+  return invoke<void>("agent_take_over", { runId });
+}
+
+export function agentResume(runId: number) {
+  return invoke<void>("agent_resume", { runId });
+}
+
+export function agentRuns() {
+  return invoke<AgentRun[]>("agent_runs");
+}
+
+export function agentClear() {
+  return invoke<void>("agent_clear");
+}
+
+export function agentShowTab(tabId: number) {
+  return invoke<void>("agent_show_tab", { tabId });
+}
+
+export function onAgentChanged(handler: (runs: AgentRun[]) => void): Promise<UnlistenFn> {
+  return listen<AgentRun[]>("agent-changed", (event) => handler(event.payload));
+}
+
+/** Opens or closes the agent panel beside this window's pages. `open` forces a state. */
+export function toggleAgentPanel(open?: boolean) {
+  return invoke<boolean>("toggle_agent_panel", { open: open ?? null });
+}
+
+// Automation secrets and MCP
+
+export function automationSecretNames() {
+  return invoke<string[]>("automation_secret_names");
+}
+
+export function setAutomationSecret(name: string, value: string) {
+  return invoke<string[]>("set_automation_secret", { name, value });
+}
+
+export function clearAutomationSecret(name: string) {
+  return invoke<string[]>("clear_automation_secret", { name });
+}
+
+export function mcpStatus() {
+  return invoke<McpStatus>("mcp_status");
+}
+
+export function regenerateMcpToken() {
+  return invoke<McpStatus>("regenerate_mcp_token");
+}
+
+export function onMcpChanged(handler: (status: McpStatus) => void): Promise<UnlistenFn> {
+  return listen<McpStatus>("mcp-changed", (event) => handler(event.payload));
+}
+
+// Flows
+
+export function automationsSnapshot() {
+  return invoke<AutomationsSnapshot>("automations_snapshot");
+}
+
+export function onAutomationsChanged(handler: (snapshot: AutomationsSnapshot) => void): Promise<UnlistenFn> {
+  return listen<AutomationsSnapshot>("automations-changed", (event) => handler(event.payload));
+}
+
+export function saveFlow(flow: Flow) {
+  return invoke<Flow>("save_flow", { flow });
+}
+
+export function deleteFlow(id: string) {
+  return invoke<void>("delete_flow", { id });
+}
+
+export function runFlow(id: string, tabId?: number) {
+  return invoke<number>("run_flow", { id, tabId: tabId ?? null });
+}
+
+export function stopFlowRun(runId: number) {
+  return invoke<void>("stop_flow_run", { runId });
+}
+
+export function clearFlowRuns() {
+  return invoke<void>("clear_flow_runs");
+}
+
+export function startFlowRecording(tabId: number) {
+  return invoke<void>("start_flow_recording", { tabId });
+}
+
+/** Ends the flow recording. `save` stores it as a new flow and returns its id. */
+export function stopFlowRecording(save: boolean) {
+  return invoke<string | null>("stop_flow_recording", { save });
+}
+
+export function flowPlaywright(id: string) {
+  return invoke<string>("flow_playwright", { id });
+}
+
+export function openAutomations(section?: string) {
+  return invoke<void>("open_automations", { section: section ?? null });
+}
+
+// Extraction
+
+export function extractPick(tabId: number) {
+  return invoke<ExtractPick | null>("extract_pick", { tabId });
+}
+
+/** Lets the user pick a list on the page, then reads, saves and shows it. `null` when they cancel. */
+export function extractPickSave(tabId: number, options: ExtractOptions) {
+  return invoke<DatasetInfo | null>("extract_pick_save", { tabId, options });
+}
+
+export function extractRun(tabId: number, spec: ExtractSpec, options: ExtractOptions) {
+  return invoke<DatasetInfo>("extract_run", { tabId, spec, options });
+}
+
+export function extractAi(tabId: number, instruction: string, options: ExtractOptions) {
+  return invoke<DatasetInfo>("extract_ai", { tabId, instruction, options });
+}
+
+export function extractCrawl(urls: string[], spec: ExtractSpec | null, instruction: string, name: string) {
+  return invoke<DatasetInfo>("extract_crawl", { urls, spec, instruction, name });
+}
+
+export function extractSniff(tabId: number) {
+  return invoke<SniffedEndpoint[]>("extract_sniff", { tabId });
+}
+
+export function extractEndpoint(tabId: number, url: string, name: string) {
+  return invoke<DatasetInfo>("extract_endpoint", { tabId, url, name });
+}
+
+export function getDataset(id: string) {
+  return invoke<Dataset>("get_dataset", { id });
+}
+
+export function deleteDataset(id: string) {
+  return invoke<void>("delete_dataset", { id });
+}
+
+export function renameDataset(id: string, name: string) {
+  return invoke<void>("rename_dataset", { id, name });
+}
+
+export function copyDataset(id: string, format: DatasetFormat) {
+  return invoke<void>("copy_dataset", { id, format });
+}
+
+export async function exportDataset(id: string, format: DatasetFormat, name: string) {
+  const path = await save({
+    title: "Export dataset",
+    defaultPath: `${name || "dataset"}.${format}`,
+    filters: [{ name: format.toUpperCase(), extensions: [format] }],
+  });
+  if (!path) {
+    return false;
+  }
+  await invoke<void>("export_dataset", { id, format, path });
+  return true;
+}
+
+export function datasetToBoard(id: string) {
+  return invoke<number>("dataset_to_board", { id });
 }

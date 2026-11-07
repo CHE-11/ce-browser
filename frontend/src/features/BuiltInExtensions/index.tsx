@@ -12,6 +12,9 @@ import { ReadingButton } from "./reading/Reading";
 import { ShoppingButton } from "./shopping/ShoppingButton";
 import { TranslateButton } from "./translate/Translate";
 import { WhatRunsButton } from "./what-runs/WhatRunsButton";
+import { AgentButton } from "./automation/AgentButton";
+import { ExtractButton } from "./automation/ExtractButton";
+import { RecordFlowButton } from "./automation/RecordFlowButton";
 
 /** One pinned built-in tool. Unknown ids render nothing. */
 export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab: TabInfo | undefined; settings: BrowserSettings | null }) {
@@ -42,6 +45,12 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <ShoppingButton activeTab={activeTab} />;
     case "reading":
       return <ReadingButton activeTab={activeTab} />;
+    case "agent":
+      return <AgentButton />;
+    case "record-flow":
+      return <RecordFlowButton activeTab={activeTab} />;
+    case "extract":
+      return <ExtractButton activeTab={activeTab} />;
     default:
       return null;
   }

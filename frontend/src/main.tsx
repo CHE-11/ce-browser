@@ -5,6 +5,8 @@ import { getUserStyles, getWindowsColorScheme, onUserStylesChanged, onWindowsCol
 import { useRoute } from "./lib/route";
 import { applyUserStyles } from "./lib/user-styles";
 import { applyZoom, readZoom } from "./lib/zoom";
+import { AgentPanelPage } from "./features/Agent/AgentPanel.page";
+import { AutomationsPage } from "./features/Automations/Automations.page";
 import { BoardsPage } from "./features/Boards/Boards.page";
 import { BookmarksPage } from "./features/Bookmarks/Bookmarks.page";
 import { CaptureEditorPage } from "./features/CaptureEditor/CaptureEditor.page";
@@ -93,6 +95,10 @@ function App() {
       return <BoardsPage params={route.params} />;
     case "whats-new":
       return <WhatsNewPage params={route.params} />;
+    case "agent-panel":
+      return <AgentPanelPage />;
+    case "automations":
+      return <AutomationsPage params={route.params} />;
     default:
       return <BookmarksPage />;
   }

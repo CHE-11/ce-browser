@@ -135,12 +135,120 @@ fn secret_path(app: &AppHandle) -> PathBuf {
 }
 
 fn key_path(app: &AppHandle, id: &str) -> PathBuf {
+    profile_secret_file(app, id, FILE_NAME)
+}
+
+fn profile_secret_file(app: &AppHandle, id: &str, file: &str) -> PathBuf {
     let name = if id == profiles::DEFAULT_ID {
-        FILE_NAME.to_string()
+        file.to_string()
     } else {
-        format!("{id}-{FILE_NAME}")
+        format!("{id}-{file}")
     };
     paths::root_local_dir(app).join("secrets").join(name)
+}
+
+/// Named values automations put into pages as `{{secret:name}}`. Same DPAPI protection as the
+/// API keys, in a file of its own so a provider key and a vault entry never share a name.
+fn vault_path(app: &AppHandle) -> PathBuf {
+    profile_secret_file(app, &profiles::active_id(), VAULT_FILE_NAME)
+}
+
+const VAULT_FILE_NAME: &str = "automation-secrets.json";
+
+/// Lowercase letters, digits, `.`, `-` and `_`, up to 64 characters.
+pub fn clean_secret_name(raw: &str) -> Option<String> {
+    let name = raw.trim().to_ascii_lowercase();
+    let valid = (1..=64).contains(&name.len())
+        && name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_'));
+    valid.then_some(name)
+}
+
+pub fn vault_names(app: &AppHandle) -> Vec<String> {
+    let file: SecretFile = files::read_json(&vault_path(app));
+    let mut names: Vec<String> = file.keys.into_iter().map(|slot| slot.provider).collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+pub fn vault_store(app: &AppHandle, name: &str, value: &str) -> Result<(), String> {
+    let name = clean_secret_name(name)
+        .ok_or("Use letters, digits, dots, dashes or underscores for the name.")?;
+    if value.is_empty() {
+        return Err("Enter a value first.".into());
+    }
+    if value.chars().count() > 4096 {
+        return Err("That value is too long.".into());
+    }
+    let ciphertext =
+        protect(value).map_err(|_| "Couldn't save the secret on this computer.".to_string())?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(ciphertext);
+    let path = vault_path(app);
+    let mut file: SecretFile = files::read_json(&path);
+    file.keys.retain(|slot| slot.provider != name);
+    file.keys.push(SecretSlot {
+        provider: name,
+        ciphertext: encoded,
+    });
+    files::write_json(&path, &file)
+}
+
+pub fn vault_clear(app: &AppHandle, name: &str) -> Result<(), String> {
+    let Some(name) = clean_secret_name(name) else {
+        return Ok(());
+    };
+    let path = vault_path(app);
+    let mut file: SecretFile = files::read_json(&path);
+    file.keys.retain(|slot| slot.provider != name);
+    files::write_json(&path, &file)
+}
+
+/// The plain value of a vault entry. Callers must not log it, return it, or send it to a model.
+pub fn vault_resolve(app: &AppHandle, name: &str) -> Result<Option<String>, String> {
+    let Some(name) = clean_secret_name(name) else {
+        return Ok(None);
+    };
+    let file: SecretFile = files::read_json(&vault_path(app));
+    let Some(slot) = file.keys.iter().find(|slot| slot.provider == name) else {
+        return Ok(None);
+    };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(slot.ciphertext.trim())
+        .map_err(|_| UNREADABLE.to_string())?;
+    let plain = unprotect(&bytes).map_err(|_| UNREADABLE.to_string())?;
+    Ok(Some(plain))
+}
+
+const MCP_FILE_NAME: &str = "mcp-token.json";
+
+/// The bearer token MCP clients send. Created on first use; `regenerate` replaces it.
+pub fn mcp_token(app: &AppHandle, regenerate: bool) -> Result<String, String> {
+    let path = profile_secret_file(app, &profiles::active_id(), MCP_FILE_NAME);
+    if !regenerate {
+        let file: SecretFile = files::read_json(&path);
+        if let Some(slot) = file.keys.first()
+            && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(slot.ciphertext.trim())
+            && let Ok(plain) = unprotect(&bytes)
+            && plain.len() >= 32
+        {
+            return Ok(plain);
+        }
+    }
+    let mut raw = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut raw);
+    let token: String = raw.iter().map(|byte| format!("{byte:02x}")).collect();
+    let ciphertext =
+        protect(&token).map_err(|_| "Couldn't save the MCP token on this computer.".to_string())?;
+    let file = SecretFile {
+        keys: vec![SecretSlot {
+            provider: "mcp".into(),
+            ciphertext: base64::engine::general_purpose::STANDARD.encode(ciphertext),
+        }],
+    };
+    files::write_json(&path, &file)?;
+    Ok(token)
 }
 
 /// Copies this user's saved API keys from one profile to another. The ciphertext stays

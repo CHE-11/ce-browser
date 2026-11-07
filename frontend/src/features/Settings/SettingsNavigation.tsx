@@ -8,7 +8,7 @@ type SettingsNavSection = {
   title: string;
 };
 
-const TOOL_SECTION_IDS = ["settings-adblock", "settings-ai", "settings-shopping", "settings-translate", "settings-print"] as const;
+const TOOL_SECTION_IDS = ["settings-adblock", "settings-ai", "settings-automation", "settings-mcp", "settings-shopping", "settings-translate", "settings-print"] as const;
 
 const itemClass = "truncate rounded-md px-2 py-1 text-left text-[11px] leading-4 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100";
 

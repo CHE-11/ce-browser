@@ -3,6 +3,7 @@ mod accent;
 mod adblock;
 mod ai;
 mod answer;
+mod automation;
 mod backdrop;
 mod boards;
 mod bookmark_health;
@@ -1733,6 +1734,7 @@ fn save_settings(app: AppHandle, settings: BrowserSettings) -> Result<BrowserSet
     if let Err(error) = system::register_browser(&app) {
         eprintln!("file handlers: {error}");
     }
+    automation::mcp::sync(&app);
     Ok(saved)
 }
 
@@ -2003,6 +2005,236 @@ fn unpin_profile_taskbar(app: AppHandle, id: String) -> Result<Vec<ProfileInfo>,
     profiles::unpin_taskbar(&app, &id).map(|profiles| publish_profiles(&app, profiles))
 }
 
+// Agent. Runs work on their own threads; these commands start, steer and read them.
+
+#[tauri::command]
+fn agent_start(app: AppHandle, tab_id: u32, goal: String) -> Result<u32, String> {
+    automation::agent::start(&app, tab_id, &goal)
+}
+
+#[tauri::command]
+fn agent_stop(app: AppHandle, run_id: u32) {
+    automation::agent::stop(&app, run_id);
+}
+
+#[tauri::command]
+fn agent_answer(app: AppHandle, run_id: u32, approval_id: u32, allow: bool) {
+    automation::agent::answer(&app, run_id, approval_id, allow);
+}
+
+#[tauri::command]
+fn agent_reply(app: AppHandle, run_id: u32, text: String) -> Result<(), String> {
+    automation::agent::reply(&app, run_id, &text)
+}
+
+#[tauri::command]
+fn agent_take_over(app: AppHandle, run_id: u32) {
+    automation::agent::take_over(&app, run_id);
+}
+
+#[tauri::command]
+fn agent_resume(app: AppHandle, run_id: u32) {
+    automation::agent::resume(&app, run_id);
+}
+
+#[tauri::command]
+fn agent_runs() -> Vec<automation::agent::AgentRun> {
+    automation::agent::runs()
+}
+
+#[tauri::command]
+fn agent_clear(app: AppHandle) {
+    automation::agent::clear(&app);
+}
+
+#[tauri::command]
+async fn agent_show_tab(app: AppHandle, tab_id: u32) -> Result<(), String> {
+    tabs::unshelve(&app, tab_id)
+}
+
+#[tauri::command]
+async fn toggle_agent_panel(
+    app: AppHandle,
+    window: Window,
+    open: Option<bool>,
+) -> Result<bool, String> {
+    automation::panel::toggle(&app, &browser_window(&window), open)
+}
+
+#[tauri::command]
+fn automation_secret_names(app: AppHandle) -> Vec<String> {
+    secrets::vault_names(&app)
+}
+
+#[tauri::command]
+fn set_automation_secret(app: AppHandle, name: String, value: String) -> Result<Vec<String>, String> {
+    secrets::vault_store(&app, &name, &value)?;
+    Ok(secrets::vault_names(&app))
+}
+
+#[tauri::command]
+fn clear_automation_secret(app: AppHandle, name: String) -> Result<Vec<String>, String> {
+    secrets::vault_clear(&app, &name)?;
+    Ok(secrets::vault_names(&app))
+}
+
+// MCP server.
+
+#[tauri::command]
+fn mcp_status(app: AppHandle) -> automation::mcp::McpStatus {
+    automation::mcp::status(&app)
+}
+
+#[tauri::command]
+fn regenerate_mcp_token(app: AppHandle) -> Result<automation::mcp::McpStatus, String> {
+    automation::mcp::regenerate_token(&app)
+}
+
+// Flows and the recorder. Runs work on their own threads.
+
+#[tauri::command]
+fn automations_snapshot(app: AppHandle) -> automation::flows::AutomationsSnapshot {
+    automation::flows::snapshot(&app)
+}
+
+#[tauri::command]
+fn save_flow(app: AppHandle, flow: automation::flows::Flow) -> Result<automation::flows::Flow, String> {
+    automation::flows::save(&app, flow)
+}
+
+#[tauri::command]
+fn delete_flow(app: AppHandle, id: String) -> Result<(), String> {
+    automation::flows::delete(&app, &id)
+}
+
+#[tauri::command]
+fn run_flow(app: AppHandle, id: String, tab_id: Option<u32>) -> Result<u32, String> {
+    automation::flows::run(&app, &id, tab_id, "manual")
+}
+
+#[tauri::command]
+fn stop_flow_run(app: AppHandle, run_id: u32) {
+    automation::flows::stop_run(&app, run_id);
+}
+
+#[tauri::command]
+fn clear_flow_runs(app: AppHandle) {
+    automation::flows::clear_runs(&app);
+}
+
+#[tauri::command]
+async fn start_flow_recording(app: AppHandle, tab_id: u32) -> Result<(), String> {
+    blocking(move || automation::recorder::start(&app, tab_id)).await
+}
+
+#[tauri::command]
+async fn stop_flow_recording(app: AppHandle, save: bool) -> Result<Option<String>, String> {
+    blocking(move || automation::recorder::stop(&app, save)).await
+}
+
+#[tauri::command]
+fn flow_playwright(app: AppHandle, id: String) -> Result<String, String> {
+    automation::flows::playwright(&app, &id)
+}
+
+#[tauri::command]
+async fn open_automations(app: AppHandle, window: Window, section: Option<String>) -> Result<(), String> {
+    let label = browser_window(&window);
+    automation::flows::open_page(&app, &label, section.as_deref())
+}
+
+// Extraction and datasets. Reading pages waits on the main thread, so these block off it.
+
+#[tauri::command]
+async fn extract_pick(app: AppHandle, tab_id: u32) -> Result<Option<automation::extract::ExtractPick>, String> {
+    blocking(move || automation::extract::pick(&app, tab_id)).await
+}
+
+#[tauri::command]
+async fn extract_pick_save(
+    app: AppHandle,
+    tab_id: u32,
+    options: automation::extract::ExtractOptions,
+) -> Result<Option<automation::extract::DatasetInfo>, String> {
+    blocking(move || automation::extract::pick_and_save(&app, tab_id, &options)).await
+}
+
+#[tauri::command]
+async fn extract_run(
+    app: AppHandle,
+    tab_id: u32,
+    spec: automation::extract::ExtractSpec,
+    options: automation::extract::ExtractOptions,
+) -> Result<automation::extract::DatasetInfo, String> {
+    blocking(move || automation::extract::run(&app, tab_id, &spec, &options)).await
+}
+
+#[tauri::command]
+async fn extract_ai(
+    app: AppHandle,
+    tab_id: u32,
+    instruction: String,
+    options: automation::extract::ExtractOptions,
+) -> Result<automation::extract::DatasetInfo, String> {
+    blocking(move || automation::extract::ai(&app, tab_id, &instruction, &options)).await
+}
+
+#[tauri::command]
+async fn extract_crawl(
+    app: AppHandle,
+    urls: Vec<String>,
+    spec: Option<automation::extract::ExtractSpec>,
+    instruction: String,
+    name: String,
+) -> Result<automation::extract::DatasetInfo, String> {
+    blocking(move || automation::extract::crawl(&app, &urls, spec.as_ref(), &instruction, &name)).await
+}
+
+#[tauri::command]
+async fn extract_sniff(app: AppHandle, tab_id: u32) -> Result<Vec<automation::extract::SniffedEndpoint>, String> {
+    blocking(move || automation::extract::sniff(&app, tab_id)).await
+}
+
+#[tauri::command]
+async fn extract_endpoint(
+    app: AppHandle,
+    tab_id: u32,
+    url: String,
+    name: String,
+) -> Result<automation::extract::DatasetInfo, String> {
+    blocking(move || automation::extract::endpoint(&app, tab_id, &url, &name)).await
+}
+
+#[tauri::command]
+fn get_dataset(app: AppHandle, id: String) -> Result<automation::extract::Dataset, String> {
+    automation::extract::get(&app, &id)
+}
+
+#[tauri::command]
+fn delete_dataset(app: AppHandle, id: String) -> Result<(), String> {
+    automation::extract::delete(&app, &id)
+}
+
+#[tauri::command]
+fn rename_dataset(app: AppHandle, id: String, name: String) -> Result<(), String> {
+    automation::extract::rename(&app, &id, &name)
+}
+
+#[tauri::command]
+fn copy_dataset(app: AppHandle, id: String, format: String) -> Result<(), String> {
+    automation::extract::copy(&app, &id, &format)
+}
+
+#[tauri::command]
+async fn export_dataset(app: AppHandle, id: String, format: String, path: String) -> Result<(), String> {
+    blocking(move || automation::extract::export(&app, &id, &format, &PathBuf::from(path))).await
+}
+
+#[tauri::command]
+async fn dataset_to_board(app: AppHandle, id: String) -> Result<usize, String> {
+    blocking(move || automation::extract::to_board(&app, &id)).await
+}
+
 fn build_window(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     tabs::create_browser_window(app, tabs::WINDOW)
         .map_err(|error| -> Box<dyn std::error::Error> { Box::new(std::io::Error::other(error)) })
@@ -2056,6 +2288,8 @@ pub fn run() {
             update::start(&handle);
             prices::start(&handle);
             extension_store::start(&handle);
+            automation::mcp::init(&handle);
+            automation::scheduler::init(&handle);
 
             tauri::async_runtime::spawn(async move {
                 if let Err(error) = session::restore(&handle) {
@@ -2417,7 +2651,45 @@ pub fn run() {
             set_profile_icon,
             set_profile_icon_color,
             pin_profile_taskbar,
-            unpin_profile_taskbar
+            unpin_profile_taskbar,
+            agent_start,
+            agent_stop,
+            agent_answer,
+            agent_reply,
+            agent_take_over,
+            agent_resume,
+            agent_runs,
+            agent_clear,
+            agent_show_tab,
+            toggle_agent_panel,
+            automation_secret_names,
+            set_automation_secret,
+            clear_automation_secret,
+            mcp_status,
+            regenerate_mcp_token,
+            automations_snapshot,
+            save_flow,
+            delete_flow,
+            run_flow,
+            stop_flow_run,
+            clear_flow_runs,
+            start_flow_recording,
+            stop_flow_recording,
+            flow_playwright,
+            open_automations,
+            extract_pick,
+            extract_pick_save,
+            extract_run,
+            extract_ai,
+            extract_crawl,
+            extract_sniff,
+            extract_endpoint,
+            get_dataset,
+            delete_dataset,
+            rename_dataset,
+            copy_dataset,
+            export_dataset,
+            dataset_to_board
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

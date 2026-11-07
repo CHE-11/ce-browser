@@ -1,6 +1,6 @@
 [package]
 name = "ce-browser"
-version = "0.1.58"
+version = "0.1.59"
 description = "Tabbed WebView2 browser"
 authors = ["you"]
 edition = "2024"
@@ -26,6 +26,7 @@ tauri = { version = "2", features = ["image-ico", "image-png", "devtools", "unst
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 url = "2"
+tiny_http = "0.12"
 ureq = "2"
 zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
 
