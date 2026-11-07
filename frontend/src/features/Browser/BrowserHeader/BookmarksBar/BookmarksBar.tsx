@@ -4,7 +4,7 @@ import { ChevronsRight, Folder } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
 import { closePopup, createTab, moveBookmark, navigate, openPopup } from "@/lib/browser-client";
 import { BOOKMARK_DROP_END, isBookmarkDrag, useBookmarkDrag } from "@/lib/bookmark-drag";
-import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
+import { BOOKMARK_SIZE, bookmarkItemStyle, bookmarkLabelStyle } from "@/lib/bookmark-size";
 import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
@@ -356,7 +356,7 @@ export function BookmarksBar({ tree, activeId, activePinned = false, textSize, p
                 className={iconClass}
                 style={iconStyle}
               />
-              <span id={`bookmarks-bar-${node.id}-title`} className="truncate">
+              <span id={`bookmarks-bar-${node.id}-title`} className="truncate" style={bookmarkLabelStyle}>
                 {node.title || node.url}
               </span>
             </button>
@@ -377,7 +377,7 @@ export function BookmarksBar({ tree, activeId, activePinned = false, textSize, p
               {folderIcons || !node.title ? (
                 <Folder id={`bookmarks-bar-${node.id}-icon`} className={cn(iconClass, "text-amber-400")} style={iconStyle} aria-hidden />
               ) : null}
-              <span id={`bookmarks-bar-${node.id}-title`} className="truncate">
+              <span id={`bookmarks-bar-${node.id}-title`} className="truncate" style={bookmarkLabelStyle}>
                 {node.title}
               </span>
             </button>
@@ -414,7 +414,7 @@ export function BookmarksBar({ tree, activeId, activePinned = false, textSize, p
           {...drag.targetProps(tree.other, 0)}
         >
           {folderIcons ? <Folder id="bookmarks-bar-other-icon" className={cn(iconClass, "text-amber-400")} style={iconStyle} aria-hidden /> : null}
-          <span id="bookmarks-bar-other-title" className="truncate">
+          <span id="bookmarks-bar-other-title" className="truncate" style={bookmarkLabelStyle}>
             {tree.other.title || "Other bookmarks"}
           </span>
         </button>

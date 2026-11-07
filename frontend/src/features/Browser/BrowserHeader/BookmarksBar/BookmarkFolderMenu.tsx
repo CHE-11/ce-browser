@@ -11,7 +11,7 @@ import {
   openPopup,
 } from "@/lib/browser-client";
 import { BOOKMARK_DROP_END, useBookmarkDrag } from "@/lib/bookmark-drag";
-import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
+import { BOOKMARK_SIZE, bookmarkItemStyle, bookmarkLabelStyle } from "@/lib/bookmark-size";
 import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { faviconKey } from "@/lib/format";
@@ -278,7 +278,7 @@ export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFol
                     className={rowIconClass}
                     style={folderIcon}
                   />
-                  <span id={`${rowId(node)}-title`} className="min-w-0 flex-1 truncate">
+                  <span id={`${rowId(node)}-title`} className="min-w-0 flex-1 truncate" style={bookmarkLabelStyle}>
                     {node.title || node.url}
                   </span>
                 </button>
@@ -300,7 +300,7 @@ export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFol
                   {...drag.itemProps(node, index)}
                 >
                   <Folder id={`${rowId(node)}-icon`} className={cn(rowIconClass, "text-amber-400")} style={folderIcon} aria-hidden />
-                  <span id={`${rowId(node)}-title`} className="min-w-0 flex-1 truncate">
+                  <span id={`${rowId(node)}-title`} className="min-w-0 flex-1 truncate" style={bookmarkLabelStyle}>
                     {node.title}
                   </span>
                   <ChevronRight id={`${rowId(node)}-chevron`} className="size-[1em] shrink-0 text-zinc-500" aria-hidden />
