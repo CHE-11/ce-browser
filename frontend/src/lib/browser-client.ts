@@ -1785,6 +1785,11 @@ export function toggleAgentPanel(open?: boolean) {
   return invoke<boolean>("toggle_agent_panel", { open: open ?? null });
 }
 
+/** Opens or closes the automations panel beside this window's pages. `open` forces a state. */
+export function toggleAutomationPanel(open?: boolean) {
+  return invoke<boolean>("toggle_automation_panel", { open: open ?? null });
+}
+
 /** Follows the mouse until the button comes up and remembers the agent panel width. */
 export function resizeAgentPanel() {
   return invoke<void>("resize_agent_panel");

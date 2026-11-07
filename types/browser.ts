@@ -126,6 +126,8 @@ export type WindowTabs = {
   viewport: PageViewport | null;
   /** The agent panel is docked beside the pages. */
   agentPanel: boolean;
+  /** The automations panel is docked beside the pages. */
+  automationPanel: boolean;
 };
 
 export type RewriteRule = {

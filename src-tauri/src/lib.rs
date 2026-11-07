@@ -2141,6 +2141,15 @@ async fn toggle_agent_panel(
 }
 
 #[tauri::command]
+async fn toggle_automation_panel(
+    app: AppHandle,
+    window: Window,
+    open: Option<bool>,
+) -> Result<bool, String> {
+    automation::panel::toggle_automations(&app, &browser_window(&window), open)
+}
+
+#[tauri::command]
 async fn resize_agent_panel(app: AppHandle, window: Window) -> Result<(), String> {
     let window = browser_window(&window);
     blocking(move || automation::panel::track_resize(&app, &window)).await
@@ -2851,6 +2860,7 @@ pub fn run() {
             agent_clear,
             agent_show_tab,
             toggle_agent_panel,
+            toggle_automation_panel,
             resize_agent_panel,
             set_agent_panel_width,
             automation_secret_names,

@@ -1,4 +1,4 @@
-//! The agent panel: a docked column beside the pages that shows agent runs.
+//! The side column beside the pages. The agent panel and the automations panel share it.
 //!
 //! Dragging its left edge calls `track_resize`. The pointer leaves the panel webview as the
 //! column grows, so the drag follows the screen cursor until the mouse button comes up.
@@ -41,20 +41,72 @@ impl Drop for ResizeGuard {
     }
 }
 
-/// Opens or closes the panel in `window`. `open` forces a state. Returns whether it is open.
+/// Opens or closes the agent panel in `window`. `open` forces a state. Returns whether it is open.
+/// The automations panel uses the same column, so opening this one parks that one.
 pub fn toggle(app: &AppHandle, window: &str, open: Option<bool>) -> Result<bool, String> {
-    let is_open = tabs::agent_panel_width(app, window) > 0.0;
-    let want = open.unwrap_or(!is_open);
+    toggle_kind(app, window, tabs::SidePanel::Agent, open, true)
+}
+
+/// Opens or closes the automations panel in `window`. `open` forces a state. Returns whether it is open.
+pub fn toggle_automations(
+    app: &AppHandle,
+    window: &str,
+    open: Option<bool>,
+) -> Result<bool, String> {
+    toggle_kind(app, window, tabs::SidePanel::Automations, open, true)
+}
+
+/// Opens the automations panel beside `window`'s pages. Leaves focus on the page, so recording
+/// can keep receiving clicks.
+pub fn show_automations(app: &AppHandle, window: &str) -> Result<(), String> {
+    toggle_kind(app, window, tabs::SidePanel::Automations, Some(true), false).map(|_| ())
+}
+
+fn toggle_kind(
+    app: &AppHandle,
+    window: &str,
+    kind: tabs::SidePanel,
+    open: Option<bool>,
+    focus: bool,
+) -> Result<bool, String> {
+    let showing =
+        tabs::side_panel(app, window) == kind && tabs::agent_panel_width(app, window) > 0.0;
+    let want = open.unwrap_or(!showing);
     if want {
-        ensure_view(app, window)?;
-        tabs::set_agent_panel(app, window, open_width(app));
-        if let Some(view) = app.get_webview(&tabs::agent_panel_label(window)) {
-            let _ = view.set_focus();
+        ensure_kind(app, window, kind)?;
+        tabs::set_side_panel(app, window, kind, open_width(app));
+        if focus {
+            let label = panel_label(window, kind);
+            if let Some(view) = app.get_webview(&label) {
+                let _ = view.set_focus();
+            }
         }
     } else {
-        tabs::set_agent_panel(app, window, 0.0);
+        tabs::set_side_panel(app, window, tabs::SidePanel::None, 0.0);
     }
     Ok(want)
+}
+
+fn panel_label(window: &str, kind: tabs::SidePanel) -> String {
+    match kind {
+        tabs::SidePanel::Automations => tabs::automation_panel_label(window),
+        _ => tabs::agent_panel_label(window),
+    }
+}
+
+fn ensure_kind(app: &AppHandle, window: &str, kind: tabs::SidePanel) -> Result<(), String> {
+    match kind {
+        tabs::SidePanel::Agent => {
+            ensure_view(app, window, &tabs::agent_panel_label(window), "agent-panel")
+        }
+        tabs::SidePanel::Automations => ensure_view(
+            app,
+            window,
+            &tabs::automation_panel_label(window),
+            "automations-panel",
+        ),
+        tabs::SidePanel::None => Ok(()),
+    }
 }
 
 fn open_width(app: &AppHandle) -> f64 {
@@ -263,17 +315,16 @@ fn width_beside_pointer(client: f64, left: f64, right: f64, cursor: f64, grab: f
     raw.clamp(min, cap)
 }
 
-fn ensure_view(app: &AppHandle, window: &str) -> Result<(), String> {
-    let label = tabs::agent_panel_label(window);
-    if app.get_webview(&label).is_some() {
+fn ensure_view(app: &AppHandle, window: &str, label: &str, page: &str) -> Result<(), String> {
+    if app.get_webview(label).is_some() {
         return Ok(());
     }
     let host = app
         .get_window(window)
         .ok_or("The browser window is missing.")?;
     let (r, g, b) = settings::popup_surface(app);
-    let url = paths::internal_url(app, "agent-panel");
-    let builder = tabs::base_builder(app, &label, WebviewUrl::External(url))
+    let url = paths::internal_url(app, page);
+    let builder = tabs::base_builder(app, label, WebviewUrl::External(url))
         .background_color(Color(r, g, b, 255))
         .focused(false);
     let view = host

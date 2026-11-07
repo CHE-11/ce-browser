@@ -180,17 +180,25 @@ var __ceLocators = (function () {
     return "";
   }
 
+  function textOf(el) {
+    try {
+      return el.innerText || el.textContent || "";
+    } catch (e) {
+      return el.textContent || "";
+    }
+  }
+
   function locatorsOf(el) {
-    var tag = el.tagName.toLowerCase();
+    var tag = el.tagName ? el.tagName.toLowerCase() : "";
     var css = "";
     if (el.id && stableId(el.id)) css = "#" + cssEscape(el.id);
-    else if (el.getAttribute("name") && (tag === "input" || tag === "select" || tag === "textarea")) {
+    else if (el.getAttribute && el.getAttribute("name") && (tag === "input" || tag === "select" || tag === "textarea")) {
       css = tag + "[name=\"" + el.getAttribute("name").replace(/"/g, "\\\"") + "\"]";
     }
     return {
       role: roleOf(el),
       name: nameOf(el),
-      text: clip(el.innerText || el.textContent || "", 80),
+      text: clip(textOf(el), 80),
       testId: testIdOf(el),
       css: css || cssPath(el),
       xpath: xpathOf(el),

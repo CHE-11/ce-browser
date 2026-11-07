@@ -1906,9 +1906,17 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                     return Ok(());
                 };
                 let json = read_pwstr(|value| args.WebMessageAsJson(value));
-                let Ok(message) = serde_json::from_str::<serde_json::Value>(&json) else {
+                let Ok(mut message) = serde_json::from_str::<serde_json::Value>(&json) else {
                     return Ok(());
                 };
+                // Remote pages hide `chrome.webview`, and an object `postMessage` then never
+                // arrives. Page scripts stringify and post a string. That arrives as a JSON
+                // string, so parse it once more.
+                if let Some(text) = message.as_str() {
+                    if let Ok(inner) = serde_json::from_str::<serde_json::Value>(text) {
+                        message = inner;
+                    }
+                }
                 match message.get("type").and_then(|kind| kind.as_str()) {
                     Some("ce-peek") => {
                         if let Some(url) = message.get("url").and_then(|url| url.as_str()) {
@@ -3220,15 +3228,21 @@ pub const WEBVIEW_CLOAK_SCRIPT: &str = r#"(function () {
   var bridge = null;
   try { bridge = chromeObj && chromeObj.webview; } catch (error) {}
   if (bridge && !window.__ceHost) {
+    var send = function (message) {
+      try {
+        bridge.postMessage(typeof message === "string" ? message : JSON.stringify(message));
+      } catch (error) {}
+    };
+    var host = { postMessage: send };
     try {
       Object.defineProperty(window, "__ceHost", {
         configurable: true,
         enumerable: false,
         writable: false,
-        value: bridge
+        value: host
       });
     } catch (error) {
-      window.__ceHost = bridge;
+      window.__ceHost = host;
     }
   }
   if (!remotePage()) return;

@@ -8,6 +8,7 @@ import { applyUserStyles } from "./lib/user-styles";
 import { applyZoom, readZoom } from "./lib/zoom";
 import { AgentPanelPage } from "./features/Agent/AgentPanel.page";
 import { AutomationsPage } from "./features/Automations/Automations.page";
+import { AutomationsPanelPage } from "./features/Automations/AutomationsPanel.page";
 import { BoardsPage } from "./features/Boards/Boards.page";
 import { BookmarksPage } from "./features/Bookmarks/Bookmarks.page";
 import { CaptureEditorPage } from "./features/CaptureEditor/CaptureEditor.page";
@@ -120,6 +121,8 @@ function App() {
       return <WhatsNewPage params={route.params} />;
     case "agent-panel":
       return <AgentPanelPage />;
+    case "automations-panel":
+      return <AutomationsPanelPage />;
     case "automations":
       return <AutomationsPage params={route.params} />;
     default:

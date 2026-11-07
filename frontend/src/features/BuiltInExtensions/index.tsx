@@ -13,6 +13,7 @@ import { ShoppingButton } from "./shopping/ShoppingButton";
 import { TranslateButton } from "./translate/Translate";
 import { WhatRunsButton } from "./what-runs/WhatRunsButton";
 import { AgentButton } from "./automation/AgentButton";
+import { AutomationsButton } from "./automation/AutomationsButton";
 import { ExtractButton } from "./automation/ExtractButton";
 import { RecordFlowButton } from "./automation/RecordFlowButton";
 
@@ -47,6 +48,8 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <ReadingButton activeTab={activeTab} />;
     case "agent":
       return <AgentButton />;
+    case "automations":
+      return <AutomationsButton />;
     case "record-flow":
       return <RecordFlowButton activeTab={activeTab} />;
     case "extract":

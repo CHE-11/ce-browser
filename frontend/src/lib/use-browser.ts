@@ -153,6 +153,7 @@ export function useTabs() {
     viewport: mine?.viewport ?? null,
     peekUrl: mine?.peekUrl ?? null,
     agentPanel: mine?.agentPanel ?? false,
+    automationPanel: mine?.automationPanel ?? false,
     groups,
     selectedIds: selectedIds.length > 0 ? selectedIds : activeId === null ? [] : [activeId],
     loaded: live.loaded,

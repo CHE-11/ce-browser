@@ -15,6 +15,7 @@ import {
   ShoppingCart,
   SlidersHorizontal,
   TableProperties,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 
@@ -113,6 +114,12 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Agent",
     description: "Let AI do a task in the current tab with real clicks and typing.",
     icon: Bot,
+  },
+  {
+    id: "automations",
+    name: "Automations",
+    description: "View flows and watch steps as you record them, beside the page.",
+    icon: Workflow,
   },
   {
     id: "record-flow",

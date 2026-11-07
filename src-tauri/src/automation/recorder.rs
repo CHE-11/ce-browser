@@ -36,6 +36,8 @@ struct Recording {
     steps: Vec<FlowStep>,
     started: u64,
     flow_id: String,
+    /// The page script posted that it is listening.
+    attached: bool,
 }
 
 fn state() -> &'static Mutex<Option<Recording>> {
@@ -111,19 +113,40 @@ pub fn start(app: &AppHandle, tab: u32, flow_id: Option<&str>) -> Result<(), Str
     });
     *state().lock().expect("recorder lock") = Some(Recording {
         tab,
-        token,
+        token: token.clone(),
         start_url: info.url.clone(),
         script: identifier,
         steps: Vec::new(),
         started: now_ms(),
         flow_id,
+        attached: false,
     });
     driver::evaluate_main(app, tab, &source).map_err(|error| {
         *state().lock().expect("recorder lock") = None;
         error
     })?;
     flows::emit(app);
+    if let Err(error) = super::panel::show_automations(app, &info.window) {
+        eprintln!("automations panel: {error}");
+    }
+    watch_attach(token);
     Ok(())
+}
+
+/// The page has a couple of seconds to say the recorder is listening. Remote pages hide
+/// `chrome.webview`, so a script that misses `__ceHost` would otherwise record nothing.
+fn watch_attach(token: String) {
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(5));
+        let missing = state().lock().ok().is_some_and(|guard| {
+            guard
+                .as_ref()
+                .is_some_and(|recording| recording.token == token && !recording.attached)
+        });
+        if missing {
+            crate::system::toast("Recording", "Recording could not attach to this page.", "");
+        }
+    });
 }
 
 /// Ends the recording. With `save` and at least one step, stores the steps and returns the id of
@@ -224,6 +247,15 @@ pub fn toggle(app: &AppHandle, tab: u32) -> Result<(), String> {
 /// A step posted by the page script. Messages without the recording's token are ignored.
 pub fn on_message(app: &AppHandle, tab: u32, message: &Value) {
     let token = message.get("token").and_then(Value::as_str).unwrap_or("");
+    if message.get("ready").and_then(Value::as_bool) == Some(true) {
+        let mut guard = state().lock().expect("recorder lock");
+        if let Some(recording) = guard.as_mut() {
+            if recording.tab == tab && recording.token == token {
+                recording.attached = true;
+            }
+        }
+        return;
+    }
     let Some(raw) = message.get("step") else {
         return;
     };
@@ -406,6 +438,7 @@ mod tests {
         let source = script("abc");
         assert!(source.starts_with("(function () {"));
         assert!(source.contains("\"abc\""));
+        assert!(source.contains("__ceHost"));
         assert!(!source.contains("__CE_RECORD_TOKEN__"));
     }
 }

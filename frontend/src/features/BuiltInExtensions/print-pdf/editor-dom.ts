@@ -18,8 +18,8 @@ const PROTECTED = new Set(["HTML", "BODY", "HEAD"]);
 const EDITOR_CSS = `
 .ce-hover { outline: 2px solid #ef4444 !important; outline-offset: -2px !important; background-color: rgba(239, 68, 68, 0.08) !important; cursor: pointer !important; }
 .ce-selected { outline: 2px dashed #0ea5e9 !important; outline-offset: -2px !important; background-color: rgba(14, 165, 233, 0.1) !important; }
-html.ce-editing-text .ce-hover { outline: none !important; background-color: transparent !important; cursor: text !important; }
-html.ce-editing-text body { outline: none !important; caret-color: #0ea5e9; }
+html.ce-editing-text .ce-hover, body.ce-editing-text .ce-hover { outline: none !important; background-color: transparent !important; cursor: text !important; }
+html.ce-editing-text body, body.ce-editing-text { outline: none !important; caret-color: #0ea5e9; }
 #${GUIDES_ID} {
   position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important;
   pointer-events: none !important; z-index: 2147483647 !important; margin: 0 !important; padding: 0 !important;
@@ -39,6 +39,48 @@ function describe(element: Element) {
   }
   const text = element.textContent?.replace(/\s+/g, " ").trim() ?? "";
   return text ? `${label} — "${text.slice(0, 48)}${text.length > 48 ? "…" : ""}"` : label;
+}
+
+/** Where a node can be inserted. An iframe document can have a body before its root is exposed. */
+function mountParent(doc: Document, preferBody = false): HTMLElement | null {
+  if (preferBody) {
+    return doc.documentElement ?? doc.body;
+  }
+  return doc.head ?? doc.body ?? doc.documentElement;
+}
+
+/** Inserts `node` now, or as soon as the document grows a parent. */
+function appendWhenReady(doc: Document, node: Node, preferBody = false) {
+  const parent = mountParent(doc, preferBody);
+  if (parent) {
+    parent.appendChild(node);
+    return;
+  }
+  if (doc.readyState !== "loading") {
+    return;
+  }
+  const place = () => {
+    const next = mountParent(doc, preferBody);
+    if (!next || node.parentNode) {
+      return next !== null;
+    }
+    next.appendChild(node);
+    return true;
+  };
+  const observer = new MutationObserver(() => {
+    if (place()) {
+      observer.disconnect();
+    }
+  });
+  observer.observe(doc, { childList: true });
+  doc.addEventListener(
+    "DOMContentLoaded",
+    () => {
+      place();
+      observer.disconnect();
+    },
+    { once: true },
+  );
 }
 
 function editable(element: Element | null): Element | null {
@@ -88,7 +130,7 @@ export class FrameEditor {
     const style = doc.createElement("style");
     style.id = EDITOR_STYLE_ID;
     style.textContent = EDITOR_CSS;
-    (doc.head ?? doc.documentElement).appendChild(style);
+    appendWhenReady(doc, style);
     this.installGuides(pageHeight);
 
     this.listen("mouseover", (event) => this.onOver(event as MouseEvent));
@@ -115,9 +157,10 @@ export class FrameEditor {
     guides.id = GUIDES_ID;
     guides.setAttribute("aria-hidden", "true");
     guides.style.setProperty("--ce-page", `${pageHeight}px`);
-    this.doc.documentElement.appendChild(guides);
+    appendWhenReady(this.doc, guides, true);
     const update = () => {
-      const height = Math.max(body.scrollHeight + body.offsetTop, this.doc.documentElement.clientHeight);
+      const root = this.doc.documentElement ?? body;
+      const height = Math.max(body.scrollHeight + body.offsetTop, root.clientHeight);
       guides.style.setProperty("height", `${height}px`, "important");
     };
     update();
@@ -135,7 +178,7 @@ export class FrameEditor {
     this.setHovered(null);
     this.clearSelection();
     const body = this.doc.body;
-    this.doc.documentElement.classList.toggle("ce-editing-text", on);
+    (this.doc.documentElement ?? body)?.classList.toggle("ce-editing-text", on);
     if (!body) {
       return;
     }

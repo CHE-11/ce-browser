@@ -206,6 +206,8 @@ pub struct WindowTabs {
     pub viewport: Option<PageViewport>,
     /// The agent panel is docked beside the pages.
     pub agent_panel: bool,
+    /// The automations panel is docked beside the pages.
+    pub automation_panel: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -390,6 +392,14 @@ impl DevtoolsState {
     }
 }
 
+/// Which webview owns the docked column beside the pages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidePanel {
+    None,
+    Agent,
+    Automations,
+}
+
 struct WindowChrome {
     label: String,
     ui: String,
@@ -401,8 +411,11 @@ struct WindowChrome {
     ui_right: f64,
     /// Height of the status bar. Zero when it is hidden.
     ui_bottom: f64,
-    /// Width of the docked agent panel in CSS pixels. Zero when it is closed.
+    /// Width of the docked side column in CSS pixels. Zero when it is closed.
+    /// The agent panel and the automations panel share this column.
     agent_panel: f64,
+    /// Which panel is in the column. `None` while the column is closed.
+    side: SidePanel,
     fullscreen: bool,
     /// Toast view drawn over the bottom of the pages. Menus open and close without touching it.
     toast: Option<String>,
@@ -437,6 +450,7 @@ impl WindowChrome {
             ui_right: 0.0,
             ui_bottom: 0.0,
             agent_panel: 0.0,
+            side: SidePanel::None,
             fullscreen: false,
             toast: None,
             shown: Vec::new(),
@@ -780,7 +794,9 @@ impl TabsState {
                         cutout: chrome.viewport_cutout,
                         home_bar: chrome.viewport_home,
                     }),
-                    agent_panel: chrome.agent_panel > 0.0,
+                    agent_panel: chrome.side == SidePanel::Agent && chrome.agent_panel > 0.0,
+                    automation_panel: chrome.side == SidePanel::Automations
+                        && chrome.agent_panel > 0.0,
                 })
                 .collect(),
             groups: self.groups.clone(),
@@ -1838,10 +1854,23 @@ pub fn page_background_script(app: &AppHandle) -> String {
         r##"(function () {{
   if (location.origin !== "{origin}") return;
   if (location.hash.indexOf("#/popup/") === 0) return;
-  var style = document.createElement("style");
-  style.id = "ce-page-background";
-  style.textContent = "html,body{{background-color:#{r:02x}{g:02x}{b:02x}}}";
-  document.documentElement.appendChild(style);
+  var css = "html,body{{background-color:#{r:02x}{g:02x}{b:02x}}}";
+  var observer = null;
+  function mount() {{
+    var root = document.head || document.body || document.documentElement;
+    if (!root) return false;
+    if (document.getElementById("ce-page-background")) return true;
+    var style = document.createElement("style");
+    style.id = "ce-page-background";
+    style.textContent = css;
+    root.appendChild(style);
+    if (observer) observer.disconnect();
+    return true;
+  }}
+  if (mount()) return;
+  observer = new MutationObserver(mount);
+  observer.observe(document, {{ childList: true }});
+  document.addEventListener("DOMContentLoaded", mount);
 }})();"##,
         origin = origin,
         r = color.0,
@@ -3377,7 +3406,7 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
             let _ = webview.set_position(parked_position());
         }
     }
-    place_agent_panel(app, window, position, page_size, scale);
+    place_side_panel(app, window, position, page_size, scale);
     apply_audio(app, window);
     if !wake.is_empty() || dock_clamped {
         emit_tabs(app);
@@ -5530,29 +5559,69 @@ fn page_rect(app: &AppHandle, window_label: &str) -> (PhysicalPosition<i32>, Phy
 }
 
 pub const AGENT_PANEL_PREFIX: &str = "agent-";
+pub const AUTOMATION_PANEL_PREFIX: &str = "automations-";
 
 pub fn agent_panel_label(window: &str) -> String {
     format!("{AGENT_PANEL_PREFIX}{window}")
 }
 
+pub fn automation_panel_label(window: &str) -> String {
+    format!("{AUTOMATION_PANEL_PREFIX}{window}")
+}
+
 /// The panel column sits between the pages and the tool strip, full page-area height.
-fn place_agent_panel(
+/// The open panel is placed there. The other one, and both while closed, stay parked.
+fn place_side_panel(
     app: &AppHandle,
     window: &str,
     position: PhysicalPosition<i32>,
     page_size: PhysicalSize<u32>,
     scale: f64,
 ) {
-    let Some(webview) = app.get_webview(&agent_panel_label(window)) else {
-        return;
-    };
-    let (width, fullscreen) = with_state(app, |state| {
+    let (width, fullscreen, side) = with_state(app, |state| {
         state
             .chrome(window)
-            .map(|chrome| (chrome.agent_panel, chrome.fullscreen))
-            .unwrap_or((0.0, false))
+            .map(|chrome| (chrome.agent_panel, chrome.fullscreen, chrome.side))
+            .unwrap_or((0.0, false, SidePanel::None))
     });
-    if width <= 0.0 || fullscreen {
+    let show = if width <= 0.0 || fullscreen {
+        SidePanel::None
+    } else {
+        side
+    };
+    place_column(
+        app,
+        &agent_panel_label(window),
+        show == SidePanel::Agent,
+        position,
+        page_size,
+        scale,
+        width,
+    );
+    place_column(
+        app,
+        &automation_panel_label(window),
+        show == SidePanel::Automations,
+        position,
+        page_size,
+        scale,
+        width,
+    );
+}
+
+fn place_column(
+    app: &AppHandle,
+    label: &str,
+    show: bool,
+    position: PhysicalPosition<i32>,
+    page_size: PhysicalSize<u32>,
+    scale: f64,
+    width: f64,
+) {
+    let Some(webview) = app.get_webview(label) else {
+        return;
+    };
+    if !show {
         let _ = webview.set_position(parked_position());
         return;
     }
@@ -5564,7 +5633,7 @@ fn place_agent_panel(
     ));
 }
 
-/// Width of the docked agent panel in CSS pixels. Zero when it is closed.
+/// Width of the docked side column in CSS pixels. Zero when it is closed.
 pub fn agent_panel_width(app: &AppHandle, window: &str) -> f64 {
     with_state(app, |state| {
         state
@@ -5574,14 +5643,30 @@ pub fn agent_panel_width(app: &AppHandle, window: &str) -> f64 {
     })
 }
 
-/// Opens (`width` > 0) or closes the agent panel column, then lays the pages out again.
-pub fn set_agent_panel(app: &AppHandle, window: &str, width: f64) {
+/// Which panel owns the column. `None` while it is closed.
+pub fn side_panel(app: &AppHandle, window: &str) -> SidePanel {
+    with_state(app, |state| {
+        state
+            .chrome(window)
+            .map(|chrome| chrome.side)
+            .unwrap_or(SidePanel::None)
+    })
+}
+
+/// Shows `kind` in the side column at `width` CSS pixels, or closes the column for `None`.
+pub fn set_side_panel(app: &AppHandle, window: &str, kind: SidePanel, width: f64) {
     let changed = with_state(app, |state| {
         let chrome = state.chrome_mut(window)?;
-        let width = width.max(0.0);
-        if (chrome.agent_panel - width).abs() < 0.5 {
+        let width = if kind == SidePanel::None {
+            0.0
+        } else {
+            width.max(0.0)
+        };
+        let kind = if width <= 0.0 { SidePanel::None } else { kind };
+        if chrome.side == kind && (chrome.agent_panel - width).abs() < 0.5 {
             return None;
         }
+        chrome.side = kind;
         chrome.agent_panel = width;
         Some(())
     });
@@ -5591,9 +5676,9 @@ pub fn set_agent_panel(app: &AppHandle, window: &str, width: f64) {
     }
 }
 
-/// Moves an open agent panel to `width` CSS pixels. Popups stay put, and the tab snapshot
+/// Moves the open side column to `width` CSS pixels. Popups stay put, and the tab snapshot
 /// is not emitted: the handle lives in the panel, which moves with the webview.
-/// `None` when the panel is closed.
+/// `None` when the column is closed.
 pub fn resize_agent_panel(app: &AppHandle, window: &str, width: f64) -> Option<f64> {
     if !width.is_finite() || agent_panel_width(app, window) <= 0.0 {
         return None;
