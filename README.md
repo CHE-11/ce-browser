@@ -1,6 +1,21 @@
 # ce-browser
+**This is a work in progress and is not yet ready for mass use. I use it as a daily driver and it is stable enough for me to use.**
 
-A small Windows browser built on Tauri 2 and Microsoft Edge WebView2. Tabs, pinned tabs, bookmarks, downloads and unpacked Chrome extensions are built in.
+I have tried nearly every browser out there and continue to be disappointed. Some are bloated, slow, and buggy. Others are missing features, have poor extensibility, or just plain ugly. 
+
+The goal with this project is:
+- fast
+- lightweight
+- secure
+- privacy focused
+- easy to use and familiar
+- easy to develop for and extend
+- easy to customize 
+- cross platform
+- accountless sync (bring your own sync provider)
+- open source
+-
+
 
 ## Running
 
@@ -9,7 +24,50 @@ pnpm install
 pnpm tauri dev
 ```
 
-`pnpm build:exe` produces the installer `src-tauri/target/release/bundle/nsis/ce-browser_<version>_x64-setup.exe`. WebView2 ships with Windows 10 and 11. Extension support needs a recent WebView2 runtime (1.0.2739 or later).
+`pnpm build:exe` produces the installer `src-tauri/target/release/bundle/nsis/ce-browser_<version>_x64-setup.exe`. WebView2 ships with Windows 10 and 11 but should also work on Mac and Linux with minor tweaks. Extension support needs a recent WebView2 runtime (1.0.2739 or later).
+
+## MCP and Developer Tools
+
+A dev build (`pnpm tauri dev`) starts Passage, a local MCP server that lets a coding agent inspect and drive the running app. Release builds never start it. It listens on `http://127.0.0.1:1427` (`CE_PASSAGE_PORT` overrides the port) and is ready when the app prints `passage: listening`. `GET /health` returns the process id, version, port and `startedAt`.
+
+Cursor connects through `.cursor/mcp.json`, which points the `ce-passage` server at `http://127.0.0.1:1427/mcp`. The same tools are available from the shell when that server is not connected:
+
+```powershell
+./scripts/passage.ps1 health
+./scripts/passage.ps1 logs '{"stream":"console","limit":50}'
+./scripts/passage.ps1 eval '{"label":"ui","expression":"document.title"}'
+./scripts/passage.ps1 screenshot
+```
+
+`POST /call/<tool>` takes a JSON object of that tool's arguments. `POST /mcp` speaks MCP JSON-RPC (`initialize`, `tools/list`, `tools/call`).
+
+After a Rust edit, `tauri dev` rebuilds and restarts the app. Call `health` again and wait until `startedAt` changes before testing. Frontend edits reload through Vite and leave Passage running.
+
+Webviews are addressed by label. `ui` is the React browser chrome. `tab-<id>` is a page. `popup-<window>-<n>` is a menu, panel or extension popup. `webviews` lists them.
+
+| Tool | What it does |
+| --- | --- |
+| `status` | Process id, start time, version, profile, data folders and windows |
+| `webviews` | Every webview: kind, address, bounds and whether it is parked off screen |
+| `tabs` | Tabs, groups, windows and workspaces |
+| `settings` | The active profile's settings |
+| `logs` | Backend stdout and stderr, and frontend console errors and warnings. `sinceId` from the last result reads only newer lines. `stream` is `stdout`, `stderr` or `console` |
+| `ipc` | Commands and events from the frontend. `failedOnly` keeps the ones that failed |
+| `eval` | Run a JavaScript expression in a webview. Promises are awaited |
+| `query` | Elements matching a CSS selector, with their box and optional computed styles |
+| `click`, `type`, `press` | Real mouse and keyboard input. `type` can click a field first and press Enter |
+| `invoke` | Call a Tauri command through the browser UI, the way the frontend does |
+| `screenshot` | A PNG under `src-tauri/target/passage`. `mode` `screen` includes popups. `webview` captures one webview |
+| `wait` | Wait until a selector appears or disappears, or until a new log line contains text |
+| `reload`, `devtools` | Reload a webview, or open its DevTools |
+| `clear` | Clear the log feed or the IPC feed |
+
+Passage binds to `127.0.0.1` only. It has no token, so any local process can use it while a dev build is running. Requests that carry a browser `Origin` are refused, so a page loaded in the browser cannot call it.
+
+Ctrl+Shift+F12, or **Toggle Debug HUD** in the browser menu, opens a window beside the browser. It shows the same IPC feed, logs, webview list and browser state that Passage reads. The menu item and the shortcut exist only in a dev build.
+
+The MCP server in Settings is a different server. It ships in release builds, drives the user's tabs, and requires the bearer token shown on that page. Passage is only for working on ce-browser itself.
+
 
 ## Tabs
 

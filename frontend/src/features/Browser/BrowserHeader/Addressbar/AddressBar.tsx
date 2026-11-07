@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
-  Activity,
   ArrowLeft,
   ArrowRight,
   Columns2,
@@ -11,16 +10,12 @@ import {
   Info,
   Lock,
   Mic,
-  Paintbrush,
-  Palette,
   Pin,
-  Puzzle,
   RotateCw,
   Search,
   Settings,
   Star,
   TriangleAlert,
-  Type,
   Volume2,
   VolumeX,
   X,
@@ -73,7 +68,7 @@ import {
 import { storeListing } from "../../../../lib/extension-store";
 import { accentTint } from "../../../../lib/accent";
 import { cn } from "../../../../lib/cn";
-import { reorderToolbar, splitToolbar, toolbarPinned } from "../../../../lib/toolbar-pin";
+import { reorderToolbarAt, splitToolbar } from "../../../../lib/toolbar-pin";
 import { buildSuggestions, inlineCompletion, looksLikeUrl } from "../../../../lib/omnibox";
 import { flattenBookmarks, type WindowTabsState } from "../../../../lib/use-browser";
 import { focusRing } from "../../../../lib/focus-ring";
@@ -81,9 +76,7 @@ import { useStickyAudio } from "../../../../lib/use-sticky-audio";
 import { IconButton } from "../../../../components/IconButton";
 import { LoadBar } from "../../../../components/LoadBar";
 import { WindowControls } from "../../../../components/WindowControls";
-import { MediaHubButton } from "../../../BuiltInExtensions/media/MediaHubButton";
-import { ProfileSwitcherButton } from "./ProfileSwitcherButton";
-import { ToolbarEntry } from "../../BrowserBody/ToolsToolbar/ToolsToolbar";
+import { AddressBarExtensions } from "./AddressBarExtensions";
 
 type AddressBarProps = {
   snapshot: WindowTabsState;
@@ -564,18 +557,16 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     return total > 0 ? Math.min(1, received / total) : null;
   }, [activeDownloads]);
 
-  const toolbarExtensions = extensions.filter(
-    (extension) => extension.enabled && toolbarPinned(settings, extension.id),
-  );
+  const toolbarExtensions = extensions.filter((extension) => extension.enabled);
   const { address: addressExtensions, all: toolbarOrderIds } = splitToolbar(
     settings,
     toolbarExtensions.map((extension) => extension.id),
   );
-  const moveToolbar = (from: string, to: string) => {
+  const moveToolbar = (from: string, dropIndex: number) => {
     if (!settings) {
       return;
     }
-    const next = reorderToolbar(toolbarOrderIds, from, to);
+    const next = reorderToolbarAt(toolbarOrderIds, addressExtensions, from, dropIndex);
     if (next) {
       void saveSettings({ ...settings, toolbarOrder: next });
     }
@@ -854,27 +845,14 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         </button>
       </div>
 
-      <div id="address-tools" className="flex items-center">
-        {addressExtensions.map((id) => (
-          <ToolbarEntry
-            key={id}
-            id={id}
-            idPrefix="address"
-            extension={toolbarExtensions.find((item) => item.id === id)}
-            activeTab={activeTab}
-            settings={settings}
-            labeled={false}
-            onMove={moveToolbar}
-          />
-        ))}
-        <IconButton
-          id="address-extensions-page"
-          label="Extensions"
-          onClick={() => void createTab("ce://extensions")}
-        >
-          <Puzzle id="address-extensions-page-icon" aria-hidden />
-        </IconButton>
-      </div>
+      <AddressBarExtensions
+        addressExtensions={addressExtensions}
+        toolbarExtensions={toolbarExtensions}
+        activeTab={activeTab}
+        settings={settings}
+        onMove={moveToolbar}
+      />
+      
       <div id="address-extensions-end" className="mx-0.5 h-4 w-px shrink-0 bg-zinc-600" />
 
       <IconButton
@@ -913,7 +891,6 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       >
         <History id="address-history-icon" aria-hidden />
       </IconButton>
-      {toolbarPinned(settings, "media-hub") ? <MediaHubButton /> : null}
       <IconButton
         id="address-split"
         label={inSplit ? "Exit split view" : "Split view with the next tab"}
@@ -939,35 +916,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           <Pin id="address-restore-pins-icon" aria-hidden />
         </IconButton>
       </div>
-      <IconButton
-        id="address-status"
-        label="Browser status"
-        onClick={(event) => void openPopup("status", event.currentTarget)}
-      >
-        <Activity id="address-status-icon" aria-hidden />
-      </IconButton>
-      <IconButton
-        id="address-styles"
-        label="Styles"
-        onClick={(event) => void openPopup("style-picker", event.currentTarget)}
-      >
-        <Paintbrush id="address-styles-icon" aria-hidden />
-      </IconButton>
-      <IconButton
-        id="address-theme"
-        label="Themes"
-        onClick={(event) => void openPopup("theme-picker", event.currentTarget)}
-      >
-        <Palette id="address-theme-icon" aria-hidden />
-      </IconButton>
-      <IconButton
-        id="address-font"
-        label="Fonts"
-        onClick={(event) => void openPopup("font-picker", event.currentTarget)}
-      >
-        <Type id="address-font-icon" aria-hidden />
-      </IconButton>
-      <ProfileSwitcherButton />
+
       <IconButton id="address-settings" label="Settings" onClick={() => void createTab("ce://settings")}>
         <Settings id="address-settings-icon" aria-hidden />
       </IconButton>

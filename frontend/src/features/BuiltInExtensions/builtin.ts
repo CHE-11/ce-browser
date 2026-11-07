@@ -24,7 +24,7 @@ export type BuiltinTool = {
   name: string;
   description: string;
   icon: LucideIcon;
-  /** Drawn in a fixed address-bar slot instead of the tool strip. */
+  /** Defaults to the address bar. Other tools default to the tools toolbar. */
   address?: boolean;
 };
 

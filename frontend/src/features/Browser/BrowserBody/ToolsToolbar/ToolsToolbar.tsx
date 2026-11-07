@@ -1,14 +1,23 @@
 import { forwardRef, useRef, useState, type DragEvent } from "react";
-import { ListCollapse, PanelRight, PanelTop } from "lucide-react";
-import type { BrowserSettings, ExtensionInfo, TabInfo } from "@type/browser";
+import { ListCollapse } from "lucide-react";
+import type { BrowserSettings, ExtensionInfo, TabInfo, ToolbarSide } from "@type/browser";
 import { ToolbarIcon } from "@features/BuiltInExtensions";
 import { builtinTool } from "@features/BuiltInExtensions/builtin";
 import { openPopup, saveSettings } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
-import { openToolbarPinMenu, reorderToolbarAt, splitToolbar, toolbarDragHandlers, toolbarPinned } from "@/lib/toolbar-pin";
+import {
+  openToolbarPinMenu,
+  reorderToolbarAt,
+  splitToolbar,
+  toolbarDragHandlers,
+  toolbarDropEdge,
+  toolbarIndexAt,
+} from "@/lib/toolbar-pin";
+import { toolbarSidePatch } from "@/lib/toolbar-side";
 import { ExtensionIcon } from "@/components/ExtensionIcon";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
+import { ToolbarSideControl } from "./ToolbarSideControl";
 
 
 type ExtensionToolbarButtonProps = {
@@ -38,8 +47,6 @@ export function ExtensionToolbarButton({ extension, idPrefix }: ExtensionToolbar
   );
 }
 
-type DropEdge = "before" | "after";
-
 type ToolbarEntryProps = {
   id: string;
   idPrefix: string;
@@ -51,7 +58,7 @@ type ToolbarEntryProps = {
   layout?: "vertical" | "horizontal";
   onMove?: (from: string, to: string) => void;
   /** Gap this icon shows while the list is being rearranged. */
-  drop?: DropEdge | null;
+  drop?: "before" | "after" | null;
   dragging?: boolean;
   /** Set on the tools toolbar, which places the drop itself. */
   toolbarIndex?: number;
@@ -138,53 +145,30 @@ export function ToolbarEntry({
   );
 }
 
-/** Gap under the pointer. Counts the slots between icons, including the slot after the last one. */
-function toolbarIndexAt(container: HTMLElement, client: number, axis: "x" | "y") {
-  const items = container.querySelectorAll<HTMLElement>(":scope > [data-toolbar-index]");
-  for (const item of items) {
-    const rect = item.getBoundingClientRect();
-    const start = axis === "x" ? rect.left : rect.top;
-    const size = axis === "x" ? rect.width : rect.height;
-    if (client < start + size / 2) {
-      return Number(item.dataset.toolbarIndex);
-    }
-  }
-  return items.length;
-}
-
-/** Hides the line when the icon would land in the gap it already occupies. */
-function dropEdge(index: number, count: number, fromIndex: number, dropIndex: number | null): DropEdge | null {
-  if (dropIndex === null || fromIndex < 0 || dropIndex === fromIndex || dropIndex === fromIndex + 1) {
-    return null;
-  }
-  if (dropIndex === index) {
-    return "before";
-  }
-  if (index === count - 1 && dropIndex === count) {
-    return "after";
-  }
-  return null;
-}
-
 type ToolsToolbarProps = {
   activeTab: TabInfo | undefined;
   extensions: ExtensionInfo[];
   settings: BrowserSettings | null;
-  layout: "vertical" | "horizontal";
+  side: ToolbarSide;
 };
 
-/** Pinned built-in tools, on the right or in a row above the bookmarks bar. */
+/** Tools pinned as secondary, on one edge of the window. */
 export const ToolsToolbar = forwardRef<HTMLElement, ToolsToolbarProps>(function ToolsToolbar(
-  { activeTab, extensions, settings, layout },
+  { activeTab, extensions, settings, side },
   ref,
 ) {
-  const toolbarExtensions = extensions.filter((extension) => extension.enabled && toolbarPinned(settings, extension.id));
+  const toolbarExtensions = extensions.filter((extension) => extension.enabled);
   const { tools, all } = splitToolbar(
     settings,
     toolbarExtensions.map((extension) => extension.id),
   );
   const labels = settings?.verticalToolbarLabels ?? false;
-  const vertical = layout === "vertical";
+  const vertical = side === "left" || side === "right";
+  const setToolbarSide = (next: ToolbarSide) => {
+    if (settings) {
+      void saveSettings({ ...settings, ...toolbarSidePatch(next) });
+    }
+  };
   const draggingRef = useRef<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -234,36 +218,34 @@ export const ToolsToolbar = forwardRef<HTMLElement, ToolsToolbarProps>(function 
       id="tools-toolbar"
       ref={ref}
       aria-label="Tools"
-      data-layout={layout}
+      data-layout={vertical ? "vertical" : "horizontal"}
+      data-side={side}
       className={cn(
         "chrome-tool-strip flex shrink-0 bg-zinc-950",
-        vertical
-          ? "h-full min-h-0 flex-col overflow-hidden border-l border-zinc-800"
-          : cn(
-              "chrome-tool-strip-horizontal grid w-full grid-cols-[minmax(0,1fr)_minmax(0,max-content)_minmax(0,1fr)] items-center border-b border-zinc-800",
-              labels && "chrome-tool-strip-labeled",
-            ),
+        side === "right" && "h-full min-h-0 flex-col overflow-hidden border-l border-zinc-800",
+        side === "left" && "h-full min-h-0 flex-col overflow-hidden border-r border-zinc-800",
+        (side === "top" || side === "bottom") &&
+          cn(
+            "chrome-tool-strip-horizontal grid w-full grid-cols-[minmax(0,1fr)_minmax(0,max-content)_minmax(0,1fr)] items-center border-zinc-800",
+            side === "top" ? "border-b" : "border-t",
+            labels && "chrome-tool-strip-labeled",
+          ),
       )}
     >
       <div
         id="tools-toolbar-dock"
         className={cn(
           "flex shrink-0 items-center justify-center gap-1",
-          vertical ? "h-[var(--toolbar-height)] border-b border-zinc-800" : "justify-self-start px-1",
+          vertical ? "w-full flex-col border-b border-zinc-800 py-1" : "flex-row justify-self-start px-1",
         )}
       >
-        <IconButton
-          id="tools-toolbar-layout"
-          label={vertical ? "Show above the bookmarks bar" : "Show on the right"}
+        <ToolbarSideControl
+          id="tools-toolbar-side"
+          value={side}
+          compact
           disabled={!settings}
-          onClick={() => settings && void saveSettings({ ...settings, verticalToolbar: !vertical })}
-        >
-          {vertical ? (
-            <PanelTop id="tools-toolbar-layout-icon" aria-hidden />
-          ) : (
-            <PanelRight id="tools-toolbar-layout-icon" aria-hidden />
-          )}
-        </IconButton>
+          onChange={setToolbarSide}
+        />
         <IconButton
           id="tools-toolbar-collapse"
           label="Collapse toolbar - Ctrl + Shift + T will show it again"
@@ -300,10 +282,10 @@ export const ToolsToolbar = forwardRef<HTMLElement, ToolsToolbarProps>(function 
             activeTab={activeTab}
             settings={settings}
             labeled={labels}
-            layout={layout}
+            layout={vertical ? "vertical" : "horizontal"}
             toolbarIndex={index}
             dragging={dragging === id}
-            drop={dropEdge(index, tools.length, fromIndex, dropIndex)}
+            drop={toolbarDropEdge(index, tools.length, fromIndex, dropIndex)}
             onDragStart={(event) => {
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData("text/plain", id);

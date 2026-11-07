@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import type { BrowserSettings, ExtensionInfo, SplitView, TabInfo } from "@type/browser";
+import type { BrowserSettings, ExtensionInfo, SplitView, TabInfo, ToolbarSide } from "@type/browser";
 import type { WindowTabsState } from "@/lib/use-browser";
 import { DevtoolsDivider } from "@/components/DevtoolsDivider";
 import { PageFailure } from "@/components/PageFailure";
@@ -20,6 +20,7 @@ type BrowserBodyProps = {
   split: SplitView | null;
   splitShown: boolean;
   showToolStrip: boolean;
+  toolSide: ToolbarSide;
   extensions: ExtensionInfo[];
 };
 
@@ -33,6 +34,7 @@ export function BrowserBody({
   split,
   splitShown,
   showToolStrip,
+  toolSide,
   extensions,
 }: BrowserBodyProps) {
   const devtools = snapshot.devtools;
@@ -42,6 +44,9 @@ export function BrowserBody({
     <div id="browser-body" className="flex min-h-0 flex-1 pt-[var(--chrome-top-slack,0px)]">
       {vertical && settings && !snapshot.fullscreen ? (
         <VerticalTabs ref={sidebarRef} snapshot={snapshot} settings={settings} />
+      ) : null}
+      {showToolStrip && toolSide === "left" ? (
+        <ToolsToolbar ref={toolbarRef} side="left" activeTab={activeTab} extensions={extensions} settings={settings} />
       ) : null}
       <div id="browser-page-area" className="relative flex min-w-0 flex-1 items-center justify-center bg-zinc-950">
         <div id="browser-pages" className="absolute inset-y-0 left-0" style={{ width: pagesWidth }}>
@@ -85,8 +90,8 @@ export function BrowserBody({
         </div>
         {devtools?.visible ? <DevtoolsDivider ratio={devtools.ratio} /> : null}
       </div>
-      {showToolStrip ? (
-        <ToolsToolbar ref={toolbarRef} layout="vertical" activeTab={activeTab} extensions={extensions} settings={settings} />
+      {showToolStrip && toolSide === "right" ? (
+        <ToolsToolbar ref={toolbarRef} side="right" activeTab={activeTab} extensions={extensions} settings={settings} />
       ) : null}
     </div>
   );

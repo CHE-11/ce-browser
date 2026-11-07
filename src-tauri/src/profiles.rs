@@ -596,6 +596,7 @@ const COPY_PARTS: &[PartSpec] = &[
             "showStatusBar",
             "statusStats",
             "verticalToolbar",
+            "toolbarSide",
             "verticalToolbarLabels",
             "showToolsToolbar",
             "menuTextSize",
@@ -671,6 +672,7 @@ const COPY_PARTS: &[PartSpec] = &[
         dirs: &["extensions"],
         settings: &[
             "hiddenToolbarExtensions",
+            "toolbarPlacements",
             "toolbarOrder",
             "verticalToolbarExtensions",
         ],

@@ -896,8 +896,9 @@ export type PopupAnchor = HTMLElement | { x: number; y: number } | PopupRect;
 
 export type PopupOptions = {
   params?: string;
-  /** Defaults to `left-start` on the vertical tools toolbar, `bottom-end` under other buttons
-   * and `point` at a click point. */
+  /** Defaults to the side that opens onto the page: left of a right-hand toolbar, right of a
+   * left-hand one, and below other buttons. A bottom toolbar flips upward on its own.
+   * `point` is a click point. */
   placement?: PopupPlacement;
   focus?: boolean;
   /** Opens beside the popup that asks instead of replacing it. */
@@ -916,7 +917,10 @@ function anchorRect(anchor: PopupAnchor): PopupRect {
 
 function defaultPlacement(anchor: PopupAnchor, rect: PopupRect): PopupPlacement {
   if (anchor instanceof HTMLElement) {
-    return anchor.closest("#tools-toolbar[data-layout='vertical']") ? "left-start" : "bottom-end";
+    const side = anchor.closest("#tools-toolbar")?.getAttribute("data-side");
+    if (side === "left") return "right-start";
+    if (side === "right") return "left-start";
+    return "bottom-end";
   }
   return rect.width || rect.height ? "bottom-end" : "point";
 }

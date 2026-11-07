@@ -27,6 +27,7 @@ import { CHROME, metric, paletteHintClass, paletteInputClass, paletteRowClass } 
 import { cn } from "@/lib/cn";
 import { flattenBookmarks, useBookmarks, useExtensions, useHistory, useRecentlyClosed, useSettings, useTabs } from "@/lib/use-browser";
 import { BUILTIN_TOOLS } from "@features/BuiltInExtensions/builtin";
+import { builtinToolEnabled } from "@/lib/toolbar-pin";
 import { siteKey } from "@features/BuiltInExtensions/page-controls/site";
 import { tabParams } from "@features/BuiltInExtensions/shared";
 import { SETTINGS_INDEX } from "@features/Settings/settings-index";
@@ -228,7 +229,7 @@ export function CommandPalette() {
       run: () => openSetting(snapshot.windowTabs, entry.id),
     }));
     const tools: Hit[] = active
-      ? BUILTIN_TOOLS.map((tool) => ({
+      ? BUILTIN_TOOLS.filter((tool) => builtinToolEnabled(settings, tool.id)).map((tool) => ({
           id: `tool-${tool.id}`,
           title: tool.name,
           hint: tool.description,

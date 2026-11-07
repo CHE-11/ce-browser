@@ -29,6 +29,11 @@ function componentIcon(extensionId: string, name: string) {
   return COMPONENT_ICONS.find((item) => item.ids.includes(extensionId) || item.names.includes(normalized));
 }
 
+/** WebView2 ships these with the browser. They are not installed by the user. */
+export function isComponentExtension(extensionId: string, name: string) {
+  return componentIcon(extensionId, name) != null;
+}
+
 type ExtensionIconProps = {
   id: string;
   extensionId: string;

@@ -1,10 +1,10 @@
 import type { DragEvent, MouseEvent } from "react";
-import type { BrowserSettings } from "../../../types/browser";
-import { BUILTIN_TOOLS } from "../features/BuiltInExtensions/builtin";
+import type { BrowserSettings, ToolbarPlacement } from "../../../types/browser";
+import { BUILTIN_TOOLS, builtinTool } from "../features/BuiltInExtensions/builtin";
 import { openPopup, saveSettings } from "./browser-client";
 
-/** Built-in tools, in the order they had before a custom order was saved. Address-bar controls are placed directly. */
-export const DEFAULT_TOOLBAR = BUILTIN_TOOLS.filter((tool) => !tool.address).map((tool) => tool.id);
+/** Built-in tools, in the order they had before a custom order was saved. */
+export const DEFAULT_TOOLBAR = BUILTIN_TOOLS.map((tool) => tool.id);
 
 /** Saved ids that are still pinned, then any pinned id the saved list does not mention. */
 export function toolbarOrder(saved: string[] | undefined, available: string[]) {
@@ -22,31 +22,60 @@ export function toolbarOrder(saved: string[] | undefined, available: string[]) {
   return ordered;
 }
 
-/** A tool stays on its toolbar until its id is stored in settings. */
-export function toolbarPinned(settings: BrowserSettings | null, id: string) {
-  return !settings?.hiddenToolbarExtensions?.includes(id);
+/**
+ * Primary shows next to the address bar. Secondary shows on the tools toolbar.
+ * An id with no saved choice keeps the previous default: built-in tools on the tools toolbar,
+ * and extensions plus address-bar tools on the address bar. An id in the hidden list stays unpinned.
+ */
+export function toolbarPlacement(settings: BrowserSettings | null, id: string): ToolbarPlacement {
+  const saved = settings?.toolbarPlacements?.[id];
+  if (saved) {
+    return { primary: !!saved.primary, secondary: !!saved.secondary };
+  }
+  if (settings?.hiddenToolbarExtensions?.includes(id)) {
+    return { primary: false, secondary: false };
+  }
+  const tool = builtinTool(id);
+  if (tool && !tool.address) {
+    return { primary: false, secondary: true };
+  }
+  return { primary: true, secondary: false };
 }
 
 export type ToolbarSplit = {
-  /** Pinned built-in tools on the tools toolbar. */
+  /** Ids pinned to the tools toolbar, in saved order. */
   tools: string[];
-  /** Pinned extensions next to the address bar. */
+  /** Ids pinned next to the address bar, in saved order. */
   address: string[];
-  /** Every pinned id, in saved order. Dragging uses this list. */
+  /** Every id pinned to either bar, in saved order. Dragging uses this list. */
   all: string[];
 };
 
-/** Built-in tools stay on the tools toolbar. Extensions stay next to the address bar. */
+/** A built-in tool stays on until the user turns it off. A missing list means every tool is on. */
+export function builtinToolEnabled(settings: BrowserSettings | null, id: string) {
+  return !(settings?.disabledBuiltinTools ?? []).includes(id);
+}
+
+export function saveBuiltinEnabled(settings: BrowserSettings, id: string, enabled: boolean) {
+  const disabledBuiltinTools = (settings.disabledBuiltinTools ?? []).filter((item) => item !== id);
+  if (!enabled) {
+    disabledBuiltinTools.push(id);
+  }
+  return saveSettings({ ...settings, disabledBuiltinTools });
+}
+
+/** Splits pinned built-in tools and enabled extensions across the two bars. An id can be on both. */
 export function splitToolbar(settings: BrowserSettings | null, extensionIds: string[]): ToolbarSplit {
-  const pinnedExtensions = extensionIds.filter((id) => toolbarPinned(settings, id));
-  const all = toolbarOrder(settings?.toolbarOrder, [
-    ...DEFAULT_TOOLBAR.filter((id) => toolbarPinned(settings, id)),
-    ...pinnedExtensions,
-  ]);
-  const extensions = new Set(pinnedExtensions);
+  const builtinIds = BUILTIN_TOOLS.map((tool) => tool.id).filter((id) => builtinToolEnabled(settings, id));
+  const extras = extensionIds.filter((id) => !builtinIds.includes(id));
+  const available = [...builtinIds, ...extras].filter((id) => {
+    const place = toolbarPlacement(settings, id);
+    return place.primary || place.secondary;
+  });
+  const all = toolbarOrder(settings?.toolbarOrder, available);
   return {
-    tools: all.filter((id) => !extensions.has(id)),
-    address: all.filter((id) => extensions.has(id)),
+    tools: all.filter((id) => toolbarPlacement(settings, id).secondary),
+    address: all.filter((id) => toolbarPlacement(settings, id).primary),
     all,
   };
 }
@@ -70,6 +99,41 @@ export function reorderToolbar(order: string[], from: string, to: string) {
  * `dropIndex` counts gaps in that list, including the gap after the last icon.
  * Icons that are not in `visible` keep their places in `order`.
  */
+export type ToolbarDropEdge = "before" | "after";
+
+/** Gap under the pointer. Counts the slots between icons, including the slot after the last one. */
+export function toolbarIndexAt(container: HTMLElement, client: number, axis: "x" | "y") {
+  const items = container.querySelectorAll<HTMLElement>(":scope > [data-toolbar-index]");
+  for (const item of items) {
+    const rect = item.getBoundingClientRect();
+    const start = axis === "x" ? rect.left : rect.top;
+    const size = axis === "x" ? rect.width : rect.height;
+    if (client < start + size / 2) {
+      return Number(item.dataset.toolbarIndex);
+    }
+  }
+  return items.length;
+}
+
+/** Hides the line when the icon would land in the gap it already occupies. */
+export function toolbarDropEdge(
+  index: number,
+  count: number,
+  fromIndex: number,
+  dropIndex: number | null,
+): ToolbarDropEdge | null {
+  if (dropIndex === null || fromIndex < 0 || dropIndex === fromIndex || dropIndex === fromIndex + 1) {
+    return null;
+  }
+  if (dropIndex === index) {
+    return "before";
+  }
+  if (index === count - 1 && dropIndex === count) {
+    return "after";
+  }
+  return null;
+}
+
 export function reorderToolbarAt(order: string[], visible: string[], from: string, dropIndex: number) {
   const fromIndex = visible.indexOf(from);
   if (fromIndex < 0 || dropIndex < 0 || dropIndex > visible.length) {
@@ -113,12 +177,13 @@ export function toolbarDragHandlers(id: string, onMove: (from: string, to: strin
   };
 }
 
-export function saveToolbarPin(settings: BrowserSettings, id: string, pinned: boolean) {
+export function saveToolbarPlacement(settings: BrowserSettings, id: string, placement: ToolbarPlacement) {
+  const toolbarPlacements = { ...(settings.toolbarPlacements ?? {}), [id]: placement };
   const hidden = (settings.hiddenToolbarExtensions ?? []).filter((item) => item !== id);
-  if (!pinned) {
+  if (!placement.primary && !placement.secondary) {
     hidden.push(id);
   }
-  return saveSettings({ ...settings, hiddenToolbarExtensions: hidden });
+  return saveSettings({ ...settings, toolbarPlacements, hiddenToolbarExtensions: hidden });
 }
 
 /** Right-click menu for an icon that is currently on a toolbar. */

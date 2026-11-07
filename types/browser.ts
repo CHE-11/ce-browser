@@ -656,6 +656,17 @@ export type FileHandler = {
   profile: string;
 };
 
+/** Edge of the window where the tools toolbar sits. */
+export type ToolbarSide = "top" | "right" | "bottom" | "left";
+
+/** Where a tool or extension is shown. Both can be set. Both clear means unpinned. */
+export type ToolbarPlacement = {
+  /** Shown next to the address bar. */
+  primary: boolean;
+  /** Shown on the tools toolbar. */
+  secondary: boolean;
+};
+
 export type BrowserSettings = {
   searchEngine: SearchEngine;
   customSearchUrl: string;
@@ -728,10 +739,16 @@ export type BrowserSettings = {
   pageMarkdown: PageMarkdownSettings;
   /** Extension ids left off the toolbars. Empty means every enabled extension stays pinned. */
   hiddenToolbarExtensions: string[];
+  /** Explicit pins. A missing id keeps the old default: built-in tools on the tools toolbar, extensions on the address bar. */
+  toolbarPlacements: Record<string, ToolbarPlacement>;
   /** Order of pinned toolbar icons. Empty keeps the built-in order, then extensions. */
   toolbarOrder: string[];
+  /** Built-in tool ids the user turned off. Empty means every built-in tool stays on. */
+  disabledBuiltinTools: string[];
   /** Built-in tools sit on the right. Off lays that toolbar out above the bookmarks bar. */
   verticalToolbar: boolean;
+  /** Edge where the tools toolbar sits. Empty until an older file is read, which uses `verticalToolbar`. */
+  toolbarSide: ToolbarSide | "";
   /** Retired. Pinned extensions stay next to the address bar. */
   verticalToolbarExtensions: boolean;
   /** Short names under icons on the tools toolbar. */

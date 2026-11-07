@@ -1,19 +1,17 @@
 import { Button } from "@/components/Button";
-import { EmptyState } from "@/components/EmptyState";
-import { ExtensionIcon } from "@/components/ExtensionIcon";
 import { PageShell } from "@/components/PageShell";
-import { Skeleton } from "@/components/Skeleton";
 import { Toggle } from "@/components/Toggle";
 import { installExtensionZip, installExtensionFolder, installExtensionFromStore, checkExtensionUpdates, updateExtension, setExtensionEnabled, openExtensionOptions, removeExtension, saveSettings } from "@/lib/browser-client";
-import { storeLabel } from "@/lib/extension-store";
 import { cn } from "@/lib/cn";
-import { saveToolbarPin, toolbarPinned } from "@/lib/toolbar-pin";
+import { saveBuiltinEnabled, saveToolbarPlacement } from "@/lib/toolbar-pin";
+import { toolbarSide, toolbarSidePatch } from "@/lib/toolbar-side";
 import { useExtensions, useSettings } from "@/lib/use-browser";
-import { ExtensionInfo } from "@type/browser";
-import { FileArchive, FolderOpen, Puzzle, PinOff, Pin, Settings2, Trash2 } from "lucide-react";
+import { ExtensionInfo, ToolbarPlacement, ToolbarSide } from "@type/browser";
+import { FileArchive, FolderOpen, Puzzle } from "lucide-react";
 import { useState } from "react";
-import { BUILTIN_TOOLS } from "../BuiltInExtensions/builtin";
-import { Segmented } from "../Settings/SettingsControls";
+import { builtinTool } from "../BuiltInExtensions/builtin";
+import { ToolbarSideControl } from "../Browser/BrowserBody/ToolsToolbar/ToolbarSideControl";
+import { ExtensionsTable } from "./ExtensionsTable";
 
 
 export function ExtensionsPage() {
@@ -74,9 +72,9 @@ export function ExtensionsPage() {
     action.catch((reason: unknown) => setStatus({ tone: "error", text: String(reason) }));
   };
 
-  const setPinned = (id: string, pinned: boolean) => {
+  const setPlacement = (id: string, placement: ToolbarPlacement) => {
     if (settings) {
-      act(saveToolbarPin(settings, id, pinned));
+      act(saveToolbarPlacement(settings, id, placement));
     }
   };
 
@@ -86,9 +84,9 @@ export function ExtensionsPage() {
     }
   };
 
-  const setToolbarLayout = (layout: "vertical" | "horizontal") => {
+  const setToolbarSide = (side: ToolbarSide) => {
     if (settings) {
-      act(saveSettings({ ...settings, verticalToolbar: layout === "vertical" }));
+      act(saveSettings({ ...settings, ...toolbarSidePatch(side) }));
     }
   };
 
@@ -110,7 +108,54 @@ export function ExtensionsPage() {
         </>
       }
     >
-      <div id="extensions-page-content" className="mx-auto flex max-w-4xl flex-col gap-6 pb-10">
+      <div id="extensions-page-content" className="mx-auto flex max-w-6xl flex-col gap-6 pb-10">
+        <section id="extensions-page-toolbar" className="flex flex-col gap-4 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+          <div id="extensions-page-toolbar-heading">
+            <h2 id="extensions-page-toolbar-title" className="text-sm font-semibold">
+              Toolbar
+            </h2>
+            <p id="extensions-page-toolbar-hint" className="mt-1 text-xs text-zinc-400">
+              <kbd id="extensions-page-toolbar-shortcut" className="font-sans text-zinc-300">
+                Ctrl+Shift+T
+              </kbd>{" "}
+              shows or hides it.
+            </p>
+          </div>
+          <div id="extensions-page-toolbar-layout" className="flex items-center justify-between gap-4">
+            <div id="extensions-page-toolbar-layout-text" className="min-w-0">
+              <p id="extensions-page-toolbar-layout-label" className="text-sm">
+                Side
+              </p>
+              <p id="extensions-page-toolbar-layout-hint" className="text-xs text-zinc-400">
+                Top sits above the bookmarks bar. Right, left and bottom sit on that edge of the page.
+              </p>
+            </div>
+            <ToolbarSideControl
+              id="extensions-page-toolbar-side"
+              value={toolbarSide(settings)}
+              disabled={!settings}
+              onChange={setToolbarSide}
+            />
+          </div>
+          <div id="extensions-page-toolbar-labels" className="flex items-center justify-between gap-4">
+            <div id="extensions-page-toolbar-labels-text" className="min-w-0">
+              <p id="extensions-page-toolbar-labels-label" className="text-sm">
+                Show labels
+              </p>
+              <p id="extensions-page-toolbar-labels-hint" className="text-xs text-zinc-400">
+                A short name under each icon.
+              </p>
+            </div>
+            <Toggle
+              id="extensions-page-toolbar-labels-toggle"
+              aria-labelledby="extensions-page-toolbar-labels-label"
+              checked={settings?.verticalToolbarLabels ?? false}
+              disabled={!settings}
+              onChange={setToolbarLabels}
+            />
+          </div>
+        </section>
+
         <section id="extensions-page-store" className="flex flex-col gap-3 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
           <h2 id="extensions-page-store-title" className="text-sm font-semibold">
             Install from a store
@@ -154,212 +199,30 @@ export function ExtensionsPage() {
           </div>
         ) : null}
 
-        {!loaded ? (
-          <div id="extensions-page-loading" className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {[0, 1, 2, 3].map((index) => (
-              <Skeleton id={`extensions-page-loading-${index}`} key={index} className="h-32 rounded-lg" />
-            ))}
-          </div>
-        ) : extensions.length === 0 ? (
-          <EmptyState
-            id="extensions-page-empty"
-            icon={Puzzle}
-            title="No extensions installed yet"
-            hint="Paste a Chrome Web Store or Edge Add-ons link, or install a .zip, .crx, or unpacked folder."
-            className="rounded-lg border border-dashed border-zinc-700"
-            action={
-              <Button id="extensions-page-empty-install" size="sm" disabled={busy} onClick={() => void install(installExtensionZip)}>
-                <FileArchive id="extensions-page-empty-install-icon" className="size-4" aria-hidden />
-                Install .zip or .crx
-              </Button>
+        {loaded && extensions.length === 0 ? (
+          <p id="extensions-page-empty" className="text-xs text-zinc-400">
+            No third-party extensions installed yet. Paste a store link, or install a .zip, .crx, or unpacked folder.
+          </p>
+        ) : null}
+        <ExtensionsTable
+          extensions={extensions}
+          loaded={loaded}
+          settings={settings}
+          busy={busy}
+          onPlacement={setPlacement}
+          onEnabled={(id, enabled) => {
+            if (builtinTool(id)) {
+              if (settings) {
+                act(saveBuiltinEnabled(settings, id, enabled));
+              }
+              return;
             }
-          />
-        ) : (
-          <div id="extensions-page-grid" className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {extensions.map((extension) => {
-              const domId = `extension-${extension.id}`;
-              return (
-                <article
-                  key={extension.id}
-                  id={domId}
-                  className={cn(
-                    "flex flex-col gap-3 rounded-lg border border-zinc-800 bg-zinc-900 p-4",
-                    !extension.enabled && "opacity-70",
-                  )}
-                >
-                  <div id={`${domId}-header`} className="flex items-start gap-3">
-                    <ExtensionIcon
-                      id={`${domId}-icon`}
-                      extensionId={extension.id}
-                      name={extension.name}
-                      src={extension.icon}
-                      className="size-10"
-                    />
-                    <div id={`${domId}-text`} className="min-w-0 flex-1">
-                      <h2 id={`${domId}-name`} className="truncate text-sm font-semibold">
-                        {extension.name}
-                        <span id={`${domId}-version`} className="ml-2 text-xs font-normal text-zinc-500">
-                          {extension.version}
-                        </span>
-                      </h2>
-                      <p id={`${domId}-description`} className="line-clamp-2 text-xs text-zinc-400">
-                        {extension.description || "No description."}
-                      </p>
-                      <p id={`${domId}-id`} className="mt-1 truncate font-mono text-[11px] text-zinc-600">
-                        {extension.id}
-                      </p>
-                      {extension.store ? (
-                        <p id={`${domId}-store`} className="mt-1 text-[11px] text-zinc-500">
-                          {storeLabel(extension.store)}
-                        </p>
-                      ) : null}
-                    </div>
-                    <Toggle
-                      id={`${domId}-toggle`}
-                      checked={extension.enabled}
-                      title={extension.enabled ? "Disable" : "Enable"}
-                      onChange={(enabled) => act(setExtensionEnabled(extension.id, enabled))}
-                    />
-                  </div>
-                  <div id={`${domId}-actions`} className="flex flex-wrap justify-end gap-2">
-                    {extension.updateVersion ? (
-                      <Button
-                        id={`${domId}-update`}
-                        size="sm"
-                        variant="primary"
-                        disabled={busy}
-                        onClick={() => void install(() => updateExtension(extension.id), "Updated")}
-                      >
-                        Update to {extension.updateVersion}
-                      </Button>
-                    ) : null}
-                    <Button
-                      id={`${domId}-pin`}
-                      size="sm"
-                      variant="ghost"
-                      disabled={!settings}
-                      title={toolbarPinned(settings, extension.id) ? "Hide from the address bar" : "Show on the address bar"}
-                      onClick={() => setPinned(extension.id, !toolbarPinned(settings, extension.id))}
-                    >
-                      {toolbarPinned(settings, extension.id) ? (
-                        <PinOff id={`${domId}-pin-icon`} className="size-3.5" aria-hidden />
-                      ) : (
-                        <Pin id={`${domId}-pin-icon`} className="size-3.5" aria-hidden />
-                      )}
-                      {toolbarPinned(settings, extension.id) ? "Unpin" : "Pin"}
-                    </Button>
-                    {extension.optionsPage ? (
-                      <Button id={`${domId}-options`} size="sm" variant="ghost" onClick={() => act(openExtensionOptions(extension.id))}>
-                        <Settings2 id={`${domId}-options-icon`} className="size-3.5" aria-hidden />
-                        Options
-                      </Button>
-                    ) : null}
-                    <Button id={`${domId}-remove`} size="sm" variant="ghost" onClick={() => act(removeExtension(extension.id))}>
-                      <Trash2 id={`${domId}-remove-icon`} className="size-3.5" aria-hidden />
-                      Remove
-                    </Button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-
-        <section id="extensions-page-builtin" className="flex flex-col gap-3">
-          <div id="extensions-page-toolbar" className="flex flex-col gap-4 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-            <div id="extensions-page-toolbar-heading">
-              <h2 id="extensions-page-toolbar-title" className="text-sm font-semibold">
-                Toolbar
-              </h2>
-              <p id="extensions-page-toolbar-hint" className="mt-1 text-xs text-zinc-400">
-                <kbd id="extensions-page-toolbar-shortcut" className="font-sans text-zinc-300">
-                  Ctrl+Shift+T
-                </kbd>{" "}
-                shows or hides it.
-              </p>
-            </div>
-            <div id="extensions-page-toolbar-layout" className="flex items-center justify-between gap-4">
-              <div id="extensions-page-toolbar-layout-text" className="min-w-0">
-                <p id="extensions-page-toolbar-layout-label" className="text-sm">
-                  Layout
-                </p>
-                <p id="extensions-page-toolbar-layout-hint" className="text-xs text-zinc-400">
-                  Vertical sits on the right. Horizontal sits above the bookmarks bar.
-                </p>
-              </div>
-              <Segmented
-                id="extensions-page-toolbar-layout-choice"
-                label="Toolbar layout"
-                value={settings?.verticalToolbar === false ? "horizontal" : "vertical"}
-                disabled={!settings}
-                options={[
-                  { value: "vertical", label: "Vertical" },
-                  { value: "horizontal", label: "Horizontal" },
-                ]}
-                onChange={setToolbarLayout}
-              />
-            </div>
-            <div id="extensions-page-toolbar-labels" className="flex items-center justify-between gap-4">
-              <div id="extensions-page-toolbar-labels-text" className="min-w-0">
-                <p id="extensions-page-toolbar-labels-label" className="text-sm">
-                  Show labels
-                </p>
-                <p id="extensions-page-toolbar-labels-hint" className="text-xs text-zinc-400">
-                  A short name under each icon.
-                </p>
-              </div>
-              <Toggle
-                id="extensions-page-toolbar-labels-toggle"
-                aria-labelledby="extensions-page-toolbar-labels-label"
-                checked={settings?.verticalToolbarLabels ?? false}
-                disabled={!settings}
-                onChange={setToolbarLabels}
-              />
-            </div>
-          </div>
-          <h2 id="extensions-page-builtin-title" className="text-sm font-semibold">
-            Built-in tools
-          </h2>
-          <div id="extensions-page-builtin-grid" className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            {BUILTIN_TOOLS.map((tool) => {
-              const domId = `builtin-${tool.id}`;
-              const pinned = toolbarPinned(settings, tool.id);
-              const Icon = tool.icon;
-              return (
-                <article
-                  key={tool.id}
-                  id={domId}
-                  className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900 p-4"
-                >
-                  <Icon id={`${domId}-icon`} className="size-8 shrink-0 text-zinc-300" aria-hidden />
-                  <div id={`${domId}-text`} className="min-w-0 flex-1">
-                    <h3 id={`${domId}-name`} className="truncate text-sm font-semibold">
-                      {tool.name}
-                    </h3>
-                    <p id={`${domId}-description`} className="line-clamp-2 text-xs text-zinc-400">
-                      {tool.description}
-                    </p>
-                  </div>
-                  <Button
-                    id={`${domId}-pin`}
-                    size="sm"
-                    variant="ghost"
-                    disabled={!settings}
-                    title={pinned ? "Hide from the toolbar" : "Show on the toolbar"}
-                    onClick={() => setPinned(tool.id, !pinned)}
-                  >
-                    {pinned ? (
-                      <PinOff id={`${domId}-pin-icon`} className="size-3.5" aria-hidden />
-                    ) : (
-                      <Pin id={`${domId}-pin-icon`} className="size-3.5" aria-hidden />
-                    )}
-                    {pinned ? "Unpin" : "Pin"}
-                  </Button>
-                </article>
-              );
-            })}
-          </div>
-        </section>
+            act(setExtensionEnabled(id, enabled));
+          }}
+          onOptions={(id) => act(openExtensionOptions(id))}
+          onRemove={(id) => act(removeExtension(id))}
+          onUpdate={(id) => void install(() => updateExtension(id), "Updated")}
+        />
 
         <section id="extensions-page-install" className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-5">
           <h2 id="extensions-page-install-title" className="flex items-center gap-2 text-sm font-semibold">
@@ -375,7 +238,7 @@ export function ExtensionsPage() {
               Click <strong>Install .zip or .crx</strong> and pick the file. An unzipped folder works with <strong>Load unpacked</strong>.
             </li>
             <li id="extensions-page-install-step-3">
-              The extension icon appears next to the address bar. Unpin an icon on this page, or right-click it, to take it off the toolbar.
+              Choose Primary to show it next to the address bar, Secondary to show it on the tools toolbar, or both. Unpinned hides it from both. Right-click an icon to change the same choice.
             </li>
           </ol>
           <p id="extensions-page-install-note" className="mt-3 text-xs text-zinc-500">

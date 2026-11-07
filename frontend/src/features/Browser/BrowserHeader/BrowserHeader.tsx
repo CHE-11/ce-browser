@@ -20,6 +20,7 @@ type BrowserHeaderProps = {
   showBookmarksBar: boolean;
   /** Built-in tools in a row above the bookmarks bar. */
   showToolsToolbar: boolean;
+  toolbarRef?: RefObject<HTMLElement | null>;
   findToken: number | null;
   activeTab: TabInfo | undefined;
   onCloseFind: () => void;
@@ -36,6 +37,7 @@ export function BrowserHeader({
   settings,
   showBookmarksBar,
   showToolsToolbar,
+  toolbarRef,
   findToken,
   activeTab,
   onCloseFind,
@@ -53,7 +55,7 @@ export function BrowserHeader({
         windowControls={vertical}
       />
       {showToolsToolbar ? (
-        <ToolsToolbar layout="horizontal" activeTab={activeTab} extensions={extensions} settings={settings} />
+        <ToolsToolbar ref={toolbarRef} side="top" activeTab={activeTab} extensions={extensions} settings={settings} />
       ) : null}
       {showBookmarksBar ? (
         <BookmarksBar

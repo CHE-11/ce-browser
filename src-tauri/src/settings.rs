@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -269,6 +270,23 @@ fn clean_input_id(raw: &str) -> String {
         .collect()
 }
 
+/// Where one tool or extension is shown. Both can be set. Both clear means unpinned.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ToolbarPlacement {
+    pub primary: bool,
+    pub secondary: bool,
+}
+
+impl Default for ToolbarPlacement {
+    fn default() -> Self {
+        Self {
+            primary: false,
+            secondary: false,
+        }
+    }
+}
+
 fn normalize_file_handlers(handlers: Vec<FileHandler>) -> Vec<FileHandler> {
     let mut kept = Vec::new();
     for handler in handlers {
@@ -419,12 +437,22 @@ pub struct BrowserSettings {
     /// Extension ids left off the toolbars. An older file omits this, so every extension stays pinned.
     #[serde(default)]
     pub hidden_toolbar_extensions: Vec<String>,
+    /// Explicit address-bar and tools-toolbar pins. A missing id keeps the old default.
+    #[serde(default)]
+    pub toolbar_placements: BTreeMap<String, ToolbarPlacement>,
     /// Order of pinned toolbar icons. Empty keeps the built-in order, then extensions.
     #[serde(default)]
     pub toolbar_order: Vec<String>,
+    /// Built-in tool ids the user turned off. An older file omits this, so every built-in tool stays on.
+    #[serde(default)]
+    pub disabled_builtin_tools: Vec<String>,
     /// Built-in tools sit on the right. Off lays that toolbar out above the bookmarks bar.
+    /// An older file uses this until `toolbar_side` is set.
     #[serde(default = "default_true")]
     pub vertical_toolbar: bool,
+    /// `top`, `right`, `bottom` or `left`. Empty on an older file, which still uses `vertical_toolbar`.
+    #[serde(default)]
+    pub toolbar_side: String,
     /// Retired. Older files may still set this. Pinned extensions stay next to the address bar.
     #[serde(default)]
     pub vertical_toolbar_extensions: bool,
@@ -1395,8 +1423,11 @@ impl Default for BrowserSettings {
             page_capture: PageCaptureSettings::default(),
             page_markdown: PageMarkdownSettings::default(),
             hidden_toolbar_extensions: Vec::new(),
+            toolbar_placements: BTreeMap::new(),
             toolbar_order: Vec::new(),
+            disabled_builtin_tools: Vec::new(),
             vertical_toolbar: true,
+            toolbar_side: String::new(),
             vertical_toolbar_extensions: false,
             vertical_toolbar_labels: false,
             show_tools_toolbar: true,
@@ -1760,7 +1791,11 @@ impl BrowserSettings {
         self.page_markdown = self.page_markdown.normalize();
         self.hidden_toolbar_extensions =
             toolbar_hidden(&map_retired_tools(&self.hidden_toolbar_extensions));
+        self.toolbar_placements = normalize_toolbar_placements(self.toolbar_placements);
         self.toolbar_order = toolbar_hidden(&map_retired_tools(&self.toolbar_order));
+        self.disabled_builtin_tools = toolbar_hidden(&map_retired_tools(&self.disabled_builtin_tools));
+        self.toolbar_side = normalize_toolbar_side(&self.toolbar_side, self.vertical_toolbar);
+        self.vertical_toolbar = self.toolbar_side == "left" || self.toolbar_side == "right";
         self.translate_language = clean_language(&self.translate_language);
         if self.translate_url.trim().is_empty() {
             self.translate_url = default_translate_url();
@@ -2632,6 +2667,34 @@ fn map_retired_tools(ids: &[String]) -> Vec<String> {
         .collect()
 }
 
+fn normalize_toolbar_side(side: &str, vertical_toolbar: bool) -> String {
+    match side {
+        "top" | "right" | "bottom" | "left" => side.to_string(),
+        _ if vertical_toolbar => "right".to_string(),
+        _ => "top".to_string(),
+    }
+}
+
+fn normalize_toolbar_placements(
+    placements: BTreeMap<String, ToolbarPlacement>,
+) -> BTreeMap<String, ToolbarPlacement> {
+    let mut next = BTreeMap::new();
+    for (id, placement) in placements {
+        let id = id.trim();
+        if id.is_empty() || id.len() > 128 || id.chars().any(char::is_whitespace) {
+            continue;
+        }
+        let id = if id == "price" { "shopping" } else { id };
+        next.entry(id.to_string())
+            .and_modify(|kept: &mut ToolbarPlacement| {
+                kept.primary |= placement.primary;
+                kept.secondary |= placement.secondary;
+            })
+            .or_insert(placement);
+    }
+    next
+}
+
 fn toolbar_hidden(ids: &[String]) -> Vec<String> {
     let mut hidden = Vec::new();
     for id in ids {
@@ -2732,6 +2795,7 @@ mod tests {
         assert!(loaded.page_markdown.links);
         assert!(loaded.page_markdown.header);
         assert!(loaded.hidden_toolbar_extensions.is_empty());
+        assert!(loaded.toolbar_placements.is_empty());
     }
 
     #[test]
@@ -2915,6 +2979,39 @@ mod tests {
         assert!(!loaded.vertical_toolbar_extensions);
         assert!(!loaded.vertical_toolbar_labels);
         assert!(loaded.show_tools_toolbar);
+        assert_eq!(loaded.toolbar_side, "right");
+        assert!(loaded.disabled_builtin_tools.is_empty());
+    }
+
+    #[test]
+    fn disabled_built_in_tools_keep_saved_ids() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"disabledBuiltinTools":[" price ","print-pdf","print-pdf"," "]}"#,
+        )
+        .expect("settings parse");
+        assert_eq!(
+            loaded.normalize().disabled_builtin_tools,
+            vec!["shopping".to_string(), "print-pdf".to_string()]
+        );
+    }
+
+    #[test]
+    fn toolbar_side_keeps_an_older_top_bar_and_accepts_every_edge() {
+        let top: super::BrowserSettings =
+            serde_json::from_str(r#"{"verticalToolbar":false}"#).expect("settings parse");
+        let top = top.normalize();
+        assert_eq!(top.toolbar_side, "top");
+        assert!(!top.vertical_toolbar);
+
+        let bottom: super::BrowserSettings =
+            serde_json::from_str(r#"{"toolbarSide":"bottom","verticalToolbar":true}"#).expect("settings parse");
+        let bottom = bottom.normalize();
+        assert_eq!(bottom.toolbar_side, "bottom");
+        assert!(!bottom.vertical_toolbar);
+
+        let left: super::BrowserSettings =
+            serde_json::from_str(r#"{"toolbarSide":"sideways"}"#).expect("settings parse");
+        assert_eq!(left.normalize().toolbar_side, "right");
     }
 
     #[test]
@@ -3159,6 +3256,20 @@ mod tests {
             settings.normalize().hidden_toolbar_extensions,
             vec!["print-pdf".to_string()]
         );
+    }
+
+    #[test]
+    fn toolbar_placements_keep_a_pin_on_both_bars() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"toolbarPlacements":{" price ":{"primary":true,"secondary":true},"print-pdf":{"primary":true}," ":{"primary":true}}}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.toolbar_placements.len(), 2);
+        assert!(loaded.toolbar_placements["shopping"].primary);
+        assert!(loaded.toolbar_placements["shopping"].secondary);
+        assert!(loaded.toolbar_placements["print-pdf"].primary);
+        assert!(!loaded.toolbar_placements["print-pdf"].secondary);
     }
 
     #[test]

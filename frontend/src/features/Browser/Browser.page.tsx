@@ -1,11 +1,13 @@
 
 import { backdropSupport, onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
 import { leaveTab } from "@/lib/tab-hover";
-import { splitToolbar, toolbarPinned } from "@/lib/toolbar-pin";
+import { splitToolbar } from "@/lib/toolbar-pin";
+import { toolbarSide } from "@/lib/toolbar-side";
 import { useTabs, useBookmarks, useDownloads, useHistory, useExtensions, useAppearanceFromSettings } from "@/lib/use-browser";
 import { useRef, useState, useEffect, useLayoutEffect } from "react";
 import type { PopupKind } from "@type/browser";
 import { BrowserBody } from "./BrowserBody/BrowserBody";
+import { ToolsToolbar } from "./BrowserBody/ToolsToolbar/ToolsToolbar";
 import { BrowserHeader } from "./BrowserHeader/BrowserHeader";
 
 
@@ -24,13 +26,11 @@ export function BrowserPage() {
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const vertical = settings?.tabLayout === "vertical";
   const hoverPreview = settings?.tabHoverPreview;
-  const toolExtensionIds = extensions
-    .filter((extension) => extension.enabled && toolbarPinned(settings, extension.id))
-    .map((extension) => extension.id);
+  const toolExtensionIds = extensions.filter((extension) => extension.enabled).map((extension) => extension.id);
   const toolSplit = splitToolbar(settings, toolExtensionIds);
-  const toolsHorizontal = settings?.verticalToolbar === false;
+  const toolSide = toolbarSide(settings);
   const showTools = !snapshot.fullscreen && settings?.showToolsToolbar !== false && toolSplit.tools.length > 0;
-  const showToolStrip = showTools && !toolsHorizontal;
+  const showToolStrip = showTools && (toolSide === "left" || toolSide === "right");
   const split = snapshot.split;
   const splitShown =
     !!split && !snapshot.fullscreen && (snapshot.activeId === split.left || snapshot.activeId === split.right);
@@ -114,9 +114,14 @@ export function BrowserPage() {
       if (browser instanceof HTMLElement) {
         browser.style.setProperty("--chrome-top-slack", `${top - height}px`);
       }
-      const left = sidebarRef.current ? Math.ceil(sidebarRef.current.getBoundingClientRect().width) : 0;
-      const right = toolbarRef.current ? Math.ceil(toolbarRef.current.getBoundingClientRect().width) : 0;
-      void setUiInsets(top, left, right, 0);
+      const sidebar = sidebarRef.current ? Math.ceil(sidebarRef.current.getBoundingClientRect().width) : 0;
+      const toolBox = toolbarRef.current?.getBoundingClientRect();
+      const toolWidth = toolBox ? Math.ceil(toolBox.width) : 0;
+      const toolHeight = toolBox ? Math.ceil(toolBox.height) : 0;
+      const left = sidebar + (toolSide === "left" ? toolWidth : 0);
+      const right = toolSide === "right" ? toolWidth : 0;
+      const bottom = toolSide === "bottom" ? toolHeight : 0;
+      void setUiInsets(top, left, right, bottom);
     };
     report();
     const observer = new ResizeObserver(report);
@@ -128,7 +133,7 @@ export function BrowserPage() {
       observer.observe(toolbarRef.current);
     }
     return () => observer.disconnect();
-  }, [vertical, snapshot.fullscreen, showToolStrip, toolsHorizontal, settings?.verticalToolbarLabels]);
+  }, [vertical, snapshot.fullscreen, showToolStrip, toolSide, settings?.verticalToolbarLabels]);
 
   const showBookmarksBar = settings?.showBookmarksBar ?? true;
 
@@ -144,7 +149,8 @@ export function BrowserPage() {
         extensions={extensions}
         settings={settings}
         showBookmarksBar={showBookmarksBar}
-        showToolsToolbar={showTools && toolsHorizontal}
+        showToolsToolbar={showTools && toolSide === "top"}
+        toolbarRef={toolSide === "top" ? toolbarRef : undefined}
         findToken={findToken}
         activeTab={activeTab}
         onCloseFind={() => setFindToken(null)}
@@ -159,8 +165,12 @@ export function BrowserPage() {
         split={split}
         splitShown={splitShown}
         showToolStrip={showToolStrip}
+        toolSide={toolSide}
         extensions={extensions}
       />
+      {showTools && toolSide === "bottom" ? (
+        <ToolsToolbar ref={toolbarRef} side="bottom" activeTab={activeTab} extensions={extensions} settings={settings} />
+      ) : null}
     </div>
   );
 }
