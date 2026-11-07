@@ -1,5 +1,6 @@
 //! Shopping summary providers. Price tracking never calls this module.
 
+use std::io::Read;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -474,16 +475,88 @@ fn reasoning_model(id: &str) -> bool {
     after.is_empty() || after.starts_with('-')
 }
 
-pub fn http_error(status: u16, endpoint: &str) -> String {
-    match status {
-        401 | 403 => "The API key was rejected.".into(),
-        429 => "The provider is rate limited. Try again in a minute.".into(),
-        404 => "That model or endpoint was not found.".into(),
+pub fn http_error(status: u16, endpoint: &str, body: &str) -> String {
+    let summary = match status {
+        401 | 403 => "The API key was rejected.".to_string(),
+        429 => "The provider is rate limited. Try again in a minute.".to_string(),
+        404 => "That model or endpoint was not found.".to_string(),
         _ if localhost_endpoint(endpoint) && status == 0 => {
-            "The local server is not running.".into()
+            "The local server is not running.".to_string()
         }
         _ => format!("The provider returned an error ({status})."),
+    };
+    match provider_error_detail(body) {
+        Some(detail) => format!("{summary}\n{detail}"),
+        None => summary,
     }
+}
+
+/// Text from a provider error body, short enough to show in the agent panel.
+fn provider_error_detail(body: &str) -> Option<String> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() || looks_like_html(trimmed) {
+        return None;
+    }
+    let text = match serde_json::from_str::<Value>(trimmed) {
+        Ok(value) => json_error_message(&value).or_else(|| {
+            let compact = value.to_string();
+            if compact == "null" || compact == "{}" || compact == "[]" {
+                None
+            } else {
+                Some(compact)
+            }
+        })?,
+        Err(_) => trimmed.to_string(),
+    };
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(clip_detail(text))
+}
+
+fn json_error_message(value: &Value) -> Option<String> {
+    if let Some(error) = value.get("error") {
+        if let Some(text) = scalar_text(error) {
+            return Some(text);
+        }
+        if let Some(text) = error.get("message").and_then(scalar_text) {
+            return Some(text);
+        }
+    }
+    for key in ["message", "detail", "error_description"] {
+        if let Some(text) = value.get(key).and_then(scalar_text) {
+            return Some(text);
+        }
+    }
+    None
+}
+
+fn scalar_text(value: &Value) -> Option<String> {
+    match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    }
+}
+
+fn looks_like_html(text: &str) -> bool {
+    let lower = text.trim_start().to_ascii_lowercase();
+    lower.starts_with("<!doctype")
+        || lower.starts_with("<html")
+        || lower.starts_with("<head")
+        || lower.starts_with("<body")
+}
+
+const ERROR_DETAIL_LIMIT: usize = 1_200;
+
+fn clip_detail(text: &str) -> String {
+    if text.chars().count() <= ERROR_DETAIL_LIMIT {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(ERROR_DETAIL_LIMIT).collect();
+    out.push('…');
+    out
 }
 
 pub fn transport_error(endpoint: &str, message: &str) -> String {
@@ -897,7 +970,7 @@ pub fn complete_tools(
     } else {
         openai_tools_body(&model, system, messages, tools)
     };
-    attach_thinking(provider, &model, &slot_thinking(current), &mut body);
+    attach_tool_thinking(provider, &model, &slot_thinking(current), &mut body);
     if provider == "claude" && body["max_tokens"].as_u64().unwrap_or(0) < TOOL_MAX_TOKENS as u64 {
         body["max_tokens"] = json!(TOOL_MAX_TOKENS);
     }
@@ -982,6 +1055,48 @@ fn attach_thinking(provider: &str, model: &str, thinking: &str, body: &mut Value
     body["reasoning_effort"] = json!(thinking);
 }
 
+/// Tool calls on Chat Completions. GPT-5.4 and later reject function tools unless
+/// `reasoning_effort` is `none`. The provider also fills in a higher default when the
+/// field is left out, so the value has to be sent.
+fn attach_tool_thinking(provider: &str, model: &str, thinking: &str, body: &mut Value) {
+    if provider != "claude" && chat_tools_require_reasoning_none(model) {
+        body["reasoning_effort"] = json!("none");
+        return;
+    }
+    attach_thinking(provider, model, thinking, body);
+}
+
+fn chat_tools_require_reasoning_none(model: &str) -> bool {
+    let id = model_family(model).to_ascii_lowercase();
+    if chat_tools_reject_reasoning_none(&id) {
+        return false;
+    }
+    let Some((major, minor)) = gpt_release(&id) else {
+        return false;
+    };
+    major > 5 || (major == 5 && minor >= 4)
+}
+
+/// GPT-6 Astra and GPT-6.1 Sol reject `reasoning_effort: none` entirely.
+fn chat_tools_reject_reasoning_none(id: &str) -> bool {
+    id == "gpt-6-astra" || id == "gpt-6.1-sol"
+}
+
+fn gpt_release(id: &str) -> Option<(u32, u32)> {
+    let rest = id.strip_prefix("gpt-")?;
+    let numeric: String = rest
+        .chars()
+        .take_while(|character| character.is_ascii_digit() || *character == '.')
+        .collect();
+    if numeric.is_empty() || numeric == "." {
+        return None;
+    }
+    let mut parts = numeric.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor))
+}
+
 pub fn test_connection(app: &AppHandle) -> Result<(), String> {
     let _ = list_models(app)?;
     Ok(())
@@ -1014,8 +1129,7 @@ fn send(
     match request.send_string(&payload) {
         Ok(response) => read_body(response),
         Err(ureq::Error::Status(status, response)) => {
-            let _ = response.into_string();
-            Err(http_error(status, endpoint))
+            Err(http_error(status, endpoint, &error_body(response)))
         }
         Err(ureq::Error::Transport(error)) => Err(transport_error(endpoint, &error.to_string())),
     }
@@ -1033,11 +1147,19 @@ fn get_text(
     match request.call() {
         Ok(response) => read_body(response),
         Err(ureq::Error::Status(status, response)) => {
-            let _ = response.into_string();
-            Err(http_error(status, endpoint))
+            Err(http_error(status, endpoint, &error_body(response)))
         }
         Err(ureq::Error::Transport(error)) => Err(transport_error(endpoint, &error.to_string())),
     }
+}
+
+fn error_body(response: ureq::Response) -> String {
+    let mut bytes = Vec::new();
+    let _ = response
+        .into_reader()
+        .take(8 * 1024)
+        .read_to_end(&mut bytes);
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 fn authorize(request: ureq::Request, provider: &str, key: &str) -> ureq::Request {
@@ -1068,10 +1190,10 @@ fn read_body(response: ureq::Response) -> Result<String, String> {
 mod tests {
     use super::{
         ChatMessage, ChatPart, ToolCall, ToolSpec, anthropic_body, anthropic_text,
-        anthropic_tool_reply, anthropic_tools_body, attach_thinking, chat_url, claude_models_url,
-        http_error, messages_url, model_accepts_thinking, model_ids, model_page, models_url,
-        openai_body, openai_text, openai_tool_reply, openai_tools_body, recent_text_models,
-        text_chat_model, transport_error,
+        anthropic_tool_reply, anthropic_tools_body, attach_thinking, attach_tool_thinking,
+        chat_tools_require_reasoning_none, chat_url, claude_models_url, http_error, messages_url,
+        model_accepts_thinking, model_ids, model_page, models_url, openai_body, openai_text,
+        openai_tool_reply, openai_tools_body, recent_text_models, text_chat_model, transport_error,
     };
 
     fn tool_history() -> (Vec<ChatMessage>, Vec<ToolSpec>) {
@@ -1218,21 +1340,51 @@ mod tests {
     #[test]
     fn provider_errors_stay_plain() {
         assert_eq!(
-            http_error(401, "https://api.openai.com/v1"),
+            http_error(401, "https://api.openai.com/v1", ""),
             "The API key was rejected."
         );
         assert_eq!(
-            http_error(403, "https://api.openai.com/v1"),
+            http_error(403, "https://api.openai.com/v1", ""),
             "The API key was rejected."
         );
         assert_eq!(
-            http_error(429, "https://api.openai.com/v1"),
+            http_error(429, "https://api.openai.com/v1", ""),
             "The provider is rate limited. Try again in a minute."
         );
         assert_eq!(
-            http_error(404, "https://api.openai.com/v1"),
+            http_error(404, "https://api.openai.com/v1", ""),
             "That model or endpoint was not found."
         );
+        assert_eq!(
+            http_error(
+                400,
+                "https://api.openai.com/v1",
+                r#"{"error":{"message":"max_tokens is too large","type":"invalid_request_error"}}"#
+            ),
+            "The provider returned an error (400).\nmax_tokens is too large"
+        );
+        assert_eq!(
+            http_error(
+                400,
+                "http://127.0.0.1:11434/v1",
+                r#"{"error":"model 'missing' not found"}"#
+            ),
+            "The provider returned an error (400).\nmodel 'missing' not found"
+        );
+        assert_eq!(
+            http_error(
+                502,
+                "https://api.openai.com/v1",
+                "<html><body>bad gateway</body></html>"
+            ),
+            "The provider returned an error (502)."
+        );
+        let long = "x".repeat(2_000);
+        let body = format!(r#"{{"message":"{long}"}}"#);
+        let message = http_error(400, "https://api.openai.com/v1", &body);
+        assert!(message.starts_with("The provider returned an error (400).\n"));
+        assert!(message.ends_with('…'));
+        assert!(message.chars().count() < 1_400);
         assert_eq!(
             transport_error(
                 "http://127.0.0.1:11434/v1",
@@ -1362,5 +1514,26 @@ mod tests {
         attach_thinking("claude", "claude-sonnet-5-5", "", &mut untouched);
         assert!(untouched.get("output_config").is_none());
         assert_eq!(untouched["max_tokens"], 1024);
+
+        assert!(chat_tools_require_reasoning_none("gpt-6-sol"));
+        assert!(chat_tools_require_reasoning_none("gpt-6-sol-20261106"));
+        assert!(chat_tools_require_reasoning_none("gpt-6-luna"));
+        assert!(chat_tools_require_reasoning_none("gpt-5.4-mini"));
+        assert!(chat_tools_require_reasoning_none("gpt-5.6-sol"));
+        assert!(!chat_tools_require_reasoning_none("gpt-5"));
+        assert!(!chat_tools_require_reasoning_none("gpt-4o-mini"));
+        assert!(!chat_tools_require_reasoning_none("gpt-6-astra"));
+        assert!(!chat_tools_require_reasoning_none("gpt-6.1-sol"));
+        assert!(!chat_tools_require_reasoning_none("o3-mini"));
+
+        let mut tools = serde_json::json!({});
+        attach_tool_thinking("openai", "gpt-6-sol", "high", &mut tools);
+        assert_eq!(tools["reasoning_effort"], "none");
+        let mut older = serde_json::json!({});
+        attach_tool_thinking("openai", "gpt-5", "high", &mut older);
+        assert_eq!(older["reasoning_effort"], "high");
+        let mut plain = openai_body("gpt-6-sol", "sys", "user", false);
+        attach_thinking("openai", "gpt-6-sol", "high", &mut plain);
+        assert_eq!(plain["reasoning_effort"], "high");
     }
 }

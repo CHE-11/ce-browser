@@ -54,6 +54,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { id: "settings-ai-endpoint", label: "AI endpoint", section: "settings-ai", keywords: "tools openai ollama" },
   { id: "settings-ai-model", label: "AI model", section: "settings-ai", keywords: "tools text model openai claude price" },
   { id: "settings-ai-thinking", label: "AI thinking", section: "settings-ai", keywords: "tools reasoning effort" },
+  { id: "settings-ai-suggestions", label: "Agent suggestions", section: "settings-ai", keywords: "tools prompts examples tasks" },
   { id: "settings-ai-key", label: "AI API key", section: "settings-ai", keywords: "tools token openai anthropic" },
   { id: "settings-automation-enabled", label: "Allow browser automation", section: "settings-automation", keywords: "agent rpa flows" },
   { id: "settings-automation-model", label: "Agent model", section: "settings-automation", keywords: "ai automation" },

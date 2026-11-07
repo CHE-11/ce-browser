@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
+import { RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/Button";
+import { IconButton } from "@/components/IconButton";
 import { aiKeyStatus, clearAiKey, listAiModels, setAiKey, testAiConnection } from "@/lib/browser-client";
-import type { AiKeyStatus, AiProviderId, AiProviderSlot } from "@type/browser";
+import type { AiKeyStatus, AiProviderId, AiProviderSlot, BrowserSettings } from "@type/browser";
+import { cn } from "@/lib/cn";
 import { AI_PROVIDERS, remoteProvider } from "../../../../lib/ai/ai-providers";
 import { modelAcceptsThinking } from "../../../../lib/ai/model-label";
 import { SETTINGS_SECTIONS } from "../../settings-sections";
-import { errorText, inputClass, matchesQuery, Row, Section, useReportMatch, type SettingsSectionProps } from "../../SettingsControls";
+import { errorText, inputClass, matchesQuery, Row, Section, useReportMatch, useSettingChanged, useSettingVisible, type SettingsSectionProps } from "../../SettingsControls";
 import { useAiModels } from "../../../../lib/ai/useAiModels";
 import { AiModelPicker } from "./AiModelPicker";
 
@@ -25,6 +28,9 @@ const THINKING_LEVELS = [
   { value: "high", label: "High" },
 ];
 const KEY_LABEL = "API key";
+const SUGGESTIONS_LABEL = "Agent suggestions";
+const SUGGESTIONS_HINT = "Shown in the agent panel. Click one to fill in the task.";
+const SUGGESTION_LIMIT = 12;
 
 function keyLabel(provider: AiProviderId) {
   if (provider === "openai") {
@@ -68,6 +74,8 @@ export function AiSection({ settings, query, onUpdate, onError, onMatch }: Setti
     modelHint,
     THINKING_LABEL,
     THINKING_HINT,
+    SUGGESTIONS_LABEL,
+    SUGGESTIONS_HINT,
     KEY_LABEL,
     keyLabel(provider),
     "openai",
@@ -231,9 +239,10 @@ export function AiSection({ settings, query, onUpdate, onError, onMatch }: Setti
                 {level.label}
               </option>
             ))}
-          </select>
-        </Row>
+        </select>
+      </Row>
       ) : null}
+      <AgentSuggestions settings={settings} onUpdate={onUpdate} />
       <Row id="settings-ai-key" setting="aiProvider" label={keyLabel(provider)} hint={keyHint}>
         <div id="settings-ai-key-row" className="flex flex-col gap-2">
           <input
@@ -278,5 +287,116 @@ export function AiSection({ settings, query, onUpdate, onError, onMatch }: Setti
         </div>
       </Row>
     </Section>
+  );
+}
+
+function AgentSuggestions({ settings, onUpdate }: { settings: BrowserSettings; onUpdate: SettingsSectionProps["onUpdate"] }) {
+  const suggestions = settings.agentSuggestions ?? [];
+  const [draft, setDraft] = useState("");
+  const { changed, reset } = useSettingChanged(["agentSuggestions"]);
+  const visible = useSettingVisible(SUGGESTIONS_LABEL, SUGGESTIONS_HINT, "Add", draft, ...suggestions);
+  if (!visible) {
+    return null;
+  }
+  const full = suggestions.length >= SUGGESTION_LIMIT;
+  const add = () => {
+    const text = draft.trim();
+    if (!text || full || suggestions.includes(text)) {
+      return;
+    }
+    onUpdate({ agentSuggestions: [...suggestions, text] });
+    setDraft("");
+  };
+  return (
+    <div id="settings-ai-suggestions" className="px-5 py-3">
+      <div id="settings-ai-suggestions-heading" className="flex items-center gap-2">
+        <div id="settings-ai-suggestions-label" className="text-sm text-zinc-100">
+          {SUGGESTIONS_LABEL}
+        </div>
+        {changed && reset ? (
+          <IconButton id="settings-ai-suggestions-reset" label="Reset agent suggestions to default" className="size-7" onClick={reset}>
+            <RotateCcw id="settings-ai-suggestions-reset-icon" aria-hidden />
+          </IconButton>
+        ) : null}
+      </div>
+      <div id="settings-ai-suggestions-hint" className="mb-2 text-xs text-zinc-500">
+        {SUGGESTIONS_HINT}
+      </div>
+      <div id="settings-ai-suggestions-add" className="mb-2 flex gap-2">
+        <input
+          id="settings-ai-suggestions-input"
+          value={draft}
+          placeholder="Add a suggestion"
+          className={cn(inputClass, "min-w-0 flex-1")}
+          disabled={full}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              add();
+            }
+          }}
+        />
+        <Button id="settings-ai-suggestions-add-button" size="sm" disabled={full || !draft.trim()} onClick={add}>
+          Add
+        </Button>
+      </div>
+      {suggestions.length === 0 ? (
+        <div id="settings-ai-suggestions-empty" className="text-xs text-zinc-500">
+          No suggestions. The agent panel hides the list.
+        </div>
+      ) : (
+        <ul id="settings-ai-suggestions-list" className="flex flex-col gap-1">
+          {suggestions.map((suggestion, index) => (
+            <SuggestionRow
+              key={`${index}-${suggestion}`}
+              id={`settings-ai-suggestions-${index}`}
+              value={suggestion}
+              onCommit={(next) => {
+                if (suggestions.some((item, at) => at !== index && item === next)) {
+                  return;
+                }
+                onUpdate({ agentSuggestions: suggestions.map((item, at) => (at === index ? next : item)) });
+              }}
+              onRemove={() => onUpdate({ agentSuggestions: suggestions.filter((_, at) => at !== index) })}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SuggestionRow({ id, value, onCommit, onRemove }: { id: string; value: string; onCommit: (next: string) => void; onRemove: () => void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+  return (
+    <li id={id} className="flex items-center gap-1">
+      <input
+        id={`${id}-input`}
+        value={draft}
+        className={cn(inputClass, "min-w-0 flex-1")}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => {
+          const next = draft.trim();
+          if (!next || next === value) {
+            setDraft(value);
+            return;
+          }
+          onCommit(next);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      <IconButton id={`${id}-remove`} label="Remove suggestion" onClick={onRemove}>
+        <X id={`${id}-remove-icon`} aria-hidden />
+      </IconButton>
+    </li>
   );
 }

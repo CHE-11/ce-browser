@@ -3759,21 +3759,26 @@ fn attach_accelerators(
                 }
                 let mut key = 0u32;
                 args.VirtualKey(&mut key)?;
-                if key == 0x1B
-                    && matches!(target, shortcuts::Target::Ui | shortcuts::Target::Page)
-                    && !key_down(VK_CONTROL)
-                    && !key_down(VK_MENU)
-                {
-                    let windows = popup::passive_open(&app);
-                    if !windows.is_empty() {
-                        args.SetHandled(true)?;
-                        let app = app.clone();
-                        tauri::async_runtime::spawn(async move {
-                            for window in windows {
-                                popup::close_all(&app, &window, false);
-                            }
-                        });
-                        return Ok(());
+                if key == 0x1B && !key_down(VK_CONTROL) && !key_down(VK_MENU) {
+                    // Stop before the page sees Escape, so a reply already chosen cannot
+                    // click or type over the key the user just pressed.
+                    let stopped_agent = crate::automation::agent::stop_focused(&app);
+                    if matches!(target, shortcuts::Target::Ui | shortcuts::Target::Page) {
+                        let windows = popup::passive_open(&app);
+                        if !windows.is_empty() {
+                            args.SetHandled(true)?;
+                            let app = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                for window in windows {
+                                    popup::close_all(&app, &window, false);
+                                }
+                            });
+                            return Ok(());
+                        }
+                        if stopped_agent {
+                            args.SetHandled(true)?;
+                            return Ok(());
+                        }
                     }
                 }
                 let action = shortcuts::action_for(

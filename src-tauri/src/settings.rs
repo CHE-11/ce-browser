@@ -654,6 +654,9 @@ pub struct BrowserSettings {
     /// Width of the docked agent panel, in CSS pixels. An older file omits this and opens at 380.
     #[serde(default = "default_agent_panel_width")]
     pub agent_panel_width: u32,
+    /// Prompts offered in the agent panel. An older file omits this and gets the summary prompt.
+    #[serde(default = "default_agent_suggestions")]
+    pub agent_suggestions: Vec<String>,
     /// Agent, recorded flows, schedules and the MCP server. An older file omits this.
     #[serde(default)]
     pub automation: AutomationSettings,
@@ -1233,6 +1236,7 @@ impl Default for BrowserSettings {
             toast_position: default_toast_position(),
             file_handlers: default_file_handlers(),
             agent_panel_width: default_agent_panel_width(),
+            agent_suggestions: default_agent_suggestions(),
             automation: AutomationSettings::default(),
         }
     }
@@ -1545,6 +1549,7 @@ impl BrowserSettings {
         self.agent_panel_width = self
             .agent_panel_width
             .clamp(AGENT_PANEL_WIDTH_PX.0, AGENT_PANEL_WIDTH_PX.1);
+        self.agent_suggestions = clean_agent_suggestions(&self.agent_suggestions);
         self.automation = self.automation.normalize();
         if !TAB_LAYOUTS.contains(&self.tab_layout.as_str()) {
             self.tab_layout = defaults.tab_layout.clone();
@@ -2262,6 +2267,25 @@ fn default_agent_panel_width() -> u32 {
     AGENT_PANEL_DEFAULT_WIDTH
 }
 
+fn default_agent_suggestions() -> Vec<String> {
+    vec!["Summarize this page and list the key facts".into()]
+}
+
+fn clean_agent_suggestions(items: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for item in items {
+        let text: String = item.trim().chars().take(240).collect();
+        if text.is_empty() || out.iter().any(|kept: &String| kept == &text) {
+            continue;
+        }
+        out.push(text);
+        if out.len() == 12 {
+            break;
+        }
+    }
+    out
+}
+
 fn default_command_palette_width() -> u32 {
     560
 }
@@ -2696,6 +2720,27 @@ mod tests {
         let wide: super::BrowserSettings =
             serde_json::from_str(r#"{"agentPanelWidth":9000}"#).expect("settings parse");
         assert_eq!(wide.normalize().agent_panel_width, 720);
+    }
+
+    #[test]
+    fn agent_suggestions_default_when_missing_and_keep_a_saved_list() {
+        let missing: super::BrowserSettings = serde_json::from_str("{}").expect("settings parse");
+        assert_eq!(
+            missing.normalize().agent_suggestions,
+            vec!["Summarize this page and list the key facts".to_string()]
+        );
+        let long = "a".repeat(300);
+        let saved: super::BrowserSettings = serde_json::from_str(&format!(
+            r#"{{"agentSuggestions":["  Find the price  ","","Find the price","{long}"]}}"#
+        ))
+        .expect("settings parse");
+        let saved = saved.normalize();
+        assert_eq!(saved.agent_suggestions[0], "Find the price");
+        assert_eq!(saved.agent_suggestions.len(), 2);
+        assert_eq!(saved.agent_suggestions[1].chars().count(), 240);
+        let empty: super::BrowserSettings =
+            serde_json::from_str(r#"{"agentSuggestions":[]}"#).expect("settings parse");
+        assert!(empty.normalize().agent_suggestions.is_empty());
     }
 
     #[test]

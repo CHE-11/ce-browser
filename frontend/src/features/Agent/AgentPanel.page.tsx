@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { Bot, Eye, Hand, History, Play, Plus, Square, Trash2, X } from "lucide-react";
-import type { AgentRun } from "@type/browser";
+import { Bot, Eye, Hand, History, Play, Plus, Settings, Square, Trash2, X } from "lucide-react";
+import type { AgentRun, TabInfo } from "@type/browser";
 import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/EmptyState";
 import { IconButton } from "@/components/IconButton";
-import { resizeAgentPanel, setAgentPanelWidth, toggleAgentPanel } from "@/lib/browser-client";
+import { activateTab, createTab, navigate, resizeAgentPanel, setAgentPanelWidth, toggleAgentPanel } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { isActiveRun, useAgentRun } from "@/lib/use-agent-run";
-import { useAppearanceState, useSettings } from "@/lib/use-browser";
+import { useAppearanceState, useSettings, useTabs } from "@/lib/use-browser";
 import { AgentApproval } from "./AgentApproval";
 import { AgentComposer } from "./AgentComposer";
+import { AgentError } from "./AgentError";
 import { AgentStepList } from "./AgentStepList";
 
 const STATUS_TEXT: Record<AgentRun["status"], string> = {
@@ -33,6 +34,17 @@ const STATUS_TONE: Record<AgentRun["status"], string> = {
 const MIN_PANEL_WIDTH = 280;
 const MAX_PANEL_WIDTH = 720;
 const DEFAULT_PANEL_WIDTH = 380;
+const AI_SETTINGS_URL = "ce://settings?focus=settings-ai";
+
+/** Opens the AI/Agent settings section, reusing a settings tab in this window. */
+function openAiSettings(tabs: TabInfo[]) {
+  const open = tabs.find((tab) => tab.url.startsWith("ce://settings"));
+  if (!open) {
+    void createTab(AI_SETTINGS_URL);
+    return;
+  }
+  void activateTab(open.id).then(() => navigate(open.id, AI_SETTINGS_URL));
+}
 
 function clampPanelWidth(width: number) {
   return Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
@@ -42,6 +54,7 @@ function clampPanelWidth(width: number) {
 export function AgentPanelPage() {
   useAppearanceState();
   const settings = useSettings();
+  const tabs = useTabs();
   const agent = useAgentRun();
   const { run, runs, activeTab } = agent;
   const active = isActiveRun(run);
@@ -52,6 +65,27 @@ export function AgentPanelPage() {
   useEffect(() => {
     document.title = "Agent";
   }, []);
+
+  const stopRef = useRef(agent.stop);
+  stopRef.current = agent.stop;
+  const escapeRun = active ? run?.id : undefined;
+  useEffect(() => {
+    if (escapeRun === undefined) {
+      return;
+    }
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || event.ctrlKey || event.altKey || event.metaKey) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) {
+        stopRef.current(escapeRun);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [escapeRun]);
 
   const onResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || resizing.current) {
@@ -108,9 +142,18 @@ export function AgentPanelPage() {
       />
       <header id="agent-panel-header" className="flex h-[var(--toolbar-height)] shrink-0 items-center gap-2 border-b border-zinc-800 pl-3 pr-1.5">
         <Bot id="agent-panel-header-icon" className="size-4 text-sky-400" aria-hidden />
-        <h1 id="agent-panel-title" className="flex-1 text-sm font-semibold">
+        <h1 id="agent-panel-title" className="text-sm font-semibold">
           Agent
         </h1>
+        <IconButton
+          id="agent-panel-settings"
+          label="AI/Agent settings"
+          className="size-7"
+          onClick={() => openAiSettings(tabs.windowTabs)}
+        >
+          <Settings id="agent-panel-settings-icon" aria-hidden />
+        </IconButton>
+        <div id="agent-panel-header-spacer" className="min-w-0 flex-1" />
         <IconButton id="agent-panel-new" label="New task" className="size-7" onClick={agent.newTask}>
           <Plus id="agent-panel-new-icon" aria-hidden />
         </IconButton>
@@ -166,15 +209,19 @@ export function AgentPanelPage() {
             </section>
             <AgentStepList id="agent-panel-steps" steps={run.steps} />
             {run.result && !active ? (
-              <section
-                id="agent-panel-result"
-                className={cn(
-                  "whitespace-pre-wrap rounded-lg p-3 text-sm ring-1",
-                  run.status === "done" ? "bg-emerald-950/40 ring-emerald-800/60" : "bg-zinc-900 ring-zinc-800",
-                )}
-              >
-                {run.result}
-              </section>
+              run.status === "failed" ? (
+                <AgentError id="agent-panel-result" text={run.result} />
+              ) : (
+                <section
+                  id="agent-panel-result"
+                  className={cn(
+                    "whitespace-pre-wrap break-words rounded-lg p-3 text-sm ring-1",
+                    run.status === "done" ? "bg-emerald-950/40 ring-emerald-800/60" : "bg-zinc-900 ring-zinc-800",
+                  )}
+                >
+                  {run.result}
+                </section>
+              )
             ) : null}
           </div>
         ) : (
@@ -188,11 +235,7 @@ export function AgentPanelPage() {
       </main>
 
       <footer id="agent-panel-footer" className="flex shrink-0 flex-col gap-2 border-t border-zinc-800 p-3">
-        {agent.error ? (
-          <p id="agent-panel-error" role="alert" className="text-xs text-red-400">
-            {agent.error}
-          </p>
-        ) : null}
+        {agent.error ? <AgentError id="agent-panel-error" text={agent.error} alert /> : null}
         {run?.approval ? (
           <AgentApproval
             approval={run.approval}
@@ -213,16 +256,32 @@ export function AgentPanelPage() {
                 Take over
               </Button>
             ) : null}
-            <Button id="agent-panel-stop" size="sm" variant="destructiveOutline" className="flex-1" onClick={() => agent.stop(run.id)}>
+            <Button
+              id="agent-panel-stop"
+              size="sm"
+              variant="destructiveOutline"
+              className="flex-1"
+              aria-keyshortcuts="Escape"
+              title="Stop (Esc)"
+              onClick={() => agent.stop(run.id)}
+            >
               <Square id="agent-panel-stop-icon" className="size-3.5" aria-hidden />
               Stop
+              <kbd id="agent-panel-stop-key" className="rounded border border-red-800 bg-red-950/70 px-1 font-sans text-[10px] leading-4 text-red-200">
+                Esc
+              </kbd>
             </Button>
           </div>
         ) : null}
         {run && active && run.source === "agent" ? (
           <AgentComposer mode="reply" onSubmit={(text) => agent.reply(run.id, text)} />
         ) : !run || !active ? (
-          <AgentComposer mode="start" disabled={!activeTab} onSubmit={agent.start} />
+          <AgentComposer
+            mode="start"
+            disabled={!activeTab}
+            suggestions={settings?.agentSuggestions ?? ["Summarize this page and list the key facts"]}
+            onSubmit={agent.start}
+          />
         ) : null}
       </footer>
     </div>

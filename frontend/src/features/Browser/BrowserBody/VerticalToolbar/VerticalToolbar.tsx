@@ -84,6 +84,7 @@ export function ToolbarEntry({
         "relative",
         stacked ? "flex w-full flex-col items-center py-0.5" : "inline-flex",
         labeled && "gap-0 px-0.5 py-0",
+        labeled && stacked && "group rounded-md hover:bg-zinc-800 hover:text-zinc-100 [&_.chrome-toolbar-button]:rounded-md [&_.chrome-toolbar-button]:hover:bg-transparent",
         dragging && "opacity-40",
       )}
       {...(listDrag
@@ -109,7 +110,7 @@ export function ToolbarEntry({
         <ToolbarIcon id={id} activeTab={activeTab} settings={settings} />
       )}
       {labeled && caption ? (
-        <span id={`${domId}-label`} className="pointer-events-none -mt-1.5 line-clamp-2 w-full min-w-0 wrap-break-word text-center text-[8px] leading-none text-zinc-400">
+        <span id={`${domId}-label`} className="pointer-events-none -mt-1.5 line-clamp-2 w-full min-w-0 wrap-break-word px-0.5 pb-1 text-center text-[8px] leading-none text-zinc-400 group-hover:text-zinc-100">
           {caption}
         </span>
       ) : null}

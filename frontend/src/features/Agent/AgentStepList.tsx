@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Brain, CheckCircle2, MousePointerClick, ShieldAlert, User } from "lucide-react";
 import type { AgentStep, AgentStepKind } from "@type/browser";
 import { cn } from "@/lib/cn";
+import { LongMessage } from "./AgentError";
 
 const ICONS: Record<AgentStepKind, typeof Brain> = {
   think: Brain,
@@ -21,6 +22,10 @@ const TONES: Record<AgentStepKind, string> = {
   answer: "text-emerald-400",
 };
 
+function longError(text: string) {
+  return text.length > 180 || text.split("\n").length > 4;
+}
+
 function time(at: number) {
   return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -37,18 +42,25 @@ export function AgentStepList({ id, steps }: { id: string; steps: AgentStep[] })
     <ol id={id} className="flex flex-col gap-2">
       {steps.map((step, index) => {
         const Icon = ICONS[step.kind] ?? Brain;
+        const errorText = step.kind === "error" && step.detail ? `${step.text}\n${step.detail}` : step.text;
         return (
           <li id={`${id}-${index}`} key={`${step.at}-${index}`} className="flex gap-2 rounded-md bg-zinc-900/70 p-2 ring-1 ring-zinc-800">
             <Icon id={`${id}-${index}-icon`} className={cn("mt-0.5 size-4 shrink-0", TONES[step.kind])} aria-hidden />
             <div id={`${id}-${index}-body`} className="min-w-0 flex-1">
-              <div id={`${id}-${index}-text`} className={cn("whitespace-pre-wrap break-words text-xs", step.kind === "think" ? "text-zinc-400" : "text-zinc-100")}>
-                {step.text}
-              </div>
-              {step.detail ? (
-                <div id={`${id}-${index}-detail`} className="mt-1 whitespace-pre-wrap break-words text-[11px] text-zinc-500">
-                  {step.detail}
-                </div>
-              ) : null}
+              {step.kind === "error" && longError(errorText) ? (
+                <LongMessage id={`${id}-${index}-text`} text={errorText} className="text-xs text-zinc-100" />
+              ) : (
+                <>
+                  <div id={`${id}-${index}-text`} className={cn("whitespace-pre-wrap break-words text-xs", step.kind === "think" ? "text-zinc-400" : "text-zinc-100")}>
+                    {step.text}
+                  </div>
+                  {step.detail ? (
+                    <div id={`${id}-${index}-detail`} className="mt-1 whitespace-pre-wrap break-words text-[11px] text-zinc-500">
+                      {step.detail}
+                    </div>
+                  ) : null}
+                </>
+              )}
               {step.thumb ? (
                 <button
                   id={`${id}-${index}-thumb`}

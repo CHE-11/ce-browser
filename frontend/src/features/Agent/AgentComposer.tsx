@@ -1,25 +1,20 @@
 import { useState } from "react";
-import { SendHorizontal } from "lucide-react";
+import { ChevronRight, SendHorizontal } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
 import { cn } from "@/lib/cn";
 import { inputClassName } from "./agent-styles";
-
-const EXAMPLES = [
-  "Summarize this page and list the key facts",
-  "Find the cheapest option on this page and add it to the cart",
-  "Fill in this form with my details, then stop before submitting",
-  "Go through the next 3 pages and collect every product name and price",
-];
 
 type Props = {
   /** `start` begins a run in the active tab. `reply` sends a message to the running agent. */
   mode: "start" | "reply";
   disabled?: boolean;
+  suggestions?: string[];
   onSubmit: (text: string) => void;
 };
 
-export function AgentComposer({ mode, disabled, onSubmit }: Props) {
+export function AgentComposer({ mode, disabled, suggestions = [], onSubmit }: Props) {
   const [text, setText] = useState("");
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const send = () => {
     const value = text.trim();
     if (!value || disabled) {
@@ -31,21 +26,40 @@ export function AgentComposer({ mode, disabled, onSubmit }: Props) {
 
   return (
     <div id="agent-composer" className="flex flex-col gap-2">
-      {mode === "start" && !text ? (
-        <ul id="agent-composer-examples" className="flex flex-col gap-1">
-          {EXAMPLES.map((example, index) => (
-            <li id={`agent-composer-example-${index}`} key={example}>
-              <button
-                id={`agent-composer-example-${index}-button`}
-                type="button"
-                className="w-full rounded-md px-2 py-1 text-left text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-                onClick={() => setText(example)}
-              >
-                {example}
-              </button>
-            </li>
-          ))}
-        </ul>
+      {mode === "start" && !text && suggestions.length > 0 ? (
+        <div id="agent-composer-examples">
+          <button
+            id="agent-composer-examples-toggle"
+            type="button"
+            className="flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-zinc-400 hover:text-zinc-100"
+            aria-expanded={suggestionsOpen}
+            aria-controls="agent-composer-examples-list"
+            onClick={() => setSuggestionsOpen((open) => !open)}
+          >
+            <ChevronRight
+              id="agent-composer-examples-toggle-icon"
+              className={cn("size-3.5 transition-transform", suggestionsOpen && "rotate-90")}
+              aria-hidden
+            />
+            Suggestions
+          </button>
+          {suggestionsOpen ? (
+            <ul id="agent-composer-examples-list" className="mt-1 flex flex-col gap-1">
+              {suggestions.map((example, index) => (
+                <li id={`agent-composer-example-${index}`} key={example}>
+                  <button
+                    id={`agent-composer-example-${index}-button`}
+                    type="button"
+                    className="w-full rounded-md px-2 py-1 text-left text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                    onClick={() => setText(example)}
+                  >
+                    {example}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
       <div id="agent-composer-box" className="relative">
         <textarea

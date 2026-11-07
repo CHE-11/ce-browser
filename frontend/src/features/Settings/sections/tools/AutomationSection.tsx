@@ -24,7 +24,7 @@ const TEXT = {
   enabled: "Allow browser automation",
   enabledHint: "The agent, recorded flows, and schedules. Off stops new runs.",
   model: "Agent model",
-  modelHint: "Blank uses the model chosen under AI. Models that see images work best.",
+  modelHint: "Blank uses the model chosen under AI/Agent. Models that see images work best.",
   steps: "Most actions per run",
   stepsHint: "The agent stops after this many actions.",
   confirm: "Ask before sensitive actions",
@@ -79,7 +79,7 @@ export function AutomationSection({ settings, query, onUpdate, onError, onMatch 
           id="settings-automation-model-input"
           className={inputClass}
           value={automation.agentModel}
-          placeholder={settings.aiProviders[settings.aiProvider]?.model || "Model from AI settings"}
+          placeholder={settings.aiProviders[settings.aiProvider]?.model || "Model from AI/Agent settings"}
           spellCheck={false}
           onChange={(event) => update({ agentModel: event.target.value })}
         />

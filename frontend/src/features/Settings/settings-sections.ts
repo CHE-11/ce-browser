@@ -13,7 +13,7 @@ export const SETTINGS_SECTIONS = [
   { id: "settings-tabs", title: "Tabs" },
   { id: "settings-update", title: "Update" },
   { id: "settings-adblock", title: "Ad blocker" },
-  { id: "settings-ai", title: "AI" },
+  { id: "settings-ai", title: "AI/Agent" },
   { id: "settings-automation", title: "Automation" },
   { id: "settings-mcp", title: "MCP server" },
   { id: "settings-shopping", title: "Shopping" },

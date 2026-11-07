@@ -89,7 +89,7 @@ export const PROFILE_COPY_CHOICES: {
   },
   {
     id: "ai",
-    label: "AI",
+    label: "AI/Agent",
     hint: "Provider, endpoint, and model, plus the saved API key.",
   },
   {

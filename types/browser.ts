@@ -877,6 +877,8 @@ export type BrowserSettings = {
   fileHandlers: FileHandler[];
   /** Width of the docked agent panel, in CSS pixels, 280 to 720. */
   agentPanelWidth: number;
+  /** Prompts offered in the agent panel. */
+  agentSuggestions: string[];
   /** Agent, recorded flows, schedules, and the MCP server. */
   automation: AutomationSettings;
 };

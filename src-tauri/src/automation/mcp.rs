@@ -796,6 +796,11 @@ fn list_downloads(app: &AppHandle, args: &Value) -> Result<Vec<Value>, String> {
     ))
 }
 
+/// Refuses the action when the user has stopped this session.
+fn commit(session: u32) -> Result<(), String> {
+    agent::session_checkpoint(session)
+}
+
 fn element_label(info: &driver::ElementInfo, element: u32) -> String {
     if info.name.trim().is_empty() {
         format!("{} [{element}]", info.role)
@@ -819,6 +824,7 @@ fn run_tool(
             let window = tabs::tab_info(app, tab)
                 .map(|info| info.window)
                 .unwrap_or_else(|| tabs::focused_window(app));
+            commit(session)?;
             let opened = tabs::open(
                 app,
                 tabs::OpenTab {
@@ -841,6 +847,7 @@ fn run_tool(
             if !owned {
                 return Err("Only tabs this MCP server opened can be closed.".into());
             }
+            commit(session)?;
             tabs::close_tab(app, tab)?;
             opened_tabs()
                 .lock()
@@ -851,6 +858,7 @@ fn run_tool(
         "navigate" => {
             let url = tabs::resolve(app, &arg_str(args, "url"));
             agent::session_gate(app, session, policy::open(auto, url.as_str()))?;
+            commit(session)?;
             driver::navigate(app, tab, url.as_str())?;
             let info = tabs::tab_info(app, tab);
             let title = info.map(|info| info.title).unwrap_or_default();
@@ -860,6 +868,7 @@ fn run_tool(
             ))
         }
         "back" => {
+            commit(session)?;
             driver::back(app, tab)?;
             Ok(("Go back".into(), text("Went back.")))
         }
@@ -901,6 +910,7 @@ fn run_tool(
             if let Some(element) = arg_u32(args, "ref") {
                 let info = driver::element_info(app, tab, element)?;
                 agent::session_gate(app, session, policy::click(auto, &info))?;
+                commit(session)?;
                 driver::click(
                     app,
                     tab,
@@ -916,6 +926,7 @@ fn run_tool(
             let (Some(x), Some(y)) = (arg_f64(args, "x"), arg_f64(args, "y")) else {
                 return Err("Give a ref, or x and y.".into());
             };
+            commit(session)?;
             driver::click_at(
                 app,
                 tab,
@@ -944,6 +955,7 @@ fn run_tool(
                     agent::session_gate(app, session, policy::submit(auto, Some(info)))?;
                 }
             }
+            commit(session)?;
             driver::type_text(
                 app,
                 tab,
@@ -971,11 +983,13 @@ fn run_tool(
                 let focused = driver::focused_info(app, tab)?;
                 agent::session_gate(app, session, policy::submit(auto, focused.as_ref()))?;
             }
+            commit(session)?;
             driver::press(app, tab, &keys)?;
             Ok((format!("Press {keys}"), text("Pressed.")))
         }
         "hover" => {
             let element = arg_u32(args, "ref").ok_or("Missing \"ref\".")?;
+            commit(session)?;
             driver::hover(app, tab, element)?;
             Ok((format!("Hover [{element}]"), text("Done.")))
         }
@@ -988,11 +1002,13 @@ fn run_tool(
                 "right" => (screens, true),
                 _ => (screens, false),
             };
+            commit(session)?;
             let result = driver::scroll(app, tab, arg_u32(args, "ref"), amount, horizontal)?;
             Ok((format!("Scroll {direction}"), text(result)))
         }
         "select" => {
             let element = arg_u32(args, "ref").ok_or("Missing \"ref\".")?;
+            commit(session)?;
             let picked = driver::select(app, tab, element, &arg_list(args, "values"))?;
             Ok((
                 format!("Choose {}", picked.join(", ")),
@@ -1013,6 +1029,7 @@ fn run_tool(
                     paths.join(", ")
                 )),
             )?;
+            commit(session)?;
             driver::upload(app, tab, element, &paths)?;
             Ok((
                 format!("Upload {}", paths.join(", ")),
@@ -1066,6 +1083,7 @@ fn run_tool(
             };
             let save = arg_str(args, "save");
             let mut note = format!("{} rows.", rows.len());
+            commit(session)?;
             if !save.trim().is_empty() {
                 let url = tabs::tab_info(app, tab)
                     .map(|info| info.url)
@@ -1085,6 +1103,7 @@ fn run_tool(
             let limit = arg_f64(args, "timeoutSeconds")
                 .unwrap_or(300.0)
                 .clamp(5.0, 3600.0);
+            commit(session)?;
             let run = flows::run(app, &flow, target, "mcp")?;
             let finished = flows::wait_run(run, Duration::from_secs_f64(limit))
                 .ok_or("The flow is still running.")?;
@@ -1096,6 +1115,7 @@ fn run_tool(
         }
         "evaluate" => {
             let expression = arg_str(args, "expression");
+            commit(session)?;
             let value = driver::evaluate_main(app, tab, &expression)?;
             Ok((
                 format!("Run script ({} characters)", expression.chars().count()),

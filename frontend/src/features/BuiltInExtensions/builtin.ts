@@ -37,7 +37,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   },
   {
     id: "page-capture",
-    name: "Save page as PNG",
+    name: "Save as PNG",
     description: "Save or copy the page as an image.",
     icon: ImageDown,
   },

@@ -39,7 +39,7 @@ export function BrowserBody({
   const pagesWidth = devtools?.visible ? `calc(${devtools.ratio * 100}% - 3px)` : "100%";
   const showViewportBar = Boolean(devtools?.visible || snapshot.viewport);
   return (
-    <div id="browser-body" className="flex min-h-0 flex-1">
+    <div id="browser-body" className="flex min-h-0 flex-1 pt-[var(--chrome-top-slack,0px)]">
       {vertical && settings && !snapshot.fullscreen ? (
         <VerticalTabs ref={sidebarRef} snapshot={snapshot} settings={settings} />
       ) : null}

@@ -1,6 +1,6 @@
 //! The AI agent: looks at a tab, asks the model for one action, runs it, and repeats.
 
-use std::sync::{Condvar, Mutex, MutexGuard, OnceLock};
+use std::sync::{Condvar, Mutex, MutexGuard, OnceLock, mpsc};
 use std::thread;
 use std::time::Duration;
 
@@ -77,6 +77,9 @@ enum Answer {
 struct RunState {
     run: AgentRun,
     stop: bool,
+    /// The next MCP `session` call fails once, then a later call may start a new session.
+    /// `stop` itself stays set so an action already in flight still refuses to touch the page.
+    reject_next: bool,
     paused: bool,
     answer: Option<(u32, Answer)>,
     notes: Vec<String>,
@@ -175,6 +178,7 @@ pub fn start(app: &AppHandle, tab: u32, goal: &str) -> Result<u32, String> {
                 max_steps: current.automation.max_steps,
             },
             stop: false,
+            reject_next: false,
             paused: false,
             answer: None,
             notes: Vec::new(),
@@ -197,14 +201,19 @@ pub fn session(app: &AppHandle, tab: u32, client: &str) -> Result<u32, String> {
         agents
             .runs
             .iter_mut()
-            .find(|state| state.run.source == "mcp" && state.run.active())
+            .find(|state| state.run.source == "mcp" && (state.run.active() || state.reject_next))
             .map(|state| {
                 state.touched = now_ms();
-                (state.run.id, state.stop, state.run.tab_id)
+                (
+                    state.run.id,
+                    state.stop || state.reject_next,
+                    state.run.tab_id,
+                )
             })
     };
     if let Some((id, stopped, current)) = existing {
         if stopped {
+            with_run(id, |state| state.reject_next = false);
             finish(app, id, "stopped", "Stopped by the user.");
             return Err("The user stopped this MCP session in the agent panel. Call again to start a new one.".into());
         }
@@ -241,6 +250,7 @@ pub fn session(app: &AppHandle, tab: u32, client: &str) -> Result<u32, String> {
                 max_steps: 0,
             },
             stop: false,
+            reject_next: false,
             paused: false,
             answer: None,
             notes: Vec::new(),
@@ -328,12 +338,44 @@ fn trim_runs(agents: &mut Agents) {
 }
 
 pub fn stop(app: &AppHandle, id: u32) {
-    with_run(id, |state| {
+    let active = with_run(id, |state| {
+        if !state.run.active() {
+            return false;
+        }
         state.stop = true;
         state.paused = false;
-    });
+        if state.run.source == "mcp" {
+            state.reject_next = true;
+        }
+        true
+    })
+    .unwrap_or(false);
     wake();
-    emit(app);
+    if active {
+        finish(app, id, "stopped", "Stopped.");
+    }
+}
+
+/// Stops every active run in the focused window. Escape uses this so a key aimed at the page
+/// wins over a click or keystroke the model already chose.
+pub fn stop_focused(app: &AppHandle) -> bool {
+    stop_window(app, &tabs::focused_window(app))
+}
+
+fn stop_window(app: &AppHandle, window: &str) -> bool {
+    let ids: Vec<u32> = lock()
+        .runs
+        .iter()
+        .filter(|state| state.run.window == window && state.run.active())
+        .map(|state| state.run.id)
+        .collect();
+    if ids.is_empty() {
+        return false;
+    }
+    for id in ids {
+        stop(app, id);
+    }
+    true
 }
 
 pub fn answer(app: &AppHandle, id: u32, approval: u32, allow: bool) {
@@ -454,7 +496,7 @@ fn checkpoint(id: u32) -> Result<(), Stopped> {
         let Some(state) = agents.get(id) else {
             return Err(Stopped);
         };
-        if state.stop {
+        if state.stop || state.run.finished != 0 {
             return Err(Stopped);
         }
         if !state.paused {
@@ -471,6 +513,12 @@ fn checkpoint(id: u32) -> Result<(), Stopped> {
 fn ask(app: &AppHandle, id: u32, kind: &str, prompt: &str) -> Option<Answer> {
     let approval = {
         let mut agents = lock();
+        if agents
+            .get(id)
+            .is_none_or(|state| state.stop || state.run.finished != 0)
+        {
+            return None;
+        }
         agents.next_approval += 1;
         let approval = agents.next_approval;
         let state = agents.get(id)?;
@@ -490,7 +538,7 @@ fn ask(app: &AppHandle, id: u32, kind: &str, prompt: &str) -> Option<Answer> {
         let Some(state) = agents.get(id) else {
             break None;
         };
-        if state.stop {
+        if state.stop || state.run.finished != 0 {
             break None;
         }
         if let Some((answered, _)) = &state.answer
@@ -505,7 +553,7 @@ fn ask(app: &AppHandle, id: u32, kind: &str, prompt: &str) -> Option<Answer> {
     };
     if let Some(state) = agents.get(id) {
         state.run.approval = None;
-        if state.run.status == "waiting" {
+        if state.run.status == "waiting" && !state.stop && state.run.finished == 0 {
             state.run.status = if state.paused {
                 "paused".into()
             } else {
@@ -523,17 +571,34 @@ fn current_tab(id: u32) -> Option<u32> {
 }
 
 fn finish(app: &AppHandle, id: u32, status: &str, result: &str) {
-    let tab = with_run(id, |state| {
+    let closed = with_run(id, |state| {
+        if state.run.finished != 0 {
+            return None;
+        }
+        // A stop already requested wins over a model reply that finishes in the same moment.
+        let status = if state.stop { "stopped" } else { status };
+        let result = if state.stop {
+            "Stopped.".to_string()
+        } else {
+            clip(result, 8000)
+        };
         state.run.status = status.into();
-        state.run.result = clip(result, 8000);
+        state.run.result = result.clone();
         state.run.finished = now_ms();
         state.run.approval = None;
-        (state.run.tab_id, state.run.source.clone())
+        state.paused = false;
+        Some((
+            state.run.tab_id,
+            state.run.source.clone(),
+            status.to_string(),
+            result,
+        ))
     });
-    if let Some((tab, source)) = tab {
-        tabs::set_automated(app, tab, false);
-        audit(app, &source, tab, status, result);
-    }
+    let Some(Some((tab, source, status, result))) = closed else {
+        return;
+    };
+    tabs::set_automated(app, tab, false);
+    audit(app, &source, tab, &status, &result);
     wake();
     emit(app);
 }
@@ -542,7 +607,8 @@ fn run(app: AppHandle, id: u32) {
     match drive(&app, id) {
         Ok((status, result)) => finish(&app, id, status, &result),
         Err(error) => {
-            push_step(&app, id, "error", &error, "");
+            let (text, detail) = error.split_once('\n').unwrap_or((error.as_str(), ""));
+            push_step(&app, id, "error", text, detail);
             finish(&app, id, "failed", &error);
         }
     }
@@ -822,6 +888,98 @@ pub fn tool_specs() -> Vec<ToolSpec> {
     ]
 }
 
+enum AskError {
+    Stopped,
+    Failed(String),
+}
+
+/// Asks the model on another thread. Returns as soon as the user stops the run, and drops a
+/// reply that arrives after that, so the model cannot click or type over the user.
+fn ask_model(
+    app: &AppHandle,
+    id: u32,
+    current: &settings::BrowserSettings,
+    model: &str,
+    system: &str,
+    messages: &[ChatMessage],
+    tools: &[ToolSpec],
+) -> Result<ai::ToolReply, AskError> {
+    if checkpoint(id).is_err() {
+        return Err(AskError::Stopped);
+    }
+    let (tx, rx) = mpsc::channel();
+    let app = app.clone();
+    let current = current.clone();
+    let model = model.to_string();
+    let system = system.to_string();
+    let messages = messages.to_vec();
+    let tools = tools.to_vec();
+    let spawned = thread::Builder::new()
+        .name("agent-model".into())
+        .spawn(move || {
+            let _ = tx.send(ai::complete_tools(
+                &app,
+                &current,
+                &model,
+                &system,
+                &messages,
+                &tools,
+                MODEL_TIMEOUT,
+            ));
+        });
+    if spawned.is_err() {
+        return Err(AskError::Failed("Couldn't reach the assistant.".into()));
+    }
+    loop {
+        if checkpoint(id).is_err() {
+            return Err(AskError::Stopped);
+        }
+        match rx.recv_timeout(Duration::from_millis(150)) {
+            Ok(Ok(reply)) => {
+                if checkpoint(id).is_err() {
+                    return Err(AskError::Stopped);
+                }
+                return Ok(reply);
+            }
+            Ok(Err(error)) => return Err(AskError::Failed(error)),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(AskError::Failed("The assistant returned nothing.".into()));
+            }
+        }
+    }
+}
+
+/// Sleeps, returning as soon as the user stops the run.
+fn pause(id: u32, total: Duration) -> Result<(), Stopped> {
+    let slice = Duration::from_millis(100);
+    let mut left = total;
+    loop {
+        checkpoint(id)?;
+        if left.is_zero() {
+            return Ok(());
+        }
+        let step = if left < slice { left } else { slice };
+        thread::sleep(step);
+        left = left.saturating_sub(step);
+    }
+}
+
+fn halted(id: u32) -> bool {
+    with_run(id, |state| {
+        state.stop || state.run.finished != 0 || !state.run.active()
+    })
+    .unwrap_or(true)
+}
+
+fn halt(id: u32) -> Result<(), String> {
+    if halted(id) {
+        Err("Stopped.".into())
+    } else {
+        Ok(())
+    }
+}
+
 fn drive(app: &AppHandle, id: u32) -> Result<(&'static str, String), String> {
     let current = settings::get(app);
     let auto = current.automation.clone();
@@ -842,6 +1000,9 @@ fn drive(app: &AppHandle, id: u32) -> Result<(&'static str, String), String> {
             return Ok(("stopped", "The tab was closed.".into()));
         }
         let observation = observe(app, tab, &window, auto.screenshots_to_model);
+        if checkpoint(id).is_err() {
+            return Ok(("stopped", "Stopped.".into()));
+        }
         if let Some(thumb) = observation.thumb.clone() {
             set_last_thumb(id, thumb);
             emit(app);
@@ -878,31 +1039,34 @@ fn drive(app: &AppHandle, id: u32) -> Result<(&'static str, String), String> {
             ))]));
         }
         prune(&mut messages);
-        let reply = match ai::complete_tools(
+        let reply = match ask_model(
             app,
+            id,
             &current,
             &auto.agent_model,
             &system,
             &messages,
             &tools,
-            MODEL_TIMEOUT,
         ) {
             Ok(reply) => reply,
-            Err(first) => {
-                thread::sleep(Duration::from_secs(2));
-                if checkpoint(id).is_err() {
+            Err(AskError::Stopped) => return Ok(("stopped", "Stopped.".into())),
+            Err(AskError::Failed(first)) => {
+                if pause(id, Duration::from_secs(2)).is_err() {
                     return Ok(("stopped", "Stopped.".into()));
                 }
-                ai::complete_tools(
+                match ask_model(
                     app,
+                    id,
                     &current,
                     &auto.agent_model,
                     &system,
                     &messages,
                     &tools,
-                    MODEL_TIMEOUT,
-                )
-                .map_err(|_| first)?
+                ) {
+                    Ok(reply) => reply,
+                    Err(AskError::Stopped) => return Ok(("stopped", "Stopped.".into())),
+                    Err(AskError::Failed(_)) => return Err(first),
+                }
             }
         };
         if checkpoint(id).is_err() {
@@ -942,7 +1106,9 @@ fn drive(app: &AppHandle, id: u32) -> Result<(&'static str, String), String> {
             Outcome::Finish(status, text) => return Ok((status, text)),
         }
         with_run(id, |state| state.run.actions += 1);
-        thread::sleep(Duration::from_millis(350));
+        if pause(id, Duration::from_millis(350)).is_err() {
+            return Ok(("stopped", "Stopped.".into()));
+        }
     }
     Ok((
         "failed",
@@ -1034,6 +1200,9 @@ fn execute(
     args: &Value,
     scale: f64,
 ) -> Outcome {
+    if halted(id) {
+        return Outcome::Finish("stopped", "Stopped.".into());
+    }
     let tab = current_tab(id).unwrap_or(0);
     match name {
         "done" => {
@@ -1075,12 +1244,14 @@ fn execute(
                 let label = format!("Click {}", element_label(&info, element));
                 gate(app, id, policy::click(auto, &info))?;
                 let button = arg_str(args, "button");
+                halt(id)?;
                 driver::click(app, tab, element, &button, arg_bool(args, "double", false))?;
                 Ok((label, "Clicked.".into()))
             }
             "click_xy" => {
                 let x = arg_f64(args, "x").ok_or("Missing \"x\".")?;
                 let y = arg_f64(args, "y").ok_or("Missing \"y\".")?;
+                halt(id)?;
                 driver::click_at(app, tab, x * scale, y * scale, "left", false)?;
                 Ok((
                     format!("Click at {}, {}", x.round(), y.round()),
@@ -1109,6 +1280,7 @@ fn execute(
                     }
                     _ => String::new(),
                 };
+                halt(id)?;
                 driver::type_text(
                     app,
                     tab,
@@ -1132,6 +1304,7 @@ fn execute(
                     let focused = driver::focused_info(app, tab)?;
                     gate(app, id, policy::submit(auto, focused.as_ref()))?;
                 }
+                halt(id)?;
                 driver::press(app, tab, &keys)?;
                 Ok((format!("Press {keys}"), "Pressed.".into()))
             }
@@ -1145,12 +1318,14 @@ fn execute(
                     _ => (screens, false),
                 };
                 let element = arg_u32(args, "ref").ok();
+                halt(id)?;
                 let result = driver::scroll(app, tab, element, amount, horizontal)?;
                 Ok((format!("Scroll {direction}"), result))
             }
             "select" => {
                 let element = arg_u32(args, "ref")?;
                 let values = arg_list(args, "values");
+                halt(id)?;
                 let picked = driver::select(app, tab, element, &values)?;
                 Ok((
                     format!("Choose {}", picked.join(", ")),
@@ -1159,6 +1334,7 @@ fn execute(
             }
             "hover" => {
                 let element = arg_u32(args, "ref")?;
+                halt(id)?;
                 driver::hover(app, tab, element)?;
                 Ok((format!("Hover [{element}]"), "Done.".into()))
             }
@@ -1166,6 +1342,7 @@ fn execute(
                 let input = arg_str(args, "url");
                 let url = tabs::resolve(app, &input);
                 gate(app, id, policy::open(auto, url.as_str()))?;
+                halt(id)?;
                 driver::navigate(app, tab, url.as_str())?;
                 Ok((
                     format!("Go to {}", clip(url.as_str(), 100)),
@@ -1173,6 +1350,7 @@ fn execute(
                 ))
             }
             "back" => {
+                halt(id)?;
                 driver::back(app, tab)?;
                 Ok(("Go back".into(), "Went back.".into()))
             }
@@ -1180,9 +1358,11 @@ fn execute(
                 let seconds = arg_f64(args, "seconds").unwrap_or(2.0).clamp(0.5, 30.0);
                 let text = arg_str(args, "text");
                 if text.is_empty() {
-                    thread::sleep(Duration::from_secs_f64(seconds));
+                    pause(id, Duration::from_secs_f64(seconds))
+                        .map_err(|_| "Stopped.".to_string())?;
                     return Ok((format!("Wait {seconds}s"), "Waited.".into()));
                 }
+                halt(id)?;
                 let query = driver::WaitQuery {
                     text: text.clone(),
                     ..Default::default()
@@ -1202,6 +1382,7 @@ fn execute(
                 let input = arg_str(args, "url");
                 let url = tabs::resolve(app, &input);
                 gate(app, id, policy::open(auto, url.as_str()))?;
+                halt(id)?;
                 let opened = tabs::open(
                     app,
                     tabs::OpenTab {
@@ -1222,6 +1403,7 @@ fn execute(
                 if info.window != window {
                     return Err("That tab is in another window.".into());
                 }
+                halt(id)?;
                 tabs::activate(app, target)?;
                 switch_to(app, id, tab, target);
                 Ok((
@@ -1262,6 +1444,7 @@ fn execute(
                     id,
                     Verdict::Ask(format!("Upload {} to this page?", paths.join(", "))),
                 )?;
+                halt(id)?;
                 driver::upload(app, tab, element, &paths)?;
                 Ok((
                     format!("Upload {}", paths.join(", ")),
@@ -1289,9 +1472,16 @@ fn execute(
         Ok((label, detail)) => {
             push_step(app, id, "action", &label, &clip(&detail, 300));
             audit(app, "agent", tab, name, &label);
-            Outcome::Continue(detail)
+            if halted(id) {
+                Outcome::Finish("stopped", "Stopped.".into())
+            } else {
+                Outcome::Continue(detail)
+            }
         }
         Err(error) => {
+            if halted(id) || error == "Stopped." {
+                return Outcome::Finish("stopped", "Stopped.".into());
+            }
             push_step(app, id, "error", &format!("{name} failed"), &error);
             Outcome::Continue(format!("Error: {error}"))
         }
