@@ -1,11 +1,16 @@
-import { invoke } from "@tauri-apps/api/core";
-import { emit, emitTo, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { LogicalSize } from "@tauri-apps/api/dpi";
+import { emit, emitTo, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdblockStats,
   AgentRun,
+  DebugFeed,
+  DebugFeedTarget,
+  DebugPaths,
+  DebugSnapshot,
+  DebugWebview,
   AutomationsSnapshot,
   Dataset,
   DatasetFormat,
@@ -96,6 +101,7 @@ import type {
   UserStyles,
 } from "../../../types/browser";
 import { applyFontPreview, applyThemePreview } from "./appearance";
+import { invoke, listen } from "./ipc";
 
 // Tabs
 
@@ -1847,4 +1853,83 @@ export async function exportDataset(id: string, format: DatasetFormat, name: str
 
 export function datasetToBoard(id: string) {
   return invoke<number>("dataset_to_board", { id });
+}
+
+// Debug HUD. The backend refuses these outside a dev build.
+
+/** Shows or hides this window's debug HUD. Resolves to whether it is now shown. */
+export function debugToggleHud() {
+  return invoke<boolean>("debug_toggle_hud");
+}
+
+/** The IPC records and log lines the backend still holds. */
+export function debugSnapshot() {
+  return invoke<DebugSnapshot>("debug_snapshot");
+}
+
+export function debugClear(target: DebugFeedTarget) {
+  return invoke<void>("debug_clear", { target });
+}
+
+export function debugWebviews() {
+  return invoke<DebugWebview[]>("debug_webviews");
+}
+
+/** Draws a border around the webview `label` until it is cleared, or clears it when `label`
+ * already has it. Resolves to whether `label` is outlined now. */
+export function debugOutline(label: string) {
+  return invoke<boolean>("debug_outline", { label });
+}
+
+export function debugClearOutline() {
+  return invoke<void>("debug_clear_outline");
+}
+
+/** Docked tools for a tab, the WebView2 inspector window for any other webview. */
+export function debugOpenDevtools(label: string) {
+  return invoke<void>("debug_open_devtools", { label });
+}
+
+export function debugReloadWebview(label: string) {
+  return invoke<void>("debug_reload_webview", { label });
+}
+
+export function debugPaths() {
+  return invoke<DebugPaths>("debug_paths");
+}
+
+/** Only paths that `debugPaths` reported can be shown. */
+export function debugRevealPath(path: string) {
+  return invoke<void>("debug_reveal_path", { path });
+}
+
+/** New IPC records and log lines, sent to this HUD in batches. */
+export function onDebugFeed(handler: (feed: DebugFeed) => void): Promise<UnlistenFn> {
+  return getCurrentWebview().listen<DebugFeed>("debug-feed", (event) => handler(event.payload));
+}
+
+/** The webview the outline window is drawn around now. */
+export function onDebugOutline(handler: (label: string) => void): Promise<UnlistenFn> {
+  return getCurrentWebview().listen<string>("debug-outline", (event) => handler(event.payload));
+}
+
+/** Moves this borderless window with the pointer until the button is released. */
+export function startWindowDrag() {
+  return getCurrentWindow().startDragging();
+}
+
+/** Resizes this borderless window from its bottom-right corner until the button is released. */
+export function startWindowResize() {
+  return getCurrentWindow().startResizeDragging("SouthEast");
+}
+
+/** This window's content size in CSS px. */
+export async function windowLogicalSize() {
+  const appWindow = getCurrentWindow();
+  const [size, scale] = await Promise.all([appWindow.innerSize(), appWindow.scaleFactor()]);
+  return size.toLogical(scale);
+}
+
+export function setWindowLogicalSize(width: number, height: number) {
+  return getCurrentWindow().setSize(new LogicalSize(width, height));
 }

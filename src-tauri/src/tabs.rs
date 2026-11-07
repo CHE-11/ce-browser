@@ -3023,6 +3023,18 @@ pub fn update_favicon(app: &AppHandle, id: u32, favicon: Option<String>) {
     update(app, id, |tab| tab.info.favicon = favicon);
 }
 
+/// Favicon bytes for this tab. A near-black glyph is redrawn on a light plate and that
+/// image replaces the site URL, so the mark stays visible on the dark toolbar. The same
+/// plate is what bookmarks load from the favicon cache.
+pub fn update_favicon_image(app: &AppHandle, id: u32, page_url: &str, bytes: &[u8]) {
+    if let Some(url) = crate::favicons::contrasted_data_url(bytes) {
+        update_favicon(app, id, Some(url));
+    }
+    if !is_ephemeral(app, id) {
+        crate::favicons::remember(app, page_url, bytes);
+    }
+}
+
 pub fn is_ephemeral(app: &AppHandle, id: u32) -> bool {
     with_state(app, |state| {
         state

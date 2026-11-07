@@ -1089,6 +1089,7 @@ unsafe extern "system" fn zoom_ll_proc(code: i32, wparam: WPARAM, lparam: LPARAM
             // The click is still delivered; this only decides whether that panel should close.
             if let Some(app) = browser_app() {
                 popup::dismiss_downloads_outside(&app, info.pt.x, info.pt.y);
+                popup::dismiss_held_outside(&app, info.pt.x, info.pt.y);
             }
         }
     }
@@ -1685,6 +1686,23 @@ pub fn attach_popup_blur(app: &AppHandle, webview: &Webview, label: &str) {
     });
 }
 
+/// The dev debug HUD of browser window `window` lost focus. A popup it kept open closes
+/// unless focus went back into that popup.
+pub fn attach_debug_hud_blur(app: &AppHandle, webview: &Webview, window: &str) {
+    let app = app.clone();
+    let window = window.to_string();
+    let _ = webview.with_webview(move |platform| {
+        let mut token = 0i64;
+        let handler = FocusChangedEventHandler::create(Box::new(move |_, _| {
+            let app = app.clone();
+            let window = window.clone();
+            tauri::async_runtime::spawn(async move { popup::debug_hud_lost_focus(&app, &window) });
+            Ok(())
+        }));
+        let _ = unsafe { platform.controller().add_LostFocus(&handler, &mut token) };
+    });
+}
+
 pub fn attach_page_hooks(app: &AppHandle, webview: &Webview, id: u32) {
     let app = app.clone();
     let _ = webview.with_webview(move |platform| {
@@ -2046,9 +2064,7 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                             let app = accent_app.clone();
                             let page_url = page_url.clone();
                             tauri::async_runtime::spawn_blocking(move || {
-                                if !tabs::is_ephemeral(&app, id) {
-                                    crate::favicons::remember(&app, &page_url, &bytes);
-                                }
+                                tabs::update_favicon_image(&app, id, &page_url, &bytes);
                             });
                             Ok(())
                         }));

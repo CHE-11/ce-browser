@@ -433,7 +433,7 @@ export type PopupKind =
   | "bookmark-add"
   | "bookmark-rename"
   | "tab-menu"
-  | "app-menu"
+  | "address-bar-ellipsis-menu"
   | "status"
   | "omnibox"
   | "command-palette"
@@ -1819,3 +1819,93 @@ export type SniffedEndpoint = {
 };
 
 export type DatasetFormat = "csv" | "json" | "tsv";
+
+// Debug HUD (dev builds only)
+
+export type DebugIpcKind = "invoke" | "event";
+
+export type DebugIpcRecord = {
+  /** Given by the backend. 0 until it is recorded. */
+  id: number;
+  /** Label of the webview that made the call or received the event. */
+  webview: string;
+  kind: DebugIpcKind;
+  /** Command or event name. */
+  name: string;
+  /** Unix ms. */
+  startedAt: number;
+  /** `null` for events. */
+  durationMs: number | null;
+  ok: boolean;
+  argsPreview: string;
+  resultPreview: string;
+  error: string;
+  /** Size of the result or event payload as JSON. */
+  bytes: number;
+};
+
+export type DebugLogStream = "stdout" | "stderr";
+
+export type DebugLogLine = {
+  id: number;
+  /** Unix ms. */
+  at: number;
+  stream: DebugLogStream;
+  /** The `area` in `eprintln!("area: message")`. Empty when the line has none. */
+  area: string;
+  text: string;
+};
+
+export type DebugSnapshot = {
+  ipc: DebugIpcRecord[];
+  logs: DebugLogLine[];
+};
+
+export type DebugFeedTarget = "ipc" | "logs";
+
+export type DebugFeed =
+  | { kind: "ipc"; records: DebugIpcRecord[] }
+  | { kind: "log"; lines: DebugLogLine[] }
+  | { kind: "cleared"; target: DebugFeedTarget };
+
+export type DebugWebviewKind = "ui" | "tab" | "popup" | "extpopup" | "devtools" | "agent" | "peek" | "script" | "debug" | "other";
+
+export type DebugWebview = {
+  label: string;
+  /** Label of the native window that hosts it. */
+  window: string;
+  kind: DebugWebviewKind;
+  tabId: number | null;
+  url: string;
+  /** Physical px inside the host window. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Physical px on the virtual screen. */
+  screenX: number;
+  screenY: number;
+  /** Moved off screen or outside its window, such as a background tab or an idle popup. */
+  parked: boolean;
+  windowVisible: boolean;
+  /** The debug outline is drawn around it now. */
+  outlined: boolean;
+};
+
+export type DebugStoreFile = {
+  name: string;
+  path: string;
+  bytes: number;
+  /** Unix ms. 0 when the file system does not say. */
+  modified: number;
+};
+
+export type DebugPaths = {
+  profile: string;
+  rootDataDir: string;
+  dataRoot: string;
+  dataDir: string;
+  profileDir: string;
+  /** Files directly inside `dataDir`, such as `settings.json` and `session.json`. */
+  files: DebugStoreFile[];
+};

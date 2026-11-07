@@ -1189,7 +1189,10 @@ struct DownloadsClick {
 /// blurs the panel and `lost_focus` does not run. A click on the button that opened it is
 /// remembered, so that click still toggles the panel shut instead of opening it again.
 pub fn dismiss_downloads_outside(app: &AppHandle, x: i32, y: i32) {
-    if app.try_state::<Popups>().is_none() || crate::downloads::dragging_file() {
+    if app.try_state::<Popups>().is_none()
+        || crate::downloads::dragging_file()
+        || crate::debug::hud_contains_point(app, x, y)
+    {
         return;
     }
     let hits = with(app, |state| {
@@ -1241,6 +1244,30 @@ pub fn dismiss_downloads_outside(app: &AppHandle, x: i32, y: i32) {
     }
 }
 
+/// A mouse button went down at screen px. A popup kept open while the debug HUD or DevTools
+/// had focus closes unless the click is in that popup, the HUD or DevTools.
+pub fn dismiss_held_outside(app: &AppHandle, x: i32, y: i32) {
+    if app.try_state::<Popups>().is_none() {
+        return;
+    }
+    for window in crate::debug::release_held_popups(app, x, y) {
+        let labels = with(app, |state| {
+            state
+                .stacks
+                .get(&window)
+                .map(|stack| stack.levels.iter().map(|level| level.label.clone()).collect::<Vec<_>>())
+                .unwrap_or_default()
+        });
+        let inside = labels.iter().any(|label| {
+            app.get_window(label)
+                .is_some_and(|popup| webview2::client_contains_screen_point(hwnd_of(&popup), x, y))
+        });
+        if !labels.is_empty() && !inside {
+            close_all(app, &window, false);
+        }
+    }
+}
+
 /// The toolbar button, plus a few px, so the click that opened the panel still counts as that button.
 fn point_on_anchor(anchor: Bounds, x: f64, y: f64) -> bool {
     const SLOP: f64 = 8.0;
@@ -1262,6 +1289,24 @@ pub fn lost_focus(app: &AppHandle, label: &str) {
     if watched.is_none() {
         return;
     }
+    close_unless_focused(app, window);
+}
+
+/// The dev debug HUD lost focus. A popup it kept open, because the HUD took focus from it,
+/// closes now unless focus went back into the popup.
+pub fn debug_hud_lost_focus(app: &AppHandle, window: &str) {
+    let watched = with(app, |state| {
+        let first = state.stacks.get(window)?.levels.first()?;
+        first.focus.then_some(())
+    });
+    if watched.is_some() {
+        close_unless_focused(app, window.to_string());
+    }
+}
+
+/// Closes `window`'s stack after focus settles, unless it landed in one of the stack's
+/// windows or in the debug HUD, which inspects popups without dismissing them.
+fn close_unless_focused(app: &AppHandle, window: String) {
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(BLUR_SETTLE);
@@ -1293,6 +1338,10 @@ pub fn lost_focus(app: &AppHandle, label: &str) {
                 .is_some_and(|popup| hwnd_of(&popup) == foreground)
         });
         if inside {
+            return;
+        }
+        if crate::debug::keeps_popups_open(&app, foreground) {
+            crate::debug::hold_popups(&window);
             return;
         }
         close_all(&app, &window, false);

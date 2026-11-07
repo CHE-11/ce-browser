@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { applyAppearance, applyFont, noteWindowsScheme, readAppearance, readFont } from "./lib/appearance";
 import { getUserStyles, getWindowsColorScheme, onUserStylesChanged, onWindowsColorScheme } from "./lib/browser-client";
@@ -31,6 +31,14 @@ import { ShoppingPage } from "./features/Shopping/Shopping.page";
 import { WhatsNewPage } from "./features/WhatsNew/WhatsNew.page";
 import "./index.css";
 
+// Dev builds only. A release bundle leaves these chunks out.
+const DebugHudPage = import.meta.env.DEV
+  ? lazy(() => import("./features/DebugHud/DebugHud.page").then((module) => ({ default: module.DebugHudPage })))
+  : null;
+const DebugOutlinePage = import.meta.env.DEV
+  ? lazy(() => import("./features/DebugHud/DebugOutline.page").then((module) => ({ default: module.DebugOutlinePage })))
+  : null;
+
 const appearance = readAppearance();
 applyAppearance(appearance.theme, appearance.colorMode);
 applyFont(readFont());
@@ -53,6 +61,20 @@ function App() {
   }
   if (route.kind === "popup") {
     return <PopupPage popup={route.popup} params={route.params} />;
+  }
+  if (DebugHudPage && route.page === "debug-hud") {
+    return (
+      <Suspense fallback={null}>
+        <DebugHudPage />
+      </Suspense>
+    );
+  }
+  if (DebugOutlinePage && route.page === "debug-outline") {
+    return (
+      <Suspense fallback={null}>
+        <DebugOutlinePage params={route.params} />
+      </Suspense>
+    );
   }
   switch (route.page) {
     case "bookmarks":

@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use image::imageops::FilterType;
-use image::{DynamicImage, ImageFormat};
+use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use url::Url;
@@ -85,19 +85,166 @@ fn data_url(png: &[u8]) -> String {
     )
 }
 
-/// Squares the icon down to `ICON_SIZE` and encodes it as PNG.
+/// Shrinks the icon to `ICON_SIZE` and encodes it as PNG. A near-black glyph is drawn on a
+/// light plate first, so it stays visible on the dark toolbar.
 fn normalize(image: DynamicImage) -> Option<Vec<u8>> {
-    let image = if image.width() > ICON_SIZE || image.height() > ICON_SIZE {
+    encode_png(&finish_icon(image))
+}
+
+fn fit_icon(image: DynamicImage) -> DynamicImage {
+    if image.width() > ICON_SIZE || image.height() > ICON_SIZE {
         image.resize(ICON_SIZE, ICON_SIZE, FilterType::Lanczos3)
     } else {
         image
-    };
+    }
+}
+
+fn finish_icon(image: DynamicImage) -> RgbaImage {
+    let fitted = fit_icon(image).to_rgba8();
+    if needs_light_plate(&fitted) {
+        light_plate(&fitted)
+    } else {
+        fitted
+    }
+}
+
+fn encode_png(image: &RgbaImage) -> Option<Vec<u8>> {
     let mut png = Vec::new();
     image
-        .to_rgba8()
         .write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
         .ok()?;
     Some(png)
+}
+
+/// Data URL of a dark glyph placed on a light plate. `None` when the icon is already
+/// readable, so the tab keeps the site's own favicon URL.
+pub fn contrasted_data_url(bytes: &[u8]) -> Option<String> {
+    let fitted = fit_icon(image::load_from_memory(bytes).ok()?).to_rgba8();
+    if !needs_light_plate(&fitted) {
+        return None;
+    }
+    Some(data_url(&encode_png(&light_plate(&fitted))?))
+}
+
+/// Cached PNG with a light plate, when the stored glyph would disappear on the toolbar.
+fn lift_png(bytes: &[u8]) -> Option<Vec<u8>> {
+    let fitted = fit_icon(image::load_from_memory(bytes).ok()?).to_rgba8();
+    if !needs_light_plate(&fitted) {
+        return None;
+    }
+    encode_png(&light_plate(&fitted))
+}
+
+/// Relative luminance, 0 for black and 1 for white. Gamma is left linear: the test is
+/// "is this nearly black", not a display-referred color.
+fn luminance(pixel: &Rgba<u8>) -> f32 {
+    let channel = |value: u8| f32::from(value) / 255.0;
+    0.2126 * channel(pixel[0]) + 0.7152 * channel(pixel[1]) + 0.0722 * channel(pixel[2])
+}
+
+fn chroma(pixel: &Rgba<u8>) -> f32 {
+    let red = pixel[0];
+    let green = pixel[1];
+    let blue = pixel[2];
+    f32::from(red.max(green).max(blue) - red.min(green).min(blue)) / 255.0
+}
+
+/// True when most of the opaque pixels are a near-black, unsaturated glyph. A red or
+/// blue mark stays as it is, and so does a black mark that already sits on a light tile.
+fn needs_light_plate(image: &RgbaImage) -> bool {
+    let mut opaque = 0u32;
+    let mut lost = 0u32;
+    let mut light = 0u32;
+    for pixel in image.pixels() {
+        if pixel[3] < 128 {
+            continue;
+        }
+        opaque += 1;
+        let luma = luminance(pixel);
+        if luma >= 0.72 {
+            light += 1;
+        } else if luma < 0.28 && chroma(pixel) < 0.18 {
+            lost += 1;
+        }
+    }
+    if opaque < 8 {
+        return false;
+    }
+    let opaque = opaque as f32;
+    lost as f32 / opaque >= 0.6 && light as f32 / opaque < 0.12
+}
+
+/// Light rounded tile behind `source`. A glyph that already has padding is left at its
+/// size. One that fills the canvas is shrunk so the tile shows as a rim.
+fn light_plate(source: &RgbaImage) -> RgbaImage {
+    let (width, height) = source.dimensions();
+    let mut canvas = RgbaImage::new(width, height);
+    let radius = (width.min(height) as f32 * 0.22).clamp(2.0, 8.0);
+    fill_rounded(&mut canvas, radius);
+
+    let wanted = (width.min(height) / 8).max(1);
+    let icon = if content_margin(source) >= wanted {
+        source.clone()
+    } else {
+        let inner_w = width.saturating_sub(wanted * 2).max(1);
+        let inner_h = height.saturating_sub(wanted * 2).max(1);
+        let scaled = image::imageops::resize(source, inner_w, inner_h, FilterType::Lanczos3);
+        let mut placed = RgbaImage::new(width, height);
+        let x = i64::from((width - inner_w) / 2);
+        let y = i64::from((height - inner_h) / 2);
+        image::imageops::overlay(&mut placed, &scaled, x, y);
+        placed
+    };
+    image::imageops::overlay(&mut canvas, &icon, 0, 0);
+    canvas
+}
+
+fn content_margin(image: &RgbaImage) -> u32 {
+    let (width, height) = image.dimensions();
+    let mut min_x = width;
+    let mut min_y = height;
+    let mut max_x = 0u32;
+    let mut max_y = 0u32;
+    let mut any = false;
+    for (x, y, pixel) in image.enumerate_pixels() {
+        if pixel[3] < 32 {
+            continue;
+        }
+        any = true;
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    if !any {
+        return 0;
+    }
+    let right = width.saturating_sub(max_x + 1);
+    let bottom = height.saturating_sub(max_y + 1);
+    min_x.min(min_y).min(right).min(bottom)
+}
+
+fn fill_rounded(image: &mut RgbaImage, radius: f32) {
+    let (width, height) = image.dimensions();
+    let w = width as f32;
+    let h = height as f32;
+    let radius = radius.min(w / 2.0).min(h / 2.0);
+    for (x, y, pixel) in image.enumerate_pixels_mut() {
+        let coverage = rounded_coverage(x as f32 + 0.5, y as f32 + 0.5, w, h, radius);
+        if coverage <= 0.0 {
+            continue;
+        }
+        let alpha = (255.0 * coverage).round() as u8;
+        *pixel = Rgba([244, 244, 245, alpha]);
+    }
+}
+
+/// How much of the pixel sits inside a rounded rectangle. 1 is fully inside.
+fn rounded_coverage(px: f32, py: f32, width: f32, height: f32, radius: f32) -> f32 {
+    let qx = (px - width / 2.0).abs() - width / 2.0 + radius;
+    let qy = (py - height / 2.0).abs() - height / 2.0 + radius;
+    let distance = qx.max(qy).min(0.0) + qx.max(0.0).hypot(qy.max(0.0)) - radius;
+    (0.5 - distance).clamp(0.0, 1.0)
 }
 
 fn store(app: &AppHandle, host: &str, image: DynamicImage) -> bool {
@@ -163,6 +310,13 @@ pub fn lookup(app: &AppHandle, urls: &[String]) -> HashMap<String, String> {
     for host in missing {
         match fs::read(file_for(app, &host)) {
             Ok(png) if !png.is_empty() => {
+                let png = match lift_png(&png) {
+                    Some(lifted) => {
+                        let _ = fs::write(file_for(app, &host), &lifted);
+                        lifted
+                    }
+                    None => png,
+                };
                 let url = data_url(&png);
                 state()
                     .lock()
@@ -409,7 +563,17 @@ fn decode_entities(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{host_of, icon_links};
+    use image::{ImageFormat, Rgba, RgbaImage};
+
+    use super::{content_margin, contrasted_data_url, host_of, icon_links, light_plate, needs_light_plate};
+
+    fn png_of(image: &RgbaImage) -> Vec<u8> {
+        let mut png = Vec::new();
+        image
+            .write_to(&mut std::io::Cursor::new(&mut png), ImageFormat::Png)
+            .unwrap();
+        png
+    }
 
     #[test]
     fn icon_links_prefer_icons_and_skip_svg() {
@@ -431,5 +595,48 @@ mod tests {
         assert_eq!(host_of("https://GitHub.com/a"), Some("github.com".into()));
         assert_eq!(host_of("ce://bookmarks"), None);
         assert_eq!(host_of("file:///C:/x.html"), None);
+    }
+
+    #[test]
+    fn a_black_glyph_is_drawn_on_a_light_plate() {
+        let mut glyph = RgbaImage::new(32, 32);
+        for x in 10..22 {
+            for y in 8..24 {
+                glyph.put_pixel(x, y, Rgba([0, 0, 0, 255]));
+            }
+        }
+        assert!(needs_light_plate(&glyph));
+        assert!(content_margin(&glyph) > 4);
+        let plated = light_plate(&glyph);
+        let backdrop = plated.get_pixel(4, 16);
+        assert!(backdrop[0] > 200 && backdrop[3] > 200);
+        let mark = plated.get_pixel(16, 16);
+        assert!(mark[0] < 40 && mark[3] > 200);
+        assert!(!needs_light_plate(&plated));
+        assert!(contrasted_data_url(&png_of(&glyph)).is_some());
+    }
+
+    #[test]
+    fn a_full_bleed_black_icon_keeps_a_light_rim() {
+        let icon = RgbaImage::from_pixel(32, 32, Rgba([0, 0, 0, 255]));
+        let plated = light_plate(&icon);
+        let rim = plated.get_pixel(1, 16);
+        assert!(rim[0] > 200 && rim[3] > 200);
+        assert!(!needs_light_plate(&plated));
+    }
+
+    #[test]
+    fn colored_and_light_icons_stay_untouched() {
+        let red = RgbaImage::from_pixel(16, 16, Rgba([228, 67, 50, 255]));
+        assert!(!needs_light_plate(&red));
+        assert!(contrasted_data_url(&png_of(&red)).is_none());
+
+        let mut white = RgbaImage::new(32, 32);
+        for x in 10..22 {
+            for y in 8..24 {
+                white.put_pixel(x, y, Rgba([250, 250, 250, 255]));
+            }
+        }
+        assert!(!needs_light_plate(&white));
     }
 }

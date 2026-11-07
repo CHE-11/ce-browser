@@ -1004,7 +1004,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         id="address-menu"
         ref={menuRef}
         label="Menu"
-        onClick={(event) => void openPopup("app-menu", event.currentTarget)}
+        onClick={(event) => void openPopup("address-bar-ellipsis-menu", event.currentTarget)}
       >
         <EllipsisVertical id="address-menu-icon" aria-hidden />
       </IconButton>

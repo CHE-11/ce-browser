@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PopupShow } from "@type/browser";
-import { AppMenu } from "@components/AppMenu";
+import { AddressBarEllipsisMenu } from "@/features/Browser/BrowserHeader/Addressbar/AddressBarEllipsisMenu";
 import { PopupFrame } from "@/components/PopupFrame";
 import { StatusPopover } from "@/components/StatusPopover";
 import { Toast } from "@/components/Toast";
 import { onPopupHide, onPopupShow, popupCurrent } from "@lib/browser-client";
 import { PopupHostContext, type PopupHostState } from "@lib/popup-host";
 import { useAppearanceState, useBookmarksState, useExtensions, useTabs } from "@lib/use-browser";
-import { AddressBarEllipsisMenu } from "@/features/Browser/BrowserHeader/Addressbar/AddressBarEllipsisMenu";
+import { AddressBarDropdownMenu } from "@/features/Browser/BrowserHeader/Addressbar/AddressBarDropdownMenu";
 import { ProfileSwitcher } from "@/features/Browser/BrowserHeader/Addressbar/ProfileSwitcher";
 import { FontPicker } from "@/features/Browser/BrowserHeader/Addressbar/FontPicker";
 import { StylePicker } from "@/features/Browser/BrowserHeader/Addressbar/StylePicker";
@@ -172,12 +172,12 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <BookmarkRename id={params.get("id") ?? ""} />;
     case "tab-menu":
       return <TabContextMenu tabId={Number(params.get("id"))} />;
-    case "app-menu":
-      return <AppMenu />;
+    case "address-bar-ellipsis-menu":
+      return <AddressBarEllipsisMenu />;
     case "status":
       return <StatusPopover />;
     case "omnibox":
-      return <AddressBarEllipsisMenu />;
+      return <AddressBarDropdownMenu />;
     case "command-palette":
       return <CommandPalette />;
     case "print-pdf":

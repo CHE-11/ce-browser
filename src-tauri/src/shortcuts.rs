@@ -55,6 +55,8 @@ pub enum Action {
     RecordFlow,
     /// Runs the flow bound to this hotkey slot, 1 to 9.
     Flow(usize),
+    /// Dev builds only.
+    DebugHud,
 }
 
 const VK_TAB: u32 = 0x09;
@@ -239,6 +241,12 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
         Action::Flow(slot) => {
             crate::automation::scheduler::hotkey(app, slot);
             Ok(())
+        }
+        Action::DebugHud => {
+            if !crate::debug::enabled() {
+                return Ok(());
+            }
+            crate::debug::toggle_hud(app, &window).map(|_| ())
         }
     }
 }
@@ -578,6 +586,7 @@ fn action_from(action: &str) -> Option<Action> {
         "tab-switcher-back" => Action::TabSwitcher(-1),
         "agent-panel" => Action::AgentPanel,
         "record-flow" => Action::RecordFlow,
+        "debug-hud" => Action::DebugHud,
         _ => return None,
     })
 }
@@ -666,6 +675,9 @@ pub fn defaults() -> Vec<ShortcutBinding> {
             &format!("Run hotkey flow {slot}"),
             "",
         ));
+    }
+    if crate::debug::enabled() {
+        rows.push(bind("debug-hud", "Toggle debug HUD", "ctrl+shift+f12"));
     }
     rows
 }

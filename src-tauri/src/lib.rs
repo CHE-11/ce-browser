@@ -10,6 +10,7 @@ mod bookmark_health;
 mod bookmarks;
 mod browsers;
 mod capture;
+mod debug;
 mod devtools;
 mod downloads;
 mod extension_store;
@@ -2242,6 +2243,7 @@ fn build_window(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    debug::stderr::capture();
     system::read_args();
     profiles::read_args();
     tauri::Builder::default()
@@ -2251,6 +2253,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle().clone();
+            debug::init(&handle);
             hang_guard::init(&handle);
             sync::attach(&handle);
             profiles::init(&handle);
@@ -2314,6 +2317,10 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             let label = window.label().to_string();
+            if debug::is_debug_label(&label) {
+                debug::window_event(window, event);
+                return;
+            }
             if popup::is_popup_label(&label) {
                 if matches!(event, WindowEvent::ScaleFactorChanged { .. }) {
                     popup::rescaled(window.app_handle(), &label);
@@ -2327,9 +2334,11 @@ pub fn run() {
                 WindowEvent::Moved(_) => {
                     popup::close_all(window.app_handle(), &label, false);
                     placement::note(window);
+                    debug::follow(window.app_handle(), &label);
                 }
                 WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
                     placement::note(window);
+                    debug::follow(window.app_handle(), &label);
                     let app = window.app_handle().clone();
                     let label = label.clone();
                     tauri::async_runtime::spawn(async move { tabs::layout(&app, &label) });
@@ -2689,7 +2698,18 @@ pub fn run() {
             rename_dataset,
             copy_dataset,
             export_dataset,
-            dataset_to_board
+            dataset_to_board,
+            debug::debug_toggle_hud,
+            debug::debug_snapshot,
+            debug::debug_record_ipc,
+            debug::debug_clear,
+            debug::debug_webviews,
+            debug::debug_outline,
+            debug::debug_clear_outline,
+            debug::debug_open_devtools,
+            debug::debug_reload_webview,
+            debug::debug_paths,
+            debug::debug_reveal_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
