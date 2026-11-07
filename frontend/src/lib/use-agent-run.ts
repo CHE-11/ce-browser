@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { AgentAutonomy, AgentRun } from "@type/browser";
+import type { AgentAccess, AgentAutonomy, AgentRun } from "@type/browser";
+import { DEFAULT_ACCESS, withDefaults } from "./agent-access";
 import {
   agentAnswer,
   agentClear,
@@ -9,6 +10,7 @@ import {
   agentResume,
   agentRun,
   agentSaveFlow,
+  agentSetAccess,
   agentSetAutonomy,
   agentShowTab,
   agentStart,
@@ -28,6 +30,7 @@ export type AgentDraftOptions = {
   autonomy: AgentAutonomy;
   /** Blank uses the agent model from Settings. */
   model: string;
+  access: AgentAccess;
 };
 
 export type AgentStartRequest = {
@@ -70,6 +73,7 @@ function loadOptions(): Partial<AgentDraftOptions> {
     return {
       autonomy: saved.autonomy === "ask" || saved.autonomy === "auto" || saved.autonomy === "full" ? saved.autonomy : undefined,
       model: typeof saved.model === "string" ? saved.model : undefined,
+      access: saved.access && typeof saved.access === "object" ? withDefaults({ ...saved.access, site: "" }) : undefined,
     };
   } catch {
     return {};
@@ -102,6 +106,7 @@ export function useAgentRun() {
   const draft: AgentDraftOptions = {
     autonomy: options.autonomy ?? settings?.automation.defaultAutonomy ?? "ask",
     model: options.model ?? "",
+    access: options.access ?? DEFAULT_ACCESS,
   };
 
   const listedId = listed?.id;
@@ -143,6 +148,7 @@ export function useAgentRun() {
         background,
         contextTabs: contextTabs.filter((id) => id !== tabId),
         instructions,
+        access: { ...draft.access, site: "" },
       });
       setSelectedId(id);
     } catch (reason: unknown) {
@@ -173,6 +179,7 @@ export function useAgentRun() {
     reply: (id: number, text: string) => guard(agentReply(id, text)),
     followUp: (id: number, text: string) => guard(agentContinue(id, text, activeTab?.id)),
     setAutonomy: (id: number, autonomy: AgentAutonomy) => guard(agentSetAutonomy(id, autonomy)),
+    setAccess: (id: number, access: AgentAccess) => guard(agentSetAccess(id, access)),
     takeOver: (id: number) => guard(agentTakeOver(id)),
     resume: (id: number) => guard(agentResume(id)),
     showTab: (tabId: number) => guard(agentShowTab(tabId)),

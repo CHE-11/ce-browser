@@ -8,9 +8,11 @@ import {
   customPaperReady,
   paperOptionLabel,
   papersInGroup,
+  presetHint,
 } from "@features/BuiltInExtensions/print-pdf/print-options";
 import { SETTINGS_SECTIONS } from "../../settings-sections";
 import { inputClass, matchesQuery, Section, useReportMatch, useSettingChanged, type SettingsSectionProps } from "../../SettingsControls";
+import { PRESETS_HINT, PRESETS_LABEL, PrintPresets } from "./PrintPresets";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-print")!;
 
@@ -66,11 +68,28 @@ function InchesField({
 }
 
 export function PrintSection({ settings, query, onUpdate, onMatch }: SettingsSectionProps) {
+  const print = settings.printEditor;
   const labels = (Object.keys(PAPER_SIZES) as (keyof typeof PAPER_SIZES)[]).map((paper) => PAPER_SIZES[paper].label);
-  const visible = matchesQuery(query, section.title, "tools", SIZES_LABEL, SIZES_HINT, CUSTOM_LABEL, CUSTOM_HINT, "print", "pdf", ...labels);
+  const presetText = (print.presets ?? []).flatMap((preset) => [preset.name, presetHint(preset)]);
+  const visible = matchesQuery(
+    query,
+    section.title,
+    "tools",
+    PRESETS_LABEL,
+    PRESETS_HINT,
+    SIZES_LABEL,
+    SIZES_HINT,
+    CUSTOM_LABEL,
+    CUSTOM_HINT,
+    "print",
+    "pdf",
+    "preset",
+    "cleanup",
+    ...labels,
+    ...presetText,
+  );
   useReportMatch(section.id, visible, onMatch);
   const { changed, reset } = useSettingChanged(["printEditor.paperChoices", "printEditor.customWidth", "printEditor.customHeight"]);
-  const print = settings.printEditor;
   const customOn = print.paperChoices.includes("custom");
 
   if (!visible) {
@@ -88,6 +107,7 @@ export function PrintSection({ settings, query, onUpdate, onMatch }: SettingsSec
 
   return (
     <Section id={section.id} title={section.title}>
+      <PrintPresets print={print} onChange={(printEditor) => onUpdate({ printEditor })} />
       <div id="settings-print-papers" className="flex flex-col gap-4 px-5 py-3">
         <div id="settings-print-papers-heading" className="flex items-start justify-between gap-3">
           <div id="settings-print-papers-text" className="min-w-0">

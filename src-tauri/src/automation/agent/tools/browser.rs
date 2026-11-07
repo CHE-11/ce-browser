@@ -14,7 +14,7 @@ use crate::{media, print, tabs};
 use super::super::{observe, runs};
 use super::{
     Ctx, Done, Kind, Tool, arg_bool, arg_f64, arg_list, arg_str, arg_u32, element_label,
-    flow_target, gate, halt, object, reference, step, tool,
+    flow_target, gate, halt, object, reference, site_gate, step, tool,
 };
 
 pub fn tools(auto: &AutomationSettings) -> Vec<Tool> {
@@ -379,6 +379,7 @@ fn hover(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
 fn navigate(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     let input = arg_str(args, "url");
     let url = tabs::resolve(ctx.app, &input);
+    site_gate(ctx, url.as_str())?;
     gate(ctx, policy::open(ctx.auto, url.as_str()))?;
     halt(ctx)?;
     driver::navigate(ctx.app, ctx.tab, url.as_str())?;

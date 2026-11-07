@@ -27,7 +27,10 @@ export function BrowserPage() {
   const toolExtensionIds = extensions
     .filter((extension) => extension.enabled && toolbarPinned(settings, extension.id))
     .map((extension) => extension.id);
-  const showToolStrip = !snapshot.fullscreen && splitToolbar(settings, toolExtensionIds).vertical.length > 0;
+  const toolSplit = splitToolbar(settings, toolExtensionIds);
+  const toolsHorizontal = settings?.verticalToolbar === false;
+  const showTools = !snapshot.fullscreen && settings?.showToolsToolbar !== false && toolSplit.tools.length > 0;
+  const showToolStrip = showTools && !toolsHorizontal;
   const split = snapshot.split;
   const splitShown =
     !!split && !snapshot.fullscreen && (snapshot.activeId === split.left || snapshot.activeId === split.right);
@@ -122,7 +125,7 @@ export function BrowserPage() {
       observer.observe(toolbarRef.current);
     }
     return () => observer.disconnect();
-  }, [vertical, snapshot.fullscreen, showToolStrip, settings?.verticalToolbarLabels]);
+  }, [vertical, snapshot.fullscreen, showToolStrip, toolsHorizontal, settings?.verticalToolbarLabels]);
 
   const showBookmarksBar = settings?.showBookmarksBar ?? true;
 
@@ -138,6 +141,7 @@ export function BrowserPage() {
         extensions={extensions}
         settings={settings}
         showBookmarksBar={showBookmarksBar}
+        showToolsToolbar={showTools && toolsHorizontal}
         findToken={findToken}
         activeTab={activeTab}
         onCloseFind={() => setFindToken(null)}

@@ -3,6 +3,7 @@ import { Bot, Hand, Play, Square } from "lucide-react";
 import type { AgentAutonomy } from "@type/browser";
 import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/EmptyState";
+import { withDefaults, type AccessToggle } from "@/lib/agent-access";
 import { parseAgentInput, type ComposerMode } from "@/lib/agent-commands";
 import { agentMemorySave, resizeAgentPanel, setAgentPanelWidth } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
@@ -27,6 +28,25 @@ const DEFAULT_PANEL_WIDTH = 380;
 
 function clampPanelWidth(width: number) {
   return Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
+}
+
+/** Host of a web page without `www.`, or blank for other pages. */
+function siteOf(url: string) {
+  try {
+    const parsed = new URL(url);
+    return /^https?:$/.test(parsed.protocol) ? parsed.hostname.replace(/^www\./, "") : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Whether `url` is one of `sites` or a subdomain of one. */
+function siteBlocked(sites: string[] | undefined, url: string) {
+  const host = siteOf(url);
+  if (!host || !sites?.length) {
+    return false;
+  }
+  return sites.some((site) => host === site || host.endsWith(`.${site}`));
 }
 
 /** The docked column beside the pages where agent runs start, report each step, and ask for approval. */
@@ -57,6 +77,9 @@ export function AgentPanelPage() {
     }
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape" || event.ctrlKey || event.altKey || event.metaKey || event.defaultPrevented) {
+        return;
+      }
+      if (document.querySelector("[data-agent-popover]")) {
         return;
       }
       event.preventDefault();
@@ -100,8 +123,17 @@ export function AgentPanelPage() {
   const showRunAutonomy = !!run && active && run.source === "agent";
   const autonomy: AgentAutonomy = showRunAutonomy ? run.autonomy : agent.draft.autonomy;
   const modelFallback = settings?.automation.agentModel || settings?.aiProviders[settings.aiProvider]?.model || "";
+  const access = showRunAutonomy ? withDefaults(run.access) : agent.draft.access;
+  const currentSite = siteOf(activeTab?.url ?? "");
+  const accessBlocked: Partial<Record<AccessToggle, string>> = {
+    ...(settings?.automation.agentAllowScript ? {} : { scripts: "Off in Settings, under Automation." }),
+    ...(settings?.automation.agentMemory === false ? { memory: "Off in Settings, under Automation." } : {}),
+    ...(settings?.automation.maxParallelAgents === 0 ? { helpers: "Off in Settings, under Automation." } : {}),
+  };
   const history = [...new Set(runs.filter((item) => item.source === "agent" && item.parent === null).map((item) => item.goal))].slice(0, 30);
   const mentionTabs = tabs.windowTabs.filter((tab) => tab.id !== activeTab?.id && /^https?:/i.test(tab.url));
+  const workingUrl = mode === "start" ? (activeTab?.url ?? "") : (tabs.windowTabs.find((tab) => tab.id === run?.tabId)?.url ?? activeTab?.url ?? "");
+  const aiBlocked = siteBlocked(settings?.aiBlockedSites, workingUrl);
 
   const submit = (text: string, contextTabs: number[]) => {
     setNotice(null);
@@ -169,6 +201,10 @@ export function AgentPanelPage() {
         model={showRunAutonomy ? null : agent.draft.model}
         modelFallback={modelFallback}
         onModel={(model) => agent.setDraft({ model })}
+        access={access}
+        onAccess={(next) => (showRunAutonomy ? agent.setAccess(run.id, next) : agent.setDraft({ access: next }))}
+        currentSite={currentSite}
+        accessBlocked={accessBlocked}
       />
 
       {view === "runs" ? (
@@ -200,6 +236,8 @@ export function AgentPanelPage() {
               <AgentTimeline id="agent-panel-steps" steps={run.steps} streaming={active ? stream : null} />
               {!active ? <AgentResult run={run} onSaveFlow={() => agent.saveFlow(run.id)} onError={setNotice} /> : null}
             </div>
+          ) : aiBlocked ? (
+            <EmptyState id="agent-panel-empty" icon={Bot} title="Not allowed on this site." hint="The agent won't take questions or screenshots of this page." />
           ) : (
             <EmptyState
               id="agent-panel-empty"
@@ -257,7 +295,11 @@ export function AgentPanelPage() {
             </Button>
           </div>
         ) : null}
-        {run && active && run.source === "mcp" ? null : (
+        {aiBlocked ? (
+          <p id="agent-panel-site-blocked" role="status" className="rounded-md bg-zinc-900 px-3 py-2 text-sm text-zinc-200">
+            Not allowed on this site.
+          </p>
+        ) : run && active && run.source === "mcp" ? null : (
           <AgentComposer
             key={`${mode}-${run?.id ?? "new"}`}
             mode={mode}

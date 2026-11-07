@@ -179,7 +179,7 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
 
   useEffect(() => () => editorRef.current?.dispose(), []);
 
-  // Remember the choices on this profile, including for the quick PDF.
+  // Remember the choices on this profile. Named quick-clean presets stay as they were saved.
   const rememberPrintSettings = useCallback(() => {
     const currentFormat = formatRef.current;
     const currentHistory = historyRef.current;
@@ -199,6 +199,7 @@ export function PrintEditor({ tabId }: PrintEditorProps) {
       paperChoices: current.printEditor.paperChoices,
       customWidth: current.printEditor.customWidth,
       customHeight: current.printEditor.customHeight,
+      presets: current.printEditor.presets,
     };
     const saved = current.printEditor as Record<string, unknown>;
     if ((Object.keys(next) as (keyof PrintEditorSettings)[]).every((key) => next[key] === saved[key])) {

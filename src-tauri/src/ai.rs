@@ -307,7 +307,12 @@ fn openai_non_text(id: &str) -> bool {
         "babbage",
         "computer-use",
     ];
+    /// Whole id segments, so `gpt-live-1` is skipped without matching inside other words.
+    const SEGMENTS: &[&str] = &["live", "voice", "speech"];
     MARKERS.iter().any(|marker| id.contains(marker))
+        || id
+            .split(['-', '.', ':', '_'])
+            .any(|segment| SEGMENTS.contains(&segment))
 }
 
 const RECENT_TEXT_MODELS: usize = 6;
@@ -1831,6 +1836,8 @@ mod tests {
             "davinci-002",
             "gpt-3.5-turbo-instruct",
             "computer-use-preview",
+            "gpt-live-1",
+            "gpt-6-voice",
         ] {
             assert!(!text_chat_model("openai", id), "{id}");
         }

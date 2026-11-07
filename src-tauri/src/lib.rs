@@ -25,6 +25,7 @@ mod keywords;
 mod library;
 mod media;
 mod microphone;
+mod model_prices;
 mod ocr;
 mod page_dialogs;
 mod page_errors;
@@ -943,6 +944,11 @@ async fn show_download_in_folder(app: AppHandle, id: u32) -> Result<(), String> 
     blocking(move || downloads::show_in_folder(&app, id)).await
 }
 
+#[tauri::command]
+async fn rename_download(app: AppHandle, id: u32, name: String) -> Result<(), String> {
+    blocking(move || downloads::rename(&app, id, &name)).await
+}
+
 /// Synchronous so `DoDragDrop` runs on the UI thread, which already owns a message loop.
 #[tauri::command]
 fn drag_download(app: AppHandle, window: Window, id: u32) -> Result<(), String> {
@@ -1592,6 +1598,14 @@ async fn list_ai_models(app: AppHandle) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+async fn ai_model_prices(
+    app: AppHandle,
+    ids: Vec<String>,
+) -> Result<std::collections::BTreeMap<String, model_prices::ModelPrice>, String> {
+    blocking(move || Ok(model_prices::prices(&app, &ids))).await
+}
+
+#[tauri::command]
 fn install_site(app: AppHandle, id: u32) -> Result<(), String> {
     system::install_site(&app, id)
 }
@@ -2031,6 +2045,15 @@ fn agent_continue(
 #[tauri::command]
 fn agent_set_autonomy(app: AppHandle, run_id: u32, autonomy: String) -> Result<(), String> {
     automation::agent::set_autonomy(&app, run_id, &autonomy)
+}
+
+#[tauri::command]
+fn agent_set_access(
+    app: AppHandle,
+    run_id: u32,
+    access: automation::agent::AgentAccess,
+) -> Result<(), String> {
+    automation::agent::set_access(&app, run_id, access)
 }
 
 #[tauri::command]
@@ -2598,6 +2621,7 @@ pub fn run() {
             cancel_download,
             open_download,
             show_download_in_folder,
+            rename_download,
             drag_download,
             remove_download,
             clear_downloads,
@@ -2694,6 +2718,7 @@ pub fn run() {
             clear_ai_key,
             test_ai_connection,
             list_ai_models,
+            ai_model_prices,
             install_site,
             open_default_apps,
             set_viewport,
@@ -2754,6 +2779,7 @@ pub fn run() {
             agent_start,
             agent_continue,
             agent_set_autonomy,
+            agent_set_access,
             agent_delete_run,
             agent_run,
             agent_save_flow,

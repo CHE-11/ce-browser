@@ -10,7 +10,9 @@ use crate::automation::{clip, policy};
 use crate::tabs;
 
 use super::super::runs::{self, with_run};
-use super::{Ctx, Done, Kind, Tool, arg_bool, arg_str, arg_u32, gate, halt, object, step, tool};
+use super::{
+    Ctx, Done, Kind, Tool, arg_bool, arg_str, arg_u32, gate, halt, object, site_gate, step, tool,
+};
 
 pub fn tools() -> Vec<Tool> {
     vec![
@@ -75,6 +77,7 @@ fn open_tab(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     let input = arg_str(args, "url");
     let url = tabs::resolve(ctx.app, &input);
     let background = arg_bool(args, "background", false);
+    site_gate(ctx, url.as_str())?;
     gate(ctx, policy::open(ctx.auto, url.as_str()))?;
     halt(ctx)?;
     let opened = tabs::open(
@@ -114,6 +117,12 @@ fn switch_tab(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     {
         return Err("Another agent is working in that tab.".into());
     }
+    if crate::settings::get(ctx.app).ai_blocked(&info.url) {
+        return Err(crate::settings::AI_SITE_BLOCKED.into());
+    }
+    if let policy::Verdict::Block(reason) = policy::page(ctx.auto, &info.url) {
+        return Err(reason);
+    }
     halt(ctx)?;
     tabs::activate(ctx.app, target)?;
     runs::switch_to(ctx.app, ctx.id, ctx.tab, target);
@@ -149,6 +158,12 @@ fn list_tabs(ctx: &mut Ctx, _args: &Value) -> Result<Done, String> {
 fn read_tab(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     let target = arg_u32(args, "tabId")?;
     let info = same_window(ctx, target)?;
+    if crate::settings::get(ctx.app).ai_blocked(&info.url) {
+        return Err(crate::settings::AI_SITE_BLOCKED.into());
+    }
+    if let policy::Verdict::Block(reason) = policy::page(ctx.auto, &info.url) {
+        return Err(reason);
+    }
     driver::wait_load(ctx.app, target, Duration::from_secs(10));
     let text = driver::text(ctx.app, target, 12_000, true)?;
     step(

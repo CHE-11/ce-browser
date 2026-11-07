@@ -1,6 +1,6 @@
-import { useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { IconButton } from "@/components/IconButton";
-import { openDownload, createTab, pauseDownload, resumeDownload, cancelDownload, showDownloadInFolder, removeDownload, dragDownload } from "@/lib/browser-client";
+import { openDownload, createTab, pauseDownload, resumeDownload, cancelDownload, showDownloadInFolder, removeDownload, dragDownload, renameDownload } from "@/lib/browser-client";
 import { downloadsIconClass, downloadsRowClass, downloadsTextClass } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { formatBytes, hostOf } from "@/lib/format";
@@ -19,6 +19,7 @@ import {
   Folder,
   FolderOpen,
   Pause,
+  Pencil,
   Play,
   RotateCw,
   SquareArrowOutUpRight,
@@ -31,6 +32,8 @@ import {
 type DownloadRowProps = {
   item: DownloadItem;
   compact?: boolean;
+  /** Finished files can be renamed in place. The popover turns this on. */
+  renamable?: boolean;
 };
 
 const IMAGES = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "avif", "heic"]);
@@ -47,6 +50,23 @@ function extension(name: string) {
 function previewable(name: string) {
   const ext = extension(name);
   return ext === "json" || ext === "csv" || ext === "md" || ext === "markdown" || ext === "log" || ext === "txt";
+}
+
+function failure(reason: unknown) {
+  if (typeof reason === "string" && reason.trim()) {
+    return reason;
+  }
+  if (reason instanceof Error && reason.message.trim()) {
+    return reason.message;
+  }
+  return "Could not rename the file.";
+}
+
+/** Selects the name and leaves the extension unselected, the way Explorer does. */
+function selectStem(input: HTMLInputElement) {
+  const value = input.value;
+  const dot = value.lastIndexOf(".");
+  input.setSelectionRange(0, dot > 0 ? dot : value.length);
 }
 
 function fileType(name: string): { icon: LucideIcon; className: string } {
@@ -115,15 +135,21 @@ function statusText(item: DownloadItem, compact: boolean, here: boolean) {
   }
 }
 
-export function DownloadRow({ item, compact }: DownloadRowProps) {
+export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
   const computer = useComputerName();
   const here = onThisComputer(item, computer);
   const domId = `download-${item.id}`;
   const running = here && (item.state === "inProgress" || item.state === "paused");
   const fraction = item.totalBytes ? Math.min(1, item.receivedBytes / item.totalBytes) : null;
   const completed = item.state === "completed" && here;
+  const canRename = Boolean(renamable && completed);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item.fileName);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const dragging = useRef(false);
   const suppressClickUntil = useRef(0);
+  const editingRef = useRef(false);
+  const committing = useRef(false);
   const { icon: TypeIcon, className: typeClass } = fileType(item.fileName);
   const elsewhere = savedOn(item) ? `Saved on ${savedOn(item)}` : "Saved on another computer";
   let nameTitle = item.fileName;
@@ -133,8 +159,58 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
     nameTitle = elsewhere;
   }
 
+  function closeRename() {
+    editingRef.current = false;
+    setEditing(false);
+  }
+
+  function beginRename() {
+    editingRef.current = true;
+    setDraft(item.fileName);
+    setRenameError(null);
+    setEditing(true);
+  }
+
+  function cancelRename() {
+    closeRename();
+    setRenameError(null);
+    setDraft(item.fileName);
+  }
+
+  async function commitRename() {
+    if (!editingRef.current || committing.current) {
+      return;
+    }
+    const name = draft.trim();
+    if (!name || name === item.fileName) {
+      closeRename();
+      setRenameError(null);
+      return;
+    }
+    committing.current = true;
+    try {
+      await renameDownload(item.id, name);
+      if (!editingRef.current) {
+        return;
+      }
+      closeRename();
+      setRenameError(null);
+    } catch (reason: unknown) {
+      if (editingRef.current) {
+        setRenameError(failure(reason));
+      }
+    } finally {
+      committing.current = false;
+    }
+  }
+
+  function submitRename(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void commitRename();
+  }
+
   function openDownloaded() {
-    if (!here || performance.now() < suppressClickUntil.current) {
+    if (!here || editing || performance.now() < suppressClickUntil.current) {
       return;
     }
     if (previewable(item.fileName)) {
@@ -149,7 +225,7 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
       return;
     }
     const target = event.target;
-    if (target instanceof Element && target.closest(`#${domId}-actions`)) {
+    if (target instanceof Element && target.closest(`#${domId}-actions, #${domId}-rename`)) {
       return;
     }
     const startX = event.clientX;
@@ -190,31 +266,64 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
       className={cn(
         "group flex items-center gap-3 rounded-md hover:bg-zinc-800/70",
         compact ? downloadsRowClass : "px-3 py-2",
-        completed && "cursor-grab",
+        completed && !editing && "cursor-grab",
         !here && "opacity-60",
         !compact && "border border-zinc-800 bg-zinc-900 py-3",
       )}
       aria-disabled={!here}
-      onPointerDown={completed ? beginFileDrag : undefined}
+      onPointerDown={completed && !editing ? beginFileDrag : undefined}
     >
       <TypeIcon id={`${domId}-icon`} className={cn("shrink-0", compact ? downloadsIconClass : "size-6", typeClass)} aria-hidden />
       <div id={`${domId}-body`} className="min-w-0 flex-1">
-        <button
-          id={`${domId}-name`}
-          type="button"
-          disabled={!completed}
-          title={nameTitle}
-          className={cn(
-            "block max-w-full truncate text-left",
-            compact ? downloadsTextClass : "text-sm",
-            completed ? "cursor-grab text-zinc-100 hover:underline" : "cursor-default text-zinc-300",
-            !here && "cursor-not-allowed",
-            (item.state === "cancelled" || item.state === "interrupted") && "line-through decoration-zinc-500",
-          )}
-          onClick={openDownloaded}
-        >
-          {item.fileName}
-        </button>
+        {editing ? (
+          <form id={`${domId}-rename`} onSubmit={submitRename}>
+            <input
+              id={`${domId}-rename-input`}
+              autoFocus
+              value={draft}
+              aria-label="File name"
+              spellCheck={false}
+              className={cn(
+                "h-7 w-full min-w-0 cursor-text rounded border border-sky-500 bg-zinc-950 px-1.5 text-zinc-100 outline-none",
+                compact ? downloadsTextClass : "text-sm",
+              )}
+              onChange={(event) => setDraft(event.currentTarget.value)}
+              onFocus={(event) => selectStem(event.currentTarget)}
+              onBlur={() => void commitRename()}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  cancelRename();
+                }
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            />
+          </form>
+        ) : (
+          <button
+            id={`${domId}-name`}
+            type="button"
+            disabled={!completed}
+            title={nameTitle}
+            className={cn(
+              "block max-w-full truncate text-left",
+              compact ? downloadsTextClass : "text-sm",
+              completed ? "cursor-grab text-zinc-100 hover:underline" : "cursor-default text-zinc-300",
+              !here && "cursor-not-allowed",
+              (item.state === "cancelled" || item.state === "interrupted") && "line-through decoration-zinc-500",
+            )}
+            onClick={openDownloaded}
+            onKeyDown={(event) => {
+              if (canRename && event.key === "F2") {
+                event.preventDefault();
+                beginRename();
+              }
+            }}
+          >
+            {item.fileName}
+          </button>
+        )}
         {!compact ? (
           <button
             id={`${domId}-url`}
@@ -229,6 +338,11 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
         <div id={`${domId}-status`} className="truncate text-xs text-zinc-400">
           {statusText(item, compact ?? false, here)}
         </div>
+        {renameError ? (
+          <p id={`${domId}-rename-error`} title={renameError} className="truncate text-xs text-red-300">
+            {renameError}
+          </p>
+        ) : null}
         {running ? (
           <div id={`${domId}-progress`} className="mt-1 h-1 overflow-hidden rounded-full bg-zinc-800">
             <div
@@ -262,6 +376,11 @@ export function DownloadRow({ item, compact }: DownloadRowProps) {
         {!here || item.state === "cancelled" || (item.state === "interrupted" && !item.canResume) ? (
           <IconButton id={`${domId}-retry`} label="Download again" onClick={() => void createTab(item.url, true)}>
             <RotateCw id={`${domId}-retry-icon`} aria-hidden />
+          </IconButton>
+        ) : null}
+        {canRename && !editing ? (
+          <IconButton id={`${domId}-rename-button`} label="Rename" onClick={beginRename}>
+            <Pencil id={`${domId}-rename-icon`} aria-hidden />
           </IconButton>
         ) : null}
         {completed ? (

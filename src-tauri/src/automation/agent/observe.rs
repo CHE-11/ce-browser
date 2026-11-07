@@ -23,6 +23,18 @@ pub struct Observation {
 }
 
 pub fn observe(app: &AppHandle, tab: u32, window: &str, screenshots: bool) -> Observation {
+    let url = tabs::tab_info(app, tab)
+        .map(|info| info.url)
+        .unwrap_or_default();
+    if crate::settings::get(app).ai_blocked(&url) {
+        return Observation {
+            text: format!("{OBSERVATION}\n{}\n", crate::settings::AI_SITE_BLOCKED),
+            image: None,
+            thumb: None,
+            scale: 1.0,
+            url,
+        };
+    }
     driver::wait_load(app, tab, Duration::from_secs(8));
     let snap = driver::snapshot(app, tab).or_else(|_| {
         thread::sleep(Duration::from_millis(700));
@@ -101,6 +113,12 @@ pub fn observe(app: &AppHandle, tab: u32, window: &str, screenshots: bool) -> Ob
 
 /// A screenshot of `tab` with element labels, for the `look` tool.
 pub fn look(app: &AppHandle, tab: u32) -> Result<String, String> {
+    let url = tabs::tab_info(app, tab)
+        .map(|info| info.url)
+        .unwrap_or_default();
+    if crate::settings::get(app).ai_blocked(&url) {
+        return Err(crate::settings::AI_SITE_BLOCKED.into());
+    }
     let shot = driver::screenshot(app, tab, true, SHOT_WIDTH)?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&shot.bytes))
 }
@@ -112,6 +130,13 @@ pub fn context_tabs(app: &AppHandle, ids: &[u32]) -> String {
         let Some(info) = tabs::tab_info(app, *id) else {
             continue;
         };
+        if crate::settings::get(app).ai_blocked(&info.url) {
+            out.push_str(&format!(
+                "\n\nCONTEXT TAB {id}: {}\n",
+                crate::settings::AI_SITE_BLOCKED
+            ));
+            continue;
+        }
         let body = driver::text(app, *id, 4000, true)
             .unwrap_or_else(|error| format!("(Couldn't read this tab: {error})"));
         out.push_str(&format!(

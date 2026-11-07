@@ -11,6 +11,7 @@ use crate::ai::{self, ChatMessage};
 use crate::automation::flows::FlowStep;
 use crate::automation::policy::{self, Risk, Verdict};
 use crate::automation::{audit, clip, now_ms};
+use crate::settings::sleep_site_key;
 use crate::{settings, system, tabs};
 
 use super::{run_loop, store};
@@ -53,6 +54,75 @@ pub struct PlanItem {
     pub status: String,
 }
 
+/// What a run may reach. Tools outside it are not offered to the model.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AgentAccess {
+    /// `site` keeps the run on one site. `browser` lets it go anywhere automation may.
+    pub sites: String,
+    /// The site a `site` run is held to. Filled in from the first web page it works on.
+    pub site: String,
+    /// Open, switch, read and close other tabs.
+    pub tabs: bool,
+    /// History, bookmarks, downloads, boards and saved flows.
+    pub browser_data: bool,
+    /// Save files to the Downloads folder and upload local files to pages.
+    pub files: bool,
+    pub clipboard: bool,
+    /// Read and write the agent's notes.
+    pub memory: bool,
+    /// Start helper agents in background tabs.
+    pub helpers: bool,
+    /// Run JavaScript in pages, when Settings also allows it.
+    pub scripts: bool,
+    pub notifications: bool,
+}
+
+impl Default for AgentAccess {
+    fn default() -> Self {
+        Self {
+            sites: "browser".into(),
+            site: String::new(),
+            tabs: true,
+            browser_data: true,
+            files: true,
+            clipboard: true,
+            memory: true,
+            helpers: true,
+            scripts: false,
+            notifications: true,
+        }
+    }
+}
+
+impl AgentAccess {
+    pub fn normalize(mut self) -> Self {
+        if self.sites != "site" {
+            self.sites = "browser".into();
+            self.site.clear();
+        }
+        self.site = clip(self.site.trim(), 200);
+        self
+    }
+
+    /// The tighter of two access sets, for a helper started by a run.
+    fn within(mut self, parent: &AgentAccess) -> Self {
+        if parent.sites == "site" {
+            self.sites = "site".into();
+            self.site = parent.site.clone();
+        }
+        self.tabs &= parent.tabs;
+        self.browser_data &= parent.browser_data;
+        self.files &= parent.files;
+        self.clipboard &= parent.clipboard;
+        self.memory &= parent.memory;
+        self.scripts &= parent.scripts;
+        self.notifications &= parent.notifications;
+        self.helpers = false;
+        self
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AgentRun {
@@ -90,6 +160,7 @@ pub struct AgentRun {
     pub flow_steps: u32,
     /// Address of the tab when the run started.
     pub start_url: String,
+    pub access: AgentAccess,
 }
 
 impl AgentRun {
@@ -110,6 +181,8 @@ pub struct StartOptions {
     pub budget: u64,
     /// Guidance for the model that the panel doesn't show as part of the goal.
     pub instructions: String,
+    /// Blank uses the default access.
+    pub access: Option<AgentAccess>,
     #[serde(skip)]
     pub parent: Option<u32>,
 }
@@ -312,6 +385,9 @@ pub fn start_with(
     let current = settings::get(app);
     check_ready(app, &current)?;
     let info = tabs::tab_info(app, tab).ok_or("That tab is closed.")?;
+    if current.ai_blocked(&info.url) {
+        return Err(settings::AI_SITE_BLOCKED.into());
+    }
     if run_for_tab(tab).is_some() {
         return Err("An agent is already working in this tab.".into());
     }
@@ -321,14 +397,24 @@ pub fn start_with(
         &options.autonomy
     });
     let mut model = clip(options.model.trim(), 120);
+    let mut access = options.access.clone().unwrap_or_default().normalize();
+    if access.sites == "site" && access.site.is_empty() {
+        access.site = sleep_site_key(&info.url);
+    }
     if let Some(parent) = options.parent
-        && let Some((level, parent_model)) =
-            with_run(parent, |state| (state.run.autonomy.clone(), state.run.model.clone()))
+        && let Some((level, parent_model, parent_access)) = with_run(parent, |state| {
+            (
+                state.run.autonomy.clone(),
+                state.run.model.clone(),
+                state.run.access.clone(),
+            )
+        })
     {
         autonomy = policy::lower_autonomy(autonomy, &level);
         if model.is_empty() {
             model = parent_model;
         }
+        access = access.within(&parent_access);
     }
     let context_tabs: Vec<u32> = options
         .context_tabs
@@ -359,6 +445,7 @@ pub fn start_with(
             parent: options.parent,
             background: options.background,
             start_url: info.url.clone(),
+            access,
             ..AgentRun::default()
         });
         state.context_tabs = context_tabs;
@@ -409,6 +496,9 @@ pub fn continue_run(app: &AppHandle, id: u32, text: &str, tab: Option<u32>) -> R
     };
     if run_for_tab(tab).is_some_and(|other| other != id) {
         return Err("An agent is already working in this tab.".into());
+    }
+    if tabs::tab_info(app, tab).is_some_and(|info| current.ai_blocked(&info.url)) {
+        return Err(settings::AI_SITE_BLOCKED.into());
     }
     let restarted = with_run(id, |state| {
         if state.run.active() || state.working {
@@ -652,6 +742,10 @@ pub fn reply(app: &AppHandle, id: u32, text: &str) -> Result<(), String> {
     if text.is_empty() {
         return Ok(());
     }
+    let tab = with_run(id, |state| state.run.tab_id).ok_or("That run has finished.")?;
+    if tabs::tab_info(app, tab).is_some_and(|info| settings::get(app).ai_blocked(&info.url)) {
+        return Err(settings::AI_SITE_BLOCKED.into());
+    }
     with_run(id, |state| {
         if !state.run.active() {
             return Err("That run has finished.".to_string());
@@ -692,6 +786,59 @@ pub fn set_autonomy(app: &AppHandle, id: u32, level: &str) -> Result<(), String>
     wake();
     emit(app);
     Ok(())
+}
+
+/// Changes what a run may reach. Holding a run to one site uses the site of its current tab.
+pub fn set_access(app: &AppHandle, id: u32, access: AgentAccess) -> Result<(), String> {
+    let mut access = access.normalize();
+    let tab = with_run(id, |state| state.run.tab_id).ok_or("That run was removed.")?;
+    if access.sites == "site" && access.site.is_empty() {
+        access.site = tabs::tab_info(app, tab)
+            .map(|info| sleep_site_key(&info.url))
+            .unwrap_or_default();
+    }
+    with_run(id, |state| {
+        if state.run.source != "agent" {
+            return Err("MCP sessions use the MCP server's settings.".to_string());
+        }
+        state.run.access = access;
+        Ok(())
+    })
+    .ok_or("That run was removed.")??;
+    emit(app);
+    Ok(())
+}
+
+/// What the run may reach now.
+pub(super) fn access(id: u32) -> AgentAccess {
+    with_run(id, |state| state.run.access.clone()).unwrap_or_default()
+}
+
+/// Holds a `site` run to its site. The first web page fills the site in when it is blank.
+pub(super) fn site_allowed(id: u32, url: &str) -> Result<(), String> {
+    let host = sleep_site_key(url);
+    if host.is_empty() {
+        return Ok(());
+    }
+    with_run(id, |state| {
+        let access = &mut state.run.access;
+        if access.sites != "site" {
+            return Ok(());
+        }
+        if access.site.is_empty() {
+            access.site = host.clone();
+            return Ok(());
+        }
+        if host == access.site || host.ends_with(&format!(".{}", access.site)) {
+            Ok(())
+        } else {
+            Err(format!(
+                "This run may only work on {}, and {host} is another site. Go back, or finish and tell the user. They can allow the whole browser from the lock menu.",
+                access.site
+            ))
+        }
+    })
+    .unwrap_or(Ok(()))
 }
 
 /// Pauses the agent before its next action so the user can use the page.

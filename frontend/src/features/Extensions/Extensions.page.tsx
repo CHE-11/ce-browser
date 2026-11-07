@@ -13,6 +13,7 @@ import { ExtensionInfo } from "@type/browser";
 import { FileArchive, FolderOpen, Puzzle, PinOff, Pin, Settings2, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { BUILTIN_TOOLS } from "../BuiltInExtensions/builtin";
+import { Segmented } from "../Settings/SettingsControls";
 
 
 export function ExtensionsPage() {
@@ -79,11 +80,15 @@ export function ExtensionsPage() {
     }
   };
 
-  const extensionBar = settings?.verticalToolbarExtensions ? "vertical toolbar" : "address bar";
-
-  const setToolbarOption = (patch: { verticalToolbarExtensions?: boolean; verticalToolbarLabels?: boolean }) => {
+  const setToolbarLabels = (verticalToolbarLabels: boolean) => {
     if (settings) {
-      act(saveSettings({ ...settings, ...patch }));
+      act(saveSettings({ ...settings, verticalToolbarLabels }));
+    }
+  };
+
+  const setToolbarLayout = (layout: "vertical" | "horizontal") => {
+    if (settings) {
+      act(saveSettings({ ...settings, verticalToolbar: layout === "vertical" }));
     }
   };
 
@@ -233,7 +238,7 @@ export function ExtensionsPage() {
                       size="sm"
                       variant="ghost"
                       disabled={!settings}
-                      title={toolbarPinned(settings, extension.id) ? `Hide from the ${extensionBar}` : `Show on the ${extensionBar}`}
+                      title={toolbarPinned(settings, extension.id) ? "Hide from the address bar" : "Show on the address bar"}
                       onClick={() => setPinned(extension.id, !toolbarPinned(settings, extension.id))}
                     >
                       {toolbarPinned(settings, extension.id) ? (
@@ -262,24 +267,36 @@ export function ExtensionsPage() {
 
         <section id="extensions-page-builtin" className="flex flex-col gap-3">
           <div id="extensions-page-toolbar" className="flex flex-col gap-4 rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-            <h2 id="extensions-page-toolbar-title" className="text-sm font-semibold">
-              Vertical toolbar
-            </h2>
-            <div id="extensions-page-toolbar-extensions" className="flex items-center justify-between gap-4">
-              <div id="extensions-page-toolbar-extensions-text" className="min-w-0">
-                <p id="extensions-page-toolbar-extensions-label" className="text-sm">
-                  Use the vertical toolbar
+            <div id="extensions-page-toolbar-heading">
+              <h2 id="extensions-page-toolbar-title" className="text-sm font-semibold">
+                Toolbar
+              </h2>
+              <p id="extensions-page-toolbar-hint" className="mt-1 text-xs text-zinc-400">
+                <kbd id="extensions-page-toolbar-shortcut" className="font-sans text-zinc-300">
+                  Ctrl+Shift+T
+                </kbd>{" "}
+                shows or hides it.
+              </p>
+            </div>
+            <div id="extensions-page-toolbar-layout" className="flex items-center justify-between gap-4">
+              <div id="extensions-page-toolbar-layout-text" className="min-w-0">
+                <p id="extensions-page-toolbar-layout-label" className="text-sm">
+                  Layout
                 </p>
-                <p id="extensions-page-toolbar-extensions-hint" className="text-xs text-zinc-400">
-                  Pinned extensions move to the right side of the page.
+                <p id="extensions-page-toolbar-layout-hint" className="text-xs text-zinc-400">
+                  Vertical sits on the right. Horizontal sits above the bookmarks bar.
                 </p>
               </div>
-              <Toggle
-                id="extensions-page-toolbar-extensions-toggle"
-                aria-labelledby="extensions-page-toolbar-extensions-label"
-                checked={settings?.verticalToolbarExtensions ?? false}
+              <Segmented
+                id="extensions-page-toolbar-layout-choice"
+                label="Toolbar layout"
+                value={settings?.verticalToolbar === false ? "horizontal" : "vertical"}
                 disabled={!settings}
-                onChange={(verticalToolbarExtensions) => setToolbarOption({ verticalToolbarExtensions })}
+                options={[
+                  { value: "vertical", label: "Vertical" },
+                  { value: "horizontal", label: "Horizontal" },
+                ]}
+                onChange={setToolbarLayout}
               />
             </div>
             <div id="extensions-page-toolbar-labels" className="flex items-center justify-between gap-4">
@@ -296,7 +313,7 @@ export function ExtensionsPage() {
                 aria-labelledby="extensions-page-toolbar-labels-label"
                 checked={settings?.verticalToolbarLabels ?? false}
                 disabled={!settings}
-                onChange={(verticalToolbarLabels) => setToolbarOption({ verticalToolbarLabels })}
+                onChange={setToolbarLabels}
               />
             </div>
           </div>
@@ -358,7 +375,7 @@ export function ExtensionsPage() {
               Click <strong>Install .zip or .crx</strong> and pick the file. An unzipped folder works with <strong>Load unpacked</strong>.
             </li>
             <li id="extensions-page-install-step-3">
-              The extension icon appears next to the address bar. Turn on the vertical toolbar to move pinned extensions to the right side of the page. Unpin an icon on this page, or right-click it, to take it off the toolbar.
+              The extension icon appears next to the address bar. Unpin an icon on this page, or right-click it, to take it off the toolbar.
             </li>
           </ol>
           <p id="extensions-page-install-note" className="mt-3 text-xs text-zinc-500">

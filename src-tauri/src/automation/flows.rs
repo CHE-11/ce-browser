@@ -736,7 +736,7 @@ fn execute(
                 run,
                 flow: &flow,
                 tab,
-                auto: settings::get(app).automation,
+                auto: settings::get(app).automation_with_blocks(),
                 vars: flow.variables.clone(),
                 rows: Vec::new(),
                 output: Vec::new(),

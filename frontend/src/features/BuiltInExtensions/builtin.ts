@@ -62,7 +62,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   },
   {
     id: "clear-cache",
-    name: "Clear site cache",
+    name: "Clear cache",
     description: "Clear cached files for the site in the current tab.",
     icon: Eraser,
   },

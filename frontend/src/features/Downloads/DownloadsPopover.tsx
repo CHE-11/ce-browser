@@ -33,7 +33,7 @@ export function DownloadsPopover() {
             Files you download appear here.
           </div>
         ) : (
-          recent.map((item) => <DownloadRow key={item.id} item={item} compact />)
+          recent.map((item) => <DownloadRow key={item.id} item={item} compact renamable />)
         )}
       </div>
       <div id="downloads-panel-footer" className="border-t border-zinc-800">

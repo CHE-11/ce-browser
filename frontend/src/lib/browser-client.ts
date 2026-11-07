@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdblockStats,
+  AgentAccess,
   AgentAutonomy,
   AgentDelta,
   AgentMemoryItem,
@@ -25,6 +26,7 @@ import type {
   ExtractSpec,
   Flow,
   McpStatus,
+  ModelPrice,
   SniffedEndpoint,
   AiKeyStatus,
   BackdropSupport,
@@ -617,6 +619,11 @@ export function listAiModels() {
   return invoke<string[]>("list_ai_models");
 }
 
+/** Prices per million tokens for these models with the active provider. Unknown ones are left out. */
+export function aiModelPrices(ids: string[]) {
+  return invoke<Record<string, ModelPrice>>("ai_model_prices", { ids });
+}
+
 export function installSite(id: number) {
   return invoke<void>("install_site", { id });
 }
@@ -886,7 +893,7 @@ export type PopupAnchor = HTMLElement | { x: number; y: number } | PopupRect;
 
 export type PopupOptions = {
   params?: string;
-  /** Defaults to `left-start` in the vertical tool strip, `bottom-end` under other buttons
+  /** Defaults to `left-start` on the vertical tools toolbar, `bottom-end` under other buttons
    * and `point` at a click point. */
   placement?: PopupPlacement;
   focus?: boolean;
@@ -906,7 +913,7 @@ function anchorRect(anchor: PopupAnchor): PopupRect {
 
 function defaultPlacement(anchor: PopupAnchor, rect: PopupRect): PopupPlacement {
   if (anchor instanceof HTMLElement) {
-    return anchor.closest("#vertical-toolbar") ? "left-start" : "bottom-end";
+    return anchor.closest("#tools-toolbar[data-layout='vertical']") ? "left-start" : "bottom-end";
   }
   return rect.width || rect.height ? "bottom-end" : "point";
 }
@@ -1244,6 +1251,11 @@ export function openDownload(id: number) {
 
 export function showDownloadInFolder(id: number) {
   return invoke<void>("show_download_in_folder", { id });
+}
+
+/** Renames a finished download on disk. The new name is the file name only, not a path. */
+export function renameDownload(id: number, name: string) {
+  return invoke<void>("rename_download", { id, name });
 }
 
 /** Starts a Windows file drag for a finished download. Resolves when the drop ends. */
@@ -1689,6 +1701,10 @@ export function agentContinue(runId: number, text: string, tabId?: number) {
 
 export function agentSetAutonomy(runId: number, autonomy: AgentAutonomy) {
   return invoke<void>("agent_set_autonomy", { runId, autonomy });
+}
+
+export function agentSetAccess(runId: number, access: AgentAccess) {
+  return invoke<void>("agent_set_access", { runId, access });
 }
 
 export function agentDeleteRun(runId: number) {

@@ -600,6 +600,17 @@ html[data-backdrop] #browser .bg-zinc-900 {
   max-width: calc(var(--toolbar-button, 2rem) + 1rem);
 }
 
+.chrome-tool-strip-horizontal {
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  height: var(--toolbar-height, 2.5rem);
+}
+
+.chrome-tool-strip-horizontal.chrome-tool-strip-labeled {
+  height: auto;
+}
+
 .chrome-toolbar .chrome-toolbar-button,
 .chrome-tool-strip .chrome-toolbar-button {
   width: var(--toolbar-button, 2rem);

@@ -119,7 +119,7 @@ fn drive(
     pending: &mut Vec<Pending>,
 ) -> Result<(&'static str, String), String> {
     let current = settings::get(app);
-    let auto = current.automation.clone();
+    let auto = current.automation_with_blocks();
     let setup = with_run(id, |state| Setup {
         goal: state.run.goal.clone(),
         window: state.run.window.clone(),
@@ -148,8 +148,6 @@ fn drive(
             text
         }
     });
-    let tools = tools::all(&auto, setup.helper);
-    let specs: Vec<ToolSpec> = tools.iter().map(|tool| tool.spec.clone()).collect();
     let mut limit = auto.max_steps.max(1);
     let mut turns = 0u32;
     let mut budget = setup.budget;
@@ -197,6 +195,12 @@ fn drive(
         if tabs::tab_info(app, tab).is_none() {
             return Ok(("stopped", "The tab was closed.".into()));
         }
+        let page_url = tabs::tab_info(app, tab)
+            .map(|info| info.url)
+            .unwrap_or_default();
+        if settings::get(app).ai_blocked(&page_url) {
+            return Ok(("failed", settings::AI_SITE_BLOCKED.into()));
+        }
         let observation = observe::observe(app, tab, &setup.window, auto.screenshots_to_model);
         if checkpoint(id).is_err() {
             return stopped();
@@ -224,7 +228,17 @@ fn drive(
         summarize(app, id, &current, &model, &setup.goal, messages);
         observe::prune(messages);
         let autonomy = with_run(id, |state| state.run.autonomy.clone()).unwrap_or_default();
-        let system = prompt::system_prompt(app, &auto, &autonomy, &observation.url, setup.helper);
+        let access = runs::access(id);
+        let tools = tools::all(&auto, setup.helper, &access);
+        let specs: Vec<ToolSpec> = tools.iter().map(|tool| tool.spec.clone()).collect();
+        let system = prompt::system_prompt(
+            app,
+            &auto,
+            &autonomy,
+            &access,
+            &observation.url,
+            setup.helper,
+        );
         let reply = match ask_twice(app, id, &current, &model, &system, messages, &specs) {
             Ok(reply) => reply,
             Err(AskError::Stopped) => return stopped(),

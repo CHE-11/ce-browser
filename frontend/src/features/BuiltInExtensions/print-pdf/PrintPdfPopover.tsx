@@ -3,8 +3,10 @@ import { CircleAlert, FileCheck, FileDown, FolderOpen, PencilRuler, Printer, Spa
 import { Button } from "@/components/Button";
 import { PopupFrame } from "@/components/PopupFrame";
 import { requestPageTool, currentWindowLabel, closePopup, createTab, openSavedFile, showSavedFile } from "@/lib/browser-client";
+import { useSettings } from "@/lib/use-browser";
 import { PopoverHeader, ActionTile } from "../PopoverParts";
 import { readPopoverTab } from "../shared";
+import { presetHint } from "./print-options";
 
 
 type PrintPdfPopoverProps = {
@@ -15,11 +17,14 @@ export function PrintPdfPopover({ params }: PrintPdfPopoverProps) {
   const tab = readPopoverTab(params);
   const status = params.get("status");
   const [showResult, setShowResult] = useState(status !== null);
+  const settings = useSettings();
+  const presets = settings?.printEditor.presets ?? [];
 
-  const send = (action: "quick" | "as-is") => {
+  const send = (action: "quick" | "as-is", presetId = "") => {
     void requestPageTool({
       tool: "print-pdf",
       action,
+      presetId,
       window: currentWindowLabel(),
       tabId: tab.id,
       title: tab.title,
@@ -34,7 +39,7 @@ export function PrintPdfPopover({ params }: PrintPdfPopoverProps) {
   };
 
   return (
-    <PopupFrame id="print-pdf-popover" width={320} maxHeight={420}>
+    <PopupFrame id="print-pdf-popover" width={320} maxHeight={560}>
       <PopoverHeader id="print-pdf-header" icon={<Printer aria-hidden />} title="Print to PDF" subtitle={tab.title || tab.url} />
       {showResult && status ? (
         <PrintResult params={params} onAgain={() => setShowResult(false)} />
@@ -48,13 +53,31 @@ export function PrintPdfPopover({ params }: PrintPdfPopoverProps) {
             hint="Remove ads and elements, then save"
             onClick={openEditor}
           />
-          <ActionTile
-            id="print-pdf-quick"
-            icon={<Sparkles aria-hidden />}
-            label="Quick clean PDF"
-            hint="Your saved cleanup, no editing"
-            onClick={() => send("quick")}
-          />
+          {presets.length > 0 ? (
+            <div id="print-pdf-presets" className="flex flex-col gap-2">
+              <p id="print-pdf-presets-label" className="px-1 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                Quick clean
+              </p>
+              {presets.map((preset) => (
+                <ActionTile
+                  key={preset.id}
+                  id={`print-pdf-preset-${preset.id}`}
+                  icon={<Sparkles aria-hidden />}
+                  label={preset.name}
+                  hint={presetHint(preset)}
+                  onClick={() => send("quick", preset.id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <ActionTile
+              id="print-pdf-quick"
+              icon={<Sparkles aria-hidden />}
+              label="Quick clean PDF"
+              hint="Your saved cleanup, no editing"
+              onClick={() => send("quick")}
+            />
+          )}
           <ActionTile
             id="print-pdf-as-is"
             icon={<FileDown aria-hidden />}
@@ -68,9 +91,15 @@ export function PrintPdfPopover({ params }: PrintPdfPopoverProps) {
   );
 }
 
+function fileNameOf(path: string) {
+  const cut = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  return cut >= 0 ? path.slice(cut + 1) : path;
+}
+
 function PrintResult({ params, onAgain }: { params: URLSearchParams; onAgain: () => void }) {
   const failed = params.get("status") === "error";
   const path = params.get("path") ?? "";
+  const fileName = fileNameOf(path);
 
   return (
     <div id="print-pdf-result" className="flex flex-col gap-2 px-3 pb-3">
@@ -86,17 +115,17 @@ function PrintResult({ params, onAgain }: { params: URLSearchParams; onAgain: ()
           )}
           {failed ? "Couldn't save the PDF" : "PDF saved"}
         </div>
-        <p id="print-pdf-result-detail" className="mt-1 break-all text-xs opacity-80">
-          {failed ? params.get("message") : path}
+        <p id="print-pdf-result-detail" className="mt-1 truncate text-xs opacity-80" title={failed ? undefined : path}>
+          {failed ? params.get("message") : fileName}
         </p>
       </div>
-      <div id="print-pdf-result-actions" className="flex gap-2">
+      <div id="print-pdf-result-actions" className="flex items-center gap-2">
         {failed ? null : (
           <>
             <Button
               id="print-pdf-result-open"
               variant="primary"
-              className="flex-1"
+              className="min-w-0 flex-1 whitespace-nowrap"
               onClick={() => {
                 void openSavedFile(path);
                 void closePopup();
@@ -106,18 +135,19 @@ function PrintResult({ params, onAgain }: { params: URLSearchParams; onAgain: ()
             </Button>
             <Button
               id="print-pdf-result-folder"
-              className="flex-1"
+              className="shrink-0 whitespace-nowrap px-2"
+              aria-label="Show in folder"
+              title="Show in folder"
               onClick={() => {
                 void showSavedFile(path);
                 void closePopup();
               }}
             >
               <FolderOpen id="print-pdf-result-folder-icon" className="size-4" aria-hidden />
-              Show in folder
             </Button>
           </>
         )}
-        <Button id="print-pdf-result-again" className="flex-1" onClick={onAgain}>
+        <Button id="print-pdf-result-again" className="shrink-0 whitespace-nowrap" onClick={onAgain}>
           Back
         </Button>
       </div>

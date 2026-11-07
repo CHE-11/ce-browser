@@ -597,6 +597,7 @@ const COPY_PARTS: &[PartSpec] = &[
             "statusStats",
             "verticalToolbar",
             "verticalToolbarLabels",
+            "showToolsToolbar",
             "menuTextSize",
             "menuPadding",
             "menuHeight",

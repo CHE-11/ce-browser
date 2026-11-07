@@ -1,7 +1,9 @@
 import { Bot, Brain, History, Plus, Settings, X } from "lucide-react";
-import type { AgentAutonomy, TabInfo } from "@type/browser";
+import type { AgentAccess, AgentAutonomy, TabInfo } from "@type/browser";
 import { IconButton } from "@/components/IconButton";
+import type { AccessToggle } from "@/lib/agent-access";
 import { activateTab, createTab, navigate, toggleAgentPanel } from "@/lib/browser-client";
+import { AgentAccessMenu } from "./AgentAccessMenu";
 import { AgentAutonomyPicker } from "./AgentAutonomyPicker";
 import { AgentModelPicker } from "./AgentModelPicker";
 
@@ -33,10 +35,30 @@ type Props = {
   model: string | null;
   modelFallback: string;
   onModel: (model: string) => void;
+  access: AgentAccess;
+  onAccess: (access: AgentAccess) => void;
+  currentSite: string;
+  accessBlocked: Partial<Record<AccessToggle, string>>;
 };
 
 /** Title bar with views and the options for the next task or the running one. */
-export function AgentHeader({ tabs, view, runCount, onView, onNewTask, autonomy, autonomyFor, onAutonomy, model, modelFallback, onModel }: Props) {
+export function AgentHeader({
+  tabs,
+  view,
+  runCount,
+  onView,
+  onNewTask,
+  autonomy,
+  autonomyFor,
+  onAutonomy,
+  model,
+  modelFallback,
+  onModel,
+  access,
+  onAccess,
+  currentSite,
+  accessBlocked,
+}: Props) {
   return (
     <div id="agent-header" className="shrink-0 border-b border-zinc-800">
       <header id="agent-panel-header" className="flex h-[var(--toolbar-height)] items-center gap-1 pl-3 pr-1.5">
@@ -70,6 +92,7 @@ export function AgentHeader({ tabs, view, runCount, onView, onNewTask, autonomy,
       </header>
       <div id="agent-panel-options" className="flex items-center gap-2 px-3 pb-2">
         <AgentAutonomyPicker id="agent-panel-autonomy" value={autonomy} onChange={onAutonomy} />
+        <AgentAccessMenu id="agent-panel-access" access={access} onChange={onAccess} scope={autonomyFor} currentSite={currentSite} blockedBySettings={accessBlocked} />
         {model !== null ? (
           <AgentModelPicker id="agent-panel-model" className="flex-1" value={model} fallback={modelFallback} onChange={onModel} />
         ) : (

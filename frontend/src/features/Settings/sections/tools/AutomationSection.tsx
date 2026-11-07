@@ -47,7 +47,7 @@ const TEXT = {
   allowed: "Allowed sites",
   allowedHint: "When this list has sites, opening any other site asks first.",
   blocked: "Blocked sites",
-  blockedHint: "Automation never acts on these sites or their subdomains.",
+  blockedHint: "Automation never acts on these sites or their subdomains. Sites blocked for AI are included.",
   secrets: "Saved secrets",
   secretsHint: "Flows and the agent type these as {{secret:name}} without seeing them. Encrypted with Windows DPAPI and never synced.",
   scheduler: "Run scheduled flows",
@@ -74,7 +74,16 @@ const MCP_TEXT = {
 
 export function AutomationSection({ settings, query, onUpdate, onError, onMatch }: SettingsSectionProps) {
   const automation = settings.automation;
-  const visible = matchesQuery(query, section.title, "agent ai rpa", ...Object.values(TEXT), ...automation.allowedSites, ...automation.blockedSites);
+  const aiBlockedSites = settings.aiBlockedSites ?? [];
+  const visible = matchesQuery(
+    query,
+    section.title,
+    "agent ai rpa",
+    ...Object.values(TEXT),
+    ...automation.allowedSites,
+    ...automation.blockedSites,
+    ...aiBlockedSites,
+  );
   useReportMatch(section.id, visible, onMatch);
   const update = (patch: Partial<AutomationSettings>) => onUpdate({ automation: { ...automation, ...patch } });
 
@@ -166,6 +175,8 @@ export function AutomationSection({ settings, query, onUpdate, onError, onMatch 
         hint={TEXT.blockedHint}
         empty="No blocked sites."
         sites={automation.blockedSites}
+        included={aiBlockedSites.filter((site) => !automation.blockedSites.includes(site))}
+        includedNote="Blocked for AI"
         onChange={(blockedSites) => update({ blockedSites })}
       />
       <Secrets onError={onError} />
@@ -279,12 +290,14 @@ export function McpSection({ settings, query, onUpdate, onError, onMatch }: Sett
   );
 }
 
-function SiteList({
+export function SiteList({
   id,
   label,
   hint,
   empty,
   sites,
+  included = [],
+  includedNote,
   onChange,
 }: {
   id: string;
@@ -292,10 +305,13 @@ function SiteList({
   hint: string;
   empty: string;
   sites: string[];
+  /** Sites kept on this list from somewhere else. They can't be removed here. */
+  included?: string[];
+  includedNote?: string;
   onChange: (sites: string[]) => void;
 }) {
   const [draft, setDraft] = useState("");
-  const visible = useSettingVisible(label, hint, empty, ...sites);
+  const visible = useSettingVisible(label, hint, empty, includedNote, ...sites, ...included);
   if (!visible) {
     return null;
   }
@@ -335,7 +351,7 @@ function SiteList({
           Add
         </Button>
       </div>
-      {sites.length === 0 ? (
+      {sites.length === 0 && included.length === 0 ? (
         <div id={`${id}-empty`} className="text-xs text-zinc-500">
           {empty}
         </div>
@@ -349,6 +365,18 @@ function SiteList({
               <IconButton id={`${id}-${site}-remove`} label={`Remove ${site}`} onClick={() => onChange(sites.filter((item) => item !== site))}>
                 <X id={`${id}-${site}-remove-icon`} aria-hidden />
               </IconButton>
+            </li>
+          ))}
+          {included.map((site) => (
+            <li id={`${id}-included-${site}`} key={site} className="flex h-8 items-center justify-between gap-2 rounded-md bg-zinc-950 pl-3 pr-3 text-sm text-zinc-200">
+              <span id={`${id}-included-${site}-host`} className="truncate">
+                {site}
+              </span>
+              {includedNote ? (
+                <span id={`${id}-included-${site}-note`} className="shrink-0 text-xs text-zinc-500">
+                  {includedNote}
+                </span>
+              ) : null}
             </li>
           ))}
         </ul>

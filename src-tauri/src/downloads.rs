@@ -622,6 +622,105 @@ pub fn show_in_folder(app: &AppHandle, id: u32) -> Result<(), String> {
     files::reveal_path(Path::new(&item.path))
 }
 
+/// Renames a finished download on disk and in the history. The file stays in its folder.
+pub fn rename(app: &AppHandle, id: u32, name: &str) -> Result<(), String> {
+    let item = require_here(app, id)?;
+    if item.state != COMPLETED {
+        return Err("The download has not finished.".into());
+    }
+    let name = name.trim();
+    allowed_file_name(name)?;
+    let current = PathBuf::from(&item.path);
+    if !current.is_file() {
+        return Err("That file is no longer on disk.".into());
+    }
+    if current.file_name().and_then(|part| part.to_str()) == Some(name) {
+        return Ok(());
+    }
+    let parent = current
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| "That file has no folder.".to_string())?;
+    let next = parent.join(name);
+    if next.exists() {
+        if same_file(&current, &next) {
+            // Windows treats names as equal aside from case, so a direct rename is a no-op.
+            rename_via_temporary(&current, &next, id)?;
+        } else {
+            return Err("That name is already used in the folder.".into());
+        }
+    } else {
+        fs::rename(&current, &next)
+            .map_err(|error| format!("Could not rename the file: {error}"))?;
+    }
+    with_state(app, |state| {
+        if let Some(found) = state.items.iter_mut().find(|entry| entry.id == id) {
+            found.file_name = name.to_string();
+            found.path = next.to_string_lossy().into_owned();
+        }
+    });
+    changed(app, true);
+    Ok(())
+}
+
+fn allowed_file_name(name: &str) -> Result<(), String> {
+    let single = Path::new(name).file_name().and_then(|part| part.to_str()) == Some(name);
+    let stem = name.split('.').next().unwrap_or(name);
+    let reserved = matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    );
+    if !single
+        || name.is_empty()
+        || name.len() > 255
+        || reserved
+        || files::sanitize_file_name(name) != name
+    {
+        return Err("That file name is not allowed.".into());
+    }
+    Ok(())
+}
+
+fn same_file(left: &Path, right: &Path) -> bool {
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn rename_via_temporary(current: &Path, next: &Path, id: u32) -> Result<(), String> {
+    let parent = next.parent().unwrap_or_else(|| Path::new("."));
+    let temporary = files::unique_path(parent, &format!(".ce-rename-{id}"));
+    fs::rename(current, &temporary)
+        .map_err(|error| format!("Could not rename the file: {error}"))?;
+    if let Err(error) = fs::rename(&temporary, next) {
+        let _ = fs::rename(&temporary, current);
+        return Err(format!("Could not rename the file: {error}"));
+    }
+    Ok(())
+}
+
 static FILE_DRAG: AtomicBool = AtomicBool::new(false);
 static CLOSE_POPUP_AFTER_DRAG: AtomicBool = AtomicBool::new(false);
 

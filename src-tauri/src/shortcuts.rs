@@ -30,6 +30,7 @@ pub enum Action {
     Forward,
     Bookmark,
     ToggleBookmarksBar,
+    ToggleTools,
     Downloads,
     Find,
     ZoomIn,
@@ -177,6 +178,10 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             settings.show_bookmarks_bar = !settings.show_bookmarks_bar
         })
         .map(|_| ()),
+        Action::ToggleTools => settings::update(app, |settings| {
+            settings.show_tools_toolbar = !settings.show_tools_toolbar
+        })
+        .map(|_| ()),
         Action::ZoomIn | Action::ZoomOut | Action::ZoomReset => {
             let change = match action {
                 Action::ZoomIn => "in",
@@ -297,7 +302,8 @@ fn category_of(action: &str) -> &'static str {
         | "focus-f6"
         | "command-palette"
         | "bookmark"
-        | "toggle-bookmarks-bar" => "Address bar and bookmarks",
+        | "toggle-bookmarks-bar"
+        | "toggle-tools" => "Address bar and bookmarks",
         "reload" | "reload-key" | "back" | "forward" | "find" | "zoom-in" | "zoom-in-shift"
         | "zoom-out" | "zoom-reset" | "devtools" | "inspect" => "Page",
         _ => "Browser",
@@ -373,9 +379,10 @@ fn saved_or_empty(app: &AppHandle) -> Vec<ShortcutBinding> {
 
 /// Saved rows win. An action missing from the file keeps its default. An empty `keys` list unbinds it.
 pub fn effective(saved: &[ShortcutBinding]) -> Vec<ShortcutBinding> {
+    let saved = migrated(saved);
     let defaults = defaults();
     let mut rows = Vec::new();
-    for binding in saved {
+    for binding in &saved {
         let unbound_by_default = defaults
             .iter()
             .any(|item| item.action == binding.action && item.keys.is_empty());
@@ -570,6 +577,7 @@ fn action_from(action: &str) -> Option<Action> {
         "forward" => Action::Forward,
         "bookmark" => Action::Bookmark,
         "toggle-bookmarks-bar" => Action::ToggleBookmarksBar,
+        "toggle-tools" => Action::ToggleTools,
         "downloads" => Action::Downloads,
         "find" => Action::Find,
         "zoom-in" | "zoom-in-shift" => Action::ZoomIn,
@@ -589,6 +597,23 @@ fn action_from(action: &str) -> Option<Action> {
         "debug-hud" => Action::DebugHud,
         _ => return None,
     })
+}
+
+/// `ctrl+shift+t` used to reopen a closed tab. That chord now shows or hides the tools toolbar.
+fn migrated(saved: &[ShortcutBinding]) -> Vec<ShortcutBinding> {
+    saved
+        .iter()
+        .cloned()
+        .map(|mut binding| {
+            if binding.action == "reopen-tab"
+                && binding.keys.len() == 1
+                && binding.keys[0] == "ctrl+shift+t"
+            {
+                binding.keys = vec!["ctrl+shift+z".into()];
+            }
+            binding
+        })
+        .collect()
 }
 
 fn bind(action: &str, label: &str, keys: &str) -> ShortcutBinding {
@@ -617,7 +642,7 @@ pub fn defaults() -> Vec<ShortcutBinding> {
         bind("sleep-other-tabs", "Sleep other tabs", ""),
         bind("new-tab", "New tab", "ctrl+t"),
         bind("close-tab", "Close tab", "ctrl+w"),
-        bind("reopen-tab", "Reopen closed tab", "ctrl+shift+t"),
+        bind("reopen-tab", "Reopen closed tab", "ctrl+shift+z"),
         bind("next-tab", "Next tab", "ctrl+tab"),
         bind("previous-tab", "Previous tab", "ctrl+shift+tab"),
         bind("tab-switcher", "Tab switcher", "ctrl+backquote"),
@@ -640,6 +665,7 @@ pub fn defaults() -> Vec<ShortcutBinding> {
             "Show or hide bookmarks bar",
             "ctrl+shift+b",
         ),
+        bind("toggle-tools", "Show or hide tools", "ctrl+shift+t"),
         bind("downloads", "Downloads", "ctrl+j"),
         bind("find", "Find in page", "ctrl+f"),
         bind("zoom-in", "Zoom in", "ctrl+plus"),
@@ -738,6 +764,31 @@ mod tests {
             .find(|row| row.action == "tab-switcher-back")
             .expect("switcher back");
         assert_eq!(back.keys, vec!["ctrl+shift+backquote".to_string()]);
+    }
+
+    #[test]
+    fn ctrl_shift_t_shows_or_hides_tools() {
+        let rows = effective(&[]);
+        let tools = rows.iter().find(|row| row.action == "toggle-tools").expect("tools");
+        assert_eq!(tools.keys, vec!["ctrl+shift+t".to_string()]);
+        let reopen = rows.iter().find(|row| row.action == "reopen-tab").expect("reopen");
+        assert_eq!(reopen.keys, vec!["ctrl+shift+z".to_string()]);
+
+        let saved = vec![ShortcutBinding {
+            action: "reopen-tab".into(),
+            label: "Reopen closed tab".into(),
+            keys: vec!["ctrl+shift+t".into()],
+            category: String::new(),
+        }];
+        let rows = effective(&saved);
+        assert_eq!(
+            rows.iter().find(|row| row.action == "reopen-tab").expect("reopen").keys,
+            vec!["ctrl+shift+z".to_string()]
+        );
+        assert_eq!(
+            rows.iter().find(|row| row.action == "toggle-tools").expect("tools").keys,
+            vec!["ctrl+shift+t".to_string()]
+        );
     }
 
     #[test]

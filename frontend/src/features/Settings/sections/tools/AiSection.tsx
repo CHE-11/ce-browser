@@ -11,6 +11,7 @@ import { SETTINGS_SECTIONS } from "../../settings-sections";
 import { errorText, inputClass, matchesQuery, Row, Section, useReportMatch, useSettingChanged, useSettingVisible, type SettingsSectionProps } from "../../SettingsControls";
 import { useAiModels } from "../../../../lib/ai/useAiModels";
 import { AiModelPicker } from "./AiModelPicker";
+import { SiteList } from "./AutomationSection";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-ai")!;
 
@@ -30,6 +31,8 @@ const THINKING_LEVELS = [
 const KEY_LABEL = "API key";
 const SUGGESTIONS_LABEL = "Agent suggestions";
 const SUGGESTIONS_HINT = "Shown in the agent panel. Click one to fill in the task.";
+const BLOCKED_LABEL = "Blocked sites";
+const BLOCKED_HINT = "The agent says it isn't allowed and won't take questions or screenshots. These sites are blocked for automation too.";
 const SUGGESTION_LIMIT = 12;
 
 function keyLabel(provider: AiProviderId) {
@@ -48,6 +51,7 @@ function slotOf(settings: SettingsSectionProps["settings"], provider: AiProvider
 
 export function AiSection({ settings, query, onUpdate, onError, onMatch }: SettingsSectionProps) {
   const provider = settings.aiProvider;
+  const blockedSites = settings.aiBlockedSites ?? [];
   const slot = slotOf(settings, provider);
   const remote = remoteProvider(provider);
   const showEndpoint = provider === "custom" || provider === "local";
@@ -76,6 +80,9 @@ export function AiSection({ settings, query, onUpdate, onError, onMatch }: Setti
     THINKING_HINT,
     SUGGESTIONS_LABEL,
     SUGGESTIONS_HINT,
+    BLOCKED_LABEL,
+    BLOCKED_HINT,
+    ...blockedSites,
     KEY_LABEL,
     keyLabel(provider),
     "openai",
@@ -243,6 +250,14 @@ export function AiSection({ settings, query, onUpdate, onError, onMatch }: Setti
       </Row>
       ) : null}
       <AgentSuggestions settings={settings} onUpdate={onUpdate} />
+      <SiteList
+        id="settings-ai-blocked"
+        label={BLOCKED_LABEL}
+        hint={BLOCKED_HINT}
+        empty="No sites are blocked for AI."
+        sites={blockedSites}
+        onChange={(aiBlockedSites) => onUpdate({ aiBlockedSites })}
+      />
       <Row id="settings-ai-key" setting="aiProvider" label={keyLabel(provider)} hint={keyHint}>
         <div id="settings-ai-key-row" className="flex flex-col gap-2">
           <input

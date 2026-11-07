@@ -421,15 +421,18 @@ pub struct BrowserSettings {
     /// Order of pinned toolbar icons. Empty keeps the built-in order, then extensions.
     #[serde(default)]
     pub toolbar_order: Vec<String>,
-    /// Built-in tools sit on the right strip. Off puts them on the address bar.
+    /// Built-in tools sit on the right. Off lays that toolbar out above the bookmarks bar.
     #[serde(default = "default_true")]
     pub vertical_toolbar: bool,
-    /// Pinned extensions share the vertical tool strip on the right.
+    /// Retired. Older files may still set this. Pinned extensions stay next to the address bar.
     #[serde(default)]
     pub vertical_toolbar_extensions: bool,
-    /// Short names under icons on the vertical tool strip.
+    /// Short names under icons on the tools toolbar.
     #[serde(default)]
     pub vertical_toolbar_labels: bool,
+    /// The tools toolbar is visible. Ctrl+Shift+T toggles it.
+    #[serde(default = "default_true")]
+    pub show_tools_toolbar: bool,
     /// Tint the active tab and address bar from the site's theme color or favicon.
     #[serde(default = "default_true")]
     pub site_accent: bool,
@@ -657,6 +660,9 @@ pub struct BrowserSettings {
     /// Prompts offered in the agent panel. An older file omits this and gets the summary prompt.
     #[serde(default = "default_agent_suggestions")]
     pub agent_suggestions: Vec<String>,
+    /// Hosts the agent will not read, screenshot, or answer about. Also blocked for automation.
+    #[serde(default)]
+    pub ai_blocked_sites: Vec<String>,
     /// Agent, recorded flows, schedules and the MCP server. An older file omits this.
     #[serde(default)]
     pub automation: AutomationSettings,
@@ -883,6 +889,9 @@ impl TabSleepSettings {
     }
 }
 
+/// What the agent says on a page blocked for AI, before it reads the page or takes a screenshot.
+pub const AI_SITE_BLOCKED: &str = "Not allowed on this site.";
+
 /// Host of a URL or a bare host, as the never-sleep list stores it. Empty for pages without a host.
 pub fn sleep_site_key(raw: &str) -> String {
     let raw = raw.trim();
@@ -897,6 +906,29 @@ pub fn sleep_site_key(raw: &str) -> String {
         raw.split('/').next().unwrap_or_default().to_string()
     };
     crate::adblock::site_key(&host)
+}
+
+impl BrowserSettings {
+    /// Whether the agent may not read, screenshot, or answer about this page.
+    pub fn ai_blocked(&self, url: &str) -> bool {
+        let host = sleep_site_key(url);
+        !host.is_empty()
+            && self
+                .ai_blocked_sites
+                .iter()
+                .any(|site| host == *site || host.ends_with(&format!(".{site}")))
+    }
+
+    /// Automation settings with every site blocked for AI included in the blocklist.
+    pub fn automation_with_blocks(&self) -> AutomationSettings {
+        let mut auto = self.automation.clone();
+        for site in &self.ai_blocked_sites {
+            if !auto.blocked_sites.iter().any(|item| item == site) {
+                auto.blocked_sites.push(site.clone());
+            }
+        }
+        auto
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -975,6 +1007,85 @@ const PAPER_SIZES: &[&str] = &[
 ];
 const DEFAULT_PAPER_CHOICES: &[&str] = &["letter", "tabloid", "legal"];
 const MARGINS: &[&str] = &["none", "narrow", "normal", "wide"];
+const MAX_PRINT_PRESETS: usize = 12;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct PrintPreset {
+    pub id: String,
+    pub name: String,
+    /// `article` keeps the main content only. `full` keeps the whole page.
+    pub mode: String,
+    pub remove_ads: bool,
+    pub remove_navigation: bool,
+    pub remove_popups: bool,
+    pub remove_social: bool,
+    pub remove_media: bool,
+    /// Percent of the page's text size.
+    pub text_size: u32,
+    pub image_size: String,
+    pub remove_backgrounds: bool,
+    pub font: String,
+    /// Title, source URL and date above the content.
+    pub show_header: bool,
+    pub paper: String,
+    pub landscape: bool,
+    pub margins: String,
+    pub header_footer: bool,
+    pub print_backgrounds: bool,
+}
+
+impl Default for PrintPreset {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: "Preset".into(),
+            mode: "article".into(),
+            remove_ads: true,
+            remove_navigation: true,
+            remove_popups: true,
+            remove_social: true,
+            remove_media: false,
+            text_size: 100,
+            image_size: "original".into(),
+            remove_backgrounds: false,
+            font: "original".into(),
+            show_header: true,
+            paper: "letter".into(),
+            landscape: false,
+            margins: "normal".into(),
+            header_footer: false,
+            print_backgrounds: true,
+        }
+    }
+}
+
+fn default_print_presets() -> Vec<PrintPreset> {
+    vec![
+        PrintPreset {
+            id: "article".into(),
+            name: "Article".into(),
+            ..PrintPreset::default()
+        },
+        PrintPreset {
+            id: "clean-page".into(),
+            name: "Clean page".into(),
+            mode: "full".into(),
+            remove_navigation: false,
+            remove_social: false,
+            ..PrintPreset::default()
+        },
+        PrintPreset {
+            id: "reader".into(),
+            name: "Reader".into(),
+            remove_media: true,
+            remove_backgrounds: true,
+            font: "serif".into(),
+            print_backgrounds: false,
+            ..PrintPreset::default()
+        },
+    ]
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
@@ -1005,6 +1116,9 @@ pub struct PrintEditorSettings {
     pub header_footer: bool,
     pub print_backgrounds: bool,
     pub open_after_save: bool,
+    /// Named recipes for Quick clean PDF. Empty uses the editor's last choices.
+    #[serde(default = "default_print_presets")]
+    pub presets: Vec<PrintPreset>,
 }
 
 impl Default for PrintEditorSettings {
@@ -1033,6 +1147,7 @@ impl Default for PrintEditorSettings {
             header_footer: false,
             print_backgrounds: true,
             open_after_save: false,
+            presets: default_print_presets(),
         }
     }
 }
@@ -1050,12 +1165,62 @@ impl PrintEditorSettings {
         keep(&mut self.font, PRINT_FONTS, defaults.font);
         keep(&mut self.paper, PAPER_SIZES, defaults.paper);
         keep(&mut self.margins, MARGINS, defaults.margins);
-        self.text_size = ((self.text_size.clamp(70, 150) + 2) / 5) * 5;
+        self.text_size = snap_text_size(self.text_size);
         self.paper_choices = paper_choices(self.paper_choices);
         self.custom_width = paper_inches(self.custom_width);
         self.custom_height = paper_inches(self.custom_height);
+        self.presets = print_presets(self.presets);
         self
     }
+}
+
+fn snap_text_size(value: u32) -> u32 {
+    ((value.clamp(70, 150) + 2) / 5) * 5
+}
+
+fn preset_id_ok(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_')
+}
+
+fn preset_name(name: &str) -> String {
+    let trimmed: String = name.trim().chars().take(40).collect();
+    if trimmed.is_empty() {
+        "Preset".into()
+    } else {
+        trimmed
+    }
+}
+
+/// Drops blank and duplicate ids. An empty list stays empty.
+fn print_presets(presets: Vec<PrintPreset>) -> Vec<PrintPreset> {
+    let mut kept = Vec::new();
+    for mut preset in presets {
+        if !preset_id_ok(&preset.id) || kept.iter().any(|item: &PrintPreset| item.id == preset.id) {
+            continue;
+        }
+        let defaults = PrintPreset::default();
+        let keep = |value: &mut String, allowed: &[&str], fallback: &str| {
+            if !allowed.contains(&value.as_str()) {
+                *value = fallback.to_string();
+            }
+        };
+        keep(&mut preset.mode, PRINT_MODES, &defaults.mode);
+        keep(&mut preset.image_size, IMAGE_SIZES, &defaults.image_size);
+        keep(&mut preset.font, PRINT_FONTS, &defaults.font);
+        keep(&mut preset.paper, PAPER_SIZES, &defaults.paper);
+        keep(&mut preset.margins, MARGINS, &defaults.margins);
+        preset.name = preset_name(&preset.name);
+        preset.text_size = snap_text_size(preset.text_size);
+        kept.push(preset);
+        if kept.len() >= MAX_PRINT_PRESETS {
+            break;
+        }
+    }
+    kept
 }
 
 fn paper_choices(choices: Vec<String>) -> Vec<String> {
@@ -1186,6 +1351,7 @@ impl Default for BrowserSettings {
             vertical_toolbar: true,
             vertical_toolbar_extensions: false,
             vertical_toolbar_labels: false,
+            show_tools_toolbar: true,
             site_accent: true,
             pin_tab_border: true,
             translate_language: default_translate_language(),
@@ -1262,6 +1428,7 @@ impl Default for BrowserSettings {
             file_handlers: default_file_handlers(),
             agent_panel_width: default_agent_panel_width(),
             agent_suggestions: default_agent_suggestions(),
+            ai_blocked_sites: Vec::new(),
             automation: AutomationSettings::default(),
         }
     }
@@ -1575,6 +1742,7 @@ impl BrowserSettings {
             .agent_panel_width
             .clamp(AGENT_PANEL_WIDTH_PX.0, AGENT_PANEL_WIDTH_PX.1);
         self.agent_suggestions = clean_agent_suggestions(&self.agent_suggestions);
+        self.ai_blocked_sites = automation_hosts(&self.ai_blocked_sites);
         self.automation = self.automation.normalize();
         if !TAB_LAYOUTS.contains(&self.tab_layout.as_str()) {
             self.tab_layout = defaults.tab_layout.clone();
@@ -2501,6 +2669,15 @@ mod tests {
         );
         assert_eq!(loaded.print_editor.custom_width, 0.0);
         assert_eq!(loaded.print_editor.custom_height, 0.0);
+        assert_eq!(
+            loaded
+                .print_editor
+                .presets
+                .iter()
+                .map(|preset| preset.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["article", "clean-page", "reader"]
+        );
         assert!(loaded.page_capture.full_page);
         assert_eq!(loaded.page_markdown.scope, "article");
         assert!(loaded.page_markdown.images);
@@ -2527,6 +2704,54 @@ mod tests {
         assert_eq!(loaded.print_editor.paper_choices, vec!["a4".to_string()]);
         assert_eq!(loaded.print_editor.custom_width, 0.0);
         assert_eq!(loaded.print_editor.custom_height, 0.0);
+    }
+
+    #[test]
+    fn an_empty_print_preset_list_stays_empty() {
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"printEditor":{"presets":[]}}"#).expect("settings parse");
+        assert!(loaded.normalize().print_editor.presets.is_empty());
+    }
+
+    #[test]
+    fn a_bad_print_preset_is_repaired() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"printEditor":{"presets":[
+                {"id":"mine","name":"  Receipt  ","mode":"nope","paper":"a9","textSize":999},
+                {"id":"mine","name":"Again"},
+                {"id":"","name":"Blank"},
+                {"id":"bad id","name":"Spaces"},
+                {"id":"notes","name":"   ","font":"comic"}
+            ]}}"#,
+        )
+        .expect("settings parse");
+        let presets = loaded.normalize().print_editor.presets;
+        assert_eq!(presets.len(), 2);
+        assert_eq!(presets[0].id, "mine");
+        assert_eq!(presets[0].name, "Receipt");
+        assert_eq!(presets[0].mode, "article");
+        assert_eq!(presets[0].paper, "letter");
+        assert_eq!(presets[0].text_size, 150);
+        assert!(presets[0].remove_ads);
+        assert_eq!(presets[1].id, "notes");
+        assert_eq!(presets[1].name, "Preset");
+        assert_eq!(presets[1].font, "original");
+    }
+
+    #[test]
+    fn print_presets_keep_twelve() {
+        let mut settings = super::BrowserSettings::default();
+        settings.print_editor.presets = (0..15)
+            .map(|index| super::PrintPreset {
+                id: format!("p{index}"),
+                name: format!("P{index}"),
+                ..super::PrintPreset::default()
+            })
+            .collect();
+        let presets = settings.normalize().print_editor.presets;
+        assert_eq!(presets.len(), 12);
+        assert_eq!(presets[0].id, "p0");
+        assert_eq!(presets[11].id, "p11");
     }
 
     #[test]
@@ -2616,6 +2841,7 @@ mod tests {
         assert!(loaded.vertical_toolbar);
         assert!(!loaded.vertical_toolbar_extensions);
         assert!(!loaded.vertical_toolbar_labels);
+        assert!(loaded.show_tools_toolbar);
     }
 
     #[test]
@@ -2766,6 +2992,23 @@ mod tests {
         let empty: super::BrowserSettings =
             serde_json::from_str(r#"{"agentSuggestions":[]}"#).expect("settings parse");
         assert!(empty.normalize().agent_suggestions.is_empty());
+    }
+
+    #[test]
+    fn ai_blocked_sites_default_when_missing_and_join_the_automation_blocklist() {
+        let missing: super::BrowserSettings = serde_json::from_str("{}").expect("settings parse");
+        assert!(missing.normalize().ai_blocked_sites.is_empty());
+        let saved: super::BrowserSettings = serde_json::from_str(
+            r#"{"aiBlockedSites":["https://www.Bank.com/login","not a host","bank.com"],"automation":{"blockedSites":["shop.example"]}}"#,
+        )
+        .expect("settings parse");
+        let saved = saved.normalize();
+        assert_eq!(saved.ai_blocked_sites, vec!["bank.com".to_string()]);
+        assert!(saved.ai_blocked("https://accounts.bank.com/a"));
+        assert!(!saved.ai_blocked("https://example.com"));
+        let guard = saved.automation_with_blocks();
+        assert!(guard.blocked_sites.iter().any(|site| site == "bank.com"));
+        assert!(guard.blocked_sites.iter().any(|site| site == "shop.example"));
     }
 
     #[test]

@@ -6,7 +6,7 @@ import { PageFailure } from "@/components/PageFailure";
 import { SplitDivider } from "@/components/SplitDivider";
 import { VerticalTabs } from "../BrowserHeader/Tabs/VerticalTabs";
 import { PageLoading, pagePending } from "./PageLoading";
-import { VerticalToolbar } from "./VerticalToolbar/VerticalToolbar";
+import { ToolsToolbar } from "./ToolsToolbar/ToolsToolbar";
 import { ViewportBar } from "./ViewportBar";
 import { ViewportHandles } from "./ViewportHandles";
 
@@ -86,7 +86,7 @@ export function BrowserBody({
         {devtools?.visible ? <DevtoolsDivider ratio={devtools.ratio} /> : null}
       </div>
       {showToolStrip ? (
-        <VerticalToolbar ref={toolbarRef} activeTab={activeTab} extensions={extensions} settings={settings} />
+        <ToolsToolbar ref={toolbarRef} layout="vertical" activeTab={activeTab} extensions={extensions} settings={settings} />
       ) : null}
     </div>
   );

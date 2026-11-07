@@ -7,6 +7,7 @@ use crate::secrets;
 use crate::settings::AutomationSettings;
 
 use super::memory;
+use super::runs::AgentAccess;
 
 fn autonomy_text(level: &str) -> &'static str {
     match level {
@@ -22,10 +23,42 @@ fn autonomy_text(level: &str) -> &'static str {
     }
 }
 
+fn access_text(access: &AgentAccess) -> String {
+    let mut out = if access.sites == "site" && !access.site.is_empty() {
+        format!(
+            "\n\nAccess: work only on {}. Pages on other sites are refused.",
+            access.site
+        )
+    } else if access.sites == "site" {
+        "\n\nAccess: work only on the first site you open; other sites are refused.".to_string()
+    } else {
+        "\n\nAccess: any site automation may use.".to_string()
+    };
+    let off: Vec<&str> = [
+        (!access.tabs, "other tabs"),
+        (!access.browser_data, "history, bookmarks, downloads, boards and flows"),
+        (!access.files, "files"),
+        (!access.clipboard, "the clipboard"),
+        (!access.memory, "memory"),
+        (!access.notifications, "notifications"),
+    ]
+    .into_iter()
+    .filter_map(|(blocked, name)| blocked.then_some(name))
+    .collect();
+    if !off.is_empty() {
+        out.push_str(&format!(
+            " The user has not given you access to {}. Don't ask for workarounds.",
+            off.join(", ")
+        ));
+    }
+    out
+}
+
 pub fn system_prompt(
     app: &AppHandle,
     auto: &AutomationSettings,
     autonomy: &str,
+    access: &AgentAccess,
     url: &str,
     helper: bool,
 ) -> String {
@@ -58,7 +91,8 @@ Autonomy for this run: {level}",
         date = today(),
         level = autonomy_text(autonomy),
     );
-    if !helper && auto.max_parallel_agents > 0 {
+    out.push_str(&access_text(access));
+    if !helper && auto.max_parallel_agents > 0 && access.helpers && access.tabs {
         out.push_str(&format!(
             "\n\nHelpers: for independent parts of a big task, such as comparing several sites, call delegate to start up to {} helper agents in background tabs. Each reports back as a message when it finishes; call wait_agents to wait for them.",
             auto.max_parallel_agents
@@ -67,7 +101,7 @@ Autonomy for this run: {level}",
     if helper {
         out.push_str("\n\nYou are a helper started by another agent. Do only your part, then call done with what you found.");
     }
-    if auto.agent_memory {
+    if auto.agent_memory && access.memory {
         out.push_str("\n\nMemory: call remember to keep a lasting fact about the user or a site, such as a preference, an account name or how a site works. Call recall to look notes up. Don't store secrets.");
         let notes = memory::for_prompt(app, url);
         if !notes.is_empty() {

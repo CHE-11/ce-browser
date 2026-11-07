@@ -13,7 +13,6 @@ import {
   Mic,
   Paintbrush,
   Palette,
-  PanelRight,
   Pin,
   Puzzle,
   RotateCw,
@@ -84,7 +83,7 @@ import { LoadBar } from "../../../../components/LoadBar";
 import { WindowControls } from "../../../../components/WindowControls";
 import { MediaHubButton } from "../../../BuiltInExtensions/media/MediaHubButton";
 import { ProfileSwitcherButton } from "./ProfileSwitcherButton";
-import { ToolbarEntry } from "../../BrowserBody/VerticalToolbar/VerticalToolbar";
+import { ToolbarEntry } from "../../BrowserBody/ToolsToolbar/ToolsToolbar";
 
 type AddressBarProps = {
   snapshot: WindowTabsState;
@@ -568,13 +567,10 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const toolbarExtensions = extensions.filter(
     (extension) => extension.enabled && toolbarPinned(settings, extension.id),
   );
-  const { address: toolbarIds, all: toolbarOrderIds } = splitToolbar(
+  const { address: addressExtensions, all: toolbarOrderIds } = splitToolbar(
     settings,
     toolbarExtensions.map((extension) => extension.id),
   );
-  const extensionIds = new Set(toolbarExtensions.map((extension) => extension.id));
-  const addressBuiltins = toolbarIds.filter((id) => !extensionIds.has(id));
-  const addressExtensions = toolbarIds.filter((id) => extensionIds.has(id));
   const moveToolbar = (from: string, to: string) => {
     if (!settings) {
       return;
@@ -859,30 +855,6 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       </div>
 
       <div id="address-tools" className="flex items-center">
-        {settings?.verticalToolbar === false ? (
-          <IconButton
-            id="address-tools-side"
-            label="Show tools on the side"
-            onClick={() => void saveSettings({ ...settings, verticalToolbar: true })}
-          >
-            <PanelRight id="address-tools-side-icon" aria-hidden />
-          </IconButton>
-        ) : null}
-        {addressBuiltins.map((id) => (
-          <ToolbarEntry
-            key={id}
-            id={id}
-            idPrefix="address"
-            extension={undefined}
-            activeTab={activeTab}
-            settings={settings}
-            labeled={false}
-            onMove={moveToolbar}
-          />
-        ))}
-        {addressBuiltins.length > 0 ? (
-          <div id="address-tools-end" className="mx-0.5 h-4 w-px shrink-0 bg-zinc-600" />
-        ) : null}
         {addressExtensions.map((id) => (
           <ToolbarEntry
             key={id}

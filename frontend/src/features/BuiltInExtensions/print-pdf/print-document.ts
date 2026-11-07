@@ -88,7 +88,7 @@ const HEADER_CSS = `
 [data-ce-header] [data-ce-site] { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #666; margin: 0 0 6px; }
 [data-ce-header] h1 { font-size: 26px; line-height: 1.25; margin: 0 0 8px; color: #111; }
 [data-ce-header] [data-ce-meta] { font-size: 13px; color: #555; margin: 0 0 2px; }
-[data-ce-header] [data-ce-url] { font-size: 11px; color: #777; word-break: break-all; margin: 0; }
+[data-ce-header] [data-ce-url] { display: block; font-size: 11px; color: #0b57d0; word-break: break-all; margin: 0; text-decoration: underline; }
 `;
 
 const PRINT_CSS = `
@@ -143,8 +143,27 @@ function buildHeader(doc: Document, page: ExtractedPage) {
   add("h1", "", "ce-header-title", page.title);
   const meta = [page.byline, formatDate(page.published)].filter(Boolean).join(" · ");
   add("p", "data-ce-meta", "ce-header-meta", meta);
-  add("p", "data-ce-url", "ce-header-url", page.url);
+  if (page.url && linkable(page.url)) {
+    const link = doc.createElement("a");
+    link.setAttribute("data-ce-url", "");
+    link.setAttribute(ID_ATTR, "ce-header-url");
+    link.setAttribute("href", page.url);
+    link.textContent = page.url;
+    header.appendChild(link);
+  } else {
+    add("p", "data-ce-url", "ce-header-url", page.url);
+  }
   return header;
+}
+
+/** Addresses the PDF viewer can open. Anything else stays plain text. */
+function linkable(url: string) {
+  try {
+    const protocol = new URL(url).protocol;
+    return protocol === "http:" || protocol === "https:" || protocol === "file:";
+  } catch {
+    return false;
+  }
 }
 
 function ensureHead(doc: Document, page: ExtractedPage) {

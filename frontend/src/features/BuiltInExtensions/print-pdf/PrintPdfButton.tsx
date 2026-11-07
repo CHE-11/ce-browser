@@ -7,7 +7,7 @@ import { TabInfo, BrowserSettings, PageToolRequest } from "@type/browser";
 import { LoaderCircle, Check, Printer } from "lucide-react";
 import { tabParams, joinPath, fileNameFor, capturable } from "../shared";
 import { contentStateFrom, buildDocument, parsePage, renderOffscreen } from "./print-document";
-import { DEFAULT_PRINT_SETTINGS, pdfOptions, contentBox } from "./print-options";
+import { DEFAULT_PRINT_SETTINGS, applyPrintPreset, pdfOptions, contentBox } from "./print-options";
 
 type PrintPdfButtonProps = {
   activeTab: TabInfo | undefined;
@@ -34,7 +34,8 @@ export function PrintPdfButton({ activeTab, settings }: PrintPdfButtonProps) {
   };
 
   const run = async (request: Extract<PageToolRequest, { tool: "print-pdf" }>) => {
-    const format = settingsRef.current?.printEditor ?? DEFAULT_PRINT_SETTINGS;
+    const stored = settingsRef.current?.printEditor ?? DEFAULT_PRINT_SETTINGS;
+    const format = request.action === "quick" && request.presetId ? applyPrintPreset(stored, request.presetId) : stored;
     const result = new URLSearchParams({ tab: String(request.tabId), title: request.title, url: request.url });
     try {
       const folder = settingsRef.current?.downloadDir || (await defaultDownloadDir());

@@ -285,6 +285,9 @@ fn check_page(app: &AppHandle, flow: &Flow) {
         return;
     }
     let url = tabs::resolve(app, &flow.start_url);
+    if settings::get(app).ai_blocked(url.as_str()) {
+        return;
+    }
     let opened = tabs::open(
         app,
         tabs::OpenTab {
@@ -436,8 +439,11 @@ pub fn on_visit(app: &AppHandle, tab: u32, url: &str) {
     let handle = app.clone();
     let url = url.to_string();
     thread::spawn(move || {
-        let auto = settings::get(&handle).automation;
-        if !auto.enabled || !auto.scheduler_enabled {
+        let current = settings::get(&handle);
+        if !current.automation.enabled || !current.automation.scheduler_enabled {
+            return;
+        }
+        if current.ai_blocked(&url) {
             return;
         }
         if tabs::tab_info(&handle, tab).is_none_or(|info| info.automated) {

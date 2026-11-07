@@ -348,7 +348,7 @@ pub fn run(
 }
 
 fn check_page(app: &AppHandle, tab: u32) -> Result<(), String> {
-    let auto = settings::get(app).automation;
+    let auto = settings::get(app).automation_with_blocks();
     if !auto.enabled {
         return Err("Automation is turned off in Settings.".into());
     }
@@ -477,7 +477,7 @@ pub fn crawl(
     instruction: &str,
     name: &str,
 ) -> Result<DatasetInfo, String> {
-    let auto = settings::get(app).automation;
+    let auto = settings::get(app).automation_with_blocks();
     if !auto.enabled {
         return Err("Automation is turned off in Settings.".into());
     }

@@ -11,7 +11,7 @@ use crate::{paths, tabs};
 use super::super::memory::{self, MemoryItem};
 use super::super::runs::{self, Answer, PlanItem, StartOptions, with_run};
 use super::{
-    Ctx, Done, Kind, Tool, arg_bool, arg_f64, arg_str, gate, halt, object, step, tool,
+    Ctx, Done, Kind, Tool, arg_bool, arg_f64, arg_str, gate, halt, object, site_gate, step, tool,
 };
 
 pub fn tools(auto: &AutomationSettings, helper: bool) -> Vec<Tool> {
@@ -271,6 +271,7 @@ fn delegate(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
             &address
         },
     );
+    site_gate(ctx, url.as_str())?;
     gate(ctx, policy::open(ctx.auto, url.as_str()))?;
     halt(ctx)?;
     let opened = tabs::open(

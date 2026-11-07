@@ -28,30 +28,24 @@ export function toolbarPinned(settings: BrowserSettings | null, id: string) {
 }
 
 export type ToolbarSplit = {
-  /** Pinned built-in tools, plus extensions when that setting is on. */
-  vertical: string[];
-  /** Pinned extensions that stay next to the address bar. */
+  /** Pinned built-in tools on the tools toolbar. */
+  tools: string[];
+  /** Pinned extensions next to the address bar. */
   address: string[];
   /** Every pinned id, in saved order. Dragging uses this list. */
   all: string[];
 };
 
-/** Built-in tools go on the right strip unless `verticalToolbar` is off. Extensions follow `verticalToolbarExtensions`. */
+/** Built-in tools stay on the tools toolbar. Extensions stay next to the address bar. */
 export function splitToolbar(settings: BrowserSettings | null, extensionIds: string[]): ToolbarSplit {
   const pinnedExtensions = extensionIds.filter((id) => toolbarPinned(settings, id));
   const all = toolbarOrder(settings?.toolbarOrder, [
     ...DEFAULT_TOOLBAR.filter((id) => toolbarPinned(settings, id)),
     ...pinnedExtensions,
   ]);
-  if (settings?.verticalToolbar === false) {
-    return { vertical: [], address: all, all };
-  }
-  if (settings?.verticalToolbarExtensions) {
-    return { vertical: all, address: [], all };
-  }
   const extensions = new Set(pinnedExtensions);
   return {
-    vertical: all.filter((id) => !extensions.has(id)),
+    tools: all.filter((id) => !extensions.has(id)),
     address: all.filter((id) => extensions.has(id)),
     all,
   };

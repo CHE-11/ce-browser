@@ -697,7 +697,7 @@ fn call_tool(
     args: &Value,
     client: &str,
 ) -> Result<Vec<Value>, String> {
-    let auto = settings::get(app).automation;
+    let auto = settings::get(app).automation_with_blocks();
     if !auto.enabled || !auto.mcp_enabled {
         return Err("Automation is turned off in ce-browser Settings.".into());
     }

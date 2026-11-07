@@ -728,12 +728,14 @@ export type BrowserSettings = {
   hiddenToolbarExtensions: string[];
   /** Order of pinned toolbar icons. Empty keeps the built-in order, then extensions. */
   toolbarOrder: string[];
-  /** Built-in tools sit on the right strip. Off puts them on the address bar. */
+  /** Built-in tools sit on the right. Off lays that toolbar out above the bookmarks bar. */
   verticalToolbar: boolean;
-  /** Pinned extensions share the vertical tool strip on the right. */
+  /** Retired. Pinned extensions stay next to the address bar. */
   verticalToolbarExtensions: boolean;
-  /** Short names under icons on the vertical tool strip. */
+  /** Short names under icons on the tools toolbar. */
   verticalToolbarLabels: boolean;
+  /** The tools toolbar is visible. Ctrl+Shift+T toggles it. */
+  showToolsToolbar: boolean;
   /** Tint the active tab and address bar from the site's color. */
   siteAccent: boolean;
   /** Site theme color or favicon along the top of pinned tabs. */
@@ -879,6 +881,8 @@ export type BrowserSettings = {
   agentPanelWidth: number;
   /** Prompts offered in the agent panel. */
   agentSuggestions: string[];
+  /** Hosts the agent will not read, screenshot, or answer about. Also blocked for automation. */
+  aiBlockedSites: string[];
   /** Agent, recorded flows, schedules, and the MCP server. */
   automation: AutomationSettings;
 };
@@ -1118,6 +1122,32 @@ export type PaperSize =
 export type PrintPaper = PaperSize | "custom";
 export type PrintMargins = "none" | "narrow" | "normal" | "wide";
 
+/** A named recipe for Quick clean PDF. */
+export type PrintPreset = {
+  id: string;
+  name: string;
+  /** `article` keeps the main content only. `full` keeps the whole page. */
+  mode: PrintMode;
+  removeAds: boolean;
+  removeNavigation: boolean;
+  removePopups: boolean;
+  removeSocial: boolean;
+  removeMedia: boolean;
+  /** Percent of the page's text size, 70 to 150. */
+  textSize: number;
+  imageSize: PrintImageSize;
+  removeBackgrounds: boolean;
+  font: PrintFont;
+  /** Title, source URL and date above the content. */
+  showHeader: boolean;
+  paper: PrintPaper;
+  landscape: boolean;
+  margins: PrintMargins;
+  /** WebView2's own header and footer on every page. */
+  headerFooter: boolean;
+  printBackgrounds: boolean;
+};
+
 export type PrintEditorSettings = {
   /** `article` keeps the main content only. `full` keeps the whole page. */
   mode: PrintMode;
@@ -1146,6 +1176,8 @@ export type PrintEditorSettings = {
   headerFooter: boolean;
   printBackgrounds: boolean;
   openAfterSave: boolean;
+  /** Named recipes for Quick clean PDF. Empty uses the editor's last choices. */
+  presets: PrintPreset[];
 };
 
 export type PageCaptureSettings = {
@@ -1247,6 +1279,8 @@ export type PageToolRequest =
   | {
       tool: "print-pdf";
       action: "quick" | "as-is";
+      /** Named quick-clean recipe. Empty uses the editor's last choices. */
+      presetId: string;
       window: string;
       tabId: number;
       title: string;
@@ -1667,6 +1701,35 @@ export type AgentRun = {
   /** Page actions that can be saved as a flow. */
   flowSteps: number;
   startUrl: string;
+  access: AgentAccess;
+};
+
+/** What a run may reach. Tools outside it are not offered to the model. */
+export type AgentAccess = {
+  /** `site` keeps the run on one site. `browser` lets it go anywhere automation may. */
+  sites: "site" | "browser";
+  /** The site a `site` run is held to. Blank fills in from the first web page. */
+  site: string;
+  /** Open, switch, read and close other tabs. */
+  tabs: boolean;
+  /** History, bookmarks, downloads, boards and saved flows. */
+  browserData: boolean;
+  /** Save files to Downloads and upload local files to pages. */
+  files: boolean;
+  clipboard: boolean;
+  memory: boolean;
+  helpers: boolean;
+  /** Run JavaScript in pages, when Settings also allows it. */
+  scripts: boolean;
+  notifications: boolean;
+};
+
+/** US dollars per million tokens. */
+export type ModelPrice = {
+  input: number;
+  output: number;
+  /** Runs on this computer, so it costs nothing per token. */
+  local: boolean;
 };
 
 export type AgentStartOptions = {
@@ -1678,6 +1741,7 @@ export type AgentStartOptions = {
   budget?: number;
   /** Guidance for the model, such as from a slash command. Not shown as part of the goal. */
   instructions?: string;
+  access?: AgentAccess;
 };
 
 /** The model's reply as it is written. Empty text clears it. */

@@ -15,7 +15,7 @@ use crate::automation::policy::{self, Verdict};
 use crate::automation::{audit, clip};
 use crate::settings::AutomationSettings;
 
-use super::runs::{self, current_tab, halted, push_step, with_run};
+use super::runs::{self, AgentAccess, current_tab, halted, push_step, with_run};
 
 /// What a tool does, which decides how many may run in one turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,14 +99,37 @@ fn tool(
     }
 }
 
-/// The tools a run may use with these settings. Helpers can't start helpers of their own.
-pub fn all(auto: &AutomationSettings, helper: bool) -> Vec<Tool> {
+/// The tools a run may use with these settings and access. Helpers can't start helpers of
+/// their own.
+pub fn all(auto: &AutomationSettings, helper: bool, access: &AgentAccess) -> Vec<Tool> {
     let mut tools = browser::tools(auto);
     tools.extend(tabs::tools());
     tools.extend(data::tools(auto));
     tools.extend(meta::tools(auto, helper));
+    tools.retain(|tool| permitted(tool.spec.name, access));
     tools
 }
+
+/// Whether `access` lets a run use the tool called `name`.
+fn permitted(name: &str, access: &AgentAccess) -> bool {
+    match name {
+        "open_tab" | "switch_tab" | "list_tabs" | "read_tab" | "close_tab" => access.tabs,
+        "search_history" | "bookmark_find" | "bookmark_add" | "list_downloads"
+        | "pin_to_board" | "list_flows" | "run_flow" => access.browser_data,
+        "save_file" | "upload" => access.files,
+        "copy_to_clipboard" => access.clipboard,
+        "remember" | "recall" | "forget" => access.memory,
+        "delegate" | "wait_agents" => access.helpers && access.tabs,
+        "run_script" => access.scripts,
+        "notify" => access.notifications,
+        "crawl" => access.sites != "site",
+        _ => true,
+    }
+}
+
+/// Tools that read the current page without acting on it. A `site` run may only use them,
+/// and the tools that act on pages, while its tab shows its own site.
+const PAGE_READERS: &[&str] = &["read_text", "read_markdown", "ocr", "look", "wait"];
 
 #[cfg(test)]
 mod tests {
@@ -118,7 +141,11 @@ mod tests {
             agent_allow_script: true,
             ..AutomationSettings::default()
         };
-        let tools = all(&everything, false);
+        let open = AgentAccess {
+            scripts: true,
+            ..AgentAccess::default()
+        };
+        let tools = all(&everything, false, &open);
         let mut names: Vec<&str> = tools.iter().map(|tool| tool.spec.name).collect();
         let count = names.len();
         names.sort_unstable();
@@ -126,16 +153,26 @@ mod tests {
         assert_eq!(names.len(), count);
         assert!(names.contains(&"run_script"));
         assert!(names.contains(&"delegate"));
-        let helper = all(&AutomationSettings::default(), true);
+        let helper = all(&AutomationSettings::default(), true, &open);
         assert!(!helper.iter().any(|tool| tool.spec.name == "delegate"));
         assert!(!helper.iter().any(|tool| tool.spec.name == "run_script"));
         let forgetful = AutomationSettings {
             agent_memory: false,
             ..AutomationSettings::default()
         };
-        assert!(!all(&forgetful, false)
+        assert!(!all(&forgetful, false, &open)
             .iter()
             .any(|tool| tool.spec.name == "remember"));
+        let narrow = AgentAccess {
+            sites: "site".into(),
+            tabs: false,
+            files: false,
+            ..AgentAccess::default()
+        };
+        let narrow = all(&everything, false, &narrow);
+        for name in ["open_tab", "save_file", "upload", "crawl", "delegate", "run_script"] {
+            assert!(!narrow.iter().any(|tool| tool.spec.name == name), "{name}");
+        }
     }
 }
 
@@ -228,18 +265,29 @@ pub fn execute(
     };
     let page = tool.kind == Kind::Page;
     let tab = current_tab(id).unwrap_or(0);
-    if tool.on_page {
-        let url = crate::tabs::tab_info(app, tab)
-            .map(|info| info.url)
-            .unwrap_or_default();
-        if let Verdict::Block(reason) = policy::page(auto, &url) {
-            push_step(app, id, "blocked", &format!("{name} refused"), &reason);
-            return Outcome::Continue {
-                result: reason,
-                image: None,
-                page: false,
-            };
-        }
+    let url = crate::tabs::tab_info(app, tab)
+        .map(|info| info.url)
+        .unwrap_or_default();
+    let refusal = if crate::settings::get(app).ai_blocked(&url)
+        && (tool.on_page || PAGE_READERS.contains(&name))
+    {
+        Some(crate::settings::AI_SITE_BLOCKED.into())
+    } else if tool.on_page
+        && let Verdict::Block(reason) = policy::page(auto, &url)
+    {
+        Some(reason)
+    } else if tool.on_page || PAGE_READERS.contains(&name) {
+        runs::site_allowed(id, &url).err()
+    } else {
+        None
+    };
+    if let Some(reason) = refusal {
+        push_step(app, id, "blocked", &format!("{name} refused"), &reason);
+        return Outcome::Continue {
+            result: reason,
+            image: None,
+            page: false,
+        };
     }
     let mut ctx = Ctx {
         app,
@@ -300,6 +348,11 @@ pub fn execute(
 /// Gate for the tool handlers.
 pub fn gate(ctx: &Ctx, verdict: Verdict) -> Result<(), String> {
     runs::gate(ctx.app, ctx.id, verdict)
+}
+
+/// Refuses an address outside the site a `site` run is held to.
+pub fn site_gate(ctx: &Ctx, url: &str) -> Result<(), String> {
+    runs::site_allowed(ctx.id, url)
 }
 
 pub fn halt(ctx: &Ctx) -> Result<(), String> {

@@ -4,6 +4,7 @@ import type { WindowTabsState } from "@/lib/use-browser";
 import { FindBar } from "@/components/FindBar";
 import { SyncToast } from "@/components/SyncToast";
 import { AddressBar } from "./Addressbar/AddressBar";
+import { ToolsToolbar } from "../BrowserBody/ToolsToolbar/ToolsToolbar";
 import { BookmarksBar } from "./BookmarksBar/BookmarksBar";
 import { TabStrip } from "./Tabs/TabStrip";
 
@@ -17,6 +18,8 @@ type BrowserHeaderProps = {
   extensions: ExtensionInfo[];
   settings: BrowserSettings | null;
   showBookmarksBar: boolean;
+  /** Built-in tools in a row above the bookmarks bar. */
+  showToolsToolbar: boolean;
   findToken: number | null;
   activeTab: TabInfo | undefined;
   onCloseFind: () => void;
@@ -32,6 +35,7 @@ export function BrowserHeader({
   extensions,
   settings,
   showBookmarksBar,
+  showToolsToolbar,
   findToken,
   activeTab,
   onCloseFind,
@@ -48,6 +52,9 @@ export function BrowserHeader({
         settings={settings}
         windowControls={vertical}
       />
+      {showToolsToolbar ? (
+        <ToolsToolbar layout="horizontal" activeTab={activeTab} extensions={extensions} settings={settings} />
+      ) : null}
       {showBookmarksBar ? (
         <BookmarksBar
           tree={bookmarks}

@@ -1,4 +1,14 @@
-import { PaperSize, PdfOptions, PrintEditorSettings, PrintFont, PrintImageSize, PrintMargins, PrintMode, PrintPaper } from "@type/browser";
+import {
+  PaperSize,
+  PdfOptions,
+  PrintEditorSettings,
+  PrintFont,
+  PrintImageSize,
+  PrintMargins,
+  PrintMode,
+  PrintPaper,
+  PrintPreset,
+} from "@type/browser";
 
 
 /** CSS pixels per inch. The preview and WebView2's PDF layout both use it. */
@@ -144,6 +154,114 @@ export const MARGIN_OPTIONS: { value: PrintMargins; label: string }[] = [
   { value: "wide", label: "Wide" },
 ];
 
+export const MAX_PRINT_PRESETS = 12;
+
+type CleanupFlag = "removeAds" | "removeNavigation" | "removePopups" | "removeSocial" | "removeMedia";
+
+export const CLEANUP_OPTIONS: { flag: CleanupFlag; label: string; short: string }[] = [
+  { flag: "removeAds", label: "Remove ads", short: "ads" },
+  { flag: "removePopups", label: "Remove pop-ups", short: "pop-ups" },
+  { flag: "removeNavigation", label: "Remove navigation", short: "menus" },
+  { flag: "removeSocial", label: "Remove social and comments", short: "social" },
+  { flag: "removeMedia", label: "Remove videos and embeds", short: "media" },
+];
+
+function articlePreset(): PrintPreset {
+  return {
+    id: "article",
+    name: "Article",
+    mode: "article",
+    removeAds: true,
+    removeNavigation: true,
+    removePopups: true,
+    removeSocial: true,
+    removeMedia: false,
+    textSize: 100,
+    imageSize: "original",
+    removeBackgrounds: false,
+    font: "original",
+    showHeader: true,
+    paper: "letter",
+    landscape: false,
+    margins: "normal",
+    headerFooter: false,
+    printBackgrounds: true,
+  };
+}
+
+/** Recipes a new profile starts with. An empty saved list stays empty. */
+export const DEFAULT_PRINT_PRESETS: PrintPreset[] = [
+  articlePreset(),
+  {
+    ...articlePreset(),
+    id: "clean-page",
+    name: "Clean page",
+    mode: "full",
+    removeNavigation: false,
+    removeSocial: false,
+  },
+  {
+    ...articlePreset(),
+    id: "reader",
+    name: "Reader",
+    removeMedia: true,
+    removeBackgrounds: true,
+    font: "serif",
+    printBackgrounds: false,
+  },
+];
+
+/** One line for the print menu: what the recipe keeps and what it strips. */
+export function presetHint(preset: PrintPreset) {
+  const mode = preset.mode === "full" ? "Full page" : "Article";
+  const removed = CLEANUP_OPTIONS.filter((option) => preset[option.flag]).map((option) => option.short);
+  if (removed.length === 0) {
+    return `${mode} · keeps the page`;
+  }
+  if (removed.length === CLEANUP_OPTIONS.length) {
+    return `${mode} · clutter removed`;
+  }
+  return `${mode} · removes ${removed.join(", ")}`;
+}
+
+/** The editor's page setup with this recipe's cleanup and layout applied. */
+export function applyPrintPreset(settings: PrintEditorSettings, presetId: string): PrintEditorSettings {
+  const preset = settings.presets.find((item) => item.id === presetId);
+  if (!preset) {
+    return settings;
+  }
+  return {
+    ...settings,
+    mode: preset.mode,
+    removeAds: preset.removeAds,
+    removeNavigation: preset.removeNavigation,
+    removePopups: preset.removePopups,
+    removeSocial: preset.removeSocial,
+    removeMedia: preset.removeMedia,
+    textSize: preset.textSize,
+    imageSize: preset.imageSize,
+    removeBackgrounds: preset.removeBackgrounds,
+    font: preset.font,
+    showHeader: preset.showHeader,
+    paper: preset.paper,
+    landscape: preset.landscape,
+    margins: preset.margins,
+    headerFooter: preset.headerFooter,
+    printBackgrounds: preset.printBackgrounds,
+  };
+}
+
+export function newPrintPreset(existing: PrintPreset[]): PrintPreset {
+  const names = new Set(existing.map((preset) => preset.name));
+  let number = existing.length + 1;
+  let name = `Preset ${number}`;
+  while (names.has(name)) {
+    number += 1;
+    name = `Preset ${number}`;
+  }
+  return { ...articlePreset(), id: crypto.randomUUID(), name };
+}
+
 export const DEFAULT_PRINT_SETTINGS: PrintEditorSettings = {
   mode: "article",
   removeAds: true,
@@ -165,6 +283,7 @@ export const DEFAULT_PRINT_SETTINGS: PrintEditorSettings = {
   headerFooter: false,
   printBackgrounds: true,
   openAfterSave: false,
+  presets: DEFAULT_PRINT_PRESETS.map((preset) => ({ ...preset })),
 };
 
 /** Page size in inches as it is laid out, after orientation. */
