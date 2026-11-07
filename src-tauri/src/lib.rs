@@ -2702,6 +2702,7 @@ pub fn run() {
             debug::debug_toggle_hud,
             debug::debug_snapshot,
             debug::debug_record_ipc,
+            debug::debug_record_console,
             debug::debug_clear,
             debug::debug_webviews,
             debug::debug_outline,

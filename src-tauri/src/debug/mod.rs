@@ -6,6 +6,7 @@
 
 mod hud;
 mod outline;
+mod passage;
 pub mod stderr;
 mod webviews;
 
@@ -89,11 +90,24 @@ pub struct DebugLogLine {
     pub id: u64,
     /// Unix ms.
     pub at: f64,
-    /// `stdout` or `stderr`.
+    /// `stdout`, `stderr` or `console`.
     pub stream: String,
     /// The `area` in `eprintln!("area: message")`. Empty when the line has none.
     pub area: String,
     pub text: String,
+}
+
+/// A console message or uncaught error from a frontend webview.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DebugConsoleEntry {
+    /// `error`, `warn`, `uncaught` or `rejection`.
+    pub level: String,
+    pub text: String,
+    /// Unix ms.
+    pub at: f64,
+    /// `file:line:column` when the browser gave one.
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -213,6 +227,7 @@ pub fn init(app: &AppHandle) {
     if !enabled() || APP.set(app.clone()).is_err() {
         return;
     }
+    passage::start(app);
     let app = app.clone();
     let _ = std::thread::Builder::new()
         .name("debug-feed".into())
@@ -251,20 +266,63 @@ fn flush(app: &AppHandle) {
 }
 
 pub(crate) fn push_log(stream: &str, text: &str) {
+    push_line(stream, stderr::area_of(text), text, now_ms());
+}
+
+/// `text` starts with `area: ` when `area` is not empty, as the HUD strips that prefix.
+fn push_line(stream: &str, area: &str, text: &str, at: f64) {
     if text.trim().is_empty() {
         return;
     }
     let mut feed = feed();
     let line = DebugLogLine {
         id: feed.next_id,
-        at: now_ms(),
+        at,
         stream: stream.to_string(),
-        area: stderr::area_of(text).to_string(),
+        area: area.to_string(),
         text: text.to_string(),
     };
     feed.next_id += 1;
     feed.logs.push(line.clone());
     feed.unsent_logs.push(line);
+}
+
+/// The area and line a console entry from webview `webview` is logged as.
+fn console_line(webview: &str, entry: &DebugConsoleEntry) -> (String, String) {
+    let level = if entry.level.trim().is_empty() {
+        "error"
+    } else {
+        entry.level.trim()
+    };
+    let area = format!("{webview} {level}");
+    let mut text = format!("{area}: {}", entry.text.trim_end());
+    if !entry.source.is_empty() {
+        text.push_str(&format!(" ({})", entry.source));
+    }
+    (area, text)
+}
+
+fn push_console(webview: &str, batch: Vec<DebugConsoleEntry>) {
+    for entry in batch {
+        let (area, text) = console_line(webview, &entry);
+        let at = if entry.at > 0.0 { entry.at } else { now_ms() };
+        push_line("console", &area, &text, at);
+    }
+}
+
+/// Log lines in the feed, oldest first.
+pub(crate) fn log_lines() -> Vec<DebugLogLine> {
+    feed().logs.to_vec()
+}
+
+/// IPC records in the feed, oldest first.
+pub(crate) fn ipc_records() -> Vec<DebugIpcRecord> {
+    feed().ipc.to_vec()
+}
+
+/// The id the next record or line will get.
+pub(crate) fn next_id() -> u64 {
+    feed().next_id
 }
 
 fn push_ipc(batch: Vec<DebugIpcRecord>) {
@@ -277,7 +335,7 @@ fn push_ipc(batch: Vec<DebugIpcRecord>) {
     }
 }
 
-fn clear(app: &AppHandle, target: &str) -> Result<(), String> {
+pub(crate) fn clear(app: &AppHandle, target: &str) -> Result<(), String> {
     {
         let mut feed = feed();
         match target {
@@ -461,6 +519,16 @@ pub async fn debug_record_ipc(batch: Vec<DebugIpcRecord>) -> Result<(), String> 
 }
 
 #[tauri::command]
+pub async fn debug_record_console(
+    webview: tauri::Webview,
+    batch: Vec<DebugConsoleEntry>,
+) -> Result<(), String> {
+    require()?;
+    push_console(webview.label(), batch);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn debug_clear(app: AppHandle, target: String) -> Result<(), String> {
     require()?;
     clear(&app, &target)
@@ -493,30 +561,38 @@ pub async fn debug_clear_outline(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-pub async fn debug_open_devtools(app: AppHandle, label: String) -> Result<(), String> {
-    require()?;
-    if let Some(id) = webviews::tab_id(&label) {
-        tabs::open_devtools(&app, id);
+fn open_devtools(app: &AppHandle, label: &str) -> Result<(), String> {
+    if let Some(id) = webviews::tab_id(label) {
+        tabs::open_devtools(app, id);
         return Ok(());
     }
     let webview = app
-        .get_webview(&label)
+        .get_webview(label)
         .ok_or_else(|| format!("No webview is labelled {label}."))?;
     webview.open_devtools();
     Ok(())
 }
 
+fn reload_webview(app: &AppHandle, label: &str) -> Result<(), String> {
+    if let Some(id) = webviews::tab_id(label) {
+        return tabs::reload(app, id);
+    }
+    let webview = app
+        .get_webview(label)
+        .ok_or_else(|| format!("No webview is labelled {label}."))?;
+    webview.reload().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn debug_open_devtools(app: AppHandle, label: String) -> Result<(), String> {
+    require()?;
+    open_devtools(&app, &label)
+}
+
 #[tauri::command]
 pub async fn debug_reload_webview(app: AppHandle, label: String) -> Result<(), String> {
     require()?;
-    if let Some(id) = webviews::tab_id(&label) {
-        return tabs::reload(&app, id);
-    }
-    let webview = app
-        .get_webview(&label)
-        .ok_or_else(|| format!("No webview is labelled {label}."))?;
-    webview.reload().map_err(|error| error.to_string())
+    reload_webview(&app, &label)
 }
 
 #[tauri::command]
@@ -575,6 +651,29 @@ mod tests {
         assert_eq!(json["target"], "ipc");
         let json = serde_json::to_value(DebugFeed::Log { lines: vec![] }).unwrap();
         assert_eq!(json["kind"], "log");
+    }
+
+    #[test]
+    fn console_lines_carry_the_webview_and_level_as_their_area() {
+        let entry = DebugConsoleEntry {
+            level: "warn".into(),
+            text: "Key prop missing\n".into(),
+            at: 1.0,
+            source: "TabStrip.tsx:12:4".into(),
+        };
+        let (area, text) = console_line("ui", &entry);
+        assert_eq!(area, "ui warn");
+        assert_eq!(text, "ui warn: Key prop missing (TabStrip.tsx:12:4)");
+        let (area, text) = console_line("popup-main-0", &DebugConsoleEntry::default());
+        assert_eq!(area, "popup-main-0 error");
+        assert_eq!(text, "popup-main-0 error: ");
+    }
+
+    #[test]
+    fn a_console_entry_with_missing_fields_deserializes() {
+        let entry: DebugConsoleEntry = serde_json::from_str(r#"{"text":"boom"}"#).unwrap();
+        assert_eq!(entry.text, "boom");
+        assert_eq!(entry.level, "");
     }
 
     #[test]

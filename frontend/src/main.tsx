@@ -1,3 +1,4 @@
+import "./lib/console-capture";
 import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { applyAppearance, applyFont, noteWindowsScheme, readAppearance, readFont } from "./lib/appearance";

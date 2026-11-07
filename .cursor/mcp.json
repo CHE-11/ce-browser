@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "ce-passage": {
+      "url": "http://127.0.0.1:1427/mcp"
+    }
+  }
+}

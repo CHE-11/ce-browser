@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
-import type { DebugLogLine } from "@type/browser";
+import type { DebugLogLine, DebugLogStream } from "@type/browser";
 import { cn } from "@/lib/cn";
 import { formatClockMs } from "@/lib/debug-hud";
 import { HudButton, HudEmpty, HudLiveToggle, HudSearch, HudSelect, HudToggle, HudToolbar } from "./HudControls";
@@ -12,7 +12,14 @@ const STREAM_OPTIONS = [
   { value: "", label: "All streams" },
   { value: "stderr", label: "stderr" },
   { value: "stdout", label: "stdout" },
+  { value: "console", label: "console" },
 ];
+
+const STREAM_TAGS: Record<DebugLogStream, { tag: string; tagClass: string; textClass: string }> = {
+  stderr: { tag: "err", tagClass: "text-red-300/80", textClass: "text-zinc-100" },
+  stdout: { tag: "out", tagClass: "text-zinc-500", textClass: "text-zinc-300" },
+  console: { tag: "con", tagClass: "text-amber-300/80", textClass: "text-zinc-100" },
+};
 
 type LogsPanelProps = {
   lines: DebugLogLine[];
@@ -82,7 +89,7 @@ export function LogsPanel({ lines, onClear }: LogsPanelProps) {
       <div id="debug-logs-scroller" ref={scroller} className="min-h-0 flex-1 overflow-auto py-1">
         {filtered.length === 0 ? (
           <HudEmpty id="debug-logs-empty">
-            {source.length === 0 ? "Nothing logged yet. println! and eprintln! output from the backend shows up here." : "Nothing matches this filter."}
+            {source.length === 0 ? "Nothing logged yet. println! and eprintln! output from the backend and console errors from the frontend show up here." : "Nothing matches this filter."}
           </HudEmpty>
         ) : (
           <ol id="debug-logs-list" className="font-mono text-[11px] leading-[1.15rem]">
@@ -91,10 +98,10 @@ export function LogsPanel({ lines, onClear }: LogsPanelProps) {
                 <span id={`debug-log-${line.id}-time`} className="shrink-0 tabular-nums text-zinc-600">
                   {formatClockMs(line.at)}
                 </span>
-                <span id={`debug-log-${line.id}-stream`} className={cn("w-10 shrink-0", line.stream === "stderr" ? "text-red-300/80" : "text-zinc-500")}>
-                  {line.stream === "stderr" ? "err" : "out"}
+                <span id={`debug-log-${line.id}-stream`} className={cn("w-10 shrink-0", STREAM_TAGS[line.stream].tagClass)}>
+                  {STREAM_TAGS[line.stream].tag}
                 </span>
-                <span id={`debug-log-${line.id}-text`} className={cn("min-w-0 flex-1 whitespace-pre-wrap break-all", line.stream === "stderr" ? "text-zinc-100" : "text-zinc-300")}>
+                <span id={`debug-log-${line.id}-text`} className={cn("min-w-0 flex-1 whitespace-pre-wrap break-all", STREAM_TAGS[line.stream].textClass)}>
                   {line.area ? (
                     <button
                       id={`debug-log-${line.id}-area`}

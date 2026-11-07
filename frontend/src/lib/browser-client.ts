@@ -6,6 +6,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdblockStats,
   AgentRun,
+  DebugConsoleEntry,
   DebugFeed,
   DebugFeedTarget,
   DebugPaths,
@@ -1869,6 +1870,11 @@ export function debugSnapshot() {
 
 export function debugClear(target: DebugFeedTarget) {
   return invoke<void>("debug_clear", { target });
+}
+
+/** Logs this webview's console errors and warnings in the backend feed, under stream `console`. */
+export function debugRecordConsole(batch: DebugConsoleEntry[]) {
+  return invoke<void>("debug_record_console", { batch });
 }
 
 export function debugWebviews() {

@@ -162,7 +162,7 @@ fn serve(app: AppHandle, server: Arc<Server>) {
     }
 }
 
-fn header(request: &Request, name: &str) -> Option<String> {
+pub(crate) fn header(request: &Request, name: &str) -> Option<String> {
     request
         .headers()
         .iter()
@@ -174,7 +174,7 @@ fn json_header() -> Header {
     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).expect("static header")
 }
 
-fn reply(request: Request, status: u16, body: Option<Value>) {
+pub(crate) fn reply(request: Request, status: u16, body: Option<Value>) {
     let response = match body {
         Some(body) => Response::from_string(body.to_string()).with_status_code(status).with_header(json_header()),
         None => Response::from_string(String::new()).with_status_code(status),
@@ -183,7 +183,7 @@ fn reply(request: Request, status: u16, body: Option<Value>) {
 }
 
 /// Browsers send an Origin; MCP clients don't. Refuse pages that try to reach the server.
-fn origin_allowed(origin: Option<&str>) -> bool {
+pub(crate) fn origin_allowed(origin: Option<&str>) -> bool {
     match origin {
         None => true,
         Some(origin) => {
@@ -252,11 +252,11 @@ fn handle_request(app: &AppHandle, mut request: Request) {
     }
 }
 
-fn rpc_error(id: Value, code: i64, message: &str) -> Value {
+pub(crate) fn rpc_error(id: Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
-fn rpc_result(id: Value, result: Value) -> Value {
+pub(crate) fn rpc_result(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 

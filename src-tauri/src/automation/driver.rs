@@ -446,6 +446,14 @@ fn char_key(ch: char, shift: bool) -> Key {
 
 /// Presses a key or chord such as `Enter`, `Tab`, `Control+A` or `Shift+ArrowDown`.
 pub fn press(app: &AppHandle, id: u32, keys: &str) -> Result<(), String> {
+    let (down, up) = key_events(keys)?;
+    cdp(app, id, "Input.dispatchKeyEvent", down)?;
+    cdp(app, id, "Input.dispatchKeyEvent", up)?;
+    Ok(())
+}
+
+/// The `Input.dispatchKeyEvent` params that press and release `keys`.
+pub fn key_events(keys: &str) -> Result<(Value, Value), String> {
     let parts: Vec<&str> = keys.split('+').map(str::trim).filter(|part| !part.is_empty()).collect();
     let Some((last, mods)) = parts.split_last() else {
         return Err("Name a key to press.".into());
@@ -484,21 +492,15 @@ pub fn press(app: &AppHandle, id: u32, keys: &str) -> Result<(), String> {
         down["text"] = json!(text);
         down["unmodifiedText"] = json!(text);
     }
-    cdp(app, id, "Input.dispatchKeyEvent", down)?;
-    cdp(
-        app,
-        id,
-        "Input.dispatchKeyEvent",
-        json!({
-            "type": "keyUp",
-            "modifiers": modifiers,
-            "key": key.key,
-            "code": key.code,
-            "windowsVirtualKeyCode": key.vk,
-            "nativeVirtualKeyCode": key.vk,
-        }),
-    )?;
-    Ok(())
+    let up = json!({
+        "type": "keyUp",
+        "modifiers": modifiers,
+        "key": key.key,
+        "code": key.code,
+        "windowsVirtualKeyCode": key.vk,
+        "nativeVirtualKeyCode": key.vk,
+    });
+    Ok((down, up))
 }
 
 fn viewport(app: &AppHandle, id: u32) -> Result<(f64, f64), String> {

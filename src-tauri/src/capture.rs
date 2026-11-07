@@ -931,7 +931,7 @@ fn capture_browser_window(app: &AppHandle, label: &str) -> Result<RgbaImage, Str
     window_image(hwnd.0 as isize)
 }
 
-fn window_image(hwnd: isize) -> Result<RgbaImage, String> {
+pub(crate) fn window_image(hwnd: isize) -> Result<RgbaImage, String> {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::Graphics::Gdi::{
         BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleBitmap, CreateCompatibleDC, DIB_RGB_COLORS,
@@ -977,6 +977,75 @@ fn window_image(hwnd: isize) -> Result<RgbaImage, String> {
         ReleaseDC(Some(hwnd), screen);
         if rows == 0 {
             return Err(format!("{FAILURE} Couldn't read the window."));
+        }
+        let mut image = RgbaImage::new(width as u32, height as u32);
+        for (pixel, chunk) in image.pixels_mut().zip(pixels.chunks_exact(4)) {
+            *pixel = image::Rgba([chunk[2], chunk[1], chunk[0], 255]);
+        }
+        Ok(image)
+    }
+}
+
+/// What the screen shows over the client area of `hwnd`, including popups and other windows
+/// on top of it. The window must be on screen.
+pub(crate) fn screen_image(hwnd: isize) -> Result<RgbaImage, String> {
+    use windows::Win32::Foundation::{HWND, POINT};
+    use windows::Win32::Graphics::Gdi::{
+        BITMAPINFO, BITMAPINFOHEADER, BitBlt, CAPTUREBLT, ClientToScreen, CreateCompatibleBitmap,
+        CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, ROP_CODE,
+        ReleaseDC, SRCCOPY, SelectObject,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+    unsafe {
+        let hwnd = HWND(hwnd as *mut std::ffi::c_void);
+        let mut rect = windows::Win32::Foundation::RECT::default();
+        GetClientRect(hwnd, &mut rect).map_err(|error| format!("{FAILURE} {error}"))?;
+        let mut origin = POINT::default();
+        let _ = ClientToScreen(hwnd, &mut origin);
+        let width = rect.right.max(1);
+        let height = rect.bottom.max(1);
+        let screen = GetDC(None);
+        let memory = CreateCompatibleDC(Some(screen));
+        let bitmap = CreateCompatibleBitmap(screen, width, height);
+        let previous = SelectObject(memory, bitmap.into());
+        let copied = BitBlt(
+            memory,
+            0,
+            0,
+            width,
+            height,
+            Some(screen),
+            origin.x,
+            origin.y,
+            ROP_CODE(SRCCOPY.0 | CAPTUREBLT.0),
+        );
+        let mut info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+        let rows = GetDIBits(
+            memory,
+            bitmap,
+            0,
+            height as u32,
+            Some(pixels.as_mut_ptr().cast()),
+            &mut info,
+            DIB_RGB_COLORS,
+        );
+        SelectObject(memory, previous);
+        let _ = DeleteObject(bitmap.into());
+        let _ = DeleteDC(memory);
+        ReleaseDC(None, screen);
+        if copied.is_err() || rows == 0 {
+            return Err(format!("{FAILURE} Couldn't read the screen."));
         }
         let mut image = RgbaImage::new(width as u32, height as u32);
         for (pixel, chunk) in image.pixels_mut().zip(pixels.chunks_exact(4)) {

@@ -1844,7 +1844,20 @@ export type DebugIpcRecord = {
   bytes: number;
 };
 
-export type DebugLogStream = "stdout" | "stderr";
+/** `console` lines are console errors and warnings from frontend webviews. */
+export type DebugLogStream = "stdout" | "stderr" | "console";
+
+export type DebugConsoleLevel = "error" | "warn" | "uncaught" | "rejection";
+
+/** A console message or uncaught error from a frontend webview, before the backend logs it. */
+export type DebugConsoleEntry = {
+  level: DebugConsoleLevel;
+  text: string;
+  /** Unix ms. */
+  at: number;
+  /** `file:line:column` when the browser gave one. Empty otherwise. */
+  source: string;
+};
 
 export type DebugLogLine = {
   id: number;

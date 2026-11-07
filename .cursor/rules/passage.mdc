@@ -1,0 +1,21 @@
+---
+description: Passage lets the agent inspect and drive the running ce-browser dev build.
+alwaysApply: true
+---
+
+# Passage
+
+A dev build (`pnpm tauri dev`) runs passage, an MCP and HTTP server on `http://127.0.0.1:1427` (`CE_PASSAGE_PORT` overrides the port). Release builds never start it. Code: `src-tauri/src/debug/passage.rs`.
+
+- Use the `ce-passage` MCP server from `.cursor/mcp.json`. When it is not connected, call the same tools from the shell: `./scripts/passage.ps1 <tool> '<json args>'`.
+- If the app is not running, start `pnpm tauri dev` from the repo root in the background. It is ready when its output shows `passage: listening` or `./scripts/passage.ps1 health` answers.
+- After a Rust edit, `tauri dev` rebuilds and restarts the app. Poll `health` until `startedAt` changes before testing. Frontend edits reload through Vite.
+- Webviews are addressed by label: `ui` is the browser UI, `tab-<id>` a page, `popup-<window>-<n>` a popup. `webviews` lists them.
+
+Debugging loop:
+
+1. `logs` with `sinceId` from the previous call: backend `eprintln!` lines (`stderr`), and console errors, warnings and uncaught errors from the frontend (`console`, area `<label> <level>`).
+2. `ipc` with `failedOnly` for failing commands, and `invoke` to call a command as the UI would.
+3. `query` (selector, styles) and `eval` on `ui` to read the DOM. Elements have ids, so `#some-id` selectors work.
+4. `click`, `type` and `press` send real input. `wait` waits for a selector or a log line.
+5. `screenshot` saves a PNG under `src-tauri/target/passage` and returns its path; read the file to view it. Mode `screen` includes popups.
