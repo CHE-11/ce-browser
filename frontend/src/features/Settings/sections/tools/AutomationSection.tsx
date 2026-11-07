@@ -38,6 +38,8 @@ const TEXT = {
   notifyHint: "A Windows notification when a run you aren't watching finishes or needs you.",
   script: "Let the agent run scripts",
   scriptHint: "The agent may run JavaScript in pages. Runs ask first unless they're on full auto.",
+  desktop: "Let the agent use the desktop",
+  desktopHint: "Mouse and keyboard outside the browser. Off until you turn it on. The first action of each run still asks.",
   stream: "Show replies as they're written",
   streamHint: "Streams the model's thinking into the panel. Turn off for endpoints that don't stream.",
   confirm: "Ask before sensitive actions",
@@ -151,6 +153,9 @@ export function AutomationSection({ settings, query, onUpdate, onError, onMatch 
       </Row>
       <Row id="settings-automation-script" setting="automation.agentAllowScript" label={TEXT.script} hint={TEXT.scriptHint}>
         <Toggle id="settings-automation-script-toggle" checked={automation.agentAllowScript ?? false} onChange={(agentAllowScript) => update({ agentAllowScript })} />
+      </Row>
+      <Row id="settings-automation-desktop" setting="automation.desktopControl" label={TEXT.desktop} hint={TEXT.desktopHint}>
+        <Toggle id="settings-automation-desktop-toggle" checked={automation.desktopControl ?? false} onChange={(desktopControl) => update({ desktopControl })} />
       </Row>
       <Row id="settings-automation-stream" setting="automation.streamReplies" label={TEXT.stream} hint={TEXT.streamHint}>
         <Toggle id="settings-automation-stream-toggle" checked={automation.streamReplies ?? true} onChange={(streamReplies) => update({ streamReplies })} />

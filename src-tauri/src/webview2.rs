@@ -1612,7 +1612,7 @@ pub fn attach_popup_hooks(app: &AppHandle, webview: &Webview, label: &str) {
             eprintln!("WebView2 shortcuts for {label}: {error}");
         }
         if let Ok(core) = core(&platform) {
-            let _ = attach_downloads(&app, &core);
+            let _ = attach_downloads(&app, &core, 0);
         }
     });
 }
@@ -2139,7 +2139,19 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
     if let Err(error) = attach_page_state(app, &core, id) {
         eprintln!("WebView2 load and crash events for tab {id}: {error}");
     }
-    attach_downloads(app, &core)?;
+    attach_downloads(app, &core, id)?;
+    let dialog_app = app.clone();
+    unsafe {
+        core.add_ScriptDialogOpening(
+            &ScriptDialogOpeningEventHandler::create(Box::new(move |_, args| {
+                if let Some(args) = args {
+                    crate::automation::dialog::handle(&dialog_app, id, args);
+                }
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
     Ok(())
 }
 
@@ -3423,7 +3435,7 @@ fn apply_page_settings(app: &AppHandle, core: &ICoreWebView2, url: &str) {
     }
 }
 
-fn attach_downloads(app: &AppHandle, core: &ICoreWebView2) -> windows::core::Result<()> {
+fn attach_downloads(app: &AppHandle, core: &ICoreWebView2, tab: u32) -> windows::core::Result<()> {
     let Ok(core4) = core.cast::<ICoreWebView2_4>() else {
         return Ok(());
     };
@@ -3435,7 +3447,7 @@ fn attach_downloads(app: &AppHandle, core: &ICoreWebView2) -> windows::core::Res
             &DownloadStartingEventHandler::create(Box::new(move |_, args| {
                 if let Some(args) = args {
                     if let Err(error) =
-                        downloads::on_download_starting(&download_app, &download_core, args)
+                        downloads::on_download_starting(&download_app, &download_core, args, tab)
                     {
                         eprintln!("download: {error}");
                     }
@@ -3984,7 +3996,7 @@ pub fn attach_peek_hooks(app: &AppHandle, webview: &Webview, window: &str, page:
         let Ok(core) = core(&platform) else {
             return;
         };
-        let _ = attach_downloads(&app, &core);
+        let _ = attach_downloads(&app, &core, 0);
         let mut token = 0i64;
         let source_app = app.clone();
         let source_window = window.clone();

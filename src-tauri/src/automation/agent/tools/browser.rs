@@ -8,12 +8,14 @@ use crate::automation::driver;
 use crate::automation::flows::{self, FlowStep};
 use crate::automation::policy::{self, Risk, Verdict};
 use crate::automation::{clip, fill_secrets, mask_secrets};
+use crate::automation::{dialog, effects};
 use crate::settings::AutomationSettings;
 use crate::{media, print, tabs};
 
 use super::super::{observe, runs};
+use super::runs::AgentNotice;
 use super::{
-    Ctx, Done, Kind, Tool, arg_bool, arg_f64, arg_list, arg_str, arg_u32, element_label,
+    Ctx, Done, Kind, Marker, Tool, arg_bool, arg_f64, arg_list, arg_str, arg_u32, element_label,
     flow_target, gate, halt, object, reference, site_gate, step, tool,
 };
 
@@ -44,6 +46,38 @@ pub fn tools(auto: &AutomationSettings) -> Vec<Tool> {
             Kind::Page,
             true,
             click_xy,
+        ),
+        tool(
+            "drag",
+            "Drag from one element or point to another. Points are screenshot pixels.",
+            object(
+                json!({
+                    "fromRef": reference(),
+                    "toRef": reference(),
+                    "x": { "type": "number" },
+                    "y": { "type": "number" },
+                    "toX": { "type": "number" },
+                    "toY": { "type": "number" }
+                }),
+                &[],
+            ),
+            Kind::Page,
+            true,
+            drag,
+        ),
+        tool(
+            "answer_dialog",
+            "Accept or dismiss the JavaScript dialog that is open. Prompts can send text.",
+            object(
+                json!({
+                    "accept": { "type": "boolean", "description": "Defaults to true. False dismisses." },
+                    "text": { "type": "string", "description": "Text for a prompt." }
+                }),
+                &[],
+            ),
+            Kind::Page,
+            true,
+            answer_dialog,
         ),
         tool(
             "type",
@@ -197,15 +231,15 @@ fn click(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     let shown = element_label(&info, element);
     gate(ctx, policy::click(ctx.auto, &info))?;
     let button = arg_str(args, "button");
+    let double = arg_bool(args, "double", false);
     let target = flow_target(ctx, element, &shown);
+    let at = driver::element_point(ctx.app, ctx.tab, element).ok();
     halt(ctx)?;
-    driver::click(
-        ctx.app,
-        ctx.tab,
-        element,
-        &button,
-        arg_bool(args, "double", false),
-    )?;
+    let armed = effects::arm(ctx.tab);
+    driver::click(ctx.app, ctx.tab, element, &button, double)?;
+    if let Some((x, y)) = at {
+        mark(ctx, x, y, None, None);
+    }
     record(
         ctx,
         FlowStep {
@@ -216,25 +250,187 @@ fn click(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
             } else {
                 button
             },
+            clicks: if double { 2 } else { 1 },
             ..flows::new_step()
         },
     );
-    step(format!("Click {shown}"), "Clicked.")
+    step(
+        format!("{} {shown}", if double { "Double-click" } else { "Click" }),
+        settle(ctx, &armed, "Clicked.".into()),
+    )
 }
 
 fn click_xy(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     let x = arg_f64(args, "x").ok_or("Missing \"x\".")?;
     let y = arg_f64(args, "y").ok_or("Missing \"y\".")?;
+    let css_x = x * ctx.scale;
+    let css_y = y * ctx.scale;
+    effects::guard_point(ctx.app, ctx.auto, ctx.tab, css_x, css_y)?;
     halt(ctx)?;
-    driver::click_at(
-        ctx.app,
-        ctx.tab,
-        x * ctx.scale,
-        y * ctx.scale,
-        "left",
-        false,
-    )?;
-    step(format!("Click at {}, {}", x.round(), y.round()), "Clicked.")
+    let armed = effects::arm(ctx.tab);
+    driver::click_at(ctx.app, ctx.tab, css_x, css_y, "left", false)?;
+    mark(ctx, css_x, css_y, None, None);
+    record(
+        ctx,
+        FlowStep {
+            kind: "click".into(),
+            x: Some(css_x),
+            y: Some(css_y),
+            clicks: 1,
+            ..flows::new_step()
+        },
+    );
+    step(
+        format!("Click at {}, {}", x.round(), y.round()),
+        settle(ctx, &armed, "Clicked.".into()),
+    )
+}
+
+fn drag(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
+    let from = drag_point(ctx, args, "fromRef", "x", "y")?;
+    let to = drag_point(ctx, args, "toRef", "toX", "toY")?;
+    effects::guard_point(ctx.app, ctx.auto, ctx.tab, from.0, from.1)?;
+    effects::guard_point(ctx.app, ctx.auto, ctx.tab, to.0, to.1)?;
+    halt(ctx)?;
+    let armed = effects::arm(ctx.tab);
+    driver::drag(ctx.app, ctx.tab, from, to)?;
+    mark(ctx, from.0, from.1, Some(to.0), Some(to.1));
+    let from_target = arg_u32(args, "fromRef")
+        .ok()
+        .and_then(|element| flow_target(ctx, element, "the start"));
+    let to_target = arg_u32(args, "toRef")
+        .ok()
+        .and_then(|element| flow_target(ctx, element, "the end"));
+    let from_point = from_target.is_none();
+    let to_point = to_target.is_none();
+    record(
+        ctx,
+        FlowStep {
+            kind: "drag".into(),
+            target: from_target,
+            to: to_target,
+            x: from_point.then_some(from.0),
+            y: from_point.then_some(from.1),
+            to_x: to_point.then_some(to.0),
+            to_y: to_point.then_some(to.1),
+            ..flows::new_step()
+        },
+    );
+    step("Drag", settle(ctx, &armed, "Dragged.".into()))
+}
+
+fn answer_dialog(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
+    let accept = arg_bool(args, "accept", true);
+    let text = arg_str(args, "text");
+    let pending = dialog::current().ok_or("No dialog is open.")?;
+    if pending.tab != ctx.tab {
+        return Err("The open dialog belongs to another tab.".into());
+    }
+    if accept && matches!(pending.kind.as_str(), "confirm" | "prompt" | "beforeunload") {
+        gate(
+            ctx,
+            Verdict::ask(
+                Risk::Send,
+                format!("Allow this dialog?\n{}", clip(&pending.message, 240)),
+            ),
+        )?;
+    }
+    halt(ctx)?;
+    dialog::answer(ctx.app, ctx.tab, accept, &text)?;
+    record(
+        ctx,
+        FlowStep {
+            kind: "dialog".into(),
+            keys: if accept {
+                String::new()
+            } else {
+                "dismiss".into()
+            },
+            text,
+            ..flows::new_step()
+        },
+    );
+    step(
+        if accept {
+            "Accept the dialog"
+        } else {
+            "Dismiss the dialog"
+        },
+        "Answered.",
+    )
+}
+
+fn drag_point(
+    ctx: &Ctx,
+    args: &Value,
+    reference_key: &str,
+    x_key: &str,
+    y_key: &str,
+) -> Result<(f64, f64), String> {
+    if let Ok(element) = arg_u32(args, reference_key) {
+        return driver::element_point(ctx.app, ctx.tab, element);
+    }
+    let x = arg_f64(args, x_key)
+        .ok_or_else(|| format!("Missing \"{reference_key}\" or \"{x_key}\"."))?;
+    let y = arg_f64(args, y_key).ok_or_else(|| format!("Missing \"{y_key}\"."))?;
+    Ok((x * ctx.scale, y * ctx.scale))
+}
+
+fn mark(ctx: &mut Ctx, x: f64, y: f64, x2: Option<f64>, y2: Option<f64>) {
+    let Some((px, py)) = driver::fractions(ctx.app, ctx.tab, x, y) else {
+        return;
+    };
+    let end = match (x2, y2) {
+        (Some(x2), Some(y2)) => driver::fractions(ctx.app, ctx.tab, x2, y2),
+        _ => None,
+    };
+    ctx.marker = Some(Marker {
+        px,
+        py,
+        px2: end.map(|point| point.0),
+        py2: end.map(|point| point.1),
+    });
+}
+
+fn settle(ctx: &mut Ctx, armed: &effects::Armed, mut detail: String) -> String {
+    let effect = effects::collect(ctx.app, armed, Duration::from_millis(1500));
+    if !effect.file_name.is_empty() {
+        ctx.download = Some(AgentNotice {
+            kind: "download".into(),
+            text: effect.file_name.clone(),
+            detail: effect.file_path.clone(),
+            tab_id: ctx.tab,
+        });
+    }
+    if let Some(tab) = effect.tab {
+        let info = tabs::tab_info(ctx.app, tab);
+        ctx.opened = Some(AgentNotice {
+            kind: "tab".into(),
+            text: info
+                .as_ref()
+                .map(|info| info.title.clone())
+                .filter(|title| !title.is_empty())
+                .unwrap_or_else(|| format!("Tab {tab}")),
+            detail: info.map(|info| info.url).unwrap_or_default(),
+            tab_id: tab,
+        });
+    } else if !effect.window.is_empty() {
+        ctx.opened = Some(AgentNotice {
+            kind: "window".into(),
+            text: "Window".into(),
+            detail: effect.window.clone(),
+            tab_id: 0,
+        });
+    }
+    let extra = effect.summary();
+    if !extra.is_empty() {
+        detail.push(' ');
+        detail.push_str(&extra);
+    }
+    if dialog::current().is_some_and(|pending| pending.tab == ctx.tab) {
+        detail.push_str(" A JavaScript dialog is open. Call answer_dialog.");
+    }
+    detail
 }
 
 fn type_text(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {

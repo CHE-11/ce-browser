@@ -16,6 +16,11 @@ export const STEP_KINDS: { kind: FlowStepKind; label: string; hint: string }[] =
   { kind: "assert", label: "Check text", hint: "Fail the run unless the page shows this text." },
   { kind: "notify", label: "Notify", hint: "Show a Windows notification." },
   { kind: "upload", label: "Upload files", hint: "Put files into a file input." },
+  { kind: "drag", label: "Drag", hint: "Drag from one element or point to another." },
+  { kind: "dialog", label: "Answer dialog", hint: "Accept or dismiss a JavaScript dialog." },
+  { kind: "desktopClick", label: "Desktop click", hint: "Click the Windows screen. Desktop control must be on." },
+  { kind: "desktopDrag", label: "Desktop drag", hint: "Drag on the Windows screen. Desktop control must be on." },
+  { kind: "desktopType", label: "Desktop type", hint: "Type into the focused window. Desktop control must be on." },
 ];
 
 export const TRIGGER_KINDS: { kind: FlowTriggerKind; label: string }[] = [
@@ -32,12 +37,12 @@ export const TRIGGER_KINDS: { kind: FlowTriggerKind; label: string }[] = [
 export const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /** Step kinds that act on one element of the page. */
-export const TARGET_KINDS = ["click", "type", "select", "hover", "upload"];
+export const TARGET_KINDS = ["click", "type", "select", "hover", "upload", "drag"];
 
 /** `{{name}}` values a run fills in by itself. */
 export const BUILT_IN_VARIABLES = ["date", "url", "file", "path", "output", "rows"];
 
-export const EMPTY_TARGET: FlowTarget = { role: "", name: "", text: "", testId: "", css: "", xpath: "", tag: "", description: "" };
+export const EMPTY_TARGET: FlowTarget = { role: "", name: "", text: "", testId: "", css: "", xpath: "", tag: "", description: "", frame: "" };
 
 export function stepKindLabel(kind: string) {
   return STEP_KINDS.find((item) => item.kind === kind)?.label ?? `Unknown (${kind})`;
@@ -67,6 +72,13 @@ export function blankStep(kind: FlowStepKind): FlowStep {
     disabled: false,
     note: "",
     autonomy: "",
+    clicks: 1,
+    x: null,
+    y: null,
+    to: null,
+    toX: null,
+    toY: null,
+    follow: false,
   };
 }
 
@@ -140,6 +152,10 @@ export function triggerSummary(trigger: FlowTrigger) {
   }
 }
 
+function pointText(x: number | null, y: number | null) {
+  return x != null && y != null ? `${Math.round(x)}, ${Math.round(y)}` : "a point";
+}
+
 function clip(text: string, max: number) {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
@@ -172,7 +188,19 @@ export function stepSummary(step: FlowStep) {
     case "navigate":
       return step.url ? `Go to ${clip(step.url, 100)}` : "Go to an address";
     case "click":
-      return `Click ${target}`;
+      return step.x != null && step.y != null && !step.target
+        ? `${step.clicks >= 2 ? "Double-click" : "Click"} at ${Math.round(step.x)}, ${Math.round(step.y)}`
+        : `${step.clicks >= 2 ? "Double-click" : "Click"} ${target}`;
+    case "drag":
+      return `Drag ${step.target ? describeTarget(step.target) : pointText(step.x, step.y)} to ${step.to ? describeTarget(step.to) : pointText(step.toX, step.toY)}`;
+    case "dialog":
+      return step.keys === "dismiss" ? "Dismiss the dialog" : `Accept the dialog${step.text ? `: ${clip(step.text, 40)}` : ""}`;
+    case "desktopClick":
+      return `Desktop click at ${pointText(step.x, step.y)}`;
+    case "desktopDrag":
+      return `Desktop drag from ${pointText(step.x, step.y)} to ${pointText(step.toX, step.toY)}`;
+    case "desktopType":
+      return `Desktop type "${clip(step.text, 60)}"`;
     case "type":
       return `Type "${clip(maskSecrets(step.text), 60)}" into ${target}`;
     case "press":
@@ -225,7 +253,14 @@ export function stepIssues(step: FlowStep, known: Set<string>) {
   if (step.disabled) {
     return issues;
   }
-  if (TARGET_KINDS.includes(step.kind) && !hasTarget(step.target)) {
+  const pointed = step.x != null && step.y != null;
+  if (step.kind === "drag") {
+    const start = hasTarget(step.target) || pointed;
+    const end = hasTarget(step.to) || (step.toX != null && step.toY != null);
+    if (!start || !end) {
+      issues.push("Pick both ends of the drag, or enter their coordinates.");
+    }
+  } else if (TARGET_KINDS.includes(step.kind) && !(step.kind === "click" && pointed) && !hasTarget(step.target)) {
     issues.push("Pick the element on the page, or describe it in words.");
   }
   switch (step.kind) {
@@ -258,6 +293,21 @@ export function stepIssues(step: FlowStep, known: Set<string>) {
     case "upload":
       if (step.values.length === 0) {
         issues.push("Add the full path of each file.");
+      }
+      break;
+    case "desktopClick":
+      if (step.x == null || step.y == null) {
+        issues.push("Enter the screen coordinates.");
+      }
+      break;
+    case "desktopDrag":
+      if (step.x == null || step.y == null || step.toX == null || step.toY == null) {
+        issues.push("Enter where the drag starts and ends.");
+      }
+      break;
+    case "desktopType":
+      if (!step.text.trim()) {
+        issues.push("Enter the text to type.");
       }
       break;
   }

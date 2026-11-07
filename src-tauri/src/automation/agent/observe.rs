@@ -84,6 +84,15 @@ pub fn observe(app: &AppHandle, tab: u32, window: &str, screenshots: bool) -> Ob
         text.push_str("\n\nTabs in this window:\n");
         text.push_str(&others.join("\n"));
     }
+    if let Some(pending) = crate::automation::dialog::current()
+        && pending.tab == tab
+    {
+        text.push_str(&format!(
+            "\n\nA JavaScript {} dialog is open: \"{}\"\nCall answer_dialog before doing anything else.\n",
+            pending.kind,
+            clip(&pending.message, 300)
+        ));
+    }
     let mut observation = Observation {
         text,
         image: None,

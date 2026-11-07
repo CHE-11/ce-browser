@@ -40,6 +40,8 @@ pub struct FlowTarget {
     pub xpath: String,
     pub tag: String,
     pub description: String,
+    /// Origin of the frame that holds the element, such as `https://ads.example`. Empty is the top page.
+    pub frame: String,
 }
 
 impl FlowTarget {
@@ -87,6 +89,17 @@ pub struct FlowStep {
     /// How much an `ai` step's agent may do without asking: `ask`, `auto` or `full`.
     /// Blank uses the default from Settings.
     pub autonomy: String,
+    /// 2 is a double-click. 0 and 1 are one click, so older steps stay single clicks.
+    pub clicks: u8,
+    /// CSS pixels for a click or drag that has no element.
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    /// Where a drag ends, when it ends on an element.
+    pub to: Option<FlowTarget>,
+    pub to_x: Option<f64>,
+    pub to_y: Option<f64>,
+    /// After this click, continue the flow in the tab it opened.
+    pub follow: bool,
     /// Fields from newer builds, written back unchanged.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
@@ -878,6 +891,38 @@ fn record(app: &AppHandle, run: u32, step: FlowRunStep) {
     emit(app);
 }
 
+struct Driving {
+    tabs: Vec<u32>,
+}
+
+impl Driving {
+    fn watch(&mut self, tab: u32) {
+        if tab != 0 && !self.tabs.contains(&tab) {
+            self.tabs.push(tab);
+            driving_tabs().lock().expect("driving").insert(tab);
+        }
+    }
+}
+
+impl Drop for Driving {
+    fn drop(&mut self) {
+        let mut tabs = driving_tabs().lock().expect("driving");
+        for tab in &self.tabs {
+            tabs.remove(tab);
+        }
+    }
+}
+
+fn driving_tabs() -> &'static Mutex<HashSet<u32>> {
+    static TABS: OnceLock<Mutex<HashSet<u32>>> = OnceLock::new();
+    TABS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Whether a flow run is currently driving this tab.
+pub fn is_driving(tab: u32) -> bool {
+    driving_tabs().lock().expect("driving").contains(&tab)
+}
+
 struct Context<'a> {
     app: &'a AppHandle,
     run: u32,
@@ -891,6 +936,7 @@ struct Context<'a> {
     output: Vec<String>,
     /// Steps whose element was found another way, with fresh locators to save.
     healed: Vec<(String, FlowTarget)>,
+    driving: &'a mut Driving,
 }
 
 /// `{{name}}` from the flow's variables. Secrets are filled in later, right before typing.
@@ -995,6 +1041,8 @@ fn execute(
         Ok((tab, hidden)) => {
             runtime_lock().tabs.insert(run, tab);
             tabs::set_automated(app, tab, true);
+            let mut driving = Driving { tabs: Vec::new() };
+            driving.watch(tab);
             let mut context = Context {
                 app,
                 run,
@@ -1007,6 +1055,7 @@ fn execute(
                 rows: Vec::new(),
                 output: Vec::new(),
                 healed: Vec::new(),
+                driving: &mut driving,
             };
             context.vars.insert("date".into(), today());
             context.vars.extend(extra);
@@ -1184,6 +1233,11 @@ fn drive(context: &mut Context) -> &'static str {
             },
         );
         if let Err(error) = result {
+            if error.starts_with("A dialog opened")
+                && let Some(pending) = super::dialog::current()
+            {
+                let _ = super::dialog::answer(context.app, pending.tab, false, "");
+            }
             if stopped(context.run) || error == "Stopped." {
                 return "stopped";
             }
@@ -1225,7 +1279,7 @@ pub fn step_label(step: &FlowStep, vars: &BTreeMap<String, String>) -> String {
         .unwrap_or_else(|| "the focused element".into());
     match step.kind.as_str() {
         "navigate" => format!("Go to {}", clip(&fill_vars(&step.url, vars), 100)),
-        "click" => format!("Click {target}"),
+        "click" => click_label(step, &target),
         "type" => format!(
             "Type \"{}\" into {target}",
             clip(&mask_secrets(&fill_vars(&step.text, vars)), 60)
@@ -1249,15 +1303,74 @@ pub fn step_label(step: &FlowStep, vars: &BTreeMap<String, String>) -> String {
         "assert" => format!("Check the page shows \"{}\"", clip(&step.text, 60)),
         "notify" => format!("Notify: {}", clip(&step.text, 60)),
         "upload" => format!("Upload {}", step.values.join(", ")),
+        "drag" => drag_label(step),
+        "dialog" => format!(
+            "Dialog: {}",
+            if step.keys == "dismiss" {
+                "dismiss"
+            } else {
+                "accept"
+            }
+        ),
+        "desktopClick" => format!(
+            "Desktop click at {}, {}",
+            step.x.unwrap_or(0.0).round(),
+            step.y.unwrap_or(0.0).round()
+        ),
+        "desktopDrag" => "Desktop drag".into(),
+        "desktopType" => format!("Desktop type \"{}\"", clip(&step.text, 60)),
         other => format!("Unknown step \"{other}\""),
     }
+}
+
+fn click_label(step: &FlowStep, target: &str) -> String {
+    let verb = if step.clicks >= 2 {
+        "Double-click"
+    } else {
+        "Click"
+    };
+    if step.target.is_none()
+        && let (Some(x), Some(y)) = (step.x, step.y)
+    {
+        format!("{verb} at {}, {}", x.round(), y.round())
+    } else {
+        format!("{verb} {target}")
+    }
+}
+
+fn drag_label(step: &FlowStep) -> String {
+    let from = step
+        .target
+        .as_ref()
+        .map(FlowTarget::describe)
+        .unwrap_or_else(|| match (step.x, step.y) {
+            (Some(x), Some(y)) => format!("{}, {}", x.round(), y.round()),
+            _ => "the start".into(),
+        });
+    let to = step
+        .to
+        .as_ref()
+        .map(FlowTarget::describe)
+        .unwrap_or_else(|| match (step.to_x, step.to_y) {
+            (Some(x), Some(y)) => format!("{}, {}", x.round(), y.round()),
+            _ => "the end".into(),
+        });
+    format!("Drag {from} to {to}")
 }
 
 fn run_step(context: &mut Context, step: &FlowStep) -> Result<StepOutcome, String> {
     let app = context.app;
     let tab = context.tab;
     let label = step_label(step, &context.vars);
-    let page_free = matches!(step.kind.as_str(), "navigate" | "wait" | "notify" | "back");
+    let desktop = matches!(
+        step.kind.as_str(),
+        "desktopClick" | "desktopDrag" | "desktopType"
+    );
+    if desktop && !context.auto.desktop_control {
+        return Err("Desktop control is off. Turn it on in Settings, under Automation.".into());
+    }
+    let page_free =
+        desktop || matches!(step.kind.as_str(), "navigate" | "wait" | "notify" | "back");
     if !page_free {
         let url = tabs::tab_info(app, tab)
             .map(|info| info.url)
@@ -1277,14 +1390,65 @@ fn run_step(context: &mut Context, step: &FlowStep) -> Result<StepOutcome, Strin
             ok(label, "Loaded.")
         }
         "click" => {
-            let (element, healed) = find(context, step)?;
             let button = if step.keys.is_empty() {
                 "left"
             } else {
                 step.keys.as_str()
             };
-            driver::click(app, tab, element, button, false)?;
-            outcome(healed, label, "Clicked.")
+            let double = step.clicks >= 2;
+            let armed = super::effects::arm(tab);
+            let (healed, detail) = if step.target.is_none()
+                && let (Some(x), Some(y)) = (step.x, step.y)
+            {
+                super::effects::guard_point(app, &context.auto, tab, x, y)?;
+                driver::click_at(app, tab, x, y, button, double)?;
+                (false, "Clicked.".to_string())
+            } else {
+                let (element, healed) = find(context, step)?;
+                driver::click(app, tab, element, button, double)?;
+                (healed, "Clicked.".to_string())
+            };
+            let detail = finish_action(context, step, &armed, detail)?;
+            outcome(healed, label, detail)
+        }
+        "drag" => {
+            let armed = super::effects::arm(tab);
+            let from = drag_point(context, step, step.target.as_ref(), step.x, step.y, "start")?;
+            let to = drag_point(context, step, step.to.as_ref(), step.to_x, step.to_y, "end")?;
+            super::effects::guard_point(app, &context.auto, tab, from.0, from.1)?;
+            super::effects::guard_point(app, &context.auto, tab, to.0, to.1)?;
+            driver::drag(app, tab, from, to)?;
+            let detail = finish_action(context, step, &armed, "Dragged.".into())?;
+            ok(label, detail)
+        }
+        "dialog" => {
+            let pending = super::dialog::current().ok_or("No dialog is open.")?;
+            if pending.tab != tab {
+                return Err("The open dialog belongs to another tab.".into());
+            }
+            let accept = step.keys != "dismiss";
+            let text = fill_vars(&step.text, &context.vars);
+            super::dialog::answer(app, tab, accept, &text)?;
+            ok(label, "Answered.")
+        }
+        "desktopClick" => {
+            let (x, y) = point_of(step.x, step.y, "Choose a point on the screen.")?;
+            super::desktop::click(x, y)?;
+            ok(label, "Clicked.")
+        }
+        "desktopDrag" => {
+            let from = point_of(step.x, step.y, "Choose where the drag starts.")?;
+            let to = point_of(step.to_x, step.to_y, "Choose where the drag ends.")?;
+            super::desktop::drag(from.0, from.1, to.0, to.1)?;
+            ok(label, "Dragged.")
+        }
+        "desktopType" => {
+            let text = fill_vars(&step.text, &context.vars);
+            if text.is_empty() {
+                return Err("Enter the text to type.".into());
+            }
+            super::desktop::type_text(&text)?;
+            ok(label, "Typed.")
         }
         "type" => {
             let raw = fill_vars(&step.text, &context.vars);
@@ -1470,9 +1634,97 @@ fn outcome(healed: bool, label: String, detail: impl Into<String>) -> Result<Ste
     }
 }
 
+fn point_of(x: Option<f64>, y: Option<f64>, missing: &str) -> Result<(f64, f64), String> {
+    match (x, y) {
+        (Some(x), Some(y)) => Ok((x, y)),
+        _ => Err(missing.into()),
+    }
+}
+
+fn drag_point(
+    context: &mut Context,
+    step: &FlowStep,
+    target: Option<&FlowTarget>,
+    x: Option<f64>,
+    y: Option<f64>,
+    which: &str,
+) -> Result<(f64, f64), String> {
+    if let Some(target) = target {
+        let (element, _) = find_at(context, step, target)?;
+        return driver::element_point(context.app, context.tab, element);
+    }
+    point_of(x, y, &format!("Choose the {which} of the drag."))
+}
+
+/// Applies a click's download and new tab, and fails when a dialog opened with no dialog step next.
+fn finish_action(
+    context: &mut Context,
+    step: &FlowStep,
+    armed: &super::effects::Armed,
+    mut detail: String,
+) -> Result<String, String> {
+    let effect = super::effects::collect(context.app, armed, Duration::from_millis(1500));
+    if !effect.file_name.is_empty() {
+        context.vars.insert("file".into(), effect.file_name.clone());
+        context.vars.insert("path".into(), effect.file_path.clone());
+        detail.push_str(&format!(
+            " Download: {} at {}.",
+            effect.file_name, effect.file_path
+        ));
+    }
+    if step.follow {
+        if let Some(tab) = effect.tab {
+            context.tab = tab;
+            context.driving.watch(tab);
+            runtime_lock().tabs.insert(context.run, tab);
+            tabs::set_automated(context.app, tab, true);
+            detail.push_str(&format!(" Continued in tab {tab}."));
+        } else if !effect.window.is_empty() {
+            detail.push_str(" A window opened. This flow stays on the current tab.");
+        }
+    } else if let Some(tab) = effect.tab {
+        detail.push_str(&format!(" Opened tab {tab}."));
+    } else if !effect.window.is_empty() {
+        detail.push_str(&format!(" Opened a window ({}).", effect.window));
+    }
+    if let Some(pending) = super::dialog::current()
+        && (pending.tab == context.tab || pending.tab == armed.opener)
+        && !upcoming_dialog(context, step)
+    {
+        return Err(format!("A dialog opened: {}", clip(&pending.message, 200)));
+    }
+    Ok(detail)
+}
+
+fn upcoming_dialog(context: &Context, step: &FlowStep) -> bool {
+    let Some(pos) = context
+        .flow
+        .steps
+        .iter()
+        .position(|item| item.id == step.id)
+    else {
+        return false;
+    };
+    context
+        .flow
+        .steps
+        .iter()
+        .skip(pos + 1)
+        .find(|item| !item.disabled)
+        .is_some_and(|item| item.kind == "dialog")
+}
+
 /// Finds a step's element: its saved locators first, waiting for the page, then the AI.
 fn find(context: &mut Context, step: &FlowStep) -> Result<(u32, bool), String> {
     let target = step.target.clone().ok_or("This step has no element.")?;
+    find_at(context, step, &target)
+}
+
+fn find_at(
+    context: &mut Context,
+    step: &FlowStep,
+    target: &FlowTarget,
+) -> Result<(u32, bool), String> {
     let value = serde_json::to_value(&target).map_err(|error| error.to_string())?;
     let start = Instant::now();
     loop {
@@ -1482,7 +1734,7 @@ fn find(context: &mut Context, step: &FlowStep) -> Result<(u32, bool), String> {
         if let Some((element, by)) = driver::locate(context.app, context.tab, &value)? {
             let healed = matches!(by.as_str(), "text" | "xpath");
             if healed {
-                remember(context, step, &target, element);
+                remember(context, step, target, element);
             }
             return Ok((element, healed));
         }
@@ -1491,8 +1743,8 @@ fn find(context: &mut Context, step: &FlowStep) -> Result<(u32, bool), String> {
         }
         thread::sleep(Duration::from_millis(400));
     }
-    let element = heal_with_ai(context, &target)?;
-    remember(context, step, &target, element);
+    let element = heal_with_ai(context, target)?;
+    remember(context, step, target, element);
     Ok((element, true))
 }
 
@@ -1687,6 +1939,58 @@ pub fn playwright(app: &AppHandle, id: &str) -> Result<String, String> {
     Ok(playwright_script(&flow))
 }
 
+fn playwright_click(step: &FlowStep, locator: &str) -> String {
+    let method = if step.clicks >= 2 {
+        "dblclick"
+    } else {
+        "click"
+    };
+    if step.target.is_none()
+        && let (Some(x), Some(y)) = (step.x, step.y)
+    {
+        return format!("await page.mouse.{method}({}, {});", x.round(), y.round());
+    }
+    match step.keys.as_str() {
+        "right" => format!("await {locator}.{method}({{ button: \"right\" }});"),
+        "middle" => format!("await {locator}.{method}({{ button: \"middle\" }});"),
+        _ => format!("await {locator}.{method}();"),
+    }
+}
+
+fn playwright_drag(step: &FlowStep) -> String {
+    if let (Some(from), Some(to)) = (&step.target, &step.to) {
+        return format!(
+            "await {}.dragTo({});",
+            playwright_locator(from),
+            playwright_locator(to)
+        );
+    }
+    if let (Some(x), Some(y), Some(x2), Some(y2)) = (step.x, step.y, step.to_x, step.to_y) {
+        return format!(
+            "await page.mouse.move({}, {});\n  await page.mouse.down();\n  await page.mouse.move({}, {});\n  await page.mouse.up();",
+            x.round(),
+            y.round(),
+            x2.round(),
+            y2.round()
+        );
+    }
+    "// Drag (needs a start and an end)".into()
+}
+
+fn playwright_dialog(step: &FlowStep, vars: &BTreeMap<String, String>) -> String {
+    let text = fill_vars(&step.text, vars);
+    if step.keys == "dismiss" {
+        "page.once(\"dialog\", dialog => dialog.dismiss());".into()
+    } else if text.is_empty() {
+        "page.once(\"dialog\", dialog => dialog.accept());".into()
+    } else {
+        format!(
+            "page.once(\"dialog\", dialog => dialog.accept({}));",
+            js_string(&text)
+        )
+    }
+}
+
 fn playwright_script(flow: &Flow) -> String {
     let vars = &flow.variables;
     let mut lines = vec![
@@ -1700,7 +2004,20 @@ fn playwright_script(flow: &Flow) -> String {
             js_string(&fill_vars(&flow.start_url, vars))
         ));
     }
-    for step in flow.steps.iter().filter(|step| !step.disabled) {
+    let steps: Vec<&FlowStep> = flow.steps.iter().filter(|step| !step.disabled).collect();
+    for (index, step) in steps.iter().enumerate() {
+        if step.kind == "dialog" {
+            if index == 0 || steps[index - 1].kind == "dialog" {
+                lines.push(format!("  {}", playwright_dialog(step, vars)));
+            }
+            continue;
+        }
+        if steps
+            .get(index + 1)
+            .is_some_and(|next| next.kind == "dialog")
+        {
+            lines.push(format!("  {}", playwright_dialog(steps[index + 1], vars)));
+        }
         let locator = step
             .target
             .as_ref()
@@ -1711,7 +2028,8 @@ fn playwright_script(flow: &Flow) -> String {
                 "await page.goto({});",
                 js_string(&fill_vars(&step.url, vars))
             ),
-            "click" => format!("await {locator}.click();"),
+            "click" => playwright_click(step, &locator),
+            "drag" => playwright_drag(step),
             "type" => format!(
                 "await {locator}.fill({});",
                 playwright_text(&step.text, vars)
@@ -1775,7 +2093,7 @@ fn playwright_script(flow: &Flow) -> String {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            "extract" | "ai" | "notify" => {
+            "extract" | "ai" | "notify" | "desktopClick" | "desktopDrag" | "desktopType" => {
                 format!("// {} (runs only in ce-browser)", step_label(step, vars))
             }
             other => format!("// Unknown step \"{other}\""),
@@ -1927,6 +2245,57 @@ mod tests {
         assert!(
             script.contains("page.getByRole(\"button\", { name: \"Go\", exact: true }).click()")
         );
+    }
+
+    #[test]
+    fn clicks_and_points_round_trip() {
+        let step = FlowStep {
+            kind: "click".into(),
+            clicks: 2,
+            x: Some(12.5),
+            y: Some(40.0),
+            follow: true,
+            ..FlowStep::default()
+        };
+        let back: FlowStep = serde_json::from_str(&serde_json::to_string(&step).unwrap()).unwrap();
+        assert_eq!(
+            (back.clicks, back.x, back.y, back.follow),
+            (2, Some(12.5), Some(40.0), true)
+        );
+        let old: FlowStep = serde_json::from_str(r#"{"kind":"click"}"#).unwrap();
+        assert_eq!(old.clicks, 0);
+        assert!(old.x.is_none());
+        assert!(!old.follow);
+        let written = serde_json::to_value(&old).unwrap();
+        let again: FlowStep = serde_json::from_value(written.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&again).unwrap(), written);
+
+        let pointed = FlowStep {
+            kind: "click".into(),
+            x: Some(3.0),
+            y: Some(4.0),
+            ..FlowStep::default()
+        };
+        let script = playwright_script(&Flow {
+            name: "Point".into(),
+            steps: vec![
+                pointed,
+                FlowStep {
+                    kind: "click".into(),
+                    clicks: 2,
+                    ..FlowStep::default()
+                },
+                FlowStep {
+                    kind: "dialog".into(),
+                    text: "yes".into(),
+                    ..FlowStep::default()
+                },
+            ],
+            ..Flow::default()
+        });
+        assert!(script.contains("page.mouse.click(3, 4)"));
+        assert!(script.contains("page.once(\"dialog\", dialog => dialog.accept(\"yes\"))"));
+        assert!(script.contains("dblclick()"));
     }
 
     #[test]

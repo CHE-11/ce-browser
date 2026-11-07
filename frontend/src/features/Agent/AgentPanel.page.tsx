@@ -16,6 +16,7 @@ import { AgentError } from "./AgentError";
 import { AgentGoalCard } from "./AgentGoalCard";
 import { AgentHeader, type AgentPanelView } from "./AgentHeader";
 import { AgentLiveView } from "./AgentLiveView";
+import { AgentPageStatus } from "./AgentPageStatus";
 import { AgentMemoryView } from "./AgentMemoryView";
 import { AgentPlan } from "./AgentPlan";
 import { AgentResult } from "./AgentResult";
@@ -127,6 +128,7 @@ export function AgentPanelPage() {
   const currentSite = siteOf(activeTab?.url ?? "");
   const accessBlocked: Partial<Record<AccessToggle, string>> = {
     ...(settings?.automation.agentAllowScript ? {} : { scripts: "Off in Settings, under Automation." }),
+    ...(settings?.automation.desktopControl ? {} : { desktop: "Off in Settings, under Automation." }),
     ...(settings?.automation.agentMemory === false ? { memory: "Off in Settings, under Automation." } : {}),
     ...(settings?.automation.maxParallelAgents === 0 ? { helpers: "Off in Settings, under Automation." } : {}),
   };
@@ -227,7 +229,9 @@ export function AgentPanelPage() {
             <div id="agent-panel-run" className="flex flex-col gap-3">
               <AgentGoalCard run={run} helpers={agent.childrenOf(run.id)} onShowTab={() => agent.showTab(run.tabId)} onSelect={agent.select} />
               <AgentPlan id="agent-panel-plan" plan={run.plan} />
-              {active ? <AgentLiveView run={run} onShowTab={() => agent.showTab(run.tabId)} /> : null}
+              {active ? (
+                <AgentLiveView run={run} onShowTab={() => agent.showTab(run.tabId)} screen={!!settings?.automation.desktopControl && access.desktop} />
+              ) : null}
               {run.steps.length < run.stepCount && run.steps.length === 0 ? (
                 <p id="agent-panel-steps-loading" className="text-xs text-zinc-500">
                   Loading steps…
@@ -255,6 +259,9 @@ export function AgentPanelPage() {
           <p id="agent-panel-notice" role="status" className="text-xs text-zinc-400">
             {notice}
           </p>
+        ) : null}
+        {run && active && (run.dialog || run.download || run.openedTab) ? (
+          <AgentPageStatus run={run} onDialog={(accept, text) => agent.answerDialog(run.id, accept, text)} onShowTab={(tabId) => agent.showTab(tabId)} />
         ) : null}
         {run?.approval ? (
           <AgentApproval

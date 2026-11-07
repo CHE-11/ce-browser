@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { AppWindow, Bell, Brain, ChevronDown, ClipboardCopy, Code, Globe, HardDrive, History, Layers, Lock, Users } from "lucide-react";
+import { AppWindow, Bell, Brain, ChevronDown, ClipboardCopy, Code, Globe, HardDrive, History, Layers, Lock, Monitor, Users } from "lucide-react";
 import type { AgentAccess } from "@type/browser";
 import { Toggle } from "@/components/Toggle";
 import { ACCESS_TOGGLES, accessSummary, type AccessToggle } from "@/lib/agent-access";
@@ -15,6 +15,7 @@ const ICONS: Record<AccessToggle, typeof Lock> = {
   helpers: Users,
   scripts: Code,
   notifications: Bell,
+  desktop: Monitor,
 };
 
 type Props = {
@@ -36,7 +37,7 @@ export function AgentAccessMenu({ id, access, onChange, scope, currentSite, bloc
   const close = useCallback(() => setOpen(false), []);
   useDismiss(root, open, close);
   const site = access.site || currentSite;
-  const narrowed = access.sites === "site" || ACCESS_TOGGLES.some((item) => item.key !== "scripts" && !access[item.key]);
+  const narrowed = access.sites === "site" || ACCESS_TOGGLES.some((item) => item.key !== "scripts" && item.key !== "desktop" && !access[item.key]);
 
   const siteOption = (value: AgentAccess["sites"], Icon: typeof Lock, label: string, hint: string) => {
     const selected = access.sites === value;
@@ -106,7 +107,7 @@ export function AgentAccessMenu({ id, access, onChange, scope, currentSite, bloc
             {siteOption("browser", Globe, "Whole browser", "Any site automation may use. Blocked sites stay off.")}
           </div>
           <ul id={`${id}-toggles`} className="flex flex-col border-t border-zinc-800 pt-1.5">
-            {ACCESS_TOGGLES.map((item) => {
+            {ACCESS_TOGGLES.filter((item) => item.key !== "desktop" || !blockedBySettings.desktop).map((item) => {
               const Icon = ICONS[item.key];
               const blocked = blockedBySettings[item.key];
               const needsTabs = item.key === "helpers" && !access.tabs;

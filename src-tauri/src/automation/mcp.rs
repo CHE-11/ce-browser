@@ -476,6 +476,34 @@ fn tool_list(auto: &AutomationSettings) -> Vec<Value> {
             ),
         ),
         (
+            "drag",
+            "Drag from one element or CSS point to another.",
+            schema(
+                json!({
+                    "tabId": tab,
+                    "fromRef": reference,
+                    "toRef": reference,
+                    "x": { "type": "number" },
+                    "y": { "type": "number" },
+                    "toX": { "type": "number" },
+                    "toY": { "type": "number" }
+                }),
+                &[],
+            ),
+        ),
+        (
+            "answer_dialog",
+            "Accept or dismiss the open JavaScript dialog. Prompts can send text.",
+            schema(
+                json!({
+                    "tabId": tab,
+                    "accept": { "type": "boolean" },
+                    "text": { "type": "string" }
+                }),
+                &[],
+            ),
+        ),
+        (
             "type",
             "Type into a field with real key input. Replaces its value unless clear is false. {{secret:name}} types a saved secret.",
             schema(
@@ -809,6 +837,23 @@ fn element_label(info: &driver::ElementInfo, element: u32) -> String {
     }
 }
 
+fn mcp_drag_point(
+    app: &AppHandle,
+    tab: u32,
+    args: &Value,
+    reference_key: &str,
+    x_key: &str,
+    y_key: &str,
+) -> Result<(f64, f64), String> {
+    if let Some(element) = arg_u32(args, reference_key) {
+        return driver::element_point(app, tab, element);
+    }
+    let x = arg_f64(args, x_key)
+        .ok_or_else(|| format!("Missing \"{reference_key}\" or \"{x_key}\"."))?;
+    let y = arg_f64(args, y_key).ok_or_else(|| format!("Missing \"{y_key}\"."))?;
+    Ok((x, y))
+}
+
 fn run_tool(
     app: &AppHandle,
     auto: &AutomationSettings,
@@ -926,6 +971,7 @@ fn run_tool(
             let (Some(x), Some(y)) = (arg_f64(args, "x"), arg_f64(args, "y")) else {
                 return Err("Give a ref, or x and y.".into());
             };
+            super::effects::guard_point(app, auto, tab, x, y)?;
             commit(session)?;
             driver::click_at(
                 app,
@@ -938,6 +984,45 @@ fn run_tool(
             Ok((
                 format!("Click at {}, {}", x.round(), y.round()),
                 text("Clicked."),
+            ))
+        }
+        "drag" => {
+            let from = mcp_drag_point(app, tab, args, "fromRef", "x", "y")?;
+            let to = mcp_drag_point(app, tab, args, "toRef", "toX", "toY")?;
+            if let Some(element) = arg_u32(args, "fromRef") {
+                let info = driver::element_info(app, tab, element)?;
+                agent::session_gate(app, session, policy::click(auto, &info))?;
+            }
+            commit(session)?;
+            driver::drag(app, tab, from, to)?;
+            Ok(("Drag".into(), text("Dragged.")))
+        }
+        "answer_dialog" => {
+            let accept = arg_bool(args, "accept", true);
+            let reply = arg_str(args, "text");
+            let pending = super::dialog::current().ok_or("No dialog is open.")?;
+            if pending.tab != tab {
+                return Err("The open dialog belongs to another tab.".into());
+            }
+            if accept && matches!(pending.kind.as_str(), "confirm" | "prompt" | "beforeunload") {
+                agent::session_gate(
+                    app,
+                    session,
+                    policy::Verdict::ask(
+                        policy::Risk::Send,
+                        format!("Allow this dialog?\n{}", clip(&pending.message, 240)),
+                    ),
+                )?;
+            }
+            commit(session)?;
+            super::dialog::answer(app, tab, accept, &reply)?;
+            Ok((
+                if accept {
+                    "Accept the dialog".into()
+                } else {
+                    "Dismiss the dialog".into()
+                },
+                text("Answered."),
             ))
         }
         "type" => {

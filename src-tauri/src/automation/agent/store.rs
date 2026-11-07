@@ -48,6 +48,8 @@ pub fn snapshot(runs: &[RunState]) -> Vec<StoredRun> {
                 step.thumb = None;
             }
             run.approval = None;
+            run.screen = None;
+            run.dialog = None;
             let transcript = if index + TRANSCRIPT_RUNS >= count {
                 let mut transcript = state.transcript.clone();
                 strip_images(&mut transcript);

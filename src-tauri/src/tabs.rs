@@ -1898,7 +1898,12 @@ pub fn new_window(
 /// The window starts at `about:blank` and is handed to `SetNewWindow` before anything navigates
 /// it. WebView2 commits the popout. Navigating or resizing from that callback never returns, so
 /// the follow-up runs on a later turn of the main thread.
-fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewWindowResponse<Wry> {
+fn script_window(
+    app: &AppHandle,
+    opener: Option<u32>,
+    url: Url,
+    features: NewWindowFeatures,
+) -> NewWindowResponse<Wry> {
     let extension = url.scheme() == "chrome-extension";
     let Some(size) = features.size().or_else(|| {
         extension.then_some(LogicalSize::new(
@@ -1960,6 +1965,9 @@ fn script_window(app: &AppHandle, url: Url, features: NewWindowFeatures) -> NewW
     }
     match builder.build() {
         Ok(window) => {
+            if let Some(opener) = opener {
+                crate::automation::effects::remember_window(opener, window.label().to_string());
+            }
             webview2::close_window_when_requested(app, window.label());
             if extension {
                 let _ = window.set_zoom(factor);
@@ -2050,7 +2058,7 @@ fn blank_tab(
     features: NewWindowFeatures,
 ) -> NewWindowResponse<Wry> {
     if features.size().is_some() || url.scheme() == "chrome-extension" {
-        return script_window(app, url, features);
+        return script_window(app, opener, url, features);
     }
     // Shift+click is a new-window request. Opening a tab for it focuses that tab and
     // closes the peek the page script just asked for.
@@ -2096,7 +2104,7 @@ fn blank_tab(
                 None,
             ),
         };
-        let _ = open(
+        if let Ok(id) = open(
             &app,
             OpenTab {
                 index,
@@ -2105,7 +2113,10 @@ fn blank_tab(
                 group,
                 ..OpenTab::new(url)
             },
-        );
+        ) && let Some(opener) = opener
+        {
+            crate::automation::effects::remember_tab(opener, id);
+        }
     });
     NewWindowResponse::Deny
 }

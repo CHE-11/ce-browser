@@ -2,7 +2,10 @@
 //! the scheduler and the local MCP server.
 
 pub mod agent;
+pub mod desktop;
+pub mod dialog;
 pub mod driver;
+pub mod effects;
 pub mod extract;
 pub mod flows;
 pub mod mcp;
@@ -23,6 +26,11 @@ use crate::{paths, tabs};
 
 const LOG_FILE: &str = "automation-log.jsonl";
 const LOG_LIMIT: u64 = 2_000_000;
+
+/// Whether a flow or the agent is driving this tab. JavaScript dialogs are deferred then.
+pub fn driving(tab: u32) -> bool {
+    agent::run_for_tab(tab).is_some() || flows::is_driving(tab)
+}
 
 /// Stops whatever was driving the tab and forgets its page state.
 pub fn tab_closed(app: &AppHandle, tab: u32) {

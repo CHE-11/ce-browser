@@ -32,6 +32,11 @@ pub struct AgentStep {
     pub detail: String,
     pub thumb: Option<String>,
     pub at: u64,
+    /// Pointer, as fractions of the viewport, for the live marker.
+    pub px: Option<f64>,
+    pub py: Option<f64>,
+    pub px2: Option<f64>,
+    pub py2: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -41,9 +46,19 @@ pub struct AgentApproval {
     /// `confirm` asks allow or deny. `question` asks for a typed answer.
     pub kind: String,
     pub prompt: String,
-    /// What a `confirm` could do: `open`, `send`, `destructive`, `payment`, `upload`, `script`
-    /// or `budget`. Blank for questions.
+    /// What a `confirm` could do: `open`, `send`, `destructive`, `payment`, `upload`, `script`,
+    /// `desktop` or `budget`. Blank for questions.
     pub risk: String,
+}
+
+/// A dialog, download or new tab the panel shows while a run is active.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AgentNotice {
+    pub kind: String,
+    pub text: String,
+    pub detail: String,
+    pub tab_id: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -76,6 +91,8 @@ pub struct AgentAccess {
     /// Run JavaScript in pages, when Settings also allows it.
     pub scripts: bool,
     pub notifications: bool,
+    /// Use the mouse and keyboard outside the browser, when Settings also allows it.
+    pub desktop: bool,
 }
 
 impl Default for AgentAccess {
@@ -91,6 +108,7 @@ impl Default for AgentAccess {
             helpers: true,
             scripts: false,
             notifications: true,
+            desktop: false,
         }
     }
 }
@@ -119,6 +137,7 @@ impl AgentAccess {
         self.scripts &= parent.scripts;
         self.notifications &= parent.notifications;
         self.helpers = false;
+        self.desktop = false;
         self
     }
 }
@@ -161,6 +180,14 @@ pub struct AgentRun {
     /// Address of the tab when the run started.
     pub start_url: String,
     pub access: AgentAccess,
+    /// A JavaScript dialog waiting on this run's tab.
+    pub dialog: Option<AgentNotice>,
+    /// The download the last page action started.
+    pub download: Option<AgentNotice>,
+    /// The tab or window the last page action opened.
+    pub opened_tab: Option<AgentNotice>,
+    /// Latest desktop screenshot, as a small JPEG data URL.
+    pub screen: Option<String>,
 }
 
 impl AgentRun {
@@ -215,6 +242,10 @@ pub(super) struct RunState {
     pub follow_up: Option<String>,
     /// The run's thread is still going, perhaps winding down after a stop.
     pub working: bool,
+    /// The user already allowed desktop control for this run.
+    pub desktop_ok: bool,
+    /// Screen pixels per pixel of the last desktop screenshot.
+    pub screen_scale: f64,
 }
 
 impl RunState {
@@ -235,6 +266,8 @@ impl RunState {
             instructions: String::new(),
             follow_up: None,
             working: false,
+            desktop_ok: false,
+            screen_scale: 1.0,
         }
     }
 }
@@ -901,6 +934,7 @@ pub(super) fn step(kind: &str, text: &str, detail: &str) -> AgentStep {
         detail: clip(detail, 4000),
         thumb: None,
         at: now_ms(),
+        ..AgentStep::default()
     }
 }
 
@@ -931,6 +965,107 @@ pub(super) fn set_last_thumb(id: u32, thumb: String) {
             last.thumb = Some(thumb);
         }
     });
+}
+
+/// Draws the live marker on the action just recorded.
+pub(super) fn set_last_point(id: u32, px: f64, py: f64, px2: Option<f64>, py2: Option<f64>) {
+    with_run(id, |state| {
+        if let Some(last) = state.run.steps.last_mut() {
+            last.px = Some(px.clamp(0.0, 1.0));
+            last.py = Some(py.clamp(0.0, 1.0));
+            last.px2 = px2.map(|value| value.clamp(0.0, 1.0));
+            last.py2 = py2.map(|value| value.clamp(0.0, 1.0));
+        }
+    });
+}
+
+/// Replaces the download and new-tab lines. `None` clears that line.
+pub(super) fn set_page_result(
+    app: &AppHandle,
+    id: u32,
+    download: Option<AgentNotice>,
+    opened: Option<AgentNotice>,
+) {
+    with_run(id, |state| {
+        state.run.download = download;
+        state.run.opened_tab = opened;
+    });
+    emit(app);
+}
+
+/// Shows a JavaScript dialog on the run that is driving `tab`.
+pub fn note_dialog(app: &AppHandle, tab: u32, kind: &str, message: &str, default_text: &str) {
+    let Some(id) = run_for_tab(tab) else {
+        return;
+    };
+    with_run(id, |state| {
+        state.run.dialog = Some(AgentNotice {
+            kind: kind.into(),
+            text: clip(message, 500),
+            detail: clip(default_text, 300),
+            tab_id: tab,
+        });
+    });
+    emit(app);
+}
+
+/// Clears the dialog banner for every run on `tab`.
+pub fn clear_dialog(app: &AppHandle, tab: u32) {
+    let mut changed = false;
+    {
+        let mut agents = lock();
+        for state in &mut agents.runs {
+            if state
+                .run
+                .dialog
+                .as_ref()
+                .is_some_and(|notice| notice.tab_id == tab)
+            {
+                state.run.dialog = None;
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        emit(app);
+    }
+}
+
+/// The tab a run is driving.
+pub fn run_tab(id: u32) -> Option<u32> {
+    with_run(id, |state| state.run.tab_id)
+}
+
+/// Asks the first time this run wants the Windows desktop, then remembers the answer.
+pub(super) fn approve_desktop(app: &AppHandle, id: u32) -> Result<(), String> {
+    let done = with_run(id, |state| state.desktop_ok).unwrap_or(false);
+    if done {
+        return Ok(());
+    }
+    gate(
+        app,
+        id,
+        policy::Verdict::ask(
+            Risk::Desktop,
+            "Let the agent use the mouse and keyboard outside the browser for this task?",
+        ),
+    )?;
+    with_run(id, |state| state.desktop_ok = true);
+    Ok(())
+}
+
+pub(super) fn screen_scale(id: u32) -> f64 {
+    with_run(id, |state| state.screen_scale).unwrap_or(1.0)
+}
+
+pub(super) fn set_screen(app: &AppHandle, id: u32, thumb: String, scale: f64) {
+    with_run(id, |state| {
+        state.run.screen = Some(thumb);
+        if scale.is_finite() && scale > 0.0 {
+            state.screen_scale = scale;
+        }
+    });
+    emit(app);
 }
 
 pub(super) struct Stopped;
@@ -994,6 +1129,7 @@ pub fn risk_name(risk: Risk) -> &'static str {
         Risk::Payment => "payment",
         Risk::Upload => "upload",
         Risk::Script => "script",
+        Risk::Desktop => "desktop",
     }
 }
 

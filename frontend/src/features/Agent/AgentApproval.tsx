@@ -14,6 +14,7 @@ const RISK_TEXT: Record<Approval["risk"], string> = {
   upload: "Uploads files",
   script: "Runs a script",
   budget: "Limit reached",
+  desktop: "Uses the desktop",
 };
 
 /** The lowest autonomy that would let this kind of action go ahead on its own. */

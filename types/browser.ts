@@ -925,6 +925,8 @@ export type AutomationSettings = {
   agentAllowScript: boolean;
   /** Show the model's reply as it is written. */
   streamReplies: boolean;
+  /** The agent may use the mouse and keyboard outside the browser. */
+  desktopControl: boolean;
 };
 
 export type ToastPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
@@ -1675,6 +1677,19 @@ export type AgentStep = {
   thumb: string | null;
   /** Milliseconds since 1970. */
   at: number;
+  /** Pointer, as fractions of the viewport. Null when this step didn't point. */
+  px: number | null;
+  py: number | null;
+  px2: number | null;
+  py2: number | null;
+};
+
+/** A dialog, download, or new tab the panel shows during a run. */
+export type AgentNotice = {
+  kind: string;
+  text: string;
+  detail: string;
+  tabId: number;
 };
 
 export type AgentApproval = {
@@ -1683,7 +1698,7 @@ export type AgentApproval = {
   kind: "confirm" | "question";
   prompt: string;
   /** What a `confirm` could do. Blank for questions. */
-  risk: "" | "open" | "send" | "destructive" | "payment" | "upload" | "script" | "budget";
+  risk: "" | "open" | "send" | "destructive" | "payment" | "upload" | "script" | "budget" | "desktop";
 };
 
 export type AgentRunStatus = "running" | "waiting" | "paused" | "done" | "failed" | "stopped";
@@ -1726,6 +1741,14 @@ export type AgentRun = {
   flowSteps: number;
   startUrl: string;
   access: AgentAccess;
+  /** A JavaScript dialog waiting on this run's tab. */
+  dialog: AgentNotice | null;
+  /** The download the last page action started. */
+  download: AgentNotice | null;
+  /** The tab or window the last page action opened. */
+  openedTab: AgentNotice | null;
+  /** Latest desktop screenshot, as a small JPEG data URL. */
+  screen: string | null;
 };
 
 /** What a run may reach. Tools outside it are not offered to the model. */
@@ -1746,6 +1769,8 @@ export type AgentAccess = {
   /** Run JavaScript in pages, when Settings also allows it. */
   scripts: boolean;
   notifications: boolean;
+  /** Use the mouse and keyboard outside the browser, when Settings also allows it. */
+  desktop: boolean;
 };
 
 /** US dollars per million tokens. */
@@ -1813,6 +1838,8 @@ export type FlowTarget = {
   tag: string;
   /** Plain description for AI healing, such as `the Add to cart button`. */
   description: string;
+  /** Origin of the frame that holds the element. Empty is the top page. */
+  frame: string;
 };
 
 export type FlowStepKind =
@@ -1830,7 +1857,12 @@ export type FlowStepKind =
   | "ai"
   | "assert"
   | "notify"
-  | "upload";
+  | "upload"
+  | "drag"
+  | "dialog"
+  | "desktopClick"
+  | "desktopDrag"
+  | "desktopType";
 
 export type FlowStep = {
   id: string;
@@ -1856,6 +1888,17 @@ export type FlowStep = {
   note: string;
   /** How much an `ai` step's agent may do without asking. Blank uses the default from Settings. */
   autonomy?: AgentAutonomy | "";
+  /** 2 is a double-click. 0 and 1 are one click. */
+  clicks: number;
+  /** CSS pixels for a click or drag that has no element. Screen pixels for a desktop step. */
+  x: number | null;
+  y: number | null;
+  /** Where a drag ends, when it ends on an element. */
+  to: FlowTarget | null;
+  toX: number | null;
+  toY: number | null;
+  /** After this click, continue the flow in the tab it opened. */
+  follow: boolean;
 };
 
 export type FlowTriggerKind = "interval" | "daily" | "weekly" | "startup" | "visit" | "pageChange" | "download" | "hotkey";

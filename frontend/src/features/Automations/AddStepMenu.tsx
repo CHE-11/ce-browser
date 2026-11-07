@@ -7,8 +7,11 @@ import {
   Hourglass,
   Keyboard,
   ListChecks,
+  MessageSquare,
+  Monitor,
   MousePointer,
   MousePointerClick,
+  Move,
   Sparkles,
   Table,
   TextCursorInput,
@@ -36,6 +39,11 @@ const STEP_ICONS: Record<FlowStepKind, ReactNode> = {
   assert: <CheckCheck />,
   notify: <Bell />,
   upload: <Upload />,
+  drag: <Move />,
+  dialog: <MessageSquare />,
+  desktopClick: <Monitor />,
+  desktopDrag: <Move />,
+  desktopType: <TextCursorInput />,
 };
 
 type AddStepMenuProps = {

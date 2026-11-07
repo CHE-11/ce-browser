@@ -709,6 +709,8 @@ pub struct AutomationSettings {
     pub agent_allow_script: bool,
     /// Show the model's reply as it is written.
     pub stream_replies: bool,
+    /// The agent may use the mouse and keyboard outside the browser. Off by default.
+    pub desktop_control: bool,
 }
 
 pub const MAX_AGENT_STEPS: u32 = 500;
@@ -736,6 +738,7 @@ impl Default for AutomationSettings {
             agent_notify: true,
             agent_allow_script: false,
             stream_replies: true,
+            desktop_control: false,
         }
     }
 }

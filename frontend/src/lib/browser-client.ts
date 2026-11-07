@@ -1757,6 +1757,11 @@ export function agentAnswer(runId: number, approvalId: number, allow: boolean) {
   return invoke<void>("agent_answer", { runId, approvalId, allow });
 }
 
+/** Accepts or dismisses the JavaScript dialog the run is waiting on. */
+export function agentAnswerDialog(runId: number, accept: boolean, text = "") {
+  return invoke<void>("agent_answer_dialog", { runId, accept, text });
+}
+
 export function agentReply(runId: number, text: string) {
   return invoke<void>("agent_reply", { runId, text });
 }

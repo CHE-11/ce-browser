@@ -3,6 +3,7 @@ import type { AgentAccess, AgentAutonomy, AgentRun } from "@type/browser";
 import { DEFAULT_ACCESS, withDefaults } from "./agent-access";
 import {
   agentAnswer,
+  agentAnswerDialog,
   agentClear,
   agentContinue,
   agentDeleteRun,
@@ -176,6 +177,7 @@ export function useAgentRun() {
     childrenOf: (id: number) => windowRuns.filter((item) => item.parent === id),
     stop: (id: number) => guard(agentStop(id)),
     answer: (id: number, approval: number, allow: boolean) => guard(agentAnswer(id, approval, allow)),
+    answerDialog: (id: number, accept: boolean, text = "") => guard(agentAnswerDialog(id, accept, text)),
     reply: (id: number, text: string) => guard(agentReply(id, text)),
     followUp: (id: number, text: string) => guard(agentContinue(id, text, activeTab?.id)),
     setAutonomy: (id: number, autonomy: AgentAutonomy) => guard(agentSetAutonomy(id, autonomy)),

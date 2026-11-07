@@ -289,6 +289,7 @@ fn mouse(
     y: f64,
     button: &str,
     clicks: u32,
+    held: bool,
 ) -> Result<(), String> {
     cdp(
         app,
@@ -299,7 +300,7 @@ fn mouse(
             "x": x,
             "y": y,
             "button": button,
-            "buttons": if kind == "mousePressed" { button_bits(button) } else { 0 },
+            "buttons": if kind == "mousePressed" || held { button_bits(button) } else { 0 },
             "clickCount": clicks,
         }),
     )
@@ -327,15 +328,69 @@ pub fn click_at(
         "right" | "middle" => button,
         _ => "left",
     };
-    mouse(app, id, "mouseMoved", x, y, "none", 0)?;
+    mouse(app, id, "mouseMoved", x, y, "none", 0, false)?;
     thread::sleep(Duration::from_millis(30));
     let rounds = if double { 2 } else { 1 };
     for count in 1..=rounds {
-        mouse(app, id, "mousePressed", x, y, button, count)?;
+        mouse(app, id, "mousePressed", x, y, button, count, false)?;
         thread::sleep(Duration::from_millis(40));
-        mouse(app, id, "mouseReleased", x, y, button, count)?;
+        mouse(app, id, "mouseReleased", x, y, button, count, false)?;
     }
     Ok(())
+}
+
+/// Presses at `from`, moves to `to`, and releases. Both points are CSS pixels.
+pub fn drag(app: &AppHandle, id: u32, from: (f64, f64), to: (f64, f64)) -> Result<(), String> {
+    mouse(app, id, "mouseMoved", from.0, from.1, "none", 0, false)?;
+    thread::sleep(Duration::from_millis(20));
+    mouse(app, id, "mousePressed", from.0, from.1, "left", 1, false)?;
+    for step in 1..=8 {
+        let t = f64::from(step) / 8.0;
+        let x = from.0 + (to.0 - from.0) * t;
+        let y = from.1 + (to.1 - from.1) * t;
+        mouse(app, id, "mouseMoved", x, y, "left", 1, true)?;
+        thread::sleep(Duration::from_millis(16));
+    }
+    mouse(app, id, "mouseReleased", to.0, to.1, "left", 1, false)
+}
+
+/// The centre of an element, in CSS pixels of the top viewport.
+pub fn element_point(app: &AppHandle, id: u32, element: u32) -> Result<(f64, f64), String> {
+    let target = point(app, id, element)?;
+    Ok((target.x, target.y))
+}
+
+/// `x` and `y` as fractions of the viewport, for the live marker.
+pub fn fractions(app: &AppHandle, id: u32, x: f64, y: f64) -> Option<(f64, f64)> {
+    let value = call(app, id, "({width:innerWidth,height:innerHeight})").ok()?;
+    let width = value.get("width")?.as_f64()?;
+    let height = value.get("height")?.as_f64()?;
+    if width < 1.0 || height < 1.0 {
+        return None;
+    }
+    Some(((x / width).clamp(0.0, 1.0), (y / height).clamp(0.0, 1.0)))
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct FrameBox {
+    pub host: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Cross-origin iframes the page script cannot read, with their viewport boxes.
+pub fn frames(app: &AppHandle, id: u32) -> Vec<FrameBox> {
+    let Ok(value) = call(app, id, "__ce.frames()") else {
+        return Vec::new();
+    };
+    value
+        .get("boxes")
+        .cloned()
+        .and_then(|boxes| serde_json::from_value(boxes).ok())
+        .unwrap_or_default()
 }
 
 fn point(app: &AppHandle, id: u32, element: u32) -> Result<Point, String> {
@@ -367,7 +422,7 @@ pub fn click(
 
 pub fn hover(app: &AppHandle, id: u32, element: u32) -> Result<(), String> {
     let target = point(app, id, element)?;
-    mouse(app, id, "mouseMoved", target.x, target.y, "none", 0)
+    mouse(app, id, "mouseMoved", target.x, target.y, "none", 0, false)
 }
 
 /// Types into the element, or into the focused field when `element` is empty.

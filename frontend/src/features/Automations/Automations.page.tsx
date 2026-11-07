@@ -265,7 +265,7 @@ export function AutomationsPage({ params }: AutomationsPageProps) {
           id="automations-welcome-empty"
           icon={Workflow}
           title={missing ? "That flow no longer exists" : flows.length ? "Choose a flow" : "Automate the web"}
-          hint="Flows repeat what you do on a page: click, type, read lists, ask AI. They heal themselves when a site changes, and run on a schedule, when a page changes, when you visit a site, or after a download."
+          hint="Flows repeat what you do on a page: click, double-click, drag, type, answer dialogs, follow a new tab, wait for a download, read lists, ask AI. They heal themselves when a site changes, and run on a schedule, when a page changes, when you visit a site, or after a download."
           action={
             <Button id="automations-welcome-new" size="sm" variant="primary" onClick={newFlow}>
               <Plus id="automations-welcome-new-icon" className="size-3.5" aria-hidden />

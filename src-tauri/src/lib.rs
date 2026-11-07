@@ -2119,6 +2119,17 @@ fn agent_answer(app: AppHandle, run_id: u32, approval_id: u32, allow: bool) {
 }
 
 #[tauri::command]
+fn agent_answer_dialog(
+    app: AppHandle,
+    run_id: u32,
+    accept: bool,
+    text: Option<String>,
+) -> Result<(), String> {
+    let tab = automation::agent::run_tab(run_id).ok_or("That run was removed.")?;
+    automation::dialog::answer(&app, tab, accept, text.as_deref().unwrap_or(""))
+}
+
+#[tauri::command]
 fn agent_reply(app: AppHandle, run_id: u32, text: String) -> Result<(), String> {
     automation::agent::reply(&app, run_id, &text)
 }
@@ -2871,6 +2882,7 @@ pub fn run() {
             agent_memory_delete,
             agent_stop,
             agent_answer,
+            agent_answer_dialog,
             agent_reply,
             agent_take_over,
             agent_resume,

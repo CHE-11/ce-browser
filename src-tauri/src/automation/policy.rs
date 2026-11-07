@@ -20,6 +20,8 @@ pub enum Risk {
     Upload,
     /// Running a script in the page.
     Script,
+    /// Using the mouse and keyboard outside the browser. Always asks once per run.
+    Desktop,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -63,7 +65,7 @@ pub fn lower_autonomy(a: &str, b: &str) -> &'static str {
 /// Whether a run at `level` goes ahead without asking about `risk`. Payments and uploads always ask.
 pub fn autonomy_allows(level: &str, risk: Risk) -> bool {
     match autonomy(level) {
-        "full" => !matches!(risk, Risk::Payment | Risk::Upload),
+        "full" => !matches!(risk, Risk::Payment | Risk::Upload | Risk::Desktop),
         "auto" => matches!(risk, Risk::Open | Risk::Send),
         _ => false,
     }
@@ -383,6 +385,7 @@ mod tests {
         assert!(autonomy_allows("full", Risk::Script));
         assert!(!autonomy_allows("full", Risk::Payment));
         assert!(!autonomy_allows("full", Risk::Upload));
+        assert!(!autonomy_allows("full", Risk::Desktop));
         assert!(!autonomy_allows("reckless", Risk::Open));
         assert_eq!(autonomy("bogus"), "ask");
         assert_eq!(lower_autonomy("full", "auto"), "auto");

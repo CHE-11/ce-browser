@@ -238,6 +238,7 @@ pub fn on_download_starting(
     app: &AppHandle,
     core: &ICoreWebView2,
     args: ICoreWebView2DownloadStartingEventArgs,
+    tab: u32,
 ) -> windows::core::Result<()> {
     unsafe {
         args.SetHandled(true)?;
@@ -273,7 +274,9 @@ pub fn on_download_starting(
                 let _ = app.run_on_main_thread(move || {
                     let (args, deferral, operation, core) = held.into_inner();
                     match chosen {
-                        Some(path) => place(&main_app, &core, args, deferral, &operation, path),
+                        Some(path) => {
+                            place(&main_app, &core, args, deferral, &operation, path, tab)
+                        }
                         None => {
                             let _ = args.SetCancel(true);
                             let _ = deferral.Complete();
@@ -288,10 +291,10 @@ pub fn on_download_starting(
         let path = files::unique_path(&dir, &name);
         if !worth_probing(&settings, &operation) {
             args.SetResultFilePath(&HSTRING::from(path.to_string_lossy().as_ref()))?;
-            return track(app, &operation, path);
+            return track(app, &operation, path, tab);
         }
         let deferral = args.GetDeferral()?;
-        place(app, core, args, deferral, &operation, path);
+        place(app, core, args, deferral, &operation, path, tab);
         Ok(())
     }
 }
@@ -315,10 +318,11 @@ fn place(
     deferral: ICoreWebView2Deferral,
     operation: &ICoreWebView2DownloadOperation,
     path: PathBuf,
+    tab: u32,
 ) {
     if !worth_probing(&settings::get(app), operation) {
         let _ = unsafe { args.SetResultFilePath(&HSTRING::from(path.to_string_lossy().as_ref())) };
-        let _ = track(app, operation, path);
+        let _ = track(app, operation, path, tab);
         let _ = unsafe { deferral.Complete() };
         return;
     }
@@ -344,7 +348,7 @@ fn place(
                         let _ = unsafe {
                             args.SetResultFilePath(&HSTRING::from(path.to_string_lossy().as_ref()))
                         };
-                        let _ = track(&main_app, &operation, path);
+                        let _ = track(&main_app, &operation, path, tab);
                         let _ = unsafe { deferral.Complete() };
                     }
                 }
@@ -357,6 +361,7 @@ fn track(
     app: &AppHandle,
     operation: &ICoreWebView2DownloadOperation,
     path: PathBuf,
+    tab: u32,
 ) -> windows::core::Result<()> {
     unsafe {
         let url = read_pwstr(|value| operation.Uri(value));
@@ -367,6 +372,7 @@ fn track(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
+        let path_text = path.to_string_lossy().into_owned();
         let id = with_state(app, |state| {
             let id = state.next_id;
             state.next_id += 1;
@@ -375,8 +381,8 @@ fn track(
                 DownloadItem {
                     id,
                     url,
-                    file_name,
-                    path: path.to_string_lossy().into_owned(),
+                    file_name: file_name.clone(),
+                    path: path_text.clone(),
                     mime_type,
                     total_bytes: (total > 0).then_some(total as u64),
                     received_bytes: 0,
@@ -391,6 +397,7 @@ fn track(
             );
             id
         });
+        crate::automation::effects::note_download(tab, id, file_name, path_text);
         OPERATIONS.with(|operations| operations.borrow_mut().insert(id, operation.clone()));
 
         let mut token = 0i64;
@@ -473,6 +480,9 @@ fn state_changed(app: &AppHandle, id: u32, operation: &ICoreWebView2DownloadOper
         IN_PROGRESS
     };
     let finished = next == COMPLETED || next == CANCELLED || (next == INTERRUPTED && !can_resume);
+    if finished {
+        crate::automation::effects::finish_download(id, next == COMPLETED);
+    }
     with_state(app, |state| {
         if let Some(item) = state.items.iter_mut().find(|item| item.id == id) {
             item.state = next.into();

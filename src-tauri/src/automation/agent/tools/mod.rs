@@ -2,6 +2,7 @@
 
 mod browser;
 mod data;
+mod desktop;
 mod meta;
 mod tabs;
 
@@ -15,7 +16,7 @@ use crate::automation::policy::{self, Verdict};
 use crate::automation::{audit, clip};
 use crate::settings::AutomationSettings;
 
-use super::runs::{self, AgentAccess, current_tab, halted, push_step, with_run};
+use super::runs::{self, AgentAccess, AgentNotice, current_tab, halted, push_step, with_run};
 
 /// What a tool does, which decides how many may run in one turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +48,17 @@ pub struct Ctx<'a> {
     pub image: Option<String>,
     /// Flow steps that repeat what the tool did.
     pub flow: Vec<FlowStep>,
+    /// Pointer fractions for the live marker. Set by the tool, drawn after the step is stored.
+    pub marker: Option<Marker>,
+    pub download: Option<AgentNotice>,
+    pub opened: Option<AgentNotice>,
+}
+
+pub struct Marker {
+    pub px: f64,
+    pub py: f64,
+    pub px2: Option<f64>,
+    pub py2: Option<f64>,
 }
 
 pub enum Done {
@@ -109,6 +121,9 @@ pub fn all(auto: &AutomationSettings, helper: bool, access: &AgentAccess) -> Vec
     tools.extend(tabs::tools());
     tools.extend(data::tools(auto));
     tools.extend(meta::tools(auto, helper));
+    if auto.desktop_control && !helper {
+        tools.extend(desktop::tools());
+    }
     tools.retain(|tool| permitted(tool.spec.name, access));
     tools
 }
@@ -126,6 +141,9 @@ fn permitted(name: &str, access: &AgentAccess) -> bool {
         "run_script" => access.scripts,
         "notify" => access.notifications,
         "crawl" => access.sites != "site",
+        "look_screen" | "click_screen" | "drag_screen" | "type_screen" | "list_windows" => {
+            access.desktop
+        }
         _ => true,
     }
 }
@@ -185,6 +203,31 @@ mod tests {
         ] {
             assert!(!narrow.iter().any(|tool| tool.spec.name == name), "{name}");
         }
+        assert!(names.contains(&"drag"));
+        assert!(!names.iter().any(|name| *name == "look_screen"));
+        let desktop = AutomationSettings {
+            desktop_control: true,
+            ..everything
+        };
+        let with_screen = AgentAccess {
+            desktop: true,
+            ..open.clone()
+        };
+        let screen_tools = all(&desktop, false, &with_screen);
+        assert!(
+            screen_tools
+                .iter()
+                .any(|tool| tool.spec.name == "look_screen")
+        );
+        assert!(screen_tools.iter().any(|tool| tool.spec.name == "drag"));
+        let no_access = all(&desktop, false, &open);
+        assert!(
+            !no_access
+                .iter()
+                .any(|tool| tool.spec.name == "click_screen")
+        );
+        let helper = all(&desktop, true, &with_screen);
+        assert!(!helper.iter().any(|tool| tool.spec.name == "look_screen"));
     }
 }
 
@@ -310,6 +353,9 @@ pub fn execute(
         scale,
         image: None,
         flow: Vec::new(),
+        marker: None,
+        download: None,
+        opened: None,
     };
     match (tool.run)(&mut ctx, &call.arguments) {
         Ok(Done::Finish(status, text)) => Outcome::Finish(status, text),
@@ -322,7 +368,13 @@ pub fn execute(
                     &label,
                     &clip(&detail, 300),
                 );
+                if let Some(marker) = ctx.marker.take() {
+                    runs::set_last_point(id, marker.px, marker.py, marker.px2, marker.py2);
+                }
                 audit(app, "agent", tab, name, &label);
+            }
+            if page {
+                runs::set_page_result(app, id, ctx.download.take(), ctx.opened.take());
             }
             if !ctx.flow.is_empty() {
                 with_run(id, |state| {

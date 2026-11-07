@@ -202,8 +202,19 @@ var __ceLocators = (function () {
       testId: testIdOf(el),
       css: css || cssPath(el),
       xpath: xpathOf(el),
-      tag: tag
+      tag: tag,
+      frame: frameOf(el)
     };
+  }
+
+  function frameOf(el) {
+    try {
+      var view = el.ownerDocument && el.ownerDocument.defaultView;
+      if (!view || view === view.top) return "";
+      return view.location.origin || "";
+    } catch (e) {
+      return "";
+    }
   }
 
   function allRoots(doc) {
@@ -289,6 +300,12 @@ var __ceLocators = (function () {
       if (target.tag) {
         var tagged = list.filter(function (el) { return el.tagName.toLowerCase() === target.tag; });
         if (tagged.length) list = tagged;
+      }
+      if (target.frame) {
+        list = list.filter(function (el) { return frameOf(el) === target.frame; });
+      } else {
+        var topOnly = list.filter(function (el) { return !frameOf(el); });
+        if (topOnly.length) list = topOnly;
       }
       if (list.length === 1) return { el: list[0], by: tries[i][0] };
       if (list.length > 1 && tries[i][0] === "role") {

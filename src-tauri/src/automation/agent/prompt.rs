@@ -21,7 +21,7 @@ fn autonomy_text(level: &str) -> &'static str {
     }
 }
 
-fn access_text(access: &AgentAccess) -> String {
+fn access_text(auto: &AutomationSettings, access: &AgentAccess) -> String {
     let mut out = if access.sites == "site" && !access.site.is_empty() {
         format!(
             "\n\nAccess: work only on {}. Pages on other sites are refused.",
@@ -42,6 +42,10 @@ fn access_text(access: &AgentAccess) -> String {
         (!access.clipboard, "the clipboard"),
         (!access.memory, "memory"),
         (!access.notifications, "notifications"),
+        (
+            auto.desktop_control && !access.desktop,
+            "the Windows desktop",
+        ),
     ]
     .into_iter()
     .filter_map(|(blocked, name)| blocked.then_some(name))
@@ -77,7 +81,8 @@ Each turn you get a PAGE STATE: the URL, the interactive elements as `[ref] role
 Rules:\n\
 - Several reading tools (read_text, list_tabs, search_history, recall and similar) may run in one turn. Only one tool that acts on a page runs per turn; later calls in that turn are skipped because the page changes.\n\
 - Use refs from the newest PAGE STATE only. Older refs may be stale.\n\
-- Prefer refs. Use click_xy only for targets without a ref, such as canvas content. Its coordinates are screenshot pixels.\n\
+- Prefer refs. Use click_xy only for targets without a ref, such as canvas content or a cross-origin iframe. Its coordinates are screenshot pixels. The page state lists those iframes with a box; don't click one on a blocked site.\n\
+- Use drag to move from one element or point to another. If a JavaScript dialog opens, call answer_dialog before anything else. A click that opens a tab or starts a download says so in the tool result.\n\
 - To fill a field, use type with its ref. It replaces what the field holds. Set submit to press Enter after typing.\n\
 - If what you need is not listed, scroll, or call read_text or read_markdown for the whole page.\n\
 - Close cookie banners and popups that cover what you need.\n\
@@ -92,7 +97,7 @@ Autonomy for this run: {level}",
         date = today(),
         level = autonomy_text(autonomy),
     );
-    out.push_str(&access_text(access));
+    out.push_str(&access_text(auto, access));
     if !helper && auto.max_parallel_agents > 0 && access.helpers && access.tabs {
         out.push_str(&format!(
             "\n\nHelpers: for independent parts of a big task, such as comparing several sites, call delegate to start up to {} helper agents in background tabs. Each reports back as a message when it finishes; call wait_agents to wait for them.",
@@ -101,6 +106,9 @@ Autonomy for this run: {level}",
     }
     if helper {
         out.push_str("\n\nYou are a helper started by another agent. Do only your part, then call done with what you found.");
+    }
+    if auto.desktop_control && access.desktop {
+        out.push_str("\n\nDesktop: look_screen, click_screen, drag_screen, type_screen and list_windows control the Windows screen outside the page. The first one waits for the user. Coordinates are pixels of the latest look_screen image.");
     }
     if auto.agent_memory && access.memory {
         out.push_str("\n\nMemory: call remember to keep a lasting fact about the user or a site, such as a preference, an account name or how a site works. Call recall to look notes up. Don't store secrets.");

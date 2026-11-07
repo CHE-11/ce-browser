@@ -19,7 +19,7 @@ type StepFieldsProps = {
 export function StepFields({ id, step, tabId, set }: StepFieldsProps) {
   return (
     <>
-      {TARGET_KINDS.includes(step.kind) ? <TargetEditor id={`${id}-target`} target={step.target} tabId={tabId} onChange={(target) => set({ target })} /> : null}
+      {TARGET_KINDS.includes(step.kind) && step.kind !== "drag" ? <TargetEditor id={`${id}-target`} target={step.target} tabId={tabId} onChange={(target) => set({ target })} /> : null}
 
       {step.kind === "navigate" ? (
         <Field id={`${id}-url`} label="Address">
@@ -28,18 +28,91 @@ export function StepFields({ id, step, tabId, set }: StepFieldsProps) {
       ) : null}
 
       {step.kind === "click" ? (
-        <Field id={`${id}-button`} label="Button" className="w-40">
-          <select id={`${id}-button-input`} className={inputClassName} value={step.keys || "left"} onChange={(event) => set({ keys: event.target.value === "left" ? "" : event.target.value })}>
-            <option id={`${id}-button-left`} value="left">
-              Left
-            </option>
-            <option id={`${id}-button-right`} value="right">
-              Right
-            </option>
-            <option id={`${id}-button-middle`} value="middle">
-              Middle
-            </option>
-          </select>
+        <div id={`${id}-click`} className="flex flex-col gap-3">
+          <div id={`${id}-click-row`} className="flex flex-wrap items-end gap-3">
+            <Field id={`${id}-button`} label="Button" className="w-40">
+              <select id={`${id}-button-input`} className={inputClassName} value={step.keys || "left"} onChange={(event) => set({ keys: event.target.value === "left" ? "" : event.target.value })}>
+                <option id={`${id}-button-left`} value="left">
+                  Left
+                </option>
+                <option id={`${id}-button-right`} value="right">
+                  Right
+                </option>
+                <option id={`${id}-button-middle`} value="middle">
+                  Middle
+                </option>
+              </select>
+            </Field>
+            <label id={`${id}-double`} className="flex items-center gap-2 pb-2 text-xs text-zinc-300">
+              <input
+                id={`${id}-double-input`}
+                type="checkbox"
+                className="size-3.5 accent-sky-500"
+                checked={step.clicks >= 2}
+                onChange={(event) => set({ clicks: event.target.checked ? 2 : 1 })}
+              />
+              Double-click
+            </label>
+            <label id={`${id}-follow`} className="flex items-center gap-2 pb-2 text-xs text-zinc-300">
+              <input
+                id={`${id}-follow-input`}
+                type="checkbox"
+                className="size-3.5 accent-sky-500"
+                checked={step.follow}
+                onChange={(event) => set({ follow: event.target.checked })}
+              />
+              Follow the new tab
+            </label>
+          </div>
+          <PointFields id={id} x={step.x} y={step.y} onChange={(x, y) => set({ x, y })} />
+        </div>
+      ) : null}
+
+      {step.kind === "drag" ? (
+        <div id={`${id}-drag`} className="flex flex-col gap-3">
+          <p id={`${id}-drag-start-label`} className="text-xs text-zinc-500">
+            Start
+          </p>
+          <TargetEditor id={`${id}-from`} target={step.target} tabId={tabId} onChange={(target) => set({ target })} />
+          <PointFields id={`${id}-from-point`} x={step.x} y={step.y} onChange={(x, y) => set({ x, y })} />
+          <p id={`${id}-drag-end-label`} className="text-xs text-zinc-500">
+            End
+          </p>
+          <TargetEditor id={`${id}-to`} target={step.to} tabId={tabId} onChange={(to) => set({ to })} />
+          <PointFields id={`${id}-to-point`} x={step.toX} y={step.toY} onChange={(toX, toY) => set({ toX, toY })} />
+        </div>
+      ) : null}
+
+      {step.kind === "dialog" ? (
+        <div id={`${id}-dialog`} className="flex gap-2">
+          <Field id={`${id}-dialog-action`} label="Answer" className="w-40">
+            <select id={`${id}-dialog-action-input`} className={inputClassName} value={step.keys === "dismiss" ? "dismiss" : "accept"} onChange={(event) => set({ keys: event.target.value === "dismiss" ? "dismiss" : "" })}>
+              <option id={`${id}-dialog-accept`} value="accept">
+                Accept
+              </option>
+              <option id={`${id}-dialog-dismiss`} value="dismiss">
+                Dismiss
+              </option>
+            </select>
+          </Field>
+          <Field id={`${id}-dialog-text`} label="Prompt text" className="flex-1">
+            <input id={`${id}-dialog-text-input`} className={inputClassName} value={step.text} placeholder="Only for a prompt" onChange={(event) => set({ text: event.target.value })} />
+          </Field>
+        </div>
+      ) : null}
+
+      {step.kind === "desktopClick" ? <PointFields id={id} x={step.x} y={step.y} placeholder="Screen px" onChange={(x, y) => set({ x, y })} /> : null}
+
+      {step.kind === "desktopDrag" ? (
+        <div id={`${id}-desktop-drag`} className="flex flex-col gap-3">
+          <PointFields id={`${id}-desktop-from`} x={step.x} y={step.y} placeholder="Screen px" onChange={(x, y) => set({ x, y })} />
+          <PointFields id={`${id}-desktop-to`} x={step.toX} y={step.toY} placeholder="Screen px" onChange={(toX, toY) => set({ toX, toY })} />
+        </div>
+      ) : null}
+
+      {step.kind === "desktopType" ? (
+        <Field id={`${id}-desktop-text`} label="Text">
+          <textarea id={`${id}-desktop-text-input`} rows={2} className={inputClassName} value={step.text} onChange={(event) => set({ text: event.target.value })} />
         </Field>
       ) : null}
 
@@ -244,5 +317,39 @@ export function StepFields({ id, step, tabId, set }: StepFieldsProps) {
         </Field>
       ) : null}
     </>
+  );
+}
+
+function PointFields({
+  id,
+  x,
+  y,
+  onChange,
+  placeholder = "CSS px",
+}: {
+  id: string;
+  x: number | null;
+  y: number | null;
+  onChange: (x: number | null, y: number | null) => void;
+  placeholder?: string;
+}) {
+  const change = (axis: "x" | "y", raw: string) => {
+    const parsed = raw.trim() === "" ? null : Number(raw);
+    const next = parsed != null && Number.isFinite(parsed) ? parsed : null;
+    if (axis === "x") {
+      onChange(next, y);
+    } else {
+      onChange(x, next);
+    }
+  };
+  return (
+    <div id={`${id}-point`} className="flex gap-2">
+      <Field id={`${id}-x`} label="X" className="w-28">
+        <input id={`${id}-x-input`} type="number" className={inputClassName} value={x ?? ""} placeholder={placeholder} onChange={(event) => change("x", event.target.value)} />
+      </Field>
+      <Field id={`${id}-y`} label="Y" className="w-28">
+        <input id={`${id}-y-input`} type="number" className={inputClassName} value={y ?? ""} placeholder={placeholder} onChange={(event) => change("y", event.target.value)} />
+      </Field>
+    </div>
   );
 }

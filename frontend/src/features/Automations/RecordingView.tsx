@@ -33,7 +33,7 @@ export function RecordingView({ recording, targetName, tab, onShowTab, onRemove,
             {targetName ? `Recording more steps for ${targetName}` : "Recording a new flow"}
           </h1>
           <p id="recording-view-tab" className="truncate text-xs text-zinc-500">
-            {tab ? `Do the task in ${tab.title || tab.url}. Each click, field and key press shows up here.` : "The recorded tab is closed."}
+            {tab ? `Do the task in ${tab.title || tab.url}. Clicks, double-clicks, drags, fields and key presses show up here.` : "The recorded tab is closed."}
           </p>
         </div>
         {tab ? (

@@ -11,6 +11,7 @@ export const DEFAULT_ACCESS: AgentAccess = {
   helpers: true,
   scripts: false,
   notifications: true,
+  desktop: false,
 };
 
 export type AccessToggle = Exclude<keyof AgentAccess, "sites" | "site">;
@@ -24,6 +25,7 @@ export const ACCESS_TOGGLES: { key: AccessToggle; label: string; hint: string }[
   { key: "helpers", label: "Helper agents", hint: "Start helpers in background tabs. Needs other tabs." },
   { key: "scripts", label: "Page scripts", hint: "Run JavaScript in pages. Settings must allow it too." },
   { key: "notifications", label: "Notifications", hint: "Show Windows notifications." },
+  { key: "desktop", label: "Desktop", hint: "Use the mouse and keyboard outside the browser. Settings must allow it too." },
 ];
 
 /** Older saved choices miss newer keys; those get the default. */
@@ -35,6 +37,6 @@ export function withDefaults(access: Partial<AgentAccess> | null | undefined): A
 /** A few words for the lock button: where the run may go and how much is off. */
 export function accessSummary(access: AgentAccess) {
   const where = access.sites === "site" ? access.site || "This site" : "Whole browser";
-  const off = ACCESS_TOGGLES.filter((item) => item.key !== "scripts" && !access[item.key]).length;
+  const off = ACCESS_TOGGLES.filter((item) => item.key !== "scripts" && item.key !== "desktop" && !access[item.key]).length;
   return off > 0 ? `${where} · ${off} off` : where;
 }

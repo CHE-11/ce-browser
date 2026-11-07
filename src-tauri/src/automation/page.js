@@ -151,6 +151,8 @@
         node = walker.nextNode();
       }
     }
+    var framed = frames();
+    if (framed.text) lines.push(framed.text);
     lastShown = shown;
     var active = deepActive();
     var focused = active && active !== document.body && ids.get(active) ? ids.get(active) : null;
@@ -167,6 +169,36 @@
       total: total,
       text: lines.join("\n")
     };
+  }
+
+  function frames() {
+    var lines = [];
+    var boxes = [];
+    function walk(doc) {
+      var list;
+      try { list = doc.querySelectorAll("iframe, frame"); } catch (e) { return; }
+      for (var i = 0; i < list.length; i++) {
+        var frame = list[i];
+        if (!L.visible(frame)) continue;
+        var rect = topRect(frame);
+        if (rect.width < 8 || rect.height < 8) continue;
+        var src = frame.getAttribute("src") || "";
+        var host = "";
+        try { host = new URL(src, location.href).hostname.replace(/^www\./, ""); } catch (e) {}
+        var open = false;
+        try { open = !!(frame.contentDocument && frame.contentDocument.documentElement); } catch (e) {}
+        var box = Math.round(rect.x) + "," + Math.round(rect.y) + " " + Math.round(rect.width) + "x" + Math.round(rect.height);
+        if (open) {
+          lines.push("-- iframe " + (host || "this page") + " box " + box + " (elements inside are listed) --");
+          walk(frame.contentDocument);
+        } else {
+          lines.push("-- iframe " + (host || "another site") + " box " + box + " (no access; click a point inside this box) --");
+          boxes.push({ host: host, x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+        }
+      }
+    }
+    walk(document);
+    return { text: lines.join("\n"), boxes: boxes };
   }
 
   function nextOutside(walker, node) {
@@ -694,6 +726,7 @@
     pickElement: pickElement,
     flash: flash,
     scrollBy: scrollBy,
-    element: element
+    element: element,
+    frames: frames
   };
 })();

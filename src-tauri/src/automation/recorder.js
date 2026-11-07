@@ -1,4 +1,3 @@
-  if (window !== window.top) return;
   var TOKEN = "__CE_RECORD_TOKEN__";
   var KEY = "__ceRecording_" + TOKEN;
   if (window[KEY]) return;
@@ -87,14 +86,20 @@
 
     // Mouse clicks and keyboard clicks (Enter or Space on a control) both land here.
     // The click event often never follows a pointerup, so the pointerup is what gets recorded.
-    function trackClick(el) {
+    function buttonName(button) {
+      if (button === 2) return "right";
+      if (button === 1) return "middle";
+      return "";
+    }
+
+    function trackClick(el, button, clicks) {
       if (skipClick(el)) return;
       var now = Date.now();
-      if (recentClick && recentClick.el === el && now - recentClick.at < 700) return;
+      if (clicks < 2 && recentClick && recentClick.el === el && now - recentClick.at < 700) return;
       recentClick = { el: el, at: now };
       flush();
       flash(el);
-      send({ kind: "click", target: safeDescribe(el) });
+      send({ kind: "click", target: safeDescribe(el), keys: buttonName(button), clicks: clicks >= 2 ? 2 : 1 });
     }
 
     function valueOf(el) {
@@ -117,27 +122,61 @@
       });
     }
 
-    document.addEventListener("pointerdown", function (event) {
-      if (!event.isTrusted || stopped || event.button !== 0) return;
-      pressed = { x: event.clientX, y: event.clientY, el: actionable(deep(event)) };
-    }, true);
+    function pagePoint(event) {
+      var x = event.clientX;
+      var y = event.clientY;
+      var view = event.view;
+      while (view && view.frameElement) {
+        var rect = view.frameElement.getBoundingClientRect();
+        x += rect.left;
+        y += rect.top;
+        view = view.parent;
+      }
+      return { x: x, y: y };
+    }
 
-    document.addEventListener("pointerup", function (event) {
-      if (!event.isTrusted || stopped || event.button !== 0) return;
-      var start = pressed;
-      pressed = null;
-      if (!start) return;
-      if (Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y) > 12) return;
-      var el = actionable(deep(event)) || start.el;
-      trackClick(el);
-    }, true);
+    function listen(doc) {
+      doc.addEventListener("pointerdown", function (event) {
+        if (!event.isTrusted || stopped || event.button !== 0) return;
+        var point = pagePoint(event);
+        pressed = { x: point.x, y: point.y, el: actionable(deep(event)) };
+      }, true);
 
-    document.addEventListener("click", function (event) {
-      if (!event.isTrusted || stopped || event.button !== 0) return;
-      trackClick(actionable(deep(event)));
-    }, true);
+      doc.addEventListener("pointerup", function (event) {
+        if (!event.isTrusted || stopped || event.button !== 0) return;
+        var start = pressed;
+        pressed = null;
+        if (!start) return;
+        var point = pagePoint(event);
+        var dx = point.x - start.x;
+        var dy = point.y - start.y;
+        if (Math.abs(dx) + Math.abs(dy) > 12) {
+          var from = start.el;
+          var to = actionable(deep(event)) || from;
+          flush();
+          if (from && to && from !== to) {
+            flash(from);
+            send({ kind: "drag", target: safeDescribe(from), to: safeDescribe(to) });
+          } else if (from) {
+            flash(from);
+            send({ kind: "drag", target: safeDescribe(from), x: start.x, y: start.y, toX: point.x, toY: point.y });
+          }
+          return;
+        }
+        trackClick(actionable(deep(event)) || start.el, 0, 1);
+      }, true);
 
-    document.addEventListener("input", function (event) {
+      doc.addEventListener("click", function (event) {
+        if (!event.isTrusted || stopped) return;
+        trackClick(actionable(deep(event)), event.button, event.detail || 1);
+      }, true);
+
+      doc.addEventListener("contextmenu", function (event) {
+        if (!event.isTrusted || stopped) return;
+        trackClick(actionable(deep(event)), 2, 1);
+      }, true);
+
+      doc.addEventListener("input", function (event) {
       if (!event.isTrusted || stopped) return;
       var el = deep(event);
       if (!el || el.nodeType !== 1) return;
@@ -149,7 +188,7 @@
       pendingTimer = setTimeout(flush, 1200);
     }, true);
 
-    document.addEventListener("change", function (event) {
+    doc.addEventListener("change", function (event) {
       if (!event.isTrusted || stopped) return;
       var el = deep(event);
       if (!el || el.nodeType !== 1) return;
@@ -170,7 +209,7 @@
       }
     }, true);
 
-    document.addEventListener("keydown", function (event) {
+    doc.addEventListener("keydown", function (event) {
       if (!event.isTrusted || stopped) return;
       var el = deep(event);
       var control = el && el.nodeType === 1 ? actionable(el) : null;
@@ -185,7 +224,30 @@
       var keys = (event.ctrlKey ? "Control+" : "") + (event.shiftKey ? "Shift+" : "") + (event.altKey ? "Alt+" : "") + event.key;
       send({ kind: "press", keys: keys });
     }, true);
+    }
 
+    function watchFrames(win) {
+      var list;
+      try { list = win.document.querySelectorAll("iframe, frame"); } catch (e) { return; }
+      for (var i = 0; i < list.length; i++) {
+        try {
+          var child = list[i].contentWindow;
+          if (!child || !child.document || child.document[KEY]) continue;
+          Object.defineProperty(child.document, KEY, { value: true });
+          listen(child.document);
+          child.addEventListener("pagehide", flush, true);
+          watchFrames(child);
+        } catch (e) {}
+      }
+    }
+
+    listen(document);
+    if (window === window.top) {
+      watchFrames(window);
+      if (window.MutationObserver && document.documentElement) {
+        new MutationObserver(function () { watchFrames(window); }).observe(document.documentElement, { childList: true, subtree: true });
+      }
+    }
     window.addEventListener("pagehide", flush, true);
     document.addEventListener("visibilitychange", function () { if (document.hidden) flush(); }, true);
     window.addEventListener("ce-record-stop-" + TOKEN, function () {

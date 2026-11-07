@@ -324,25 +324,18 @@ fn parse_step(raw: &Value) -> FlowStep {
             .unwrap_or("")
             .to_string()
     };
-    let target = raw
-        .get("target")
-        .filter(|value| value.is_object())
-        .map(|value| {
-            let field = |key: &str| clip(value.get(key).and_then(Value::as_str).unwrap_or(""), 400);
-            FlowTarget {
-                role: field("role"),
-                name: field("name"),
-                text: field("text"),
-                test_id: field("testId"),
-                css: field("css"),
-                xpath: field("xpath"),
-                tag: field("tag"),
-                description: field("description"),
-            }
-        });
+    let target = raw.get("target").and_then(target_of);
+    let to = raw.get("to").and_then(target_of);
     let kind = match text("kind").as_str() {
-        kind @ ("click" | "type" | "press" | "select" | "upload") => kind.to_string(),
+        kind @ ("click" | "type" | "press" | "select" | "upload" | "drag") => kind.to_string(),
         _ => String::new(),
+    };
+    let number = |key: &str| {
+        raw.get(key).and_then(|value| {
+            value
+                .as_f64()
+                .or_else(|| value.as_i64().map(|item| item as f64))
+        })
     };
     FlowStep {
         kind,
@@ -362,8 +355,32 @@ fn parse_step(raw: &Value) -> FlowStep {
             })
             .unwrap_or_default(),
         note: clip(&text("note"), 300),
+        clicks: raw.get("clicks").and_then(Value::as_u64).unwrap_or(0) as u8,
+        x: number("x"),
+        y: number("y"),
+        to,
+        to_x: number("toX"),
+        to_y: number("toY"),
         ..flows::new_step()
     }
+}
+
+fn target_of(value: &Value) -> Option<FlowTarget> {
+    if !value.is_object() {
+        return None;
+    }
+    let field = |key: &str| clip(value.get(key).and_then(Value::as_str).unwrap_or(""), 400);
+    Some(FlowTarget {
+        role: field("role"),
+        name: field("name"),
+        text: field("text"),
+        test_id: field("testId"),
+        css: field("css"),
+        xpath: field("xpath"),
+        tag: field("tag"),
+        description: field("description"),
+        frame: field("frame"),
+    })
 }
 
 fn same_target(a: &Option<FlowTarget>, b: &Option<FlowTarget>) -> bool {
@@ -382,6 +399,10 @@ fn push(steps: &mut Vec<FlowStep>, step: FlowStep) -> bool {
         }
         if step.kind == "navigate" && last.kind == "navigate" {
             last.url = step.url;
+            return true;
+        }
+        if step.clicks >= 2 && last.kind == "click" && same_target(&last.target, &step.target) {
+            last.clicks = 2;
             return true;
         }
     }
