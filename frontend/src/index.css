@@ -608,7 +608,8 @@ html[data-backdrop] #browser .bg-zinc-900 {
 }
 
 .chrome-tool-strip-horizontal.chrome-tool-strip-labeled {
-  height: auto;
+  height: calc(var(--toolbar-height, 2.5rem) + 2px);
+  padding-bottom: 2px;
 }
 
 .chrome-toolbar .chrome-toolbar-button,

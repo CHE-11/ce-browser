@@ -240,6 +240,7 @@ export const ToolsToolbar = forwardRef<HTMLElement, ToolsToolbarProps>(function 
           ? "h-full min-h-0 flex-col overflow-hidden border-l border-zinc-800"
           : cn(
               "chrome-tool-strip-horizontal grid w-full grid-cols-[minmax(0,1fr)_minmax(0,max-content)_minmax(0,1fr)] items-center border-b border-zinc-800",
+              labels && "chrome-tool-strip-labeled",
             ),
       )}
     >
