@@ -41,15 +41,23 @@ fn state() -> &'static Mutex<Option<Recording>> {
 }
 
 pub fn current() -> Option<FlowRecording> {
-    state().lock().expect("recorder lock").as_ref().map(|recording| FlowRecording {
-        tab_id: recording.tab,
-        steps: recording.steps.clone(),
-        started: recording.started,
-    })
+    state()
+        .lock()
+        .expect("recorder lock")
+        .as_ref()
+        .map(|recording| FlowRecording {
+            tab_id: recording.tab,
+            steps: recording.steps.clone(),
+            started: recording.started,
+        })
 }
 
 pub fn recording_tab() -> Option<u32> {
-    state().lock().expect("recorder lock").as_ref().map(|recording| recording.tab)
+    state()
+        .lock()
+        .expect("recorder lock")
+        .as_ref()
+        .map(|recording| recording.tab)
 }
 
 fn script(token: &str) -> String {
@@ -68,7 +76,10 @@ fn new_token() -> String {
 /// Starts recording in `tab`. A recording in another tab is saved first.
 pub fn start(app: &AppHandle, tab: u32) -> Result<(), String> {
     let info = tabs::tab_info(app, tab).ok_or("That tab is closed.")?;
-    if !info.url.starts_with("http://") && !info.url.starts_with("https://") && !info.url.starts_with("file:") {
+    if !info.url.starts_with("http://")
+        && !info.url.starts_with("https://")
+        && !info.url.starts_with("file:")
+    {
         return Err("Open a web page to record a flow.".into());
     }
     if recording_tab().is_some() {
@@ -76,9 +87,19 @@ pub fn start(app: &AppHandle, tab: u32) -> Result<(), String> {
     }
     let token = new_token();
     let source = script(&token);
-    let identifier = driver::cdp(app, tab, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": source }))
-        .ok()
-        .and_then(|value| value.get("identifier").and_then(Value::as_str).map(String::from));
+    let identifier = driver::cdp(
+        app,
+        tab,
+        "Page.addScriptToEvaluateOnNewDocument",
+        json!({ "source": source }),
+    )
+    .ok()
+    .and_then(|value| {
+        value
+            .get("identifier")
+            .and_then(Value::as_str)
+            .map(String::from)
+    });
     *state().lock().expect("recorder lock") = Some(Recording {
         tab,
         token,
@@ -97,19 +118,35 @@ pub fn start(app: &AppHandle, tab: u32) -> Result<(), String> {
 
 /// Ends the recording. With `save` and at least one step, stores a new flow and returns its id.
 pub fn stop(app: &AppHandle, save: bool) -> Result<Option<String>, String> {
-    let Some((tab, token, script)) = state()
-        .lock()
-        .expect("recorder lock")
-        .as_ref()
-        .map(|recording| (recording.tab, recording.token.clone(), recording.script.clone()))
+    let Some((tab, token, script)) =
+        state()
+            .lock()
+            .expect("recorder lock")
+            .as_ref()
+            .map(|recording| {
+                (
+                    recording.tab,
+                    recording.token.clone(),
+                    recording.script.clone(),
+                )
+            })
     else {
         return Ok(None);
     };
     if tabs::tab_info(app, tab).is_some() {
         if let Some(identifier) = &script {
-            let _ = driver::cdp(app, tab, "Page.removeScriptToEvaluateOnNewDocument", json!({ "identifier": identifier }));
+            let _ = driver::cdp(
+                app,
+                tab,
+                "Page.removeScriptToEvaluateOnNewDocument",
+                json!({ "identifier": identifier }),
+            );
         }
-        let _ = driver::evaluate_main(app, tab, &format!("window.dispatchEvent(new Event('ce-record-stop-{token}'))"));
+        let _ = driver::evaluate_main(
+            app,
+            tab,
+            &format!("window.dispatchEvent(new Event('ce-record-stop-{token}'))"),
+        );
         thread::sleep(Duration::from_millis(200));
     }
     let Some(recording) = state().lock().expect("recorder lock").take() else {
@@ -122,7 +159,10 @@ pub fn stop(app: &AppHandle, save: bool) -> Result<Option<String>, String> {
     }
     let host = url::Url::parse(&recording.start_url)
         .ok()
-        .and_then(|url| url.host_str().map(|host| host.trim_start_matches("www.").to_string()))
+        .and_then(|url| {
+            url.host_str()
+                .map(|host| host.trim_start_matches("www.").to_string())
+        })
         .unwrap_or_else(|| "page".into());
     let flow = Flow {
         name: format!("Recorded on {host}"),
@@ -140,7 +180,11 @@ pub fn toggle(app: &AppHandle, tab: u32) -> Result<(), String> {
     thread::spawn(move || {
         let result = if recording_tab().is_some() {
             stop(&handle, true).and_then(|saved| match saved {
-                Some(id) => flows::open_page(&handle, &tabs::focused_window(&handle), Some(&format!("flow={id}"))),
+                Some(id) => flows::open_page(
+                    &handle,
+                    &tabs::focused_window(&handle),
+                    Some(&format!("flow={id}")),
+                ),
                 None => Ok(()),
             })
         } else {
@@ -182,7 +226,11 @@ pub fn note_navigate(app: &AppHandle, tab: u32, url: &str) {
         let Some(recording) = guard.as_mut().filter(|recording| recording.tab == tab) else {
             return;
         };
-        let step = FlowStep { kind: "navigate".into(), url: url.to_string(), ..flows::new_step() };
+        let step = FlowStep {
+            kind: "navigate".into(),
+            url: url.to_string(),
+            ..flows::new_step()
+        };
         push(&mut recording.steps, step)
     };
     if changed {
@@ -200,20 +248,28 @@ pub fn tab_closed(app: &AppHandle, tab: u32) {
 }
 
 fn parse_step(raw: &Value) -> FlowStep {
-    let text = |key: &str| raw.get(key).and_then(Value::as_str).unwrap_or("").to_string();
-    let target = raw.get("target").filter(|value| value.is_object()).map(|value| {
-        let field = |key: &str| clip(value.get(key).and_then(Value::as_str).unwrap_or(""), 400);
-        FlowTarget {
-            role: field("role"),
-            name: field("name"),
-            text: field("text"),
-            test_id: field("testId"),
-            css: field("css"),
-            xpath: field("xpath"),
-            tag: field("tag"),
-            description: field("description"),
-        }
-    });
+    let text = |key: &str| {
+        raw.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    let target = raw
+        .get("target")
+        .filter(|value| value.is_object())
+        .map(|value| {
+            let field = |key: &str| clip(value.get(key).and_then(Value::as_str).unwrap_or(""), 400);
+            FlowTarget {
+                role: field("role"),
+                name: field("name"),
+                text: field("text"),
+                test_id: field("testId"),
+                css: field("css"),
+                xpath: field("xpath"),
+                tag: field("tag"),
+                description: field("description"),
+            }
+        });
     let kind = match text("kind").as_str() {
         kind @ ("click" | "type" | "press" | "select" | "upload") => kind.to_string(),
         _ => String::new(),
@@ -226,7 +282,14 @@ fn parse_step(raw: &Value) -> FlowStep {
         values: raw
             .get("values")
             .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(Value::as_str).map(|item| clip(item, 400)).take(50).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|item| clip(item, 400))
+                    .take(50)
+                    .collect()
+            })
             .unwrap_or_default(),
         note: clip(&text("note"), 300),
         ..flows::new_step()
@@ -265,11 +328,37 @@ mod tests {
 
     #[test]
     fn typing_folds_into_one_step() {
-        let target = Some(FlowTarget { css: "#q".into(), ..FlowTarget::default() });
+        let target = Some(FlowTarget {
+            css: "#q".into(),
+            ..FlowTarget::default()
+        });
         let mut steps = Vec::new();
-        push(&mut steps, FlowStep { kind: "type".into(), target: target.clone(), text: "a".into(), ..flows::new_step() });
-        push(&mut steps, FlowStep { kind: "type".into(), target, text: "abc".into(), ..flows::new_step() });
-        push(&mut steps, FlowStep { kind: "press".into(), keys: "Enter".into(), ..flows::new_step() });
+        push(
+            &mut steps,
+            FlowStep {
+                kind: "type".into(),
+                target: target.clone(),
+                text: "a".into(),
+                ..flows::new_step()
+            },
+        );
+        push(
+            &mut steps,
+            FlowStep {
+                kind: "type".into(),
+                target,
+                text: "abc".into(),
+                ..flows::new_step()
+            },
+        );
+        push(
+            &mut steps,
+            FlowStep {
+                kind: "press".into(),
+                keys: "Enter".into(),
+                ..flows::new_step()
+            },
+        );
         assert_eq!(steps.len(), 2);
         assert_eq!(steps[0].text, "abc");
     }

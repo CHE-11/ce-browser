@@ -110,11 +110,7 @@ fn describe(webview: &Webview) -> Option<DebugWebview> {
 }
 
 pub fn list(app: &AppHandle) -> Vec<DebugWebview> {
-    let mut rows: Vec<DebugWebview> = app
-        .webviews()
-        .values()
-        .filter_map(describe)
-        .collect();
+    let mut rows: Vec<DebugWebview> = app.webviews().values().filter_map(describe).collect();
     rows.sort_by(|left, right| {
         rank(&left.kind)
             .cmp(&rank(&right.kind))

@@ -529,7 +529,10 @@ mod tests {
         let root = read_preferences(&dir);
         assert_eq!(setting(&root, CLOSEABLE_TABS)["welcome"], false);
         assert_eq!(setting(&root, RELEASE_NOTES)["shouldOpenWelcome"], false);
-        assert_eq!(root["devtools"]["preferences"][SELECTED_TAB], "\"elements\"");
+        assert_eq!(
+            root["devtools"]["preferences"][SELECTED_TAB],
+            "\"elements\""
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

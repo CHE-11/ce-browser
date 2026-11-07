@@ -62,7 +62,16 @@ fn local_now() -> LocalTime {
     unsafe extern "system" {
         fn GetLocalTime(time: *mut SystemTime);
     }
-    let mut time = SystemTime { year: 0, month: 0, day_of_week: 0, day: 0, hour: 0, minute: 0, second: 0, milliseconds: 0 };
+    let mut time = SystemTime {
+        year: 0,
+        month: 0,
+        day_of_week: 0,
+        day: 0,
+        hour: 0,
+        minute: 0,
+        second: 0,
+        milliseconds: 0,
+    };
     unsafe { GetLocalTime(&mut time) };
     LocalTime {
         year: time.year as i64,
@@ -87,7 +96,8 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
 
 /// Minutes the local clock is ahead of UTC.
 fn offset_minutes(local: LocalTime, now: u64) -> i64 {
-    let local_minutes = days_from_civil(local.year, local.month, local.day) * 1440 + (local.hour * 60 + local.minute) as i64;
+    let local_minutes = days_from_civil(local.year, local.month, local.day) * 1440
+        + (local.hour * 60 + local.minute) as i64;
     let utc_minutes = (now / 60_000) as i64;
     let raw = local_minutes - utc_minutes;
     (raw as f64 / 15.0).round() as i64 * 15
@@ -95,8 +105,16 @@ fn offset_minutes(local: LocalTime, now: u64) -> i64 {
 
 fn parse_time(text: &str) -> (u32, u32) {
     let mut parts = text.split(':');
-    let hour = parts.next().and_then(|part| part.trim().parse().ok()).unwrap_or(9).min(23);
-    let minute = parts.next().and_then(|part| part.trim().parse().ok()).unwrap_or(0).min(59);
+    let hour = parts
+        .next()
+        .and_then(|part| part.trim().parse().ok())
+        .unwrap_or(9)
+        .min(23);
+    let minute = parts
+        .next()
+        .and_then(|part| part.trim().parse().ok())
+        .unwrap_or(0)
+        .min(59);
     (hour, minute)
 }
 
@@ -108,7 +126,8 @@ fn last_due(trigger: &FlowTrigger, local: LocalTime, now: u64) -> Option<u64> {
     for back in 0..8i64 {
         let day = today - back;
         let weekday = ((local.weekday as i64 - back).rem_euclid(7)) as u8;
-        if trigger.kind == "weekly" && !trigger.days.is_empty() && !trigger.days.contains(&weekday) {
+        if trigger.kind == "weekly" && !trigger.days.is_empty() && !trigger.days.contains(&weekday)
+        {
             continue;
         }
         let minutes = day * 1440 + (hour * 60 + minute) as i64 - offset;
@@ -133,16 +152,32 @@ fn paused(app: &AppHandle) -> bool {
 }
 
 fn fired_at(app: &AppHandle, flow: &str, key: &str) -> Option<u64> {
-    flows::with_store(app, |store| store.schedule.get(flow).and_then(|state| state.fired.get(key).copied()))
+    flows::with_store(app, |store| {
+        store
+            .schedule
+            .get(flow)
+            .and_then(|state| state.fired.get(key).copied())
+    })
 }
 
 fn set_fired(app: &AppHandle, flow: &str, key: &str, at: u64) {
     flows::with_store(app, |store| {
-        store.schedule.entry(flow.to_string()).or_default().fired.insert(key.to_string(), at);
+        store
+            .schedule
+            .entry(flow.to_string())
+            .or_default()
+            .fired
+            .insert(key.to_string(), at);
     });
 }
 
-fn start(app: &AppHandle, flow: &Flow, tab: Option<u32>, trigger: &str, vars: BTreeMap<String, String>) {
+fn start(
+    app: &AppHandle,
+    flow: &Flow,
+    tab: Option<u32>,
+    trigger: &str,
+    vars: BTreeMap<String, String>,
+) {
     if flows::running_flow(app, &flow.id) {
         return;
     }
@@ -156,7 +191,11 @@ fn fire_startup(app: &AppHandle) {
         return;
     }
     for flow in flows::flows(app) {
-        if flow.triggers.iter().any(|trigger| trigger.enabled && trigger.kind == "startup") {
+        if flow
+            .triggers
+            .iter()
+            .any(|trigger| trigger.enabled && trigger.kind == "startup")
+        {
             start(app, &flow, None, "startup", BTreeMap::new());
         }
     }
@@ -233,7 +272,10 @@ fn tick(app: &AppHandle) {
 
 fn hash_text(text: &str) -> String {
     let mut hasher = DefaultHasher::new();
-    text.split_whitespace().collect::<Vec<_>>().join(" ").hash(&mut hasher);
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
 
@@ -245,7 +287,12 @@ fn check_page(app: &AppHandle, flow: &Flow) {
     let url = tabs::resolve(app, &flow.start_url);
     let opened = tabs::open(
         app,
-        tabs::OpenTab { shelf: true, background: true, window: tabs::focused_window(app), ..tabs::OpenTab::new(url.clone()) },
+        tabs::OpenTab {
+            shelf: true,
+            background: true,
+            window: tabs::focused_window(app),
+            ..tabs::OpenTab::new(url.clone())
+        },
     );
     let Ok(tab) = opened else {
         return;
@@ -277,7 +324,10 @@ fn check_page(app: &AppHandle, flow: &Flow) {
         return;
     }
     let (matched, summary) = if flow.monitor_prompt.trim().is_empty() {
-        (true, format!("{} changed.", url.host_str().unwrap_or("The page")))
+        (
+            true,
+            format!("{} changed.", url.host_str().unwrap_or("The page")),
+        )
     } else {
         match judge(app, &flow.monitor_prompt, &old_text, &text) {
             Ok(result) => result,
@@ -300,7 +350,12 @@ fn check_page(app: &AppHandle, flow: &Flow) {
 }
 
 /// Asks the AI whether the change between two versions of a page meets the user's condition.
-fn judge(app: &AppHandle, condition: &str, before: &str, after: &str) -> Result<(bool, String), String> {
+fn judge(
+    app: &AppHandle,
+    condition: &str,
+    before: &str,
+    after: &str,
+) -> Result<(bool, String), String> {
     let current = settings::get(app);
     if !ai::available(app, &current) {
         return Err("Set up an AI provider in Settings, under AI, for AI monitors.".into());
@@ -311,10 +366,26 @@ fn judge(app: &AppHandle, condition: &str, before: &str, after: &str) -> Result<
         clip(before, MONITOR_TEXT / 2),
         clip(after, MONITOR_TEXT / 2)
     );
-    let reply = ai::complete(app, &current, &current.automation.agent_model, system, &prompt, true, Duration::from_secs(120))?;
-    let parsed: Value = serde_json::from_str(json_block(&reply)).map_err(|_| "The AI monitor didn't answer clearly.".to_string())?;
-    let matched = parsed.get("match").and_then(Value::as_bool).unwrap_or(false);
-    let summary = parsed.get("summary").and_then(Value::as_str).unwrap_or("The page changed.").to_string();
+    let reply = ai::complete(
+        app,
+        &current,
+        &current.automation.agent_model,
+        system,
+        &prompt,
+        true,
+        Duration::from_secs(120),
+    )?;
+    let parsed: Value = serde_json::from_str(json_block(&reply))
+        .map_err(|_| "The AI monitor didn't answer clearly.".to_string())?;
+    let matched = parsed
+        .get("match")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let summary = parsed
+        .get("summary")
+        .and_then(Value::as_str)
+        .unwrap_or("The page changed.")
+        .to_string();
     Ok((matched, summary))
 }
 
@@ -374,17 +445,19 @@ pub fn on_visit(app: &AppHandle, tab: u32, url: &str) {
         }
         let now = now_ms();
         for flow in flows::flows(&handle) {
-            let matches = flow
-                .triggers
-                .iter()
-                .any(|trigger| trigger.enabled && trigger.kind == "visit" && wildcard(&trigger.pattern, &url));
+            let matches = flow.triggers.iter().any(|trigger| {
+                trigger.enabled && trigger.kind == "visit" && wildcard(&trigger.pattern, &url)
+            });
             if !matches {
                 continue;
             }
             {
                 let mut seen = visits().lock().expect("visits lock");
                 let key = (flow.id.clone(), tab);
-                if seen.get(&key).is_some_and(|last| now.saturating_sub(*last) < VISIT_COOLDOWN_MS) {
+                if seen
+                    .get(&key)
+                    .is_some_and(|last| now.saturating_sub(*last) < VISIT_COOLDOWN_MS)
+                {
                     continue;
                 }
                 seen.insert(key, now);
@@ -411,12 +484,16 @@ pub fn on_download(app: &AppHandle, name: &str, path: &str) {
             return;
         }
         for flow in flows::flows(&handle) {
-            let matches = flow
-                .triggers
-                .iter()
-                .any(|trigger| trigger.enabled && trigger.kind == "download" && (trigger.pattern.trim().is_empty() || wildcard(&trigger.pattern, &name)));
+            let matches = flow.triggers.iter().any(|trigger| {
+                trigger.enabled
+                    && trigger.kind == "download"
+                    && (trigger.pattern.trim().is_empty() || wildcard(&trigger.pattern, &name))
+            });
             if matches {
-                let vars = BTreeMap::from([("file".to_string(), name.clone()), ("path".to_string(), path.clone())]);
+                let vars = BTreeMap::from([
+                    ("file".to_string(), name.clone()),
+                    ("path".to_string(), path.clone()),
+                ]);
                 start(&handle, &flow, None, "download", vars);
             }
         }
@@ -433,10 +510,9 @@ pub fn hotkey(app: &AppHandle, slot: usize) {
         let active = tabs::active_id(&handle);
         let mut found = false;
         for flow in flows::flows(&handle) {
-            let bound = flow
-                .triggers
-                .iter()
-                .any(|trigger| trigger.enabled && trigger.kind == "hotkey" && trigger.slot as usize == slot);
+            let bound = flow.triggers.iter().any(|trigger| {
+                trigger.enabled && trigger.kind == "hotkey" && trigger.slot as usize == slot
+            });
             if !bound {
                 continue;
             }
@@ -445,7 +521,13 @@ pub fn hotkey(app: &AppHandle, slot: usize) {
             start(&handle, &flow, target, "hotkey", BTreeMap::new());
         }
         if !found {
-            system::toast("Automations", &format!("No flow uses hotkey slot {slot}. Add a shortcut trigger to a flow in ce://automations."), "");
+            system::toast(
+                "Automations",
+                &format!(
+                    "No flow uses hotkey slot {slot}. Add a shortcut trigger to a flow in ce://automations."
+                ),
+                "",
+            );
         }
     });
 }
@@ -465,15 +547,40 @@ mod tests {
 
     #[test]
     fn daily_due_is_today_or_yesterday() {
-        let local = LocalTime { year: 2026, month: 11, day: 6, weekday: 5, hour: 10, minute: 30 };
+        let local = LocalTime {
+            year: 2026,
+            month: 11,
+            day: 6,
+            weekday: 5,
+            hour: 10,
+            minute: 30,
+        };
         let now = (days_from_civil(2026, 11, 6) * 1440 + 10 * 60 + 30) as u64 * 60_000;
-        let trigger = FlowTrigger { kind: "daily".into(), time: "09:00".into(), ..FlowTrigger::default() };
+        let trigger = FlowTrigger {
+            kind: "daily".into(),
+            time: "09:00".into(),
+            ..FlowTrigger::default()
+        };
         let due = last_due(&trigger, local, now).unwrap();
         assert_eq!(now - due, 90 * 60_000);
-        let later = FlowTrigger { time: "11:00".into(), ..trigger.clone() };
-        assert_eq!(now - last_due(&later, local, now).unwrap(), (23 * 60 + 30) * 60_000);
-        let weekly = FlowTrigger { kind: "weekly".into(), time: "09:00".into(), days: vec![1], ..FlowTrigger::default() };
-        assert_eq!(now - last_due(&weekly, local, now).unwrap(), (4 * 1440 + 90) * 60_000);
+        let later = FlowTrigger {
+            time: "11:00".into(),
+            ..trigger.clone()
+        };
+        assert_eq!(
+            now - last_due(&later, local, now).unwrap(),
+            (23 * 60 + 30) * 60_000
+        );
+        let weekly = FlowTrigger {
+            kind: "weekly".into(),
+            time: "09:00".into(),
+            days: vec![1],
+            ..FlowTrigger::default()
+        };
+        assert_eq!(
+            now - last_due(&weekly, local, now).unwrap(),
+            (4 * 1440 + 90) * 60_000
+        );
     }
 
     #[test]

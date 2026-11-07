@@ -211,7 +211,7 @@ export const VerticalToolbar = forwardRef<HTMLElement, VerticalToolbarProps>(fun
       aria-label="Tools"
       className="chrome-tool-strip flex h-full w-12 min-h-0 min-w-12 max-w-12 shrink-0 flex-col overflow-hidden border-l border-zinc-800 bg-zinc-950"
     >
-      <div id="vertical-toolbar-dock" className="flex shrink-0 justify-center border-b border-zinc-800 py-1">
+      <div id="vertical-toolbar-dock" className="flex h-[var(--toolbar-height)] shrink-0 items-center justify-center border-b border-zinc-800">
         <IconButton
           id="vertical-toolbar-to-address"
           label="Show on the address bar"

@@ -120,10 +120,16 @@ pub struct DebugSnapshot {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum DebugFeed {
-    Ipc { records: Vec<DebugIpcRecord> },
-    Log { lines: Vec<DebugLogLine> },
+    Ipc {
+        records: Vec<DebugIpcRecord>,
+    },
+    Log {
+        lines: Vec<DebugLogLine>,
+    },
     /// `ipc` or `logs`.
-    Cleared { target: String },
+    Cleared {
+        target: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -364,7 +370,9 @@ pub(crate) fn clear(app: &AppHandle, target: &str) -> Result<(), String> {
 static HELD_POPUPS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 fn held_popups() -> MutexGuard<'static, Vec<String>> {
-    HELD_POPUPS.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    HELD_POPUPS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Focus moving to the HUD or to a WebView2 DevTools window does not dismiss a popup, so
@@ -416,13 +424,20 @@ fn is_webview_devtools(hwnd: isize) -> bool {
     if process_id == 0 {
         return false;
     }
-    let Ok(process) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) }) else {
+    let Ok(process) =
+        (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) })
+    else {
         return false;
     };
     let mut path = [0u16; 1024];
     let mut size = path.len() as u32;
     let named = unsafe {
-        QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(path.as_mut_ptr()), &mut size)
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_WIN32,
+            PWSTR(path.as_mut_ptr()),
+            &mut size,
+        )
     }
     .is_ok();
     let _ = unsafe { CloseHandle(process) };
@@ -678,9 +693,10 @@ mod tests {
 
     #[test]
     fn a_record_without_an_id_deserializes() {
-        let record: DebugIpcRecord =
-            serde_json::from_str(r#"{"webview":"ui","kind":"invoke","name":"list_tabs","ok":true}"#)
-                .unwrap();
+        let record: DebugIpcRecord = serde_json::from_str(
+            r#"{"webview":"ui","kind":"invoke","name":"list_tabs","ok":true}"#,
+        )
+        .unwrap();
         assert_eq!(record.id, 0);
         assert_eq!(record.name, "list_tabs");
         assert_eq!(record.duration_ms, None);

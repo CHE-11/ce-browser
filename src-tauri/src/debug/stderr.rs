@@ -54,8 +54,8 @@ fn tee(which: STD_HANDLE, stream: &'static str) {
 
 fn pump(mut reader: PipeReader, original: Option<isize>, stream: &'static str) {
     // Borrowed: the process still owns the original handle.
-    let mut terminal =
-        original.map(|handle| ManuallyDrop::new(unsafe { File::from_raw_handle(handle as RawHandle) }));
+    let mut terminal = original
+        .map(|handle| ManuallyDrop::new(unsafe { File::from_raw_handle(handle as RawHandle) }));
     let mut buffer = [0u8; 4096];
     let mut pending = Vec::new();
     loop {
@@ -139,7 +139,10 @@ mod tests {
 
     #[test]
     fn the_area_is_the_short_prefix_before_a_colon() {
-        assert_eq!(area_of("docked devtools: the port closed"), "docked devtools");
+        assert_eq!(
+            area_of("docked devtools: the port closed"),
+            "docked devtools"
+        );
         assert_eq!(area_of("shortcut DebugHud: failed"), "shortcut DebugHud");
         assert_eq!(area_of("no area here"), "");
         assert_eq!(

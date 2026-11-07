@@ -1719,6 +1719,16 @@ export function toggleAgentPanel(open?: boolean) {
   return invoke<boolean>("toggle_agent_panel", { open: open ?? null });
 }
 
+/** Follows the mouse until the button comes up and remembers the agent panel width. */
+export function resizeAgentPanel() {
+  return invoke<void>("resize_agent_panel");
+}
+
+/** Sets the open agent panel width in CSS pixels and remembers it. */
+export function setAgentPanelWidth(width: number) {
+  return invoke<void>("set_agent_panel_width", { width });
+}
+
 // Automation secrets and MCP
 
 export function automationSecretNames() {

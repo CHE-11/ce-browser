@@ -33,7 +33,9 @@ static PLACES: LazyLock<Mutex<HashMap<String, Place>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn places() -> MutexGuard<'static, HashMap<String, Place>> {
-    PLACES.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    PLACES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 pub fn label(window: &str) -> String {

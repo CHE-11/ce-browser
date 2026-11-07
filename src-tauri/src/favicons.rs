@@ -565,7 +565,9 @@ fn decode_entities(value: &str) -> String {
 mod tests {
     use image::{ImageFormat, Rgba, RgbaImage};
 
-    use super::{content_margin, contrasted_data_url, host_of, icon_links, light_plate, needs_light_plate};
+    use super::{
+        content_margin, contrasted_data_url, host_of, icon_links, light_plate, needs_light_plate,
+    };
 
     fn png_of(image: &RgbaImage) -> Vec<u8> {
         let mut png = Vec::new();

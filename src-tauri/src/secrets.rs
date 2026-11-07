@@ -159,9 +159,9 @@ const VAULT_FILE_NAME: &str = "automation-secrets.json";
 pub fn clean_secret_name(raw: &str) -> Option<String> {
     let name = raw.trim().to_ascii_lowercase();
     let valid = (1..=64).contains(&name.len())
-        && name
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_'));
+        && name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
+        });
     valid.then_some(name)
 }
 
@@ -229,7 +229,8 @@ pub fn mcp_token(app: &AppHandle, regenerate: bool) -> Result<String, String> {
     if !regenerate {
         let file: SecretFile = files::read_json(&path);
         if let Some(slot) = file.keys.first()
-            && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(slot.ciphertext.trim())
+            && let Ok(bytes) =
+                base64::engine::general_purpose::STANDARD.decode(slot.ciphertext.trim())
             && let Ok(plain) = unprotect(&bytes)
             && plain.len() >= 32
         {

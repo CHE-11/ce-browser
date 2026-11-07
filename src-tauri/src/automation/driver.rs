@@ -146,10 +146,7 @@ fn context(webview: &Webview, id: u32) -> Option<i64> {
         return known;
     }
     let created = create_world(webview);
-    worlds()
-        .lock()
-        .expect("worlds lock")
-        .insert(id, created);
+    worlds().lock().expect("worlds lock").insert(id, created);
     created
 }
 
@@ -195,7 +192,10 @@ fn run_in(
             .map(Value::take)
             .unwrap_or(Value::Null))
     } else {
-        Ok(response.get_mut("result").map(Value::take).unwrap_or(Value::Null))
+        Ok(response
+            .get_mut("result")
+            .map(Value::take)
+            .unwrap_or(Value::Null))
     }
 }
 
@@ -209,16 +209,29 @@ fn guarded(call: &str) -> String {
 }
 
 /// Calls `__ce.<call>` in the tab's automation world, loading the page script when needed.
-fn call_with(app: &AppHandle, id: u32, call: &str, by_value: bool, timeout: Duration) -> Result<Value, String> {
+fn call_with(
+    app: &AppHandle,
+    id: u32,
+    call: &str,
+    by_value: bool,
+    timeout: Duration,
+) -> Result<Value, String> {
     let webview = view(app, id)?;
     let expression = guarded(call);
     for attempt in 0..3 {
         let world = context(&webview, id);
         let result = run_in(&webview, world, &expression, by_value, timeout);
         match result {
-            Ok(value) if value.as_str() == Some(MISSING) || value.get("value").and_then(Value::as_str) == Some(MISSING) => {
+            Ok(value)
+                if value.as_str() == Some(MISSING)
+                    || value.get("value").and_then(Value::as_str) == Some(MISSING) =>
+            {
                 run_in(&webview, world, PAGE_SCRIPT, true, CALL_TIMEOUT).or_else(|error| {
-                    if stale_context(&error) { Ok(Value::Null) } else { Err(error) }
+                    if stale_context(&error) {
+                        Ok(Value::Null)
+                    } else {
+                        Err(error)
+                    }
                 })?;
                 if attempt == 2 {
                     break;
@@ -239,7 +252,12 @@ fn call(app: &AppHandle, id: u32, call: &str) -> Result<Value, String> {
 }
 
 /// Runs an expression in the automation world, out of the page's reach, and awaits it.
-pub fn evaluate_world(app: &AppHandle, id: u32, expression: &str, timeout: Duration) -> Result<Value, String> {
+pub fn evaluate_world(
+    app: &AppHandle,
+    id: u32,
+    expression: &str,
+    timeout: Duration,
+) -> Result<Value, String> {
     call_with(app, id, expression, true, timeout)
 }
 
@@ -263,7 +281,15 @@ pub fn focused_info(app: &AppHandle, id: u32) -> Result<Option<ElementInfo>, Str
         .map_err(|error| error.to_string())
 }
 
-fn mouse(app: &AppHandle, id: u32, kind: &str, x: f64, y: f64, button: &str, clicks: u32) -> Result<(), String> {
+fn mouse(
+    app: &AppHandle,
+    id: u32,
+    kind: &str,
+    x: f64,
+    y: f64,
+    button: &str,
+    clicks: u32,
+) -> Result<(), String> {
     cdp(
         app,
         id,
@@ -289,7 +315,14 @@ fn button_bits(button: &str) -> u32 {
 }
 
 /// Clicks a point in the page's viewport, in CSS pixels.
-pub fn click_at(app: &AppHandle, id: u32, x: f64, y: f64, button: &str, double: bool) -> Result<(), String> {
+pub fn click_at(
+    app: &AppHandle,
+    id: u32,
+    x: f64,
+    y: f64,
+    button: &str,
+    double: bool,
+) -> Result<(), String> {
     let button = match button {
         "right" | "middle" => button,
         _ => "left",
@@ -311,7 +344,13 @@ fn point(app: &AppHandle, id: u32, element: u32) -> Result<Point, String> {
 }
 
 /// Scrolls the element into view and clicks its centre with a trusted mouse event.
-pub fn click(app: &AppHandle, id: u32, element: u32, button: &str, double: bool) -> Result<(), String> {
+pub fn click(
+    app: &AppHandle,
+    id: u32,
+    element: u32,
+    button: &str,
+    double: bool,
+) -> Result<(), String> {
     let target = point(app, id, element)?;
     if !target.ok {
         let cover = if target.cover.is_empty() {
@@ -454,7 +493,11 @@ pub fn press(app: &AppHandle, id: u32, keys: &str) -> Result<(), String> {
 
 /// The `Input.dispatchKeyEvent` params that press and release `keys`.
 pub fn key_events(keys: &str) -> Result<(Value, Value), String> {
-    let parts: Vec<&str> = keys.split('+').map(str::trim).filter(|part| !part.is_empty()).collect();
+    let parts: Vec<&str> = keys
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect();
     let Some((last, mods)) = parts.split_last() else {
         return Err("Name a key to press.".into());
     };
@@ -479,7 +522,11 @@ pub fn key_events(keys: &str) -> Result<(Value, Value), String> {
         }
     };
     // Chords with Ctrl, Alt or Meta are commands, not text.
-    let text = if modifiers & 7 != 0 { None } else { key.text.clone() };
+    let text = if modifiers & 7 != 0 {
+        None
+    } else {
+        key.text.clone()
+    };
     let mut down = json!({
         "type": if text.is_some() { "keyDown" } else { "rawKeyDown" },
         "modifiers": modifiers,
@@ -511,7 +558,13 @@ fn viewport(app: &AppHandle, id: u32) -> Result<(f64, f64), String> {
 }
 
 /// Scrolls with the mouse wheel. `screens` is how many viewport heights to move; negative scrolls up.
-pub fn scroll(app: &AppHandle, id: u32, element: Option<u32>, screens: f64, horizontal: bool) -> Result<String, String> {
+pub fn scroll(
+    app: &AppHandle,
+    id: u32,
+    element: Option<u32>,
+    screens: f64,
+    horizontal: bool,
+) -> Result<String, String> {
     let (width, height) = viewport(app, id)?;
     let (x, y) = match element {
         Some(element) => {
@@ -525,9 +578,13 @@ pub fn scroll(app: &AppHandle, id: u32, element: Option<u32>, screens: f64, hori
         None => (width / 2.0, height / 2.0),
     };
     let distance = screens * if horizontal { width } else { height } * 0.85;
-    let before = call(app, id, "(document.scrollingElement||document.documentElement).scrollTop")?
-        .as_f64()
-        .unwrap_or(0.0);
+    let before = call(
+        app,
+        id,
+        "(document.scrollingElement||document.documentElement).scrollTop",
+    )?
+    .as_f64()
+    .unwrap_or(0.0);
     cdp(
         app,
         id,
@@ -542,9 +599,13 @@ pub fn scroll(app: &AppHandle, id: u32, element: Option<u32>, screens: f64, hori
     )?;
     thread::sleep(Duration::from_millis(350));
     if element.is_none() && !horizontal {
-        let after = call(app, id, "(document.scrollingElement||document.documentElement).scrollTop")?
-            .as_f64()
-            .unwrap_or(0.0);
+        let after = call(
+            app,
+            id,
+            "(document.scrollingElement||document.documentElement).scrollTop",
+        )?
+        .as_f64()
+        .unwrap_or(0.0);
         if (after - before).abs() < 1.0 {
             let moved = call(app, id, &format!("__ce.scrollBy(0, {distance})"))?;
             if moved.get("moved").and_then(Value::as_bool) != Some(true) {
@@ -559,12 +620,22 @@ pub fn scroll(app: &AppHandle, id: u32, element: Option<u32>, screens: f64, hori
     Ok("Scrolled.".into())
 }
 
-pub fn select(app: &AppHandle, id: u32, element: u32, values: &[String]) -> Result<Vec<String>, String> {
+pub fn select(
+    app: &AppHandle,
+    id: u32,
+    element: u32,
+    values: &[String],
+) -> Result<Vec<String>, String> {
     let list = serde_json::to_string(values).map_err(|error| error.to_string())?;
     let value = call(app, id, &format!("__ce.choose({element}, {list})"))?;
     Ok(value
         .as_array()
-        .map(|items| items.iter().filter_map(|item| item.as_str().map(String::from)).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default())
 }
 
@@ -579,7 +650,13 @@ pub fn upload(app: &AppHandle, id: u32, element: u32, files: &[String]) -> Resul
     if !info.file {
         return Err(format!("Element {element} is not a file input."));
     }
-    let handle = call_with(app, id, &format!("__ce.element({element})"), false, CALL_TIMEOUT)?;
+    let handle = call_with(
+        app,
+        id,
+        &format!("__ce.element({element})"),
+        false,
+        CALL_TIMEOUT,
+    )?;
     let object = handle
         .get("objectId")
         .and_then(Value::as_str)
@@ -652,11 +729,20 @@ pub struct WaitQuery {
     pub gone: String,
 }
 
-pub fn wait_for(app: &AppHandle, id: u32, query: &WaitQuery, limit: Duration) -> Result<bool, String> {
+pub fn wait_for(
+    app: &AppHandle,
+    id: u32,
+    query: &WaitQuery,
+    limit: Duration,
+) -> Result<bool, String> {
     let body = serde_json::to_string(query).map_err(|error| error.to_string())?;
     let start = Instant::now();
     loop {
-        if call(app, id, &format!("__ce.find({body})")).ok().and_then(|value| value.as_bool()) == Some(true) {
+        if call(app, id, &format!("__ce.find({body})"))
+            .ok()
+            .and_then(|value| value.as_bool())
+            == Some(true)
+        {
             return Ok(true);
         }
         if start.elapsed() >= limit {
@@ -704,8 +790,13 @@ pub fn screenshot(app: &AppHandle, id: u32, marks: bool, max_width: u32) -> Resu
 pub fn shrink_jpeg(bytes: &[u8], max_width: u32, quality: u8) -> Result<Shot, String> {
     let image = image::load_from_memory(bytes).map_err(|error| error.to_string())?;
     let image = if image.width() > max_width {
-        let height = (image.height() as f64 * max_width as f64 / image.width() as f64).round() as u32;
-        image.resize(max_width, height.max(1), image::imageops::FilterType::Triangle)
+        let height =
+            (image.height() as f64 * max_width as f64 / image.width() as f64).round() as u32;
+        image.resize(
+            max_width,
+            height.max(1),
+            image::imageops::FilterType::Triangle,
+        )
     } else {
         image
     };
@@ -741,7 +832,11 @@ pub fn locate(app: &AppHandle, id: u32, target: &Value) -> Result<Option<(u32, S
         return Ok(None);
     }
     let element = value.get("ref").and_then(Value::as_u64).unwrap_or(0) as u32;
-    let by = value.get("by").and_then(Value::as_str).unwrap_or("").to_string();
+    let by = value
+        .get("by")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     Ok(Some((element, by)))
 }
 
@@ -756,7 +851,11 @@ pub fn pick(app: &AppHandle, id: u32) -> Result<Option<Value>, String> {
     Ok(if value.is_null() { None } else { Some(value) })
 }
 
-pub fn extract_rows(app: &AppHandle, id: u32, spec: &Value) -> Result<Vec<serde_json::Map<String, Value>>, String> {
+pub fn extract_rows(
+    app: &AppHandle,
+    id: u32,
+    spec: &Value,
+) -> Result<Vec<serde_json::Map<String, Value>>, String> {
     let value = call(app, id, &format!("__ce.extract({spec})"))?;
     Ok(value
         .as_array()

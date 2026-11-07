@@ -3240,8 +3240,8 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
                 && active.is_some_and(|id| id == split.left || id == split.right)
         });
         let ratio = split.map(|split| split.ratio).unwrap_or(0.5);
-        let dock_ratio = (chrome.devtools.visible_for(active) && !fullscreen)
-            .then_some(chrome.devtools.ratio);
+        let dock_ratio =
+            (chrome.devtools.visible_for(active) && !fullscreen).then_some(chrome.devtools.ratio);
         // A tab that failed, or whose next document has not painted, keeps its view off
         // screen so the browser UI behind can show why or that it is still loading.
         let painted_view = |id: u32| {
@@ -4179,7 +4179,9 @@ pub fn navigate(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
     crate::automation::recorder::note_navigate(app, id, &display);
     // ce:// pages share one document and differ only in the hash. WebView2 reports no load for
     // a hash change, so marking one as loading would leave the tab parked and spinning.
-    let current = with_state(app, |state| state.tab_mut(id).map(|tab| tab.info.url.clone()));
+    let current = with_state(app, |state| {
+        state.tab_mut(id).map(|tab| tab.info.url.clone())
+    });
     let in_page = current.as_ref().is_some_and(|current| {
         url.fragment().is_some() && same_document(resolve(app, current).as_str(), url.as_str())
     });
@@ -5587,6 +5589,29 @@ pub fn set_agent_panel(app: &AppHandle, window: &str, width: f64) {
         layout(app, window);
         emit_tabs(app);
     }
+}
+
+/// Moves an open agent panel to `width` CSS pixels. Popups stay put, and the tab snapshot
+/// is not emitted: the handle lives in the panel, which moves with the webview.
+/// `None` when the panel is closed.
+pub fn resize_agent_panel(app: &AppHandle, window: &str, width: f64) -> Option<f64> {
+    if !width.is_finite() || agent_panel_width(app, window) <= 0.0 {
+        return None;
+    }
+    let changed = with_state(app, |state| {
+        let chrome = state.chrome_mut(window)?;
+        if (chrome.agent_panel - width).abs() < 0.5 {
+            return None;
+        }
+        chrome.agent_panel = width;
+        Some(())
+    });
+    if changed.is_some() {
+        place_pages(app, window, true);
+        crate::peek::relayout(app, window);
+        place_toast(app, window);
+    }
+    Some(agent_panel_width(app, window))
 }
 
 /// Marks a tab as driven by automation. Automated tabs never sleep.

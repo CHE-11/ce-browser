@@ -875,6 +875,8 @@ export type BrowserSettings = {
   toastPosition: ToastPosition;
   /** Opens these file types in a browser tab. */
   fileHandlers: FileHandler[];
+  /** Width of the docked agent panel, in CSS pixels, 280 to 720. */
+  agentPanelWidth: number;
   /** Agent, recorded flows, schedules, and the MCP server. */
   automation: AutomationSettings;
 };

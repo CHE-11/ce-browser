@@ -557,8 +557,14 @@ pub enum ChatPart {
 #[derive(Debug, Clone)]
 pub enum ChatMessage {
     User(Vec<ChatPart>),
-    Assistant { text: String, calls: Vec<ToolCall> },
-    ToolResult { call_id: String, parts: Vec<ChatPart> },
+    Assistant {
+        text: String,
+        calls: Vec<ToolCall>,
+    },
+    ToolResult {
+        call_id: String,
+        parts: Vec<ChatPart>,
+    },
 }
 
 /// A tool the model may call. `parameters` is a JSON Schema object.
@@ -613,7 +619,12 @@ fn part_text(parts: &[ChatPart]) -> String {
     out
 }
 
-pub fn openai_tools_body(model: &str, system: &str, messages: &[ChatMessage], tools: &[ToolSpec]) -> Value {
+pub fn openai_tools_body(
+    model: &str,
+    system: &str,
+    messages: &[ChatMessage],
+    tools: &[ToolSpec],
+) -> Value {
     let mut out = vec![json!({ "role": "system", "content": system })];
     // Tool messages carry text only, so their images follow in one user message.
     let mut pending: Vec<ChatPart> = Vec::new();
@@ -692,7 +703,12 @@ fn anthropic_parts(parts: &[ChatPart]) -> Vec<Value> {
         .collect()
 }
 
-pub fn anthropic_tools_body(model: &str, system: &str, messages: &[ChatMessage], tools: &[ToolSpec]) -> Value {
+pub fn anthropic_tools_body(
+    model: &str,
+    system: &str,
+    messages: &[ChatMessage],
+    tools: &[ToolSpec],
+) -> Value {
     let mut out: Vec<Value> = Vec::new();
     let mut push = |role: &str, blocks: Vec<Value>| {
         if blocks.is_empty() {
@@ -718,7 +734,9 @@ pub fn anthropic_tools_body(model: &str, system: &str, messages: &[ChatMessage],
                 }
                 push(
                     "user",
-                    vec![json!({ "type": "tool_result", "tool_use_id": call_id, "content": content })],
+                    vec![
+                        json!({ "type": "tool_result", "tool_use_id": call_id, "content": content }),
+                    ],
                 );
             }
             ChatMessage::Assistant { text, calls } => {
@@ -761,7 +779,10 @@ fn parse_arguments(raw: &Value) -> Value {
 }
 
 pub fn openai_tool_reply(value: &Value) -> ToolReply {
-    let message = value.pointer("/choices/0/message").cloned().unwrap_or(Value::Null);
+    let message = value
+        .pointer("/choices/0/message")
+        .cloned()
+        .unwrap_or(Value::Null);
     let text = message
         .get("content")
         .and_then(Value::as_str)
@@ -787,7 +808,9 @@ pub fn openai_tool_reply(value: &Value) -> ToolReply {
                     Some(ToolCall {
                         id,
                         name,
-                        arguments: parse_arguments(function.get("arguments").unwrap_or(&Value::Null)),
+                        arguments: parse_arguments(
+                            function.get("arguments").unwrap_or(&Value::Null),
+                        ),
                     })
                 })
                 .collect()
@@ -812,13 +835,25 @@ pub fn anthropic_tool_reply(value: &Value) -> ToolReply {
                 }
             }
             Some("tool_use") => {
-                let id = block.get("id").and_then(Value::as_str).unwrap_or("").to_string();
-                let name = block.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                let id = block
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let name = block
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
                 if name.is_empty() {
                     continue;
                 }
                 reply.calls.push(ToolCall {
-                    id: if id.is_empty() { format!("toolu_{}", reply.calls.len()) } else { id },
+                    id: if id.is_empty() {
+                        format!("toolu_{}", reply.calls.len())
+                    } else {
+                        id
+                    },
                     name,
                     arguments: parse_arguments(block.get("input").unwrap_or(&Value::Null)),
                 });
@@ -1076,7 +1111,10 @@ mod tests {
         let body = openai_tools_body("gpt-5", "sys", &messages, &tools);
         let list = body["messages"].as_array().unwrap();
         assert_eq!(list[0]["role"], "system");
-        assert_eq!(list[2]["tool_calls"][0]["function"]["arguments"], "{\"ref\":4}");
+        assert_eq!(
+            list[2]["tool_calls"][0]["function"]["arguments"],
+            "{\"ref\":4}"
+        );
         assert_eq!(list[3]["role"], "tool");
         assert_eq!(list[3]["content"], "Clicked.");
         assert_eq!(list[4]["role"], "user");

@@ -83,7 +83,9 @@ pub fn audit(app: &AppHandle, source: &str, tab: u32, action: &str, detail: &str
     if fs::metadata(&path).is_ok_and(|meta| meta.len() > LOG_LIMIT) {
         let _ = fs::rename(&path, path.with_extension("jsonl.old"));
     }
-    let url = tabs::tab_info(app, tab).map(|info| info.url).unwrap_or_default();
+    let url = tabs::tab_info(app, tab)
+        .map(|info| info.url)
+        .unwrap_or_default();
     let line = json!({
         "at": now_ms(),
         "source": source,

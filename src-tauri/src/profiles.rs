@@ -774,7 +774,7 @@ const COPY_PARTS: &[PartSpec] = &[
     PartSpec {
         files: &["automations.json"],
         dirs: &["datasets"],
-        settings: &["automation"],
+        settings: &["automation", "agentPanelWidth"],
         ..bare("automation")
     },
     PartSpec {

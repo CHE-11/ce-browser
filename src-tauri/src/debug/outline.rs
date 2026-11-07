@@ -37,7 +37,9 @@ struct Outlined {
 static CURRENT: Mutex<Option<Outlined>> = Mutex::new(None);
 
 fn current() -> MutexGuard<'static, Option<Outlined>> {
-    CURRENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    CURRENT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 pub fn outlined_label() -> Option<String> {

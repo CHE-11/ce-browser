@@ -224,10 +224,7 @@ mod tests {
         let mut settings = settings::BrowserSettings::default();
         settings.strip_tracking = true;
         assert_eq!(
-            page_address(
-                &settings,
-                "https://example.com/a?utm_source=x&id=1#section"
-            ),
+            page_address(&settings, "https://example.com/a?utm_source=x&id=1#section"),
             "https://example.com/a?id=1#section"
         );
         assert_eq!(

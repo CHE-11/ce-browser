@@ -322,7 +322,7 @@ export function BookmarksPage() {
 
   return (
     <div id="bookmarks-page" className="flex h-full flex-col bg-zinc-950 text-zinc-100">
-      <header id="bookmarks-page-header" className="flex h-11 shrink-0 items-center gap-2 border-b border-zinc-800 px-3">
+      <header id="bookmarks-page-header" className="flex h-[var(--toolbar-height)] shrink-0 items-center gap-2 border-b border-zinc-800 px-3">
         <nav id="bookmarks-page-path" aria-label="Folder" className="flex min-w-0 items-center gap-0.5">
           {path.map((folder, index) => (
             <span key={folder.id} id={`bookmarks-page-crumb-${folder.id}`} className="flex min-w-0 items-center gap-0.5">

@@ -94,7 +94,11 @@ fn json_content(content_type: Option<&str>) -> bool {
 
 fn handle(app: &AppHandle, mut request: Request) {
     if !origin_allowed(header(&request, "Origin").as_deref()) {
-        return reply(request, 403, Some(json!({ "error": "Web pages can't use passage." })));
+        return reply(
+            request,
+            403,
+            Some(json!({ "error": "Web pages can't use passage." })),
+        );
     }
     let route = route_of(request.url());
     if let Route::Health = route {
@@ -126,7 +130,11 @@ fn handle(app: &AppHandle, mut request: Request) {
         .read_to_string(&mut body)
         .is_err()
     {
-        return reply(request, 400, Some(json!({ "error": "The body is not UTF-8 text." })));
+        return reply(
+            request,
+            400,
+            Some(json!({ "error": "The body is not UTF-8 text." })),
+        );
     }
     let parsed: Value = if body.trim().is_empty() {
         json!({})
@@ -134,13 +142,21 @@ fn handle(app: &AppHandle, mut request: Request) {
         match serde_json::from_str(&body) {
             Ok(value) => value,
             Err(error) => {
-                return reply(request, 400, Some(json!({ "error": format!("Parse error: {error}") })));
+                return reply(
+                    request,
+                    400,
+                    Some(json!({ "error": format!("Parse error: {error}") })),
+                );
             }
         }
     };
     match route {
         Route::Call(tool) => match run(app, &tool, &parsed) {
-            Ok(output) => reply(request, 200, Some(json!({ "ok": true, "result": output.value }))),
+            Ok(output) => reply(
+                request,
+                200,
+                Some(json!({ "ok": true, "result": output.value })),
+            ),
             Err(error) => reply(request, 400, Some(json!({ "ok": false, "error": error }))),
         },
         _ => match parsed {
@@ -206,7 +222,10 @@ fn dispatch(app: &AppHandle, message: &Value) -> Option<Value> {
         "tools/list" => rpc_result(id, json!({ "tools": tool_list() })),
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-            let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let args = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             let result = match run(app, name, &args) {
                 Ok(output) => json!({ "content": output.content(), "isError": false }),
                 Err(error) => {
@@ -227,13 +246,30 @@ fn schema(properties: Value, required: &[&str]) -> Value {
 
 fn tool_list() -> Vec<Value> {
     let label = json!({ "type": "string", "description": "Webview label, such as ui, tab-3 or popup-main-0. Defaults to ui." });
-    let selector = json!({ "type": "string", "description": "CSS selector. The first match is used." });
+    let selector =
+        json!({ "type": "string", "description": "CSS selector. The first match is used." });
     let timeout = json!({ "type": "number", "description": "Seconds to wait. Defaults to 10." });
     let tools = [
-        ("status", "Process id, start time, version, profile, data folders and browser windows.", schema(json!({}), &[])),
-        ("webviews", "Every native webview with its kind, address, bounds and whether it is parked off screen.", schema(json!({}), &[])),
-        ("tabs", "The full tab snapshot: tabs, groups, windows and workspaces.", schema(json!({}), &[])),
-        ("settings", "The active profile's settings.", schema(json!({}), &[])),
+        (
+            "status",
+            "Process id, start time, version, profile, data folders and browser windows.",
+            schema(json!({}), &[]),
+        ),
+        (
+            "webviews",
+            "Every native webview with its kind, address, bounds and whether it is parked off screen.",
+            schema(json!({}), &[]),
+        ),
+        (
+            "tabs",
+            "The full tab snapshot: tabs, groups, windows and workspaces.",
+            schema(json!({}), &[]),
+        ),
+        (
+            "settings",
+            "The active profile's settings.",
+            schema(json!({}), &[]),
+        ),
         (
             "logs",
             "Backend stdout and stderr and frontend console errors and warnings, oldest first. Returns nextId; pass it as sinceId to read only newer lines.",
@@ -265,7 +301,10 @@ fn tool_list() -> Vec<Value> {
         (
             "eval",
             "Run a JavaScript expression in a webview and return its JSON value. Promises are awaited.",
-            schema(json!({ "label": label, "expression": { "type": "string" }, "timeoutSeconds": timeout }), &["expression"]),
+            schema(
+                json!({ "label": label, "expression": { "type": "string" }, "timeoutSeconds": timeout }),
+                &["expression"],
+            ),
         ),
         (
             "query",
@@ -313,7 +352,10 @@ fn tool_list() -> Vec<Value> {
         (
             "press",
             "Press a key or chord, such as Enter, Escape, Control+L or Shift+Tab.",
-            schema(json!({ "label": label, "keys": { "type": "string" } }), &["keys"]),
+            schema(
+                json!({ "label": label, "keys": { "type": "string" } }),
+                &["keys"],
+            ),
         ),
         (
             "invoke",
@@ -340,8 +382,16 @@ fn tool_list() -> Vec<Value> {
                 &[],
             ),
         ),
-        ("reload", "Reload a webview.", schema(json!({ "label": label }), &[])),
-        ("devtools", "Open DevTools for a webview.", schema(json!({ "label": label }), &[])),
+        (
+            "reload",
+            "Reload a webview.",
+            schema(json!({ "label": label }), &[]),
+        ),
+        (
+            "devtools",
+            "Open DevTools for a webview.",
+            schema(json!({ "label": label }), &[]),
+        ),
         (
             "wait",
             "Wait until a selector appears (or is gone) in a webview, or until a log line contains text.",
@@ -360,7 +410,10 @@ fn tool_list() -> Vec<Value> {
         (
             "clear",
             "Clear the logs or ipc feed.",
-            schema(json!({ "target": { "type": "string", "enum": ["logs", "ipc"] } }), &["target"]),
+            schema(
+                json!({ "target": { "type": "string", "enum": ["logs", "ipc"] } }),
+                &["target"],
+            ),
         ),
     ];
     tools
@@ -400,7 +453,10 @@ impl Output {
 }
 
 fn arg_str(args: &Value, key: &str) -> String {
-    args.get(key).and_then(Value::as_str).unwrap_or("").to_string()
+    args.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
 }
 
 fn arg_bool(args: &Value, key: &str, fallback: bool) -> bool {
@@ -408,17 +464,26 @@ fn arg_bool(args: &Value, key: &str, fallback: bool) -> bool {
 }
 
 fn arg_f64(args: &Value, key: &str) -> Option<f64> {
-    args.get(key)
-        .and_then(|value| value.as_f64().or_else(|| value.as_str().and_then(|s| s.parse().ok())))
+    args.get(key).and_then(|value| {
+        value
+            .as_f64()
+            .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
+    })
 }
 
 fn arg_u64(args: &Value, key: &str) -> Option<u64> {
-    arg_f64(args, key).filter(|value| *value >= 0.0).map(|value| value as u64)
+    arg_f64(args, key)
+        .filter(|value| *value >= 0.0)
+        .map(|value| value as u64)
 }
 
 fn arg_label(args: &Value) -> String {
     let label = arg_str(args, "label");
-    if label.trim().is_empty() { "ui".into() } else { label.trim().to_string() }
+    if label.trim().is_empty() {
+        "ui".into()
+    } else {
+        label.trim().to_string()
+    }
 }
 
 fn arg_timeout(args: &Value) -> Duration {
@@ -445,7 +510,11 @@ fn run(app: &AppHandle, name: &str, args: &Value) -> Result<Output, String> {
                 return Err("Give an expression.".into());
             }
             let webview = webview_of(app, &arg_label(args))?;
-            Ok(Output::json(evaluate(&webview, &expression, arg_timeout(args))?))
+            Ok(Output::json(evaluate(
+                &webview,
+                &expression,
+                arg_timeout(args),
+            )?))
         }
         "query" => query(app, args).map(Output::json),
         "click" => click(app, args).map(Output::json),
@@ -489,9 +558,8 @@ fn webview_of(app: &AppHandle, label: &str) -> Result<Webview, String> {
     if let Some(id) = webviews::tab_id(label) {
         return driver::view(app, id);
     }
-    app.get_webview(label).ok_or_else(|| {
-        format!("No webview is labelled \"{label}\". Call webviews to list them.")
-    })
+    app.get_webview(label)
+        .ok_or_else(|| format!("No webview is labelled \"{label}\". Call webviews to list them."))
 }
 
 fn evaluate(webview: &Webview, expression: &str, timeout: Duration) -> Result<Value, String> {
@@ -499,7 +567,13 @@ fn evaluate(webview: &Webview, expression: &str, timeout: Duration) -> Result<Va
 }
 
 fn cdp(webview: &Webview, method: &str, params: Value) -> Result<Value, String> {
-    webview2::call_cdp_json(webview, method, &params.to_string(), DEFAULT_TIMEOUT, FAILURE)
+    webview2::call_cdp_json(
+        webview,
+        method,
+        &params.to_string(),
+        DEFAULT_TIMEOUT,
+        FAILURE,
+    )
 }
 
 // Feed
@@ -633,18 +707,31 @@ fn center_of(webview: &Webview, selector: &str) -> Result<(f64, f64), String> {
         json!(selector)
     );
     let value = evaluate(webview, &expression, DEFAULT_TIMEOUT)?;
-    match (value.get(0).and_then(Value::as_f64), value.get(1).and_then(Value::as_f64)) {
+    match (
+        value.get(0).and_then(Value::as_f64),
+        value.get(1).and_then(Value::as_f64),
+    ) {
         (Some(x), Some(y)) => Ok((x, y)),
         _ => Err(format!("Nothing matches \"{selector}\".")),
     }
 }
 
-fn mouse_click(webview: &Webview, x: f64, y: f64, button: &str, double: bool) -> Result<(), String> {
+fn mouse_click(
+    webview: &Webview,
+    x: f64,
+    y: f64,
+    button: &str,
+    double: bool,
+) -> Result<(), String> {
     let button = match button {
         "right" | "middle" => button,
         _ => "left",
     };
-    cdp(webview, "Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": x, "y": y }))?;
+    cdp(
+        webview,
+        "Input.dispatchMouseEvent",
+        json!({ "type": "mouseMoved", "x": x, "y": y }),
+    )?;
     let clicks = if double { 2 } else { 1 };
     for count in 1..=clicks {
         for kind in ["mousePressed", "mouseReleased"] {
@@ -669,7 +756,13 @@ fn click(app: &AppHandle, args: &Value) -> Result<Value, String> {
             _ => return Err("Give a selector, or x and y.".into()),
         }
     };
-    mouse_click(&webview, x, y, &arg_str(args, "button"), arg_bool(args, "double", false))?;
+    mouse_click(
+        &webview,
+        x,
+        y,
+        &arg_str(args, "button"),
+        arg_bool(args, "double", false),
+    )?;
     Ok(json!({ "clicked": [x.round(), y.round()] }))
 }
 
@@ -751,12 +844,24 @@ fn invoke(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let label = arg_label(args);
     let webview = webview_of(app, &label)?;
     let started_at = super::now_ms();
-    let answer = evaluate(&webview, &invoke_script(&command, &call_args), arg_timeout(args))?;
+    let answer = evaluate(
+        &webview,
+        &invoke_script(&command, &call_args),
+        arg_timeout(args),
+    )?;
     let ok = answer.get("ok").and_then(Value::as_bool).unwrap_or(false);
     let value = answer.get("value").cloned().unwrap_or(Value::Null);
-    let error = answer.get("error").and_then(Value::as_str).unwrap_or("").to_string();
+    let error = answer
+        .get("error")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     let (args_preview, _) = preview(&call_args);
-    let (result_preview, bytes) = if ok { preview(&value) } else { (String::new(), 0) };
+    let (result_preview, bytes) = if ok {
+        preview(&value)
+    } else {
+        (String::new(), 0)
+    };
     super::push_ipc(vec![DebugIpcRecord {
         webview: format!("passage via {label}"),
         kind: "invoke".into(),
@@ -784,7 +889,13 @@ fn shots_dir() -> PathBuf {
 fn shot_name(at_ms: u64, target: &str) -> String {
     let target: String = target
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' { ch } else { '-' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' {
+                ch
+            } else {
+                '-'
+            }
+        })
         .collect();
     format!("{at_ms}-{target}.png")
 }
@@ -841,7 +952,11 @@ fn screenshot(app: &AppHandle, args: &Value) -> Result<Output, String> {
         } else {
             capture::window_image(hwnd)?
         };
-        let target = if mode == "screen" { format!("{window}-screen") } else { window };
+        let target = if mode == "screen" {
+            format!("{window}-screen")
+        } else {
+            window
+        };
         (target, capture::encode_png(&image)?)
     };
     let dir = shots_dir();
@@ -949,8 +1064,23 @@ mod tests {
             .map(|tool| tool["name"].as_str().unwrap().to_string())
             .collect();
         for name in [
-            "status", "webviews", "tabs", "settings", "logs", "ipc", "eval", "query", "click",
-            "type", "press", "invoke", "screenshot", "reload", "devtools", "wait", "clear",
+            "status",
+            "webviews",
+            "tabs",
+            "settings",
+            "logs",
+            "ipc",
+            "eval",
+            "query",
+            "click",
+            "type",
+            "press",
+            "invoke",
+            "screenshot",
+            "reload",
+            "devtools",
+            "wait",
+            "clear",
         ] {
             assert!(names.contains(&name.to_string()), "{name} is missing");
         }
@@ -974,14 +1104,36 @@ mod tests {
         };
         assert_eq!(filter_logs(lines.clone(), &all).len(), 4);
         let since = LogFilter { since_id: 3, ..all };
-        assert_eq!(filter_logs(lines.clone(), &since).iter().map(|l| l.id).collect::<Vec<_>>(), [3, 4]);
-        let stream = LogFilter { since_id: 0, stream: "console".into(), ..since };
+        assert_eq!(
+            filter_logs(lines.clone(), &since)
+                .iter()
+                .map(|l| l.id)
+                .collect::<Vec<_>>(),
+            [3, 4]
+        );
+        let stream = LogFilter {
+            since_id: 0,
+            stream: "console".into(),
+            ..since
+        };
         assert_eq!(filter_logs(lines.clone(), &stream)[0].id, 3);
-        let area = LogFilter { stream: String::new(), area: "TABS".into(), ..stream };
+        let area = LogFilter {
+            stream: String::new(),
+            area: "TABS".into(),
+            ..stream
+        };
         assert_eq!(filter_logs(lines.clone(), &area).len(), 2);
-        let text = LogFilter { area: String::new(), contains: "boom".into(), ..area };
+        let text = LogFilter {
+            area: String::new(),
+            contains: "boom".into(),
+            ..area
+        };
         assert_eq!(filter_logs(lines.clone(), &text)[0].id, 3);
-        let newest = LogFilter { contains: String::new(), limit: 1, ..text };
+        let newest = LogFilter {
+            contains: String::new(),
+            limit: 1,
+            ..text
+        };
         assert_eq!(filter_logs(lines, &newest)[0].id, 4);
     }
 
@@ -995,7 +1147,11 @@ mod tests {
             ok,
             ..DebugIpcRecord::default()
         };
-        let records = vec![record(1, "list_tabs", true), record(2, "navigate", false), record(3, "list_tabs", false)];
+        let records = vec![
+            record(1, "list_tabs", true),
+            record(2, "navigate", false),
+            record(3, "list_tabs", false),
+        ];
         let filter = IpcFilter {
             since_id: 0,
             name: String::new(),
@@ -1003,10 +1159,24 @@ mod tests {
             failed_only: true,
             limit: 100,
         };
-        assert_eq!(filter_ipc(records.clone(), &filter).iter().map(|r| r.id).collect::<Vec<_>>(), [2, 3]);
-        let named = IpcFilter { name: "LIST".into(), ..filter };
+        assert_eq!(
+            filter_ipc(records.clone(), &filter)
+                .iter()
+                .map(|r| r.id)
+                .collect::<Vec<_>>(),
+            [2, 3]
+        );
+        let named = IpcFilter {
+            name: "LIST".into(),
+            ..filter
+        };
         assert_eq!(filter_ipc(records.clone(), &named)[0].id, 3);
-        let other = IpcFilter { webview: "popup-main-0".into(), failed_only: false, name: String::new(), ..named };
+        let other = IpcFilter {
+            webview: "popup-main-0".into(),
+            failed_only: false,
+            name: String::new(),
+            ..named
+        };
         assert!(filter_ipc(records, &other).is_empty());
     }
 

@@ -46,7 +46,15 @@ impl FlowTarget {
             return self.description.trim().to_string();
         }
         if !self.name.trim().is_empty() {
-            return format!("the \"{}\" {}", clip(self.name.trim(), 60), if self.role.is_empty() { &self.tag } else { &self.role });
+            return format!(
+                "the \"{}\" {}",
+                clip(self.name.trim(), 60),
+                if self.role.is_empty() {
+                    &self.tag
+                } else {
+                    &self.role
+                }
+            );
         }
         if !self.text.trim().is_empty() {
             return format!("the element with text \"{}\"", clip(self.text.trim(), 60));
@@ -224,10 +232,21 @@ pub fn persist(app: &AppHandle) {
 }
 
 pub fn snapshot(app: &AppHandle) -> AutomationsSnapshot {
-    let (flows, mut runs, mut datasets) = with_store(app, |store| (store.flows.clone(), store.runs.clone(), store.datasets.clone()));
+    let (flows, mut runs, mut datasets) = with_store(app, |store| {
+        (
+            store.flows.clone(),
+            store.runs.clone(),
+            store.datasets.clone(),
+        )
+    });
     runs.reverse();
     datasets.sort_by(|a, b| b.updated.cmp(&a.updated));
-    AutomationsSnapshot { flows, runs, recording: recorder::current(), datasets }
+    AutomationsSnapshot {
+        flows,
+        runs,
+        recording: recorder::current(),
+        datasets,
+    }
 }
 
 pub fn emit(app: &AppHandle) {
@@ -239,7 +258,10 @@ pub fn new_id() -> String {
 }
 
 pub fn new_step() -> FlowStep {
-    FlowStep { id: new_id(), ..FlowStep::default() }
+    FlowStep {
+        id: new_id(),
+        ..FlowStep::default()
+    }
 }
 
 pub fn flows(app: &AppHandle) -> Vec<Flow> {
@@ -247,13 +269,20 @@ pub fn flows(app: &AppHandle) -> Vec<Flow> {
 }
 
 pub fn flow(app: &AppHandle, id: &str) -> Option<Flow> {
-    with_store(app, |store| store.flows.iter().find(|flow| flow.id == id).cloned())
+    with_store(app, |store| {
+        store.flows.iter().find(|flow| flow.id == id).cloned()
+    })
 }
 
 fn clean_time(raw: &str) -> String {
     let mut parts = raw.trim().split(':');
-    let hour = parts.next().and_then(|part| part.trim().parse::<u32>().ok());
-    let minute = parts.next().and_then(|part| part.trim().parse::<u32>().ok()).unwrap_or(0);
+    let hour = parts
+        .next()
+        .and_then(|part| part.trim().parse::<u32>().ok());
+    let minute = parts
+        .next()
+        .and_then(|part| part.trim().parse::<u32>().ok())
+        .unwrap_or(0);
     match hour {
         Some(hour) if hour < 24 && minute < 60 => format!("{hour:02}:{minute:02}"),
         _ => "09:00".into(),
@@ -354,10 +383,12 @@ pub fn open_page(app: &AppHandle, window: &str, section: Option<&str>) -> Result
         Some(section) => format!("{}automations?{section}", paths::INTERNAL_SCHEME),
         None => format!("{}automations", paths::INTERNAL_SCHEME),
     };
-    let existing = tabs::snapshot(app)
-        .tabs
-        .into_iter()
-        .find(|tab| tab.window == window && tab.url.starts_with(&format!("{}automations", paths::INTERNAL_SCHEME)));
+    let existing = tabs::snapshot(app).tabs.into_iter().find(|tab| {
+        tab.window == window
+            && tab
+                .url
+                .starts_with(&format!("{}automations", paths::INTERNAL_SCHEME))
+    });
     match existing {
         Some(tab) => {
             if section.is_some() {
@@ -393,7 +424,12 @@ fn stopped(run: u32) -> bool {
 }
 
 pub fn running_flow(app: &AppHandle, flow_id: &str) -> bool {
-    with_store(app, |store| store.runs.iter().any(|run| run.flow_id == flow_id && run.status == "running"))
+    with_store(app, |store| {
+        store
+            .runs
+            .iter()
+            .any(|run| run.flow_id == flow_id && run.status == "running")
+    })
 }
 
 /// Starts a run of a saved flow. `tab` runs it in that tab instead of the flow's own.
@@ -402,16 +438,35 @@ pub fn run(app: &AppHandle, flow_id: &str, tab: Option<u32>, trigger: &str) -> R
 }
 
 /// Like `run`, with extra `{{name}}` values from the trigger, such as a downloaded file's path.
-pub fn run_with(app: &AppHandle, flow_id: &str, tab: Option<u32>, trigger: &str, vars: BTreeMap<String, String>) -> Result<u32, String> {
+pub fn run_with(
+    app: &AppHandle,
+    flow_id: &str,
+    tab: Option<u32>,
+    trigger: &str,
+    vars: BTreeMap<String, String>,
+) -> Result<u32, String> {
     launch(app, flow_id, tab, false, trigger, vars)
 }
 
 /// Runs a flow on the page already open in `tab`, without loading its start address.
-pub fn run_here(app: &AppHandle, flow_id: &str, tab: u32, trigger: &str, vars: BTreeMap<String, String>) -> Result<u32, String> {
+pub fn run_here(
+    app: &AppHandle,
+    flow_id: &str,
+    tab: u32,
+    trigger: &str,
+    vars: BTreeMap<String, String>,
+) -> Result<u32, String> {
     launch(app, flow_id, Some(tab), true, trigger, vars)
 }
 
-fn launch(app: &AppHandle, flow_id: &str, tab: Option<u32>, here: bool, trigger: &str, vars: BTreeMap<String, String>) -> Result<u32, String> {
+fn launch(
+    app: &AppHandle,
+    flow_id: &str,
+    tab: Option<u32>,
+    here: bool,
+    trigger: &str,
+    vars: BTreeMap<String, String>,
+) -> Result<u32, String> {
     if !settings::get(app).automation.enabled {
         return Err("Automation is turned off in Settings.".into());
     }
@@ -432,7 +487,9 @@ fn launch(app: &AppHandle, flow_id: &str, tab: Option<u32>, here: bool, trigger:
 fn next_run_id(app: &AppHandle) -> u32 {
     let mut runtime = runtime_lock();
     if runtime.next == 0 {
-        runtime.next = with_store(app, |store| store.runs.iter().map(|run| run.id).max().unwrap_or(0));
+        runtime.next = with_store(app, |store| {
+            store.runs.iter().map(|run| run.id).max().unwrap_or(0)
+        });
     }
     runtime.next += 1;
     runtime.next
@@ -495,14 +552,21 @@ pub fn stop_run(app: &AppHandle, run: u32) {
 }
 
 pub fn clear_runs(app: &AppHandle) {
-    with_store(app, |store| store.runs.retain(|run| run.status == "running"));
+    with_store(app, |store| {
+        store.runs.retain(|run| run.status == "running")
+    });
     persist(app);
     emit(app);
 }
 
 /// Stops runs whose tab closed.
 pub fn tab_closed(app: &AppHandle, tab: u32) {
-    let runs: Vec<u32> = runtime_lock().tabs.iter().filter(|(_, used)| **used == tab).map(|(run, _)| *run).collect();
+    let runs: Vec<u32> = runtime_lock()
+        .tabs
+        .iter()
+        .filter(|(_, used)| **used == tab)
+        .map(|(run, _)| *run)
+        .collect();
     for run in runs {
         stop_run(app, run);
     }
@@ -518,7 +582,14 @@ pub fn wait_run(run: u32, limit: Duration) -> Option<FlowRun> {
             .lock()
             .expect("flows lock")
             .as_ref()
-            .and_then(|loaded| loaded.store.runs.iter().find(|item| item.id == run).cloned())
+            .and_then(|loaded| {
+                loaded
+                    .store
+                    .runs
+                    .iter()
+                    .find(|item| item.id == run)
+                    .cloned()
+            })
             .filter(|item| item.status != "running");
         if finished.is_some() {
             return finished;
@@ -526,7 +597,10 @@ pub fn wait_run(run: u32, limit: Duration) -> Option<FlowRun> {
         if start.elapsed() >= limit {
             return None;
         }
-        runtime = condvar.wait_timeout(runtime, Duration::from_millis(500)).expect("runtime lock").0;
+        runtime = condvar
+            .wait_timeout(runtime, Duration::from_millis(500))
+            .expect("runtime lock")
+            .0;
     }
 }
 
@@ -587,23 +661,39 @@ fn sleep_checked(run: u32, duration: Duration) -> Result<(), String> {
 }
 
 /// Picks or opens the tab a run drives. The flag is true for a hidden tab the run should close.
-fn run_tab(app: &AppHandle, flow: &Flow, tab: Option<u32>, here: bool) -> Result<(u32, bool), String> {
+fn run_tab(
+    app: &AppHandle,
+    flow: &Flow,
+    tab: Option<u32>,
+    here: bool,
+) -> Result<(u32, bool), String> {
     if let Some(tab) = tab.filter(|tab| tabs::tab_info(app, *tab).is_some()) {
         if !here && !flow.start_url.is_empty() {
             let url = tabs::resolve(app, &flow.start_url);
-            let current = tabs::tab_info(app, tab).map(|info| info.url).unwrap_or_default();
+            let current = tabs::tab_info(app, tab)
+                .map(|info| info.url)
+                .unwrap_or_default();
             if current != url.as_str() {
                 driver::navigate(app, tab, url.as_str())?;
             }
         }
         return Ok((tab, false));
     }
-    let address = if flow.start_url.is_empty() { "about:blank".to_string() } else { flow.start_url.clone() };
+    let address = if flow.start_url.is_empty() {
+        "about:blank".to_string()
+    } else {
+        flow.start_url.clone()
+    };
     let url = tabs::resolve(app, &address);
     if flow.background {
         let opened = tabs::open(
             app,
-            tabs::OpenTab { shelf: true, background: true, window: tabs::focused_window(app), ..tabs::OpenTab::new(url) },
+            tabs::OpenTab {
+                shelf: true,
+                background: true,
+                window: tabs::focused_window(app),
+                ..tabs::OpenTab::new(url)
+            },
         )?;
         driver::view(app, opened)?;
         driver::wait_load(app, opened, Duration::from_secs(30));
@@ -614,12 +704,26 @@ fn run_tab(app: &AppHandle, flow: &Flow, tab: Option<u32>, here: bool) -> Result
     {
         return Ok((active, false));
     }
-    let opened = tabs::open(app, tabs::OpenTab { window: tabs::focused_window(app), ..tabs::OpenTab::new(url) })?;
+    let opened = tabs::open(
+        app,
+        tabs::OpenTab {
+            window: tabs::focused_window(app),
+            ..tabs::OpenTab::new(url)
+        },
+    )?;
     driver::wait_load(app, opened, Duration::from_secs(30));
     Ok((opened, false))
 }
 
-fn execute(app: &AppHandle, run: u32, flow: Flow, tab: Option<u32>, here: bool, trigger: &str, extra: BTreeMap<String, String>) {
+fn execute(
+    app: &AppHandle,
+    run: u32,
+    flow: Flow,
+    tab: Option<u32>,
+    here: bool,
+    trigger: &str,
+    extra: BTreeMap<String, String>,
+) {
     let (status, output, dataset) = match run_tab(app, &flow, tab, here) {
         Ok((tab, hidden)) => {
             runtime_lock().tabs.insert(run, tab);
@@ -641,11 +745,20 @@ fn execute(app: &AppHandle, run: u32, flow: Flow, tab: Option<u32>, here: bool, 
             let dataset = if context.rows.is_empty() {
                 String::new()
             } else {
-                let source = tabs::tab_info(app, tab).map(|info| info.url).unwrap_or_default();
-                match extract::save_rows(app, &format!("{} {}", flow.name, today()), &source, std::mem::take(&mut context.rows)) {
+                let source = tabs::tab_info(app, tab)
+                    .map(|info| info.url)
+                    .unwrap_or_default();
+                match extract::save_rows(
+                    app,
+                    &format!("{} {}", flow.name, today()),
+                    &source,
+                    std::mem::take(&mut context.rows),
+                ) {
                     Ok(info) => info.id,
                     Err(error) => {
-                        context.output.push(format!("Couldn't save the rows: {error}"));
+                        context
+                            .output
+                            .push(format!("Couldn't save the rows: {error}"));
                         String::new()
                     }
                 }
@@ -682,9 +795,18 @@ fn execute(app: &AppHandle, run: u32, flow: Flow, tab: Option<u32>, here: bool, 
     }
     runtime().1.notify_all();
     emit(app);
-    audit(app, "flow", 0, status, &format!("{} ({trigger})", flow.name));
+    audit(
+        app,
+        "flow",
+        0,
+        status,
+        &format!("{} ({trigger})", flow.name),
+    );
     if flow.notify && status != "stopped" {
-        let first = output.lines().find(|line| !line.trim().is_empty()).unwrap_or("");
+        let first = output
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("");
         let title = match status {
             "done" => format!("{} finished", flow.name),
             _ => format!("{} failed", flow.name),
@@ -721,20 +843,32 @@ fn drive(context: &mut Context) -> &'static str {
         }
         let result = run_step(context, step);
         let (status, label, detail) = match &result {
-            Ok(outcome) => (outcome.status, outcome.label.clone(), outcome.detail.clone()),
+            Ok(outcome) => (
+                outcome.status,
+                outcome.label.clone(),
+                outcome.detail.clone(),
+            ),
             Err(error) => ("failed", step_label(step, &context.vars), error.clone()),
         };
         record(
             context.app,
             context.run,
-            FlowRunStep { index, kind: step.kind.clone(), label: clip(&label, 200), status: status.into(), detail: clip(&detail, 600) },
+            FlowRunStep {
+                index,
+                kind: step.kind.clone(),
+                label: clip(&label, 200),
+                status: status.into(),
+                detail: clip(&detail, 600),
+            },
         );
         if let Err(error) = result {
             if stopped(context.run) || error == "Stopped." {
                 return "stopped";
             }
             if !step.optional {
-                context.output.push(format!("Step {} failed: {error}", index + 1));
+                context
+                    .output
+                    .push(format!("Step {} failed: {error}", index + 1));
                 return "failed";
             }
         }
@@ -753,19 +887,37 @@ struct StepOutcome {
 }
 
 fn ok(label: String, detail: impl Into<String>) -> Result<StepOutcome, String> {
-    Ok(StepOutcome { status: "ok", label, detail: detail.into() })
+    Ok(StepOutcome {
+        status: "ok",
+        label,
+        detail: detail.into(),
+    })
 }
 
 /// What a step does, in words, for the run history and the editor.
 pub fn step_label(step: &FlowStep, vars: &BTreeMap<String, String>) -> String {
-    let target = step.target.as_ref().map(FlowTarget::describe).unwrap_or_else(|| "the focused element".into());
+    let target = step
+        .target
+        .as_ref()
+        .map(FlowTarget::describe)
+        .unwrap_or_else(|| "the focused element".into());
     match step.kind.as_str() {
         "navigate" => format!("Go to {}", clip(&fill_vars(&step.url, vars), 100)),
         "click" => format!("Click {target}"),
-        "type" => format!("Type \"{}\" into {target}", clip(&mask_secrets(&fill_vars(&step.text, vars)), 60)),
+        "type" => format!(
+            "Type \"{}\" into {target}",
+            clip(&mask_secrets(&fill_vars(&step.text, vars)), 60)
+        ),
         "press" => format!("Press {}", step.keys),
         "select" => format!("Choose {} in {target}", step.values.join(", ")),
-        "scroll" => format!("Scroll {}", if step.text.is_empty() { "down" } else { &step.text }),
+        "scroll" => format!(
+            "Scroll {}",
+            if step.text.is_empty() {
+                "down"
+            } else {
+                &step.text
+            }
+        ),
         "hover" => format!("Hover over {target}"),
         "wait" => format!("Wait {}s", step.seconds.max(0.1)),
         "waitFor" => format!("Wait for \"{}\"", clip(&step.text, 60)),
@@ -785,7 +937,9 @@ fn run_step(context: &mut Context, step: &FlowStep) -> Result<StepOutcome, Strin
     let label = step_label(step, &context.vars);
     let page_free = matches!(step.kind.as_str(), "navigate" | "wait" | "notify" | "back");
     if !page_free {
-        let url = tabs::tab_info(app, tab).map(|info| info.url).unwrap_or_default();
+        let url = tabs::tab_info(app, tab)
+            .map(|info| info.url)
+            .unwrap_or_default();
         if let Verdict::Block(reason) = policy::page(&context.auto, &url) {
             return Err(reason);
         }
@@ -802,7 +956,11 @@ fn run_step(context: &mut Context, step: &FlowStep) -> Result<StepOutcome, Strin
         }
         "click" => {
             let (element, healed) = find(context, step)?;
-            let button = if step.keys.is_empty() { "left" } else { step.keys.as_str() };
+            let button = if step.keys.is_empty() {
+                "left"
+            } else {
+                step.keys.as_str()
+            };
             driver::click(app, tab, element, button, false)?;
             outcome(healed, label, "Clicked.")
         }
@@ -813,7 +971,14 @@ fn run_step(context: &mut Context, step: &FlowStep) -> Result<StepOutcome, Strin
                 Some(_) => Some(find(context, step)?),
                 None => None,
             };
-            driver::type_text(app, tab, element.map(|(element, _)| element), &text, true, false)?;
+            driver::type_text(
+                app,
+                tab,
+                element.map(|(element, _)| element),
+                &text,
+                true,
+                false,
+            )?;
             outcome(element.is_some_and(|(_, healed)| healed), label, "Typed.")
         }
         "press" => {
@@ -825,12 +990,20 @@ fn run_step(context: &mut Context, step: &FlowStep) -> Result<StepOutcome, Strin
         }
         "select" => {
             let (element, healed) = find(context, step)?;
-            let values: Vec<String> = step.values.iter().map(|value| fill_vars(value, &context.vars)).collect();
+            let values: Vec<String> = step
+                .values
+                .iter()
+                .map(|value| fill_vars(value, &context.vars))
+                .collect();
             let picked = driver::select(app, tab, element, &values)?;
             outcome(healed, label, format!("Selected {}.", picked.join(", ")))
         }
         "scroll" => {
-            let screens = if step.seconds > 0.0 { step.seconds.min(50.0) } else { 1.0 };
+            let screens = if step.seconds > 0.0 {
+                step.seconds.min(50.0)
+            } else {
+                1.0
+            };
             let (amount, horizontal) = match step.text.trim() {
                 "up" => (-screens, false),
                 "left" => (-screens, true),
@@ -850,19 +1023,39 @@ fn run_step(context: &mut Context, step: &FlowStep) -> Result<StepOutcome, Strin
             outcome(healed, label, "Done.")
         }
         "wait" => {
-            let seconds = if step.seconds > 0.0 { step.seconds.min(3600.0) } else { 1.0 };
+            let seconds = if step.seconds > 0.0 {
+                step.seconds.min(3600.0)
+            } else {
+                1.0
+            };
             sleep_checked(context.run, Duration::from_secs_f64(seconds))?;
             ok(label, "Waited.")
         }
         "waitFor" => {
             let text = fill_vars(&step.text, &context.vars);
-            let selector = step.target.as_ref().map(|target| target.css.clone()).filter(|_| step.text.is_empty()).unwrap_or_default();
+            let selector = step
+                .target
+                .as_ref()
+                .map(|target| target.css.clone())
+                .filter(|_| step.text.is_empty())
+                .unwrap_or_default();
             let query = if step.keys == "gone" {
-                WaitQuery { gone: text, ..WaitQuery::default() }
+                WaitQuery {
+                    gone: text,
+                    ..WaitQuery::default()
+                }
             } else {
-                WaitQuery { text, selector, ..WaitQuery::default() }
+                WaitQuery {
+                    text,
+                    selector,
+                    ..WaitQuery::default()
+                }
             };
-            let limit = if step.seconds > 0.0 { step.seconds.min(600.0) } else { 15.0 };
+            let limit = if step.seconds > 0.0 {
+                step.seconds.min(600.0)
+            } else {
+                15.0
+            };
             if driver::wait_for(app, tab, &query, Duration::from_secs_f64(limit))? {
                 ok(label, "Done.")
             } else {
@@ -875,13 +1068,19 @@ fn run_step(context: &mut Context, step: &FlowStep) -> Result<StepOutcome, Strin
         }
         "extract" => {
             let rows = match &step.spec {
-                Some(spec) if !spec.item.trim().is_empty() => extract::collect(app, tab, spec, step.pages.max(1), &step.text)?,
-                _ if !step.prompt.trim().is_empty() => extract::ai_rows(app, tab, &fill_vars(&step.prompt, &context.vars))?,
+                Some(spec) if !spec.item.trim().is_empty() => {
+                    extract::collect(app, tab, spec, step.pages.max(1), &step.text)?
+                }
+                _ if !step.prompt.trim().is_empty() => {
+                    extract::ai_rows(app, tab, &fill_vars(&step.prompt, &context.vars))?
+                }
                 _ => return Err("Pick what to extract first.".into()),
             };
             let count = rows.len();
             context.rows.extend(rows);
-            context.vars.insert("rows".into(), context.rows.len().to_string());
+            context
+                .vars
+                .insert("rows".into(), context.rows.len().to_string());
             context.output.push(format!("Extracted {count} rows."));
             ok(format!("Extract {count} rows"), format!("{count} rows."))
         }
@@ -897,8 +1096,15 @@ fn run_step(context: &mut Context, step: &FlowStep) -> Result<StepOutcome, Strin
         }
         "assert" => {
             let text = fill_vars(&step.text, &context.vars);
-            let limit = if step.seconds > 0.0 { step.seconds.min(120.0) } else { 5.0 };
-            let query = WaitQuery { text: text.clone(), ..WaitQuery::default() };
+            let limit = if step.seconds > 0.0 {
+                step.seconds.min(120.0)
+            } else {
+                5.0
+            };
+            let query = WaitQuery {
+                text: text.clone(),
+                ..WaitQuery::default()
+            };
             if driver::wait_for(app, tab, &query, Duration::from_secs_f64(limit))? {
                 ok(label, "Found.")
             } else {
@@ -913,18 +1119,30 @@ fn run_step(context: &mut Context, step: &FlowStep) -> Result<StepOutcome, Strin
         }
         "upload" => {
             let (element, healed) = find(context, step)?;
-            let paths: Vec<String> = step.values.iter().map(|value| fill_vars(value, &context.vars)).collect();
+            let paths: Vec<String> = step
+                .values
+                .iter()
+                .map(|value| fill_vars(value, &context.vars))
+                .collect();
             driver::upload(app, tab, element, &paths)?;
             outcome(healed, label, "Files attached.")
         }
-        _ => Ok(StepOutcome { status: "skipped", label, detail: "This step needs a newer version of ce-browser.".into() }),
+        _ => Ok(StepOutcome {
+            status: "skipped",
+            label,
+            detail: "This step needs a newer version of ce-browser.".into(),
+        }),
     }
 }
 
 fn outcome(healed: bool, label: String, detail: impl Into<String>) -> Result<StepOutcome, String> {
     let detail = detail.into();
     if healed {
-        Ok(StepOutcome { status: "healed", label, detail: format!("{detail} Found the element another way and updated the step.") })
+        Ok(StepOutcome {
+            status: "healed",
+            label,
+            detail: format!("{detail} Found the element another way and updated the step."),
+        })
     } else {
         ok(label, detail)
     }
@@ -994,8 +1212,12 @@ fn heal_with_ai(context: &Context, target: &FlowTarget) -> Result<u32, String> {
         Duration::from_secs(60),
     )
     .map_err(|_| missing.clone())?;
-    let parsed: Value = serde_json::from_str(extract::json_block(&reply)).map_err(|_| missing.clone())?;
-    let element = parsed.get("ref").and_then(Value::as_u64).ok_or(missing.clone())? as u32;
+    let parsed: Value =
+        serde_json::from_str(extract::json_block(&reply)).map_err(|_| missing.clone())?;
+    let element = parsed
+        .get("ref")
+        .and_then(Value::as_u64)
+        .ok_or(missing.clone())? as u32;
     driver::element_info(context.app, context.tab, element).map_err(|_| missing)?;
     Ok(element)
 }
@@ -1009,10 +1231,19 @@ fn run_agent(context: &Context, prompt: &str) -> Result<String, String> {
             agent::stop(context.app, id);
             return Err("Stopped.".into());
         }
-        let run = agent::runs().into_iter().find(|run| run.id == id).ok_or("The agent run was removed.")?;
+        let run = agent::runs()
+            .into_iter()
+            .find(|run| run.id == id)
+            .ok_or("The agent run was removed.")?;
         match run.status.as_str() {
             "done" => return Ok(run.result),
-            "failed" | "stopped" => return Err(if run.result.is_empty() { "The agent stopped.".into() } else { run.result }),
+            "failed" | "stopped" => {
+                return Err(if run.result.is_empty() {
+                    "The agent stopped.".into()
+                } else {
+                    run.result
+                });
+            }
             _ => {}
         }
         if start.elapsed() > AI_STEP_TIMEOUT {
@@ -1026,8 +1257,26 @@ fn run_agent(context: &Context, prompt: &str) -> Result<String, String> {
 // Playwright export.
 
 const ARIA_ROLES: &[&str] = &[
-    "button", "link", "checkbox", "radio", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "switch",
-    "combobox", "textbox", "searchbox", "slider", "spinbutton", "treeitem", "gridcell", "listbox", "heading", "img",
+    "button",
+    "link",
+    "checkbox",
+    "radio",
+    "tab",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "option",
+    "switch",
+    "combobox",
+    "textbox",
+    "searchbox",
+    "slider",
+    "spinbutton",
+    "treeitem",
+    "gridcell",
+    "listbox",
+    "heading",
+    "img",
 ];
 
 fn js_string(text: &str) -> String {
@@ -1039,21 +1288,34 @@ fn playwright_locator(target: &FlowTarget) -> String {
         if attribute == "data-testid" {
             return format!("page.getByTestId({})", js_string(value));
         }
-        return format!("page.locator({})", js_string(&format!("[{attribute}={}]", js_string(value))));
+        return format!(
+            "page.locator({})",
+            js_string(&format!("[{attribute}={}]", js_string(value)))
+        );
     }
     if target.css.starts_with('#') {
         return format!("page.locator({})", js_string(&target.css));
     }
     if ARIA_ROLES.contains(&target.role.as_str()) && !target.name.trim().is_empty() {
-        return format!("page.getByRole({}, {{ name: {}, exact: true }})", js_string(&target.role), js_string(target.name.trim()));
+        return format!(
+            "page.getByRole({}, {{ name: {}, exact: true }})",
+            js_string(&target.role),
+            js_string(target.name.trim())
+        );
     }
     if !target.css.is_empty() {
         return format!("page.locator({})", js_string(&target.css));
     }
     if !target.text.trim().is_empty() {
-        return format!("page.getByText({}, {{ exact: true }})", js_string(target.text.trim()));
+        return format!(
+            "page.getByText({}, {{ exact: true }})",
+            js_string(target.text.trim())
+        );
     }
-    format!("page.locator({})", js_string(&format!("xpath={}", target.xpath)))
+    format!(
+        "page.locator({})",
+        js_string(&format!("xpath={}", target.xpath))
+    )
 }
 
 /// `{{secret:name}}` becomes `process.env.NAME` so the export holds no secrets.
@@ -1072,7 +1334,13 @@ fn playwright_text(text: &str, vars: &BTreeMap<String, String>) -> String {
         let env: String = after[..end]
             .trim()
             .chars()
-            .map(|character| if character.is_ascii_alphanumeric() { character.to_ascii_uppercase() } else { '_' })
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character.to_ascii_uppercase()
+                } else {
+                    '_'
+                }
+            })
             .collect();
         parts.push(format!("(process.env.{env} ?? \"\")"));
         rest = &after[end + 2..];
@@ -1096,38 +1364,89 @@ fn playwright_script(flow: &Flow) -> String {
         format!("test({}, async ({{ page }}) => {{", js_string(&flow.name)),
     ];
     if !flow.start_url.is_empty() {
-        lines.push(format!("  await page.goto({});", js_string(&fill_vars(&flow.start_url, vars))));
+        lines.push(format!(
+            "  await page.goto({});",
+            js_string(&fill_vars(&flow.start_url, vars))
+        ));
     }
     for step in &flow.steps {
-        let locator = step.target.as_ref().map(playwright_locator).unwrap_or_else(|| "page.locator(\":focus\")".into());
+        let locator = step
+            .target
+            .as_ref()
+            .map(playwright_locator)
+            .unwrap_or_else(|| "page.locator(\":focus\")".into());
         let line = match step.kind.as_str() {
-            "navigate" => format!("await page.goto({});", js_string(&fill_vars(&step.url, vars))),
+            "navigate" => format!(
+                "await page.goto({});",
+                js_string(&fill_vars(&step.url, vars))
+            ),
             "click" => format!("await {locator}.click();"),
-            "type" => format!("await {locator}.fill({});", playwright_text(&step.text, vars)),
+            "type" => format!(
+                "await {locator}.fill({});",
+                playwright_text(&step.text, vars)
+            ),
             "press" => format!("await page.keyboard.press({});", js_string(&step.keys)),
             "select" => format!(
                 "await {locator}.selectOption([{}]);",
-                step.values.iter().map(|value| format!("{{ label: {} }}", js_string(&fill_vars(value, vars)))).collect::<Vec<_>>().join(", ")
+                step.values
+                    .iter()
+                    .map(|value| format!("{{ label: {} }}", js_string(&fill_vars(value, vars))))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
             "scroll" => {
-                let screens = if step.seconds > 0.0 { step.seconds } else { 1.0 };
-                let sign = if matches!(step.text.as_str(), "up" | "left") { -1.0 } else { 1.0 };
-                if matches!(step.text.as_str(), "left" | "right") {
-                    format!("await page.mouse.wheel({}, 0);", (sign * screens * 800.0).round())
+                let screens = if step.seconds > 0.0 {
+                    step.seconds
                 } else {
-                    format!("await page.mouse.wheel(0, {});", (sign * screens * 800.0).round())
+                    1.0
+                };
+                let sign = if matches!(step.text.as_str(), "up" | "left") {
+                    -1.0
+                } else {
+                    1.0
+                };
+                if matches!(step.text.as_str(), "left" | "right") {
+                    format!(
+                        "await page.mouse.wheel({}, 0);",
+                        (sign * screens * 800.0).round()
+                    )
+                } else {
+                    format!(
+                        "await page.mouse.wheel(0, {});",
+                        (sign * screens * 800.0).round()
+                    )
                 }
             }
             "hover" => format!("await {locator}.hover();"),
-            "wait" => format!("await page.waitForTimeout({});", ((if step.seconds > 0.0 { step.seconds } else { 1.0 }) * 1000.0).round()),
-            "waitFor" => format!("await page.getByText({}).first().waitFor();", js_string(&step.text)),
+            "wait" => format!(
+                "await page.waitForTimeout({});",
+                ((if step.seconds > 0.0 {
+                    step.seconds
+                } else {
+                    1.0
+                }) * 1000.0)
+                    .round()
+            ),
+            "waitFor" => format!(
+                "await page.getByText({}).first().waitFor();",
+                js_string(&step.text)
+            ),
             "back" => "await page.goBack();".into(),
-            "assert" => format!("await expect(page.getByText({}).first()).toBeVisible();", js_string(&fill_vars(&step.text, vars))),
+            "assert" => format!(
+                "await expect(page.getByText({}).first()).toBeVisible();",
+                js_string(&fill_vars(&step.text, vars))
+            ),
             "upload" => format!(
                 "await {locator}.setInputFiles([{}]);",
-                step.values.iter().map(|value| js_string(value)).collect::<Vec<_>>().join(", ")
+                step.values
+                    .iter()
+                    .map(|value| js_string(value))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
-            "extract" | "ai" | "notify" => format!("// {} (runs only in ce-browser)", step_label(step, vars)),
+            "extract" | "ai" | "notify" => {
+                format!("// {} (runs only in ce-browser)", step_label(step, vars))
+            }
             other => format!("// Unknown step \"{other}\""),
         };
         lines.push(format!("  {line}"));
@@ -1159,7 +1478,10 @@ mod tests {
     fn variables_fill_but_secrets_wait() {
         let mut vars = BTreeMap::new();
         vars.insert("city".to_string(), "Oslo".to_string());
-        assert_eq!(fill_vars("Weather in {{city}} {{secret:pw}} {{missing}}", &vars), "Weather in Oslo {{secret:pw}} {{missing}}");
+        assert_eq!(
+            fill_vars("Weather in {{city}} {{secret:pw}} {{missing}}", &vars),
+            "Weather in Oslo {{secret:pw}} {{missing}}"
+        );
     }
 
     #[test]
@@ -1170,13 +1492,21 @@ mod tests {
             steps: vec![
                 FlowStep {
                     kind: "type".into(),
-                    target: Some(FlowTarget { css: "#q".into(), ..FlowTarget::default() }),
+                    target: Some(FlowTarget {
+                        css: "#q".into(),
+                        ..FlowTarget::default()
+                    }),
                     text: "hi {{secret:site-password}}".into(),
                     ..FlowStep::default()
                 },
                 FlowStep {
                     kind: "click".into(),
-                    target: Some(FlowTarget { role: "button".into(), name: "Go".into(), css: "form > button".into(), ..FlowTarget::default() }),
+                    target: Some(FlowTarget {
+                        role: "button".into(),
+                        name: "Go".into(),
+                        css: "form > button".into(),
+                        ..FlowTarget::default()
+                    }),
                     ..FlowStep::default()
                 },
             ],
@@ -1184,8 +1514,14 @@ mod tests {
         };
         let script = playwright_script(&flow);
         assert!(script.contains("await page.goto(\"https://example.com\");"));
-        assert!(script.contains("page.locator(\"#q\").fill(\"hi \" + (process.env.SITE_PASSWORD ?? \"\"))"));
-        assert!(script.contains("page.getByRole(\"button\", { name: \"Go\", exact: true }).click()"));
+        assert!(
+            script.contains(
+                "page.locator(\"#q\").fill(\"hi \" + (process.env.SITE_PASSWORD ?? \"\"))"
+            )
+        );
+        assert!(
+            script.contains("page.getByRole(\"button\", { name: \"Go\", exact: true }).click()")
+        );
     }
 
     #[test]

@@ -2063,12 +2063,27 @@ async fn toggle_agent_panel(
 }
 
 #[tauri::command]
+async fn resize_agent_panel(app: AppHandle, window: Window) -> Result<(), String> {
+    let window = browser_window(&window);
+    blocking(move || automation::panel::track_resize(&app, &window)).await
+}
+
+#[tauri::command]
+async fn set_agent_panel_width(app: AppHandle, window: Window, width: f64) -> Result<(), String> {
+    automation::panel::set_width(&app, &browser_window(&window), width)
+}
+
+#[tauri::command]
 fn automation_secret_names(app: AppHandle) -> Vec<String> {
     secrets::vault_names(&app)
 }
 
 #[tauri::command]
-fn set_automation_secret(app: AppHandle, name: String, value: String) -> Result<Vec<String>, String> {
+fn set_automation_secret(
+    app: AppHandle,
+    name: String,
+    value: String,
+) -> Result<Vec<String>, String> {
     secrets::vault_store(&app, &name, &value)?;
     Ok(secrets::vault_names(&app))
 }
@@ -2099,7 +2114,10 @@ fn automations_snapshot(app: AppHandle) -> automation::flows::AutomationsSnapsho
 }
 
 #[tauri::command]
-fn save_flow(app: AppHandle, flow: automation::flows::Flow) -> Result<automation::flows::Flow, String> {
+fn save_flow(
+    app: AppHandle,
+    flow: automation::flows::Flow,
+) -> Result<automation::flows::Flow, String> {
     automation::flows::save(&app, flow)
 }
 
@@ -2139,7 +2157,11 @@ fn flow_playwright(app: AppHandle, id: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-async fn open_automations(app: AppHandle, window: Window, section: Option<String>) -> Result<(), String> {
+async fn open_automations(
+    app: AppHandle,
+    window: Window,
+    section: Option<String>,
+) -> Result<(), String> {
     let label = browser_window(&window);
     automation::flows::open_page(&app, &label, section.as_deref())
 }
@@ -2147,7 +2169,10 @@ async fn open_automations(app: AppHandle, window: Window, section: Option<String
 // Extraction and datasets. Reading pages waits on the main thread, so these block off it.
 
 #[tauri::command]
-async fn extract_pick(app: AppHandle, tab_id: u32) -> Result<Option<automation::extract::ExtractPick>, String> {
+async fn extract_pick(
+    app: AppHandle,
+    tab_id: u32,
+) -> Result<Option<automation::extract::ExtractPick>, String> {
     blocking(move || automation::extract::pick(&app, tab_id)).await
 }
 
@@ -2188,11 +2213,15 @@ async fn extract_crawl(
     instruction: String,
     name: String,
 ) -> Result<automation::extract::DatasetInfo, String> {
-    blocking(move || automation::extract::crawl(&app, &urls, spec.as_ref(), &instruction, &name)).await
+    blocking(move || automation::extract::crawl(&app, &urls, spec.as_ref(), &instruction, &name))
+        .await
 }
 
 #[tauri::command]
-async fn extract_sniff(app: AppHandle, tab_id: u32) -> Result<Vec<automation::extract::SniffedEndpoint>, String> {
+async fn extract_sniff(
+    app: AppHandle,
+    tab_id: u32,
+) -> Result<Vec<automation::extract::SniffedEndpoint>, String> {
     blocking(move || automation::extract::sniff(&app, tab_id)).await
 }
 
@@ -2227,7 +2256,12 @@ fn copy_dataset(app: AppHandle, id: String, format: String) -> Result<(), String
 }
 
 #[tauri::command]
-async fn export_dataset(app: AppHandle, id: String, format: String, path: String) -> Result<(), String> {
+async fn export_dataset(
+    app: AppHandle,
+    id: String,
+    format: String,
+    path: String,
+) -> Result<(), String> {
     blocking(move || automation::extract::export(&app, &id, &format, &PathBuf::from(path))).await
 }
 
@@ -2671,6 +2705,8 @@ pub fn run() {
             agent_clear,
             agent_show_tab,
             toggle_agent_panel,
+            resize_agent_panel,
+            set_agent_panel_width,
             automation_secret_names,
             set_automation_secret,
             clear_automation_secret,

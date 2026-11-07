@@ -79,9 +79,11 @@ static CALLS: AtomicU64 = AtomicU64::new(0);
 pub fn init(app: &AppHandle) {
     sync(app);
     let handle = app.clone();
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_secs(15));
-        agent::end_idle_sessions(&handle, IDLE_MS);
+    thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::from_secs(15));
+            agent::end_idle_sessions(&handle, IDLE_MS);
+        }
     });
 }
 
@@ -90,7 +92,10 @@ pub fn sync(app: &AppHandle) {
     let auto = settings::get(app).automation;
     let want = auto.enabled && auto.mcp_enabled;
     let mut guard = state().lock().expect("mcp lock");
-    let same = guard.running.as_ref().is_some_and(|running| running.port == auto.mcp_port);
+    let same = guard
+        .running
+        .as_ref()
+        .is_some_and(|running| running.port == auto.mcp_port);
     if want && same {
         return;
     }
@@ -108,10 +113,17 @@ pub fn sync(app: &AppHandle) {
                 let listener = server.clone();
                 let handle = app.clone();
                 let thread = thread::spawn(move || serve(handle, listener));
-                guard.running = Some(Running { port: auto.mcp_port, server, thread: Some(thread) });
+                guard.running = Some(Running {
+                    port: auto.mcp_port,
+                    server,
+                    thread: Some(thread),
+                });
             }
             Err(error) => {
-                guard.error = Some(format!("Couldn't listen on port {}: {error}", auto.mcp_port));
+                guard.error = Some(format!(
+                    "Couldn't listen on port {}: {error}",
+                    auto.mcp_port
+                ));
             }
         }
     }
@@ -176,7 +188,9 @@ fn json_header() -> Header {
 
 pub(crate) fn reply(request: Request, status: u16, body: Option<Value>) {
     let response = match body {
-        Some(body) => Response::from_string(body.to_string()).with_status_code(status).with_header(json_header()),
+        Some(body) => Response::from_string(body.to_string())
+            .with_status_code(status)
+            .with_header(json_header()),
         None => Response::from_string(String::new()).with_status_code(status),
     };
     let _ = request.respond(response);
@@ -204,23 +218,45 @@ fn token_matches(given: &str, expected: &str) -> bool {
     if given.len() != expected.len() || expected.is_empty() {
         return false;
     }
-    given.iter().zip(expected).fold(0u8, |diff, (a, b)| diff | (a ^ b)) == 0
+    given
+        .iter()
+        .zip(expected)
+        .fold(0u8, |diff, (a, b)| diff | (a ^ b))
+        == 0
 }
 
 fn handle_request(app: &AppHandle, mut request: Request) {
     let path = request.url().split('?').next().unwrap_or("").to_string();
     if path != "/mcp" && path != "/" {
-        return reply(request, 404, Some(json!({ "error": "Not found. Use /mcp." })));
+        return reply(
+            request,
+            404,
+            Some(json!({ "error": "Not found. Use /mcp." })),
+        );
     }
     if !origin_allowed(header(&request, "Origin").as_deref()) {
-        return reply(request, 403, Some(json!({ "error": "Web pages can't use this server." })));
+        return reply(
+            request,
+            403,
+            Some(json!({ "error": "Web pages can't use this server." })),
+        );
     }
     let expected = secrets::mcp_token(app, false).unwrap_or_default();
     let given = header(&request, "Authorization")
-        .and_then(|value| value.strip_prefix("Bearer ").map(|token| token.trim().to_string()))
+        .and_then(|value| {
+            value
+                .strip_prefix("Bearer ")
+                .map(|token| token.trim().to_string())
+        })
         .unwrap_or_default();
     if !token_matches(&given, &expected) {
-        return reply(request, 401, Some(json!({ "error": "Send the token from ce-browser Settings as \"Authorization: Bearer <token>\"." })));
+        return reply(
+            request,
+            401,
+            Some(
+                json!({ "error": "Send the token from ce-browser Settings as \"Authorization: Bearer <token>\"." }),
+            ),
+        );
     }
     match request.method() {
         tiny_http::Method::Post => {}
@@ -228,17 +264,43 @@ fn handle_request(app: &AppHandle, mut request: Request) {
         _ => return reply(request, 405, None),
     }
     let mut body = String::new();
-    if request.as_reader().take(BODY_LIMIT).read_to_string(&mut body).is_err() {
-        return reply(request, 400, Some(rpc_error(Value::Null, -32700, "The body is not UTF-8 text.")));
+    if request
+        .as_reader()
+        .take(BODY_LIMIT)
+        .read_to_string(&mut body)
+        .is_err()
+    {
+        return reply(
+            request,
+            400,
+            Some(rpc_error(
+                Value::Null,
+                -32700,
+                "The body is not UTF-8 text.",
+            )),
+        );
     }
     let parsed: Value = match serde_json::from_str(&body) {
         Ok(value) => value,
-        Err(error) => return reply(request, 400, Some(rpc_error(Value::Null, -32700, &format!("Parse error: {error}")))),
+        Err(error) => {
+            return reply(
+                request,
+                400,
+                Some(rpc_error(
+                    Value::Null,
+                    -32700,
+                    &format!("Parse error: {error}"),
+                )),
+            );
+        }
     };
     let client = header(&request, "User-Agent").unwrap_or_default();
     match parsed {
         Value::Array(batch) => {
-            let answers: Vec<Value> = batch.iter().filter_map(|message| dispatch(app, message, &client)).collect();
+            let answers: Vec<Value> = batch
+                .iter()
+                .filter_map(|message| dispatch(app, message, &client))
+                .collect();
             if answers.is_empty() {
                 reply(request, 202, None)
             } else {
@@ -268,7 +330,10 @@ fn dispatch(app: &AppHandle, message: &Value, client: &str) -> Option<Value> {
     let id = id?;
     Some(match method {
         "initialize" => {
-            let requested = params.get("protocolVersion").and_then(Value::as_str).unwrap_or(PROTOCOL_VERSION);
+            let requested = params
+                .get("protocolVersion")
+                .and_then(Value::as_str)
+                .unwrap_or(PROTOCOL_VERSION);
             let name = params
                 .pointer("/clientInfo/name")
                 .and_then(Value::as_str)
@@ -288,18 +353,34 @@ fn dispatch(app: &AppHandle, message: &Value, client: &str) -> Option<Value> {
             )
         }
         "ping" => rpc_result(id, json!({})),
-        "tools/list" => rpc_result(id, json!({ "tools": tool_list(&settings::get(app).automation) })),
+        "tools/list" => rpc_result(
+            id,
+            json!({ "tools": tool_list(&settings::get(app).automation) }),
+        ),
         "tools/call" => {
-            let name = params.get("name").and_then(Value::as_str).unwrap_or("").to_string();
-            let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let name = params
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let args = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             CALLS.fetch_add(1, Ordering::Relaxed);
             let label = {
                 let stored = client_name().lock().expect("client lock").clone();
-                if stored.is_empty() { client.to_string() } else { stored }
+                if stored.is_empty() {
+                    client.to_string()
+                } else {
+                    stored
+                }
             };
             let content = match call_tool(app, &name, &args, &label) {
                 Ok(content) => json!({ "content": content, "isError": false }),
-                Err(error) => json!({ "content": [{ "type": "text", "text": error }], "isError": true }),
+                Err(error) => {
+                    json!({ "content": [{ "type": "text", "text": error }], "isError": true })
+                }
             };
             rpc_result(id, content)
         }
@@ -322,17 +403,40 @@ fn schema(properties: Value, required: &[&str]) -> Value {
 
 fn tool_list(auto: &AutomationSettings) -> Vec<Value> {
     let tab = json!({ "type": "integer", "description": "Tab id from list_tabs. Defaults to the tab this session last used, or the active tab." });
-    let reference = json!({ "type": "integer", "description": "Element ref from the newest snapshot." });
+    let reference =
+        json!({ "type": "integer", "description": "Element ref from the newest snapshot." });
     let mut tools = vec![
-        ("list_tabs", "List open tabs with their ids, titles and addresses.", schema(json!({}), &[])),
+        (
+            "list_tabs",
+            "List open tabs with their ids, titles and addresses.",
+            schema(json!({}), &[]),
+        ),
         (
             "open_tab",
             "Open an address in a new tab, in the MCP tab group. Returns the tab id.",
-            schema(json!({ "url": { "type": "string" }, "background": { "type": "boolean", "description": "Open without switching to it." } }), &["url"]),
+            schema(
+                json!({ "url": { "type": "string" }, "background": { "type": "boolean", "description": "Open without switching to it." } }),
+                &["url"],
+            ),
         ),
-        ("close_tab", "Close a tab this session opened.", schema(json!({ "tabId": tab }), &["tabId"])),
-        ("navigate", "Load an address or a search in a tab and wait for it.", schema(json!({ "tabId": tab, "url": { "type": "string" } }), &["url"])),
-        ("back", "Go back one page.", schema(json!({ "tabId": tab }), &[])),
+        (
+            "close_tab",
+            "Close a tab this session opened.",
+            schema(json!({ "tabId": tab }), &["tabId"]),
+        ),
+        (
+            "navigate",
+            "Load an address or a search in a tab and wait for it.",
+            schema(
+                json!({ "tabId": tab, "url": { "type": "string" } }),
+                &["url"],
+            ),
+        ),
+        (
+            "back",
+            "Go back one page.",
+            schema(json!({ "tabId": tab }), &[]),
+        ),
         (
             "snapshot",
             "The page's address, title, headings and interactive elements as `[ref] role \"name\"`.",
@@ -341,9 +445,16 @@ fn tool_list(auto: &AutomationSettings) -> Vec<Value> {
         (
             "screenshot",
             "A JPEG of the visible page. With marks, every element from the snapshot is outlined and labelled with its ref.",
-            schema(json!({ "tabId": tab, "marks": { "type": "boolean" }, "width": { "type": "integer", "description": "Largest width in pixels. Defaults to 1280." } }), &[]),
+            schema(
+                json!({ "tabId": tab, "marks": { "type": "boolean" }, "width": { "type": "integer", "description": "Largest width in pixels. Defaults to 1280." } }),
+                &[],
+            ),
         ),
-        ("read_markdown", "The page's main content as Markdown.", schema(json!({ "tabId": tab }), &[])),
+        (
+            "read_markdown",
+            "The page's main content as Markdown.",
+            schema(json!({ "tabId": tab }), &[]),
+        ),
         (
             "read_text",
             "All visible text on the page, optionally with link addresses.",
@@ -372,8 +483,19 @@ fn tool_list(auto: &AutomationSettings) -> Vec<Value> {
                 &["text"],
             ),
         ),
-        ("press", "Press a key or chord, such as Enter, Escape or Control+A.", schema(json!({ "tabId": tab, "keys": { "type": "string" } }), &["keys"])),
-        ("hover", "Move the mouse over an element.", schema(json!({ "tabId": tab, "ref": reference }), &["ref"])),
+        (
+            "press",
+            "Press a key or chord, such as Enter, Escape or Control+A.",
+            schema(
+                json!({ "tabId": tab, "keys": { "type": "string" } }),
+                &["keys"],
+            ),
+        ),
+        (
+            "hover",
+            "Move the mouse over an element.",
+            schema(json!({ "tabId": tab, "ref": reference }), &["ref"]),
+        ),
         (
             "scroll",
             "Scroll the page or a scrollable element.",
@@ -385,12 +507,18 @@ fn tool_list(auto: &AutomationSettings) -> Vec<Value> {
         (
             "select",
             "Choose options in a <select> by their text or value.",
-            schema(json!({ "tabId": tab, "ref": reference, "values": { "type": "array", "items": { "type": "string" } } }), &["ref", "values"]),
+            schema(
+                json!({ "tabId": tab, "ref": reference, "values": { "type": "array", "items": { "type": "string" } } }),
+                &["ref", "values"],
+            ),
         ),
         (
             "upload",
             "Put local files into a file input. The user approves every upload.",
-            schema(json!({ "tabId": tab, "ref": reference, "paths": { "type": "array", "items": { "type": "string" } } }), &["ref", "paths"]),
+            schema(
+                json!({ "tabId": tab, "ref": reference, "paths": { "type": "array", "items": { "type": "string" } } }),
+                &["ref", "paths"],
+            ),
         ),
         (
             "wait_for",
@@ -419,19 +547,33 @@ fn tool_list(auto: &AutomationSettings) -> Vec<Value> {
                 &[],
             ),
         ),
-        ("list_flows", "List the user's saved automation flows.", schema(json!({}), &[])),
+        (
+            "list_flows",
+            "List the user's saved automation flows.",
+            schema(json!({}), &[]),
+        ),
         (
             "run_flow",
             "Run a saved flow and wait for its result.",
-            schema(json!({ "flowId": { "type": "string" }, "tabId": tab, "timeoutSeconds": { "type": "number" } }), &["flowId"]),
+            schema(
+                json!({ "flowId": { "type": "string" }, "tabId": tab, "timeoutSeconds": { "type": "number" } }),
+                &["flowId"],
+            ),
         ),
-        ("downloads", "Recent downloads with their file paths and states.", schema(json!({ "limit": { "type": "integer" } }), &[])),
+        (
+            "downloads",
+            "Recent downloads with their file paths and states.",
+            schema(json!({ "limit": { "type": "integer" } }), &[]),
+        ),
     ];
     if auto.mcp_allow_evaluate {
         tools.push((
             "evaluate",
             "Run a JavaScript expression in the page and return its JSON value.",
-            schema(json!({ "tabId": tab, "expression": { "type": "string" } }), &["expression"]),
+            schema(
+                json!({ "tabId": tab, "expression": { "type": "string" } }),
+                &["expression"],
+            ),
         ));
     }
     tools
@@ -453,7 +595,10 @@ fn text(content: impl Into<String>) -> Vec<Value> {
 }
 
 fn arg_str(args: &Value, key: &str) -> String {
-    args.get(key).and_then(Value::as_str).unwrap_or("").to_string()
+    args.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
 }
 
 fn arg_bool(args: &Value, key: &str, fallback: bool) -> bool {
@@ -461,16 +606,25 @@ fn arg_bool(args: &Value, key: &str, fallback: bool) -> bool {
 }
 
 fn arg_f64(args: &Value, key: &str) -> Option<f64> {
-    args.get(key).and_then(|value| value.as_f64().or_else(|| value.as_str().and_then(|s| s.parse().ok())))
+    args.get(key).and_then(|value| {
+        value
+            .as_f64()
+            .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
+    })
 }
 
 fn arg_u32(args: &Value, key: &str) -> Option<u32> {
-    arg_f64(args, key).filter(|value| *value >= 0.0).map(|value| value as u32)
+    arg_f64(args, key)
+        .filter(|value| *value >= 0.0)
+        .map(|value| value as u32)
 }
 
 fn arg_list(args: &Value, key: &str) -> Vec<String> {
     match args.get(key) {
-        Some(Value::Array(items)) => items.iter().filter_map(|item| item.as_str().map(String::from)).collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(String::from))
+            .collect(),
         Some(Value::String(one)) => vec![one.clone()],
         _ => Vec::new(),
     }
@@ -479,7 +633,9 @@ fn arg_list(args: &Value, key: &str) -> Vec<String> {
 /// The tab a call acts on: `tabId`, the session's tab, then the active tab.
 fn target_tab(app: &AppHandle, args: &Value) -> Result<u32, String> {
     if let Some(tab) = arg_u32(args, "tabId") {
-        return tabs::tab_info(app, tab).map(|_| tab).ok_or_else(|| format!("There is no tab {tab}. Call list_tabs."));
+        return tabs::tab_info(app, tab)
+            .map(|_| tab)
+            .ok_or_else(|| format!("There is no tab {tab}. Call list_tabs."));
     }
     if let Some(tab) = session_tab()
         && tabs::tab_info(app, tab).is_some()
@@ -490,7 +646,9 @@ fn target_tab(app: &AppHandle, args: &Value) -> Result<u32, String> {
 }
 
 fn session_tab() -> Option<u32> {
-    let session = agent::runs().into_iter().find(|run| run.source == "mcp" && matches!(run.status.as_str(), "running" | "waiting" | "paused"))?;
+    let session = agent::runs().into_iter().find(|run| {
+        run.source == "mcp" && matches!(run.status.as_str(), "running" | "waiting" | "paused")
+    })?;
     (session.tab_id != 0).then_some(session.tab_id)
 }
 
@@ -504,46 +662,77 @@ fn place_in_group(app: &AppHandle, tab: u32, window: &str) {
     let existing = state().lock().expect("mcp lock").group;
     let groups = tabs::snapshot(app).groups;
     if let Some(group) = existing
-        && groups.iter().any(|item| item.id == group && item.window == window)
+        && groups
+            .iter()
+            .any(|item| item.id == group && item.window == window)
     {
         let _ = tabs::add_to_group(app, &[tab], group);
         return;
     }
     if let Ok(group) = tabs::create_group(app, &[tab]) {
-        let _ = tabs::update_group(app, group, Some(GROUP_NAME.into()), Some("cyan".into()), None);
+        let _ = tabs::update_group(
+            app,
+            group,
+            Some(GROUP_NAME.into()),
+            Some("cyan".into()),
+            None,
+        );
         state().lock().expect("mcp lock").group = Some(group);
     }
 }
 
 fn page_allowed(app: &AppHandle, auto: &AutomationSettings, tab: u32) -> Result<(), String> {
-    let url = tabs::tab_info(app, tab).map(|info| info.url).unwrap_or_default();
+    let url = tabs::tab_info(app, tab)
+        .map(|info| info.url)
+        .unwrap_or_default();
     match policy::page(auto, &url) {
         Verdict::Block(reason) => Err(reason),
         _ => Ok(()),
     }
 }
 
-fn call_tool(app: &AppHandle, name: &str, args: &Value, client: &str) -> Result<Vec<Value>, String> {
+fn call_tool(
+    app: &AppHandle,
+    name: &str,
+    args: &Value,
+    client: &str,
+) -> Result<Vec<Value>, String> {
     let auto = settings::get(app).automation;
     if !auto.enabled || !auto.mcp_enabled {
         return Err("Automation is turned off in ce-browser Settings.".into());
     }
     if auto.mcp_read_only && !READ_TOOLS.contains(&name) {
-        return Err(format!("The MCP server is read-only, so \"{name}\" is turned off. The user can change this in Settings, under MCP server."));
+        return Err(format!(
+            "The MCP server is read-only, so \"{name}\" is turned off. The user can change this in Settings, under MCP server."
+        ));
     }
     if name == "evaluate" && !auto.mcp_allow_evaluate {
-        return Err("Running scripts is turned off. The user can allow it in Settings, under MCP server.".into());
+        return Err(
+            "Running scripts is turned off. The user can allow it in Settings, under MCP server."
+                .into(),
+        );
     }
     match name {
         "list_tabs" => return list_tabs(app),
-        "list_flows" => return Ok(text(serde_json::to_string_pretty(&flows::summaries(app)).unwrap_or_default())),
+        "list_flows" => {
+            return Ok(text(
+                serde_json::to_string_pretty(&flows::summaries(app)).unwrap_or_default(),
+            ));
+        }
         "downloads" => return list_downloads(app, args),
         _ => {}
     }
-    let tab = if name == "open_tab" { tabs::active_id(app).unwrap_or(0) } else { target_tab(app, args)? };
+    let tab = if name == "open_tab" {
+        tabs::active_id(app).unwrap_or(0)
+    } else {
+        target_tab(app, args)?
+    };
     let session = agent::session(app, tab, client)?;
     agent::session_checkpoint(session)?;
-    let page_free = matches!(name, "open_tab" | "navigate" | "back" | "close_tab" | "run_flow");
+    let page_free = matches!(
+        name,
+        "open_tab" | "navigate" | "back" | "close_tab" | "run_flow"
+    );
     if !page_free {
         page_allowed(app, &auto, tab)?;
     }
@@ -559,7 +748,11 @@ fn call_tool(app: &AppHandle, name: &str, args: &Value, client: &str) -> Result<
 
 fn list_tabs(app: &AppHandle) -> Result<Vec<Value>, String> {
     let snapshot = tabs::snapshot(app);
-    let active: Vec<Option<u32>> = snapshot.windows.iter().map(|window| window.active_id).collect();
+    let active: Vec<Option<u32>> = snapshot
+        .windows
+        .iter()
+        .map(|window| window.active_id)
+        .collect();
     let list: Vec<Value> = snapshot
         .tabs
         .iter()
@@ -574,7 +767,9 @@ fn list_tabs(app: &AppHandle) -> Result<Vec<Value>, String> {
             })
         })
         .collect();
-    Ok(text(serde_json::to_string_pretty(&list).unwrap_or_default()))
+    Ok(text(
+        serde_json::to_string_pretty(&list).unwrap_or_default(),
+    ))
 }
 
 fn list_downloads(app: &AppHandle, args: &Value) -> Result<Vec<Value>, String> {
@@ -596,7 +791,9 @@ fn list_downloads(app: &AppHandle, args: &Value) -> Result<Vec<Value>, String> {
             })
         })
         .collect();
-    Ok(text(serde_json::to_string_pretty(&list).unwrap_or_default()))
+    Ok(text(
+        serde_json::to_string_pretty(&list).unwrap_or_default(),
+    ))
 }
 
 fn element_label(info: &driver::ElementInfo, element: u32) -> String {
@@ -607,21 +804,37 @@ fn element_label(info: &driver::ElementInfo, element: u32) -> String {
     }
 }
 
-fn run_tool(app: &AppHandle, auto: &AutomationSettings, session: u32, tab: u32, name: &str, args: &Value) -> Result<(String, Vec<Value>), String> {
+fn run_tool(
+    app: &AppHandle,
+    auto: &AutomationSettings,
+    session: u32,
+    tab: u32,
+    name: &str,
+    args: &Value,
+) -> Result<(String, Vec<Value>), String> {
     match name {
         "open_tab" => {
             let url = tabs::resolve(app, &arg_str(args, "url"));
             agent::session_gate(app, session, policy::open(auto, url.as_str()))?;
-            let window = tabs::tab_info(app, tab).map(|info| info.window).unwrap_or_else(|| tabs::focused_window(app));
+            let window = tabs::tab_info(app, tab)
+                .map(|info| info.window)
+                .unwrap_or_else(|| tabs::focused_window(app));
             let opened = tabs::open(
                 app,
-                tabs::OpenTab { window: window.clone(), background: arg_bool(args, "background", false), ..tabs::OpenTab::new(url.clone()) },
+                tabs::OpenTab {
+                    window: window.clone(),
+                    background: arg_bool(args, "background", false),
+                    ..tabs::OpenTab::new(url.clone())
+                },
             )?;
             opened_tabs().lock().expect("opened lock").push(opened);
             place_in_group(app, opened, &window);
             agent::session(app, opened, "")?;
             driver::wait_load(app, opened, Duration::from_secs(20));
-            Ok((format!("Open {}", clip(url.as_str(), 100)), text(format!("Opened tab {opened}."))))
+            Ok((
+                format!("Open {}", clip(url.as_str(), 100)),
+                text(format!("Opened tab {opened}.")),
+            ))
         }
         "close_tab" => {
             let owned = opened_tabs().lock().expect("opened lock").contains(&tab);
@@ -629,7 +842,10 @@ fn run_tool(app: &AppHandle, auto: &AutomationSettings, session: u32, tab: u32, 
                 return Err("Only tabs this MCP server opened can be closed.".into());
             }
             tabs::close_tab(app, tab)?;
-            opened_tabs().lock().expect("opened lock").retain(|id| *id != tab);
+            opened_tabs()
+                .lock()
+                .expect("opened lock")
+                .retain(|id| *id != tab);
             Ok((format!("Close tab {tab}"), text("Closed.")))
         }
         "navigate" => {
@@ -638,7 +854,10 @@ fn run_tool(app: &AppHandle, auto: &AutomationSettings, session: u32, tab: u32, 
             driver::navigate(app, tab, url.as_str())?;
             let info = tabs::tab_info(app, tab);
             let title = info.map(|info| info.title).unwrap_or_default();
-            Ok((format!("Go to {}", clip(url.as_str(), 100)), text(format!("Loaded \"{title}\"."))))
+            Ok((
+                format!("Go to {}", clip(url.as_str(), 100)),
+                text(format!("Loaded \"{title}\".")),
+            ))
         }
         "back" => {
             driver::back(app, tab)?;
@@ -647,10 +866,15 @@ fn run_tool(app: &AppHandle, auto: &AutomationSettings, session: u32, tab: u32, 
         "snapshot" => {
             driver::wait_load(app, tab, Duration::from_secs(8));
             let snap = driver::snapshot(app, tab)?;
-            Ok(("Read the page".into(), text(format!("Tab {tab}\n{}", snap.render()))))
+            Ok((
+                "Read the page".into(),
+                text(format!("Tab {tab}\n{}", snap.render())),
+            ))
         }
         "screenshot" => {
-            let width = arg_u32(args, "width").unwrap_or(driver::SHOT_WIDTH).clamp(200, 2560);
+            let width = arg_u32(args, "width")
+                .unwrap_or(driver::SHOT_WIDTH)
+                .clamp(200, 2560);
             let shot = driver::screenshot(app, tab, arg_bool(args, "marks", false), width)?;
             let data = base64::engine::general_purpose::STANDARD.encode(&shot.bytes);
             Ok((
@@ -664,7 +888,10 @@ fn run_tool(app: &AppHandle, auto: &AutomationSettings, session: u32, tab: u32, 
         "read_markdown" => {
             let page = print::extract_page(app, tab)?;
             let markdown = media::html_to_markdown(&page.title, &page.html);
-            Ok(("Read the page as Markdown".into(), text(clip(&markdown, 200_000))))
+            Ok((
+                "Read the page as Markdown".into(),
+                text(clip(&markdown, 200_000)),
+            ))
         }
         "read_text" => {
             let body = driver::text(app, tab, 200_000, arg_bool(args, "links", false))?;
@@ -674,14 +901,33 @@ fn run_tool(app: &AppHandle, auto: &AutomationSettings, session: u32, tab: u32, 
             if let Some(element) = arg_u32(args, "ref") {
                 let info = driver::element_info(app, tab, element)?;
                 agent::session_gate(app, session, policy::click(auto, &info))?;
-                driver::click(app, tab, element, &arg_str(args, "button"), arg_bool(args, "double", false))?;
-                return Ok((format!("Click {}", element_label(&info, element)), text("Clicked.")));
+                driver::click(
+                    app,
+                    tab,
+                    element,
+                    &arg_str(args, "button"),
+                    arg_bool(args, "double", false),
+                )?;
+                return Ok((
+                    format!("Click {}", element_label(&info, element)),
+                    text("Clicked."),
+                ));
             }
             let (Some(x), Some(y)) = (arg_f64(args, "x"), arg_f64(args, "y")) else {
                 return Err("Give a ref, or x and y.".into());
             };
-            driver::click_at(app, tab, x, y, &arg_str(args, "button"), arg_bool(args, "double", false))?;
-            Ok((format!("Click at {}, {}", x.round(), y.round()), text("Clicked.")))
+            driver::click_at(
+                app,
+                tab,
+                x,
+                y,
+                &arg_str(args, "button"),
+                arg_bool(args, "double", false),
+            )?;
+            Ok((
+                format!("Click at {}, {}", x.round(), y.round()),
+                text("Clicked."),
+            ))
         }
         "type" => {
             let raw = arg_str(args, "text");
@@ -698,12 +944,26 @@ fn run_tool(app: &AppHandle, auto: &AutomationSettings, session: u32, tab: u32, 
                     agent::session_gate(app, session, policy::submit(auto, Some(info)))?;
                 }
             }
-            driver::type_text(app, tab, element, &value, arg_bool(args, "clear", true), submit)?;
+            driver::type_text(
+                app,
+                tab,
+                element,
+                &value,
+                arg_bool(args, "clear", true),
+                submit,
+            )?;
             let target = match (&info, element) {
                 (Some(info), Some(element)) => format!(" into {}", element_label(info, element)),
                 _ => String::new(),
             };
-            Ok((format!("Type \"{}\"{target}", clip(&mask_secrets(&raw), 80)), text(if submit { "Typed and pressed Enter." } else { "Typed." })))
+            Ok((
+                format!("Type \"{}\"{target}", clip(&mask_secrets(&raw), 80)),
+                text(if submit {
+                    "Typed and pressed Enter."
+                } else {
+                    "Typed."
+                }),
+            ))
         }
         "press" => {
             let keys = arg_str(args, "keys");
@@ -734,7 +994,10 @@ fn run_tool(app: &AppHandle, auto: &AutomationSettings, session: u32, tab: u32, 
         "select" => {
             let element = arg_u32(args, "ref").ok_or("Missing \"ref\".")?;
             let picked = driver::select(app, tab, element, &arg_list(args, "values"))?;
-            Ok((format!("Choose {}", picked.join(", ")), text(format!("Selected {}.", picked.join(", ")))))
+            Ok((
+                format!("Choose {}", picked.join(", ")),
+                text(format!("Selected {}.", picked.join(", "))),
+            ))
         }
         "upload" => {
             let element = arg_u32(args, "ref").ok_or("Missing \"ref\".")?;
@@ -742,24 +1005,57 @@ fn run_tool(app: &AppHandle, auto: &AutomationSettings, session: u32, tab: u32, 
             if paths.is_empty() {
                 return Err("Name the files to upload.".into());
             }
-            agent::session_gate(app, session, Verdict::Ask(format!("Let the MCP client upload {} to this page?", paths.join(", "))))?;
+            agent::session_gate(
+                app,
+                session,
+                Verdict::Ask(format!(
+                    "Let the MCP client upload {} to this page?",
+                    paths.join(", ")
+                )),
+            )?;
             driver::upload(app, tab, element, &paths)?;
-            Ok((format!("Upload {}", paths.join(", ")), text("Files attached.")))
+            Ok((
+                format!("Upload {}", paths.join(", ")),
+                text("Files attached."),
+            ))
         }
         "wait_for" => {
             let query = if arg_bool(args, "gone", false) {
-                WaitQuery { gone: arg_str(args, "text"), ..WaitQuery::default() }
+                WaitQuery {
+                    gone: arg_str(args, "text"),
+                    ..WaitQuery::default()
+                }
             } else {
-                WaitQuery { text: arg_str(args, "text"), selector: arg_str(args, "selector"), ..WaitQuery::default() }
+                WaitQuery {
+                    text: arg_str(args, "text"),
+                    selector: arg_str(args, "selector"),
+                    ..WaitQuery::default()
+                }
             };
             if query.text.is_empty() && query.selector.is_empty() && query.gone.is_empty() {
                 driver::wait_load(app, tab, Duration::from_secs(20));
-                return Ok(("Wait for the page".into(), text("The page finished loading.")));
+                return Ok((
+                    "Wait for the page".into(),
+                    text("The page finished loading."),
+                ));
             }
-            let limit = arg_f64(args, "timeoutSeconds").unwrap_or(15.0).clamp(0.5, 120.0);
+            let limit = arg_f64(args, "timeoutSeconds")
+                .unwrap_or(15.0)
+                .clamp(0.5, 120.0);
             let seen = driver::wait_for(app, tab, &query, Duration::from_secs_f64(limit))?;
-            let what = [&query.text, &query.selector, &query.gone].into_iter().find(|item| !item.is_empty()).cloned().unwrap_or_default();
-            Ok((format!("Wait for \"{}\"", clip(&what, 60)), text(if seen { "Done waiting: the condition is met." } else { "Timed out." })))
+            let what = [&query.text, &query.selector, &query.gone]
+                .into_iter()
+                .find(|item| !item.is_empty())
+                .cloned()
+                .unwrap_or_default();
+            Ok((
+                format!("Wait for \"{}\"", clip(&what, 60)),
+                text(if seen {
+                    "Done waiting: the condition is met."
+                } else {
+                    "Timed out."
+                }),
+            ))
         }
         "extract" => {
             let prompt = arg_str(args, "prompt");
@@ -771,26 +1067,40 @@ fn run_tool(app: &AppHandle, auto: &AutomationSettings, session: u32, tab: u32, 
             let save = arg_str(args, "save");
             let mut note = format!("{} rows.", rows.len());
             if !save.trim().is_empty() {
-                let url = tabs::tab_info(app, tab).map(|info| info.url).unwrap_or_default();
+                let url = tabs::tab_info(app, tab)
+                    .map(|info| info.url)
+                    .unwrap_or_default();
                 let saved = extract::save_rows(app, save.trim(), &url, rows.clone())?;
                 note.push_str(&format!(" Saved as dataset {}.", saved.id));
             }
             let body = serde_json::to_string_pretty(&rows).unwrap_or_default();
-            Ok((format!("Extract {} rows", rows.len()), text(format!("{note}\n{}", clip(&body, 200_000)))))
+            Ok((
+                format!("Extract {} rows", rows.len()),
+                text(format!("{note}\n{}", clip(&body, 200_000))),
+            ))
         }
         "run_flow" => {
             let flow = arg_str(args, "flowId");
             let target = arg_u32(args, "tabId");
-            let limit = arg_f64(args, "timeoutSeconds").unwrap_or(300.0).clamp(5.0, 3600.0);
+            let limit = arg_f64(args, "timeoutSeconds")
+                .unwrap_or(300.0)
+                .clamp(5.0, 3600.0);
             let run = flows::run(app, &flow, target, "mcp")?;
-            let finished = flows::wait_run(run, Duration::from_secs_f64(limit)).ok_or("The flow is still running.")?;
+            let finished = flows::wait_run(run, Duration::from_secs_f64(limit))
+                .ok_or("The flow is still running.")?;
             let summary = json!({ "status": finished.status, "output": finished.output, "datasetId": finished.dataset_id, "steps": finished.steps });
-            Ok((format!("Run flow \"{}\"", clip(&finished.flow_name, 60)), text(serde_json::to_string_pretty(&summary).unwrap_or_default())))
+            Ok((
+                format!("Run flow \"{}\"", clip(&finished.flow_name, 60)),
+                text(serde_json::to_string_pretty(&summary).unwrap_or_default()),
+            ))
         }
         "evaluate" => {
             let expression = arg_str(args, "expression");
             let value = driver::evaluate_main(app, tab, &expression)?;
-            Ok((format!("Run script ({} characters)", expression.chars().count()), text(clip(&value.to_string(), 200_000))))
+            Ok((
+                format!("Run script ({} characters)", expression.chars().count()),
+                text(clip(&value.to_string(), 200_000)),
+            ))
         }
         other => Err(format!("There is no tool named \"{other}\".")),
     }
@@ -813,8 +1123,14 @@ mod tests {
 
     #[test]
     fn read_only_hides_actions() {
-        let auto = AutomationSettings { mcp_read_only: true, ..AutomationSettings::default() };
-        let names: Vec<String> = tool_list(&auto).iter().map(|tool| tool["name"].as_str().unwrap().to_string()).collect();
+        let auto = AutomationSettings {
+            mcp_read_only: true,
+            ..AutomationSettings::default()
+        };
+        let names: Vec<String> = tool_list(&auto)
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap().to_string())
+            .collect();
         assert!(names.contains(&"snapshot".to_string()));
         assert!(!names.contains(&"click".to_string()));
         assert!(!names.contains(&"evaluate".to_string()));

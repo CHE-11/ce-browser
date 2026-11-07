@@ -117,7 +117,12 @@ fn wake() {
 
 /// Every run, newest first.
 pub fn runs() -> Vec<AgentRun> {
-    lock().runs.iter().rev().map(|state| state.run.clone()).collect()
+    lock()
+        .runs
+        .iter()
+        .rev()
+        .map(|state| state.run.clone())
+        .collect()
 }
 
 fn emit(app: &AppHandle) {
@@ -221,7 +226,11 @@ pub fn session(app: &AppHandle, tab: u32, client: &str) -> Result<u32, String> {
                 source: "mcp".into(),
                 tab_id: tab,
                 window,
-                goal: if client.trim().is_empty() { "MCP client".into() } else { clip(client.trim(), 120) },
+                goal: if client.trim().is_empty() {
+                    "MCP client".into()
+                } else {
+                    clip(client.trim(), 120)
+                },
                 status: "running".into(),
                 steps: Vec::new(),
                 approval: None,
@@ -257,7 +266,10 @@ pub fn session_step(app: &AppHandle, id: u32, ok: bool, text: &str, detail: &str
     with_run(id, |state| {
         state.touched = now_ms();
         state.run.actions += 1;
-        state.run.steps.push(step(if ok { "action" } else { "error" }, text, detail));
+        state
+            .run
+            .steps
+            .push(step(if ok { "action" } else { "error" }, text, detail));
         if state.run.steps.len() > 200 {
             state.run.steps.remove(0);
         }
@@ -304,7 +316,11 @@ fn trim_runs(agents: &mut Agents) {
         agents.runs.remove(index);
     }
     let count = agents.runs.len();
-    for state in agents.runs.iter_mut().take(count.saturating_sub(THUMB_RUNS)) {
+    for state in agents
+        .runs
+        .iter_mut()
+        .take(count.saturating_sub(THUMB_RUNS))
+    {
         for step in &mut state.run.steps {
             step.thumb = None;
         }
@@ -322,7 +338,12 @@ pub fn stop(app: &AppHandle, id: u32) {
 
 pub fn answer(app: &AppHandle, id: u32, approval: u32, allow: bool) {
     with_run(id, |state| {
-        if state.run.approval.as_ref().is_some_and(|item| item.id == approval) {
+        if state
+            .run
+            .approval
+            .as_ref()
+            .is_some_and(|item| item.id == approval)
+        {
             state.answer = Some((approval, Answer::Allow(allow)));
         }
     });
@@ -485,7 +506,11 @@ fn ask(app: &AppHandle, id: u32, kind: &str, prompt: &str) -> Option<Answer> {
     if let Some(state) = agents.get(id) {
         state.run.approval = None;
         if state.run.status == "waiting" {
-            state.run.status = if state.paused { "paused".into() } else { "running".into() };
+            state.run.status = if state.paused {
+                "paused".into()
+            } else {
+                "running".into()
+            };
         }
     }
     drop(agents);
@@ -584,7 +609,12 @@ fn observe(app: &AppHandle, tab: u32, window: &str, screenshots: bool) -> Observ
         thumb: None,
         scale: 1.0,
     };
-    let shot = driver::screenshot(app, tab, screenshots, if screenshots { SHOT_WIDTH } else { 320 });
+    let shot = driver::screenshot(
+        app,
+        tab,
+        screenshots,
+        if screenshots { SHOT_WIDTH } else { 320 },
+    );
     if let Ok(shot) = shot {
         if css_width > 0.0 && shot.width > 0 {
             observation.scale = css_width / shot.width as f64;
@@ -593,8 +623,7 @@ fn observe(app: &AppHandle, tab: u32, window: &str, screenshots: bool) -> Observ
             .ok()
             .map(|thumb| jpeg_data_url(&thumb.bytes));
         if screenshots {
-            observation.image =
-                Some(base64::engine::general_purpose::STANDARD.encode(&shot.bytes));
+            observation.image = Some(base64::engine::general_purpose::STANDARD.encode(&shot.bytes));
         }
     }
     observation
@@ -663,7 +692,8 @@ fn object(properties: Value, required: &[&str]) -> Value {
 }
 
 pub fn tool_specs() -> Vec<ToolSpec> {
-    let reference = json!({ "type": "integer", "description": "Element ref from the newest page state." });
+    let reference =
+        json!({ "type": "integer", "description": "Element ref from the newest page state." });
     vec![
         ToolSpec {
             name: "click",
@@ -680,7 +710,10 @@ pub fn tool_specs() -> Vec<ToolSpec> {
         ToolSpec {
             name: "click_xy",
             description: "Click a point on the screenshot, in screenshot pixels. Only for targets without a ref.",
-            parameters: object(json!({ "x": { "type": "number" }, "y": { "type": "number" } }), &["x", "y"]),
+            parameters: object(
+                json!({ "x": { "type": "number" }, "y": { "type": "number" } }),
+                &["x", "y"],
+            ),
         },
         ToolSpec {
             name: "type",
@@ -792,8 +825,10 @@ pub fn tool_specs() -> Vec<ToolSpec> {
 fn drive(app: &AppHandle, id: u32) -> Result<(&'static str, String), String> {
     let current = settings::get(app);
     let auto = current.automation.clone();
-    let (goal, window) = with_run(id, |state| (state.run.goal.clone(), state.run.window.clone()))
-        .ok_or("The run was removed.")?;
+    let (goal, window) = with_run(id, |state| {
+        (state.run.goal.clone(), state.run.window.clone())
+    })
+    .ok_or("The run was removed.")?;
     let tools = tool_specs();
     let system = system_prompt(app);
     let mut messages: Vec<ChatMessage> = Vec::new();
@@ -817,7 +852,10 @@ fn drive(app: &AppHandle, id: u32) -> Result<(&'static str, String), String> {
                 parts.push(ChatPart::Text(result));
                 parts.push(ChatPart::Text(observation.text));
                 if let Some(image) = observation.image {
-                    parts.push(ChatPart::Image { media_type: "image/jpeg".into(), data: image });
+                    parts.push(ChatPart::Image {
+                        media_type: "image/jpeg".into(),
+                        data: image,
+                    });
                 }
                 messages.push(ChatMessage::ToolResult { call_id, parts });
             }
@@ -825,36 +863,64 @@ fn drive(app: &AppHandle, id: u32) -> Result<(&'static str, String), String> {
                 parts.push(ChatPart::Text(format!("Task: {goal}")));
                 parts.push(ChatPart::Text(observation.text));
                 if let Some(image) = observation.image {
-                    parts.push(ChatPart::Image { media_type: "image/jpeg".into(), data: image });
+                    parts.push(ChatPart::Image {
+                        media_type: "image/jpeg".into(),
+                        data: image,
+                    });
                 }
                 messages.push(ChatMessage::User(parts));
             }
         }
         let notes = with_run(id, |state| std::mem::take(&mut state.notes)).unwrap_or_default();
         for note in notes {
-            messages.push(ChatMessage::User(vec![ChatPart::Text(format!("Message from the user: {note}"))]));
+            messages.push(ChatMessage::User(vec![ChatPart::Text(format!(
+                "Message from the user: {note}"
+            ))]));
         }
         prune(&mut messages);
-        let reply = match ai::complete_tools(app, &current, &auto.agent_model, &system, &messages, &tools, MODEL_TIMEOUT) {
+        let reply = match ai::complete_tools(
+            app,
+            &current,
+            &auto.agent_model,
+            &system,
+            &messages,
+            &tools,
+            MODEL_TIMEOUT,
+        ) {
             Ok(reply) => reply,
             Err(first) => {
                 thread::sleep(Duration::from_secs(2));
                 if checkpoint(id).is_err() {
                     return Ok(("stopped", "Stopped.".into()));
                 }
-                ai::complete_tools(app, &current, &auto.agent_model, &system, &messages, &tools, MODEL_TIMEOUT)
-                    .map_err(|_| first)?
+                ai::complete_tools(
+                    app,
+                    &current,
+                    &auto.agent_model,
+                    &system,
+                    &messages,
+                    &tools,
+                    MODEL_TIMEOUT,
+                )
+                .map_err(|_| first)?
             }
         };
         if checkpoint(id).is_err() {
             return Ok(("stopped", "Stopped.".into()));
         }
-        messages.push(ChatMessage::Assistant { text: reply.text.clone(), calls: reply.calls.clone() });
+        messages.push(ChatMessage::Assistant {
+            text: reply.text.clone(),
+            calls: reply.calls.clone(),
+        });
         if !reply.text.is_empty() {
             push_step(app, id, "think", &reply.text, "");
         }
         let Some(call) = reply.calls.first().cloned() else {
-            let text = if reply.text.is_empty() { "Finished.".to_string() } else { reply.text };
+            let text = if reply.text.is_empty() {
+                "Finished.".to_string()
+            } else {
+                reply.text
+            };
             return Ok(("done", text));
         };
         for extra in reply.calls.iter().skip(1) {
@@ -863,14 +929,25 @@ fn drive(app: &AppHandle, id: u32) -> Result<(&'static str, String), String> {
                 parts: vec![ChatPart::Text("Skipped. Call one tool per turn.".into())],
             });
         }
-        match execute(app, id, &auto, &window, &call.name, &call.arguments, observation.scale) {
+        match execute(
+            app,
+            id,
+            &auto,
+            &window,
+            &call.name,
+            &call.arguments,
+            observation.scale,
+        ) {
             Outcome::Continue(result) => pending = Some((call.id, result)),
             Outcome::Finish(status, text) => return Ok((status, text)),
         }
         with_run(id, |state| state.run.actions += 1);
         thread::sleep(Duration::from_millis(350));
     }
-    Ok(("failed", format!("Stopped after {} steps without finishing.", auto.max_steps)))
+    Ok((
+        "failed",
+        format!("Stopped after {} steps without finishing.", auto.max_steps),
+    ))
 }
 
 enum Outcome {
@@ -880,13 +957,25 @@ enum Outcome {
 
 fn arg_u32(args: &Value, key: &str) -> Result<u32, String> {
     args.get(key)
-        .and_then(|value| value.as_u64().or_else(|| value.as_f64().map(|n| n as u64)).or_else(|| value.as_str().and_then(|s| s.trim().trim_matches(['[', ']']).parse().ok())))
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_f64().map(|n| n as u64))
+                .or_else(|| {
+                    value
+                        .as_str()
+                        .and_then(|s| s.trim().trim_matches(['[', ']']).parse().ok())
+                })
+        })
         .map(|value| value as u32)
         .ok_or_else(|| format!("Missing \"{key}\"."))
 }
 
 fn arg_str(args: &Value, key: &str) -> String {
-    args.get(key).and_then(Value::as_str).unwrap_or("").to_string()
+    args.get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
 }
 
 fn arg_bool(args: &Value, key: &str, fallback: bool) -> bool {
@@ -894,12 +983,19 @@ fn arg_bool(args: &Value, key: &str, fallback: bool) -> bool {
 }
 
 fn arg_f64(args: &Value, key: &str) -> Option<f64> {
-    args.get(key).and_then(|value| value.as_f64().or_else(|| value.as_str().and_then(|s| s.parse().ok())))
+    args.get(key).and_then(|value| {
+        value
+            .as_f64()
+            .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
+    })
 }
 
 fn arg_list(args: &Value, key: &str) -> Vec<String> {
     match args.get(key) {
-        Some(Value::Array(items)) => items.iter().filter_map(|item| item.as_str().map(String::from)).collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| item.as_str().map(String::from))
+            .collect(),
         Some(Value::String(one)) => vec![one.clone()],
         _ => Vec::new(),
     }
@@ -912,7 +1008,10 @@ fn gate(app: &AppHandle, id: u32, verdict: Verdict) -> Result<(), String> {
         Verdict::Block(reason) => Err(reason),
         Verdict::Ask(prompt) => match ask(app, id, "confirm", &prompt) {
             Some(Answer::Allow(true)) => Ok(()),
-            Some(_) => Err("The user declined this action. Don't try it again. Find another way or finish.".into()),
+            Some(_) => Err(
+                "The user declined this action. Don't try it again. Find another way or finish."
+                    .into(),
+            ),
             None => Err("Stopped.".into()),
         },
     }
@@ -944,159 +1043,248 @@ fn execute(
         }
         "fail" => {
             let reason = arg_str(args, "reason");
-            return Outcome::Finish("failed", if reason.is_empty() { "The agent gave up.".into() } else { reason });
+            return Outcome::Finish(
+                "failed",
+                if reason.is_empty() {
+                    "The agent gave up.".into()
+                } else {
+                    reason
+                },
+            );
         }
         _ => {}
     }
-    let page_free = matches!(name, "navigate" | "open_tab" | "switch_tab" | "back" | "wait" | "read_text" | "ocr" | "ask_user");
+    let page_free = matches!(
+        name,
+        "navigate" | "open_tab" | "switch_tab" | "back" | "wait" | "read_text" | "ocr" | "ask_user"
+    );
     if !page_free {
-        let url = tabs::tab_info(app, tab).map(|info| info.url).unwrap_or_default();
+        let url = tabs::tab_info(app, tab)
+            .map(|info| info.url)
+            .unwrap_or_default();
         if let Verdict::Block(reason) = policy::page(auto, &url) {
             push_step(app, id, "blocked", &format!("{name} refused"), &reason);
             return Outcome::Continue(reason);
         }
     }
-    let result = (|| -> Result<(String, String), String> { match name {
-        "click" => {
-            let element = arg_u32(args, "ref")?;
-            let info = driver::element_info(app, tab, element)?;
-            let label = format!("Click {}", element_label(&info, element));
-            gate(app, id, policy::click(auto, &info))?;
-            let button = arg_str(args, "button");
-            driver::click(app, tab, element, &button, arg_bool(args, "double", false))?;
-            Ok((label, "Clicked.".into()))
-        }
-        "click_xy" => {
-            let x = arg_f64(args, "x").ok_or("Missing \"x\".")?;
-            let y = arg_f64(args, "y").ok_or("Missing \"y\".")?;
-            driver::click_at(app, tab, x * scale, y * scale, "left", false)?;
-            Ok((format!("Click at {}, {}", x.round(), y.round()), "Clicked.".into()))
-        }
-        "type" => {
-            let raw = arg_str(args, "text");
-            let (text, secret) = fill_secrets(app, &raw)?;
-            let element = arg_u32(args, "ref").ok();
-            let submit = arg_bool(args, "submit", false);
-            let info = match element {
-                Some(element) => Some(driver::element_info(app, tab, element)?),
-                None => driver::focused_info(app, tab)?,
-            };
-            if let Some(info) = &info {
-                gate(app, id, policy::typing(auto, info, secret))?;
-                if submit {
-                    gate(app, id, policy::submit(auto, Some(info)))?;
+    let result = (|| -> Result<(String, String), String> {
+        match name {
+            "click" => {
+                let element = arg_u32(args, "ref")?;
+                let info = driver::element_info(app, tab, element)?;
+                let label = format!("Click {}", element_label(&info, element));
+                gate(app, id, policy::click(auto, &info))?;
+                let button = arg_str(args, "button");
+                driver::click(app, tab, element, &button, arg_bool(args, "double", false))?;
+                Ok((label, "Clicked.".into()))
+            }
+            "click_xy" => {
+                let x = arg_f64(args, "x").ok_or("Missing \"x\".")?;
+                let y = arg_f64(args, "y").ok_or("Missing \"y\".")?;
+                driver::click_at(app, tab, x * scale, y * scale, "left", false)?;
+                Ok((
+                    format!("Click at {}, {}", x.round(), y.round()),
+                    "Clicked.".into(),
+                ))
+            }
+            "type" => {
+                let raw = arg_str(args, "text");
+                let (text, secret) = fill_secrets(app, &raw)?;
+                let element = arg_u32(args, "ref").ok();
+                let submit = arg_bool(args, "submit", false);
+                let info = match element {
+                    Some(element) => Some(driver::element_info(app, tab, element)?),
+                    None => driver::focused_info(app, tab)?,
+                };
+                if let Some(info) = &info {
+                    gate(app, id, policy::typing(auto, info, secret))?;
+                    if submit {
+                        gate(app, id, policy::submit(auto, Some(info)))?;
+                    }
+                }
+                let shown = mask_secrets(&raw);
+                let target = match (&info, element) {
+                    (Some(info), Some(element)) => {
+                        format!(" into {}", element_label(info, element))
+                    }
+                    _ => String::new(),
+                };
+                driver::type_text(
+                    app,
+                    tab,
+                    element,
+                    &text,
+                    arg_bool(args, "clear", true),
+                    submit,
+                )?;
+                Ok((
+                    format!("Type \"{}\"{target}", clip(&shown, 80)),
+                    if submit {
+                        "Typed and pressed Enter.".into()
+                    } else {
+                        "Typed.".into()
+                    },
+                ))
+            }
+            "press" => {
+                let keys = arg_str(args, "keys");
+                if keys.to_ascii_lowercase().ends_with("enter") {
+                    let focused = driver::focused_info(app, tab)?;
+                    gate(app, id, policy::submit(auto, focused.as_ref()))?;
+                }
+                driver::press(app, tab, &keys)?;
+                Ok((format!("Press {keys}"), "Pressed.".into()))
+            }
+            "scroll" => {
+                let direction = arg_str(args, "direction");
+                let screens = arg_f64(args, "screens").unwrap_or(1.0).clamp(0.1, 10.0);
+                let (amount, horizontal) = match direction.as_str() {
+                    "up" => (-screens, false),
+                    "left" => (-screens, true),
+                    "right" => (screens, true),
+                    _ => (screens, false),
+                };
+                let element = arg_u32(args, "ref").ok();
+                let result = driver::scroll(app, tab, element, amount, horizontal)?;
+                Ok((format!("Scroll {direction}"), result))
+            }
+            "select" => {
+                let element = arg_u32(args, "ref")?;
+                let values = arg_list(args, "values");
+                let picked = driver::select(app, tab, element, &values)?;
+                Ok((
+                    format!("Choose {}", picked.join(", ")),
+                    format!("Selected {}.", picked.join(", ")),
+                ))
+            }
+            "hover" => {
+                let element = arg_u32(args, "ref")?;
+                driver::hover(app, tab, element)?;
+                Ok((format!("Hover [{element}]"), "Done.".into()))
+            }
+            "navigate" => {
+                let input = arg_str(args, "url");
+                let url = tabs::resolve(app, &input);
+                gate(app, id, policy::open(auto, url.as_str()))?;
+                driver::navigate(app, tab, url.as_str())?;
+                Ok((
+                    format!("Go to {}", clip(url.as_str(), 100)),
+                    "Loaded.".into(),
+                ))
+            }
+            "back" => {
+                driver::back(app, tab)?;
+                Ok(("Go back".into(), "Went back.".into()))
+            }
+            "wait" => {
+                let seconds = arg_f64(args, "seconds").unwrap_or(2.0).clamp(0.5, 30.0);
+                let text = arg_str(args, "text");
+                if text.is_empty() {
+                    thread::sleep(Duration::from_secs_f64(seconds));
+                    return Ok((format!("Wait {seconds}s"), "Waited.".into()));
+                }
+                let query = driver::WaitQuery {
+                    text: text.clone(),
+                    ..Default::default()
+                };
+                let seen =
+                    driver::wait_for(app, tab, &query, Duration::from_secs_f64(seconds.max(5.0)))?;
+                Ok((
+                    format!("Wait for \"{}\"", clip(&text, 60)),
+                    if seen {
+                        "The text appeared.".into()
+                    } else {
+                        "Timed out; the text did not appear.".into()
+                    },
+                ))
+            }
+            "open_tab" => {
+                let input = arg_str(args, "url");
+                let url = tabs::resolve(app, &input);
+                gate(app, id, policy::open(auto, url.as_str()))?;
+                let opened = tabs::open(
+                    app,
+                    tabs::OpenTab {
+                        window: window.to_string(),
+                        ..tabs::OpenTab::new(url.clone())
+                    },
+                )?;
+                switch_to(app, id, tab, opened);
+                driver::wait_load(app, opened, Duration::from_secs(20));
+                Ok((
+                    format!("Open {} in a new tab", clip(url.as_str(), 100)),
+                    format!("Opened tab {opened}. You are now in it."),
+                ))
+            }
+            "switch_tab" => {
+                let target = arg_u32(args, "tabId")?;
+                let info = tabs::tab_info(app, target).ok_or("There is no tab with that id.")?;
+                if info.window != window {
+                    return Err("That tab is in another window.".into());
+                }
+                tabs::activate(app, target)?;
+                switch_to(app, id, tab, target);
+                Ok((
+                    format!("Switch to \"{}\"", clip(&info.title, 60)),
+                    format!("Now in tab {target}."),
+                ))
+            }
+            "read_text" => {
+                let text = driver::text(app, tab, 12_000, true)?;
+                Ok((
+                    "Read the page text".into(),
+                    if text.is_empty() {
+                        "The page has no text.".into()
+                    } else {
+                        text
+                    },
+                ))
+            }
+            "ocr" => {
+                let text = driver::ocr(app, tab)?;
+                Ok((
+                    "Read the screen".into(),
+                    if text.trim().is_empty() {
+                        "No text found on screen.".into()
+                    } else {
+                        clip(&text, 6000)
+                    },
+                ))
+            }
+            "upload" => {
+                let element = arg_u32(args, "ref")?;
+                let paths = arg_list(args, "paths");
+                if paths.is_empty() {
+                    return Err("Name the files to upload.".into());
+                }
+                gate(
+                    app,
+                    id,
+                    Verdict::Ask(format!("Upload {} to this page?", paths.join(", "))),
+                )?;
+                driver::upload(app, tab, element, &paths)?;
+                Ok((
+                    format!("Upload {}", paths.join(", ")),
+                    "Files attached.".into(),
+                ))
+            }
+            "ask_user" => {
+                let question = arg_str(args, "question");
+                match ask(app, id, "question", &question) {
+                    Some(Answer::Reply(text)) => Ok((
+                        format!("Ask: {}", clip(&question, 120)),
+                        format!("The user answered: {text}"),
+                    )),
+                    Some(Answer::Allow(_)) => Ok((
+                        format!("Ask: {}", clip(&question, 120)),
+                        "The user didn't answer.".into(),
+                    )),
+                    None => Err("Stopped.".into()),
                 }
             }
-            let shown = mask_secrets(&raw);
-            let target = match (&info, element) {
-                (Some(info), Some(element)) => format!(" into {}", element_label(info, element)),
-                _ => String::new(),
-            };
-            driver::type_text(app, tab, element, &text, arg_bool(args, "clear", true), submit)?;
-            Ok((format!("Type \"{}\"{target}", clip(&shown, 80)), if submit { "Typed and pressed Enter.".into() } else { "Typed.".into() }))
+            other => Err(format!("There is no tool named \"{other}\".")),
         }
-        "press" => {
-            let keys = arg_str(args, "keys");
-            if keys.to_ascii_lowercase().ends_with("enter") {
-                let focused = driver::focused_info(app, tab)?;
-                gate(app, id, policy::submit(auto, focused.as_ref()))?;
-            }
-            driver::press(app, tab, &keys)?;
-            Ok((format!("Press {keys}"), "Pressed.".into()))
-        }
-        "scroll" => {
-            let direction = arg_str(args, "direction");
-            let screens = arg_f64(args, "screens").unwrap_or(1.0).clamp(0.1, 10.0);
-            let (amount, horizontal) = match direction.as_str() {
-                "up" => (-screens, false),
-                "left" => (-screens, true),
-                "right" => (screens, true),
-                _ => (screens, false),
-            };
-            let element = arg_u32(args, "ref").ok();
-            let result = driver::scroll(app, tab, element, amount, horizontal)?;
-            Ok((format!("Scroll {direction}"), result))
-        }
-        "select" => {
-            let element = arg_u32(args, "ref")?;
-            let values = arg_list(args, "values");
-            let picked = driver::select(app, tab, element, &values)?;
-            Ok((format!("Choose {}", picked.join(", ")), format!("Selected {}.", picked.join(", "))))
-        }
-        "hover" => {
-            let element = arg_u32(args, "ref")?;
-            driver::hover(app, tab, element)?;
-            Ok((format!("Hover [{element}]"), "Done.".into()))
-        }
-        "navigate" => {
-            let input = arg_str(args, "url");
-            let url = tabs::resolve(app, &input);
-            gate(app, id, policy::open(auto, url.as_str()))?;
-            driver::navigate(app, tab, url.as_str())?;
-            Ok((format!("Go to {}", clip(url.as_str(), 100)), "Loaded.".into()))
-        }
-        "back" => {
-            driver::back(app, tab)?;
-            Ok(("Go back".into(), "Went back.".into()))
-        }
-        "wait" => {
-            let seconds = arg_f64(args, "seconds").unwrap_or(2.0).clamp(0.5, 30.0);
-            let text = arg_str(args, "text");
-            if text.is_empty() {
-                thread::sleep(Duration::from_secs_f64(seconds));
-                return Ok((format!("Wait {seconds}s"), "Waited.".into()));
-            }
-            let query = driver::WaitQuery { text: text.clone(), ..Default::default() };
-            let seen = driver::wait_for(app, tab, &query, Duration::from_secs_f64(seconds.max(5.0)))?;
-            Ok((format!("Wait for \"{}\"", clip(&text, 60)), if seen { "The text appeared.".into() } else { "Timed out; the text did not appear.".into() }))
-        }
-        "open_tab" => {
-            let input = arg_str(args, "url");
-            let url = tabs::resolve(app, &input);
-            gate(app, id, policy::open(auto, url.as_str()))?;
-            let opened = tabs::open(app, tabs::OpenTab { window: window.to_string(), ..tabs::OpenTab::new(url.clone()) })?;
-            switch_to(app, id, tab, opened);
-            driver::wait_load(app, opened, Duration::from_secs(20));
-            Ok((format!("Open {} in a new tab", clip(url.as_str(), 100)), format!("Opened tab {opened}. You are now in it.")))
-        }
-        "switch_tab" => {
-            let target = arg_u32(args, "tabId")?;
-            let info = tabs::tab_info(app, target).ok_or("There is no tab with that id.")?;
-            if info.window != window {
-                return Err("That tab is in another window.".into());
-            }
-            tabs::activate(app, target)?;
-            switch_to(app, id, tab, target);
-            Ok((format!("Switch to \"{}\"", clip(&info.title, 60)), format!("Now in tab {target}.")))
-        }
-        "read_text" => {
-            let text = driver::text(app, tab, 12_000, true)?;
-            Ok(("Read the page text".into(), if text.is_empty() { "The page has no text.".into() } else { text }))
-        }
-        "ocr" => {
-            let text = driver::ocr(app, tab)?;
-            Ok(("Read the screen".into(), if text.trim().is_empty() { "No text found on screen.".into() } else { clip(&text, 6000) }))
-        }
-        "upload" => {
-            let element = arg_u32(args, "ref")?;
-            let paths = arg_list(args, "paths");
-            if paths.is_empty() {
-                return Err("Name the files to upload.".into());
-            }
-            gate(app, id, Verdict::Ask(format!("Upload {} to this page?", paths.join(", "))))?;
-            driver::upload(app, tab, element, &paths)?;
-            Ok((format!("Upload {}", paths.join(", ")), "Files attached.".into()))
-        }
-        "ask_user" => {
-            let question = arg_str(args, "question");
-            match ask(app, id, "question", &question) {
-                Some(Answer::Reply(text)) => Ok((format!("Ask: {}", clip(&question, 120)), format!("The user answered: {text}"))),
-                Some(Answer::Allow(_)) => Ok((format!("Ask: {}", clip(&question, 120)), "The user didn't answer.".into())),
-                None => Err("Stopped.".into()),
-            }
-        }
-        other => Err(format!("There is no tool named \"{other}\".")),
-    }})();
+    })();
     match result {
         Ok((label, detail)) => {
             push_step(app, id, "action", &label, &clip(&detail, 300));

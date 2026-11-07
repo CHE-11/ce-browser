@@ -1255,7 +1255,13 @@ pub fn dismiss_held_outside(app: &AppHandle, x: i32, y: i32) {
             state
                 .stacks
                 .get(&window)
-                .map(|stack| stack.levels.iter().map(|level| level.label.clone()).collect::<Vec<_>>())
+                .map(|stack| {
+                    stack
+                        .levels
+                        .iter()
+                        .map(|level| level.label.clone())
+                        .collect::<Vec<_>>()
+                })
                 .unwrap_or_default()
         });
         let inside = labels.iter().any(|label| {

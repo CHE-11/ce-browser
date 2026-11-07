@@ -1,13 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Bot, Eye, Hand, History, Play, Plus, Square, Trash2, X } from "lucide-react";
 import type { AgentRun } from "@type/browser";
 import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/EmptyState";
 import { IconButton } from "@/components/IconButton";
-import { toggleAgentPanel } from "@/lib/browser-client";
+import { resizeAgentPanel, setAgentPanelWidth, toggleAgentPanel } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { isActiveRun, useAgentRun } from "@/lib/use-agent-run";
-import { useAppearanceState } from "@/lib/use-browser";
+import { useAppearanceState, useSettings } from "@/lib/use-browser";
 import { AgentApproval } from "./AgentApproval";
 import { AgentComposer } from "./AgentComposer";
 import { AgentStepList } from "./AgentStepList";
@@ -30,20 +30,83 @@ const STATUS_TONE: Record<AgentRun["status"], string> = {
   stopped: "bg-zinc-500",
 };
 
+const MIN_PANEL_WIDTH = 280;
+const MAX_PANEL_WIDTH = 720;
+const DEFAULT_PANEL_WIDTH = 380;
+
+function clampPanelWidth(width: number) {
+  return Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
+}
+
 /** The docked column beside the pages where agent runs start, report each step, and ask for approval. */
 export function AgentPanelPage() {
   useAppearanceState();
+  const settings = useSettings();
   const agent = useAgentRun();
   const { run, runs, activeTab } = agent;
   const active = isActiveRun(run);
+  const width = settings?.agentPanelWidth ?? DEFAULT_PANEL_WIDTH;
+  const resizing = useRef(false);
+  const [resizingPanel, setResizingPanel] = useState(false);
 
   useEffect(() => {
     document.title = "Agent";
   }, []);
 
+  const onResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || resizing.current) {
+      return;
+    }
+    event.preventDefault();
+    resizing.current = true;
+    setResizingPanel(true);
+    void resizeAgentPanel().finally(() => {
+      resizing.current = false;
+      setResizingPanel(false);
+    });
+  };
+
+  const onResizeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = event.shiftKey ? 64 : 16;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      void setAgentPanelWidth(clampPanelWidth(width + step));
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      void setAgentPanelWidth(clampPanelWidth(width - step));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      void setAgentPanelWidth(DEFAULT_PANEL_WIDTH);
+    }
+  };
+
   return (
-    <div id="agent-panel" className="flex h-screen flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100" onContextMenu={(event) => event.preventDefault()}>
-      <header id="agent-panel-header" className="flex h-10 shrink-0 items-center gap-2 border-b border-zinc-800 pl-3 pr-1.5">
+    <div
+      id="agent-panel"
+      className={cn(
+        "relative flex h-screen flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100",
+        resizingPanel && "cursor-col-resize select-none",
+      )}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <div
+        id="agent-panel-resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the agent panel"
+        aria-valuemin={MIN_PANEL_WIDTH}
+        aria-valuemax={MAX_PANEL_WIDTH}
+        aria-valuenow={width}
+        tabIndex={0}
+        title="Drag to resize. Left and right arrows change the width."
+        className={cn(
+          "absolute inset-y-0 left-0 z-20 w-1.5 cursor-col-resize touch-none hover:bg-sky-500/40 focus-visible:bg-sky-500/40 focus-visible:outline-none",
+          resizingPanel && "bg-sky-500/50",
+        )}
+        onPointerDown={onResizePointerDown}
+        onKeyDown={onResizeKeyDown}
+      />
+      <header id="agent-panel-header" className="flex h-[var(--toolbar-height)] shrink-0 items-center gap-2 border-b border-zinc-800 pl-3 pr-1.5">
         <Bot id="agent-panel-header-icon" className="size-4 text-sky-400" aria-hidden />
         <h1 id="agent-panel-title" className="flex-1 text-sm font-semibold">
           Agent

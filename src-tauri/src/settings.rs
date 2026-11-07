@@ -57,6 +57,9 @@ const HEIGHT_REM: (f32, f32) = (1.0, 4.0);
 const OPTIONAL_HEIGHT_REM: (f32, f32) = (0.0, 4.0);
 const MENU_WIDTH_PX: (u32, u32) = (160, 480);
 const PANEL_WIDTH_PX: (u32, u32) = (240, 720);
+/// Docked agent panel, in CSS pixels. Narrower than this clips the composer.
+pub const AGENT_PANEL_WIDTH_PX: (u32, u32) = (280, 720);
+pub const AGENT_PANEL_DEFAULT_WIDTH: u32 = 380;
 /// Height of the bookmark editor's place list, in rem.
 const LIST_HEIGHT_REM: (f32, f32) = (8.0, 36.0);
 const PALETTE_WIDTH_PX: (u32, u32) = (360, 880);
@@ -648,6 +651,9 @@ pub struct BrowserSettings {
     /// Pages that open files of each type inside the browser. Missing means the PDF editor.
     #[serde(default = "default_file_handlers")]
     pub file_handlers: Vec<FileHandler>,
+    /// Width of the docked agent panel, in CSS pixels. An older file omits this and opens at 380.
+    #[serde(default = "default_agent_panel_width")]
+    pub agent_panel_width: u32,
     /// Agent, recorded flows, schedules and the MCP server. An older file omits this.
     #[serde(default)]
     pub automation: AutomationSettings,
@@ -1226,6 +1232,7 @@ impl Default for BrowserSettings {
             last_seen_version: String::new(),
             toast_position: default_toast_position(),
             file_handlers: default_file_handlers(),
+            agent_panel_width: default_agent_panel_width(),
             automation: AutomationSettings::default(),
         }
     }
@@ -1535,6 +1542,9 @@ impl BrowserSettings {
             self.summon_hotkey = default_hotkey();
         }
         self.adblock = self.adblock.normalize();
+        self.agent_panel_width = self
+            .agent_panel_width
+            .clamp(AGENT_PANEL_WIDTH_PX.0, AGENT_PANEL_WIDTH_PX.1);
         self.automation = self.automation.normalize();
         if !TAB_LAYOUTS.contains(&self.tab_layout.as_str()) {
             self.tab_layout = defaults.tab_layout.clone();
@@ -2248,6 +2258,10 @@ fn default_history_panel_width() -> u32 {
     380
 }
 
+fn default_agent_panel_width() -> u32 {
+    AGENT_PANEL_DEFAULT_WIDTH
+}
+
 fn default_command_palette_width() -> u32 {
     560
 }
@@ -2649,6 +2663,7 @@ mod tests {
         assert_eq!(loaded.downloads_panel_width, 380);
         assert_eq!(loaded.downloads_icon_size, 2.0);
         assert_eq!(loaded.history_panel_width, 380);
+        assert_eq!(loaded.agent_panel_width, 380);
         assert_eq!(loaded.command_palette_width, 560);
         assert_eq!(loaded.command_palette_input_height, 3.0);
         assert_eq!(loaded.command_palette_row_height, 2.5);
@@ -2669,6 +2684,18 @@ mod tests {
         assert_eq!(loaded.downloads_panel_width, 720);
         assert_eq!(loaded.command_palette_width, 360);
         assert_eq!(loaded.omnibox_url_size, 1.5);
+    }
+
+    #[test]
+    fn agent_panel_width_defaults_and_clamps() {
+        let missing: super::BrowserSettings = serde_json::from_str("{}").expect("settings parse");
+        assert_eq!(missing.normalize().agent_panel_width, 380);
+        let narrow: super::BrowserSettings =
+            serde_json::from_str(r#"{"agentPanelWidth":9}"#).expect("settings parse");
+        assert_eq!(narrow.normalize().agent_panel_width, 280);
+        let wide: super::BrowserSettings =
+            serde_json::from_str(r#"{"agentPanelWidth":9000}"#).expect("settings parse");
+        assert_eq!(wide.normalize().agent_panel_width, 720);
     }
 
     #[test]
