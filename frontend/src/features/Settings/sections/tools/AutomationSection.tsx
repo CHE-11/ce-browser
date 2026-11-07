@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import type { AutomationSettings, McpStatus } from "@type/browser";
+import type { AgentAutonomy, AutomationSettings, McpStatus } from "@type/browser";
+import { AUTONOMY_LEVELS } from "@/lib/agent-autonomy";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
@@ -25,8 +26,20 @@ const TEXT = {
   enabledHint: "The agent, recorded flows, and schedules. Off stops new runs.",
   model: "Agent model",
   modelHint: "Blank uses the model chosen under AI/Agent. Models that see images work best.",
-  steps: "Most actions per run",
-  stepsHint: "The agent stops after this many actions.",
+  steps: "Most turns per run",
+  stepsHint: "After this many turns the agent asks whether to keep going.",
+  autonomy: "Default autonomy",
+  autonomyHint: "How much new agent runs do without asking. Each run can change it in the agent panel.",
+  helpers: "Helper agents",
+  helpersHint: "Helpers one run may have working in background tabs at once. 0 turns helpers off.",
+  memory: "Agent memory",
+  memoryHint: "The agent keeps notes about you and sites across runs. Manage them in the agent panel.",
+  notify: "Notify when background runs finish",
+  notifyHint: "A Windows notification when a run you aren't watching finishes or needs you.",
+  script: "Let the agent run scripts",
+  scriptHint: "The agent may run JavaScript in pages. Runs ask first unless they're on full auto.",
+  stream: "Show replies as they're written",
+  streamHint: "Streams the model's thinking into the panel. Turn off for endpoints that don't stream.",
   confirm: "Ask before sensitive actions",
   confirmHint: "Purchases, payments, sends, deletes, and posts wait for your approval. Uploads always ask.",
   screenshots: "Send screenshots to the model",
@@ -90,10 +103,48 @@ export function AutomationSection({ settings, query, onUpdate, onError, onMatch 
           className={inputClass}
           type="number"
           min={5}
-          max={200}
+          max={500}
           value={automation.maxSteps}
-          onChange={(event) => update({ maxSteps: Math.max(5, Math.min(200, Number(event.target.value) || 30)) })}
+          onChange={(event) => update({ maxSteps: Math.max(5, Math.min(500, Number(event.target.value) || 30)) })}
         />
+      </Row>
+      <Row id="settings-automation-autonomy" setting="automation.defaultAutonomy" label={TEXT.autonomy} hint={TEXT.autonomyHint}>
+        <select
+          id="settings-automation-autonomy-select"
+          className={inputClass}
+          value={automation.defaultAutonomy ?? "ask"}
+          title={AUTONOMY_LEVELS.find((level) => level.value === automation.defaultAutonomy)?.hint}
+          onChange={(event) => update({ defaultAutonomy: event.target.value as AgentAutonomy })}
+        >
+          {AUTONOMY_LEVELS.map((level) => (
+            <option id={`settings-automation-autonomy-${level.value}`} key={level.value} value={level.value}>
+              {level.label}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <Row id="settings-automation-helpers" setting="automation.maxParallelAgents" label={TEXT.helpers} hint={TEXT.helpersHint}>
+        <input
+          id="settings-automation-helpers-input"
+          className={inputClass}
+          type="number"
+          min={0}
+          max={6}
+          value={automation.maxParallelAgents ?? 3}
+          onChange={(event) => update({ maxParallelAgents: Math.max(0, Math.min(6, Math.round(Number(event.target.value) || 0))) })}
+        />
+      </Row>
+      <Row id="settings-automation-memory" setting="automation.agentMemory" label={TEXT.memory} hint={TEXT.memoryHint}>
+        <Toggle id="settings-automation-memory-toggle" checked={automation.agentMemory ?? true} onChange={(agentMemory) => update({ agentMemory })} />
+      </Row>
+      <Row id="settings-automation-notify" setting="automation.agentNotify" label={TEXT.notify} hint={TEXT.notifyHint}>
+        <Toggle id="settings-automation-notify-toggle" checked={automation.agentNotify ?? true} onChange={(agentNotify) => update({ agentNotify })} />
+      </Row>
+      <Row id="settings-automation-script" setting="automation.agentAllowScript" label={TEXT.script} hint={TEXT.scriptHint}>
+        <Toggle id="settings-automation-script-toggle" checked={automation.agentAllowScript ?? false} onChange={(agentAllowScript) => update({ agentAllowScript })} />
+      </Row>
+      <Row id="settings-automation-stream" setting="automation.streamReplies" label={TEXT.stream} hint={TEXT.streamHint}>
+        <Toggle id="settings-automation-stream-toggle" checked={automation.streamReplies ?? true} onChange={(streamReplies) => update({ streamReplies })} />
       </Row>
       <Row id="settings-automation-confirm" setting="automation.confirmSensitive" label={TEXT.confirm} hint={TEXT.confirmHint}>
         <Toggle id="settings-automation-confirm-toggle" checked={automation.confirmSensitive} onChange={(confirmSensitive) => update({ confirmSensitive })} />

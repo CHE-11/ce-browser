@@ -2009,8 +2009,63 @@ fn unpin_profile_taskbar(app: AppHandle, id: String) -> Result<Vec<ProfileInfo>,
 // Agent. Runs work on their own threads; these commands start, steer and read them.
 
 #[tauri::command]
-fn agent_start(app: AppHandle, tab_id: u32, goal: String) -> Result<u32, String> {
-    automation::agent::start(&app, tab_id, &goal)
+fn agent_start(
+    app: AppHandle,
+    tab_id: u32,
+    goal: String,
+    options: Option<automation::agent::StartOptions>,
+) -> Result<u32, String> {
+    automation::agent::start_with(&app, tab_id, &goal, options.unwrap_or_default())
+}
+
+#[tauri::command]
+fn agent_continue(
+    app: AppHandle,
+    run_id: u32,
+    text: String,
+    tab_id: Option<u32>,
+) -> Result<(), String> {
+    automation::agent::continue_run(&app, run_id, &text, tab_id)
+}
+
+#[tauri::command]
+fn agent_set_autonomy(app: AppHandle, run_id: u32, autonomy: String) -> Result<(), String> {
+    automation::agent::set_autonomy(&app, run_id, &autonomy)
+}
+
+#[tauri::command]
+fn agent_delete_run(app: AppHandle, run_id: u32) {
+    automation::agent::delete(&app, run_id);
+}
+
+#[tauri::command]
+fn agent_run(run_id: u32) -> Option<automation::agent::AgentRun> {
+    automation::agent::run_detail(run_id)
+}
+
+#[tauri::command]
+async fn agent_save_flow(app: AppHandle, window: Window, run_id: u32) -> Result<String, String> {
+    let id = automation::agent::save_flow(&app, run_id)?;
+    automation::flows::open_page(&app, &browser_window(&window), Some(&format!("flow={id}")))?;
+    Ok(id)
+}
+
+#[tauri::command]
+fn agent_memory(app: AppHandle) -> Vec<automation::agent::memory::MemoryItem> {
+    automation::agent::memory::list(&app)
+}
+
+#[tauri::command]
+fn agent_memory_save(
+    app: AppHandle,
+    item: automation::agent::memory::MemoryItem,
+) -> Result<automation::agent::memory::MemoryItem, String> {
+    automation::agent::memory::save(&app, item)
+}
+
+#[tauri::command]
+fn agent_memory_delete(app: AppHandle, id: String) {
+    automation::agent::memory::delete(&app, &id);
 }
 
 #[tauri::command]
@@ -2325,6 +2380,7 @@ pub fn run() {
             update::start(&handle);
             prices::start(&handle);
             extension_store::start(&handle);
+            automation::agent::init(&handle);
             automation::mcp::init(&handle);
             automation::scheduler::init(&handle);
 
@@ -2696,6 +2752,14 @@ pub fn run() {
             pin_profile_taskbar,
             unpin_profile_taskbar,
             agent_start,
+            agent_continue,
+            agent_set_autonomy,
+            agent_delete_run,
+            agent_run,
+            agent_save_flow,
+            agent_memory,
+            agent_memory_save,
+            agent_memory_delete,
             agent_stop,
             agent_answer,
             agent_reply,

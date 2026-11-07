@@ -50,6 +50,7 @@ export function blankStep(kind: FlowStepKind): FlowStep {
     pages: 1,
     optional: false,
     note: "",
+    autonomy: "",
   };
 }
 

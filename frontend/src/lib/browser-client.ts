@@ -5,7 +5,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdblockStats,
+  AgentAutonomy,
+  AgentDelta,
+  AgentMemoryItem,
   AgentRun,
+  AgentStartOptions,
   DebugConsoleEntry,
   DebugFeed,
   DebugFeedTarget,
@@ -1674,8 +1678,51 @@ export function onWindowResized(handler: () => void) {
 
 // Agent
 
-export function agentStart(tabId: number, goal: string) {
-  return invoke<number>("agent_start", { tabId, goal });
+export function agentStart(tabId: number, goal: string, options?: AgentStartOptions) {
+  return invoke<number>("agent_start", { tabId, goal, options: options ?? null });
+}
+
+/** Sends a follow-up. A finished run continues with its history, in `tabId` when its own tab closed. */
+export function agentContinue(runId: number, text: string, tabId?: number) {
+  return invoke<void>("agent_continue", { runId, text, tabId: tabId ?? null });
+}
+
+export function agentSetAutonomy(runId: number, autonomy: AgentAutonomy) {
+  return invoke<void>("agent_set_autonomy", { runId, autonomy });
+}
+
+export function agentDeleteRun(runId: number) {
+  return invoke<void>("agent_delete_run", { runId });
+}
+
+/** One run with all its steps. */
+export function agentRun(runId: number) {
+  return invoke<AgentRun | null>("agent_run", { runId });
+}
+
+/** Saves a run's page actions as a flow and opens it. Returns the flow id. */
+export function agentSaveFlow(runId: number) {
+  return invoke<string>("agent_save_flow", { runId });
+}
+
+export function onAgentDelta(handler: (delta: AgentDelta) => void): Promise<UnlistenFn> {
+  return listen<AgentDelta>("agent-delta", (event) => handler(event.payload));
+}
+
+export function agentMemory() {
+  return invoke<AgentMemoryItem[]>("agent_memory");
+}
+
+export function agentMemorySave(item: AgentMemoryItem) {
+  return invoke<AgentMemoryItem>("agent_memory_save", { item });
+}
+
+export function agentMemoryDelete(id: string) {
+  return invoke<void>("agent_memory_delete", { id });
+}
+
+export function onAgentMemoryChanged(handler: (items: AgentMemoryItem[]) => void): Promise<UnlistenFn> {
+  return listen<AgentMemoryItem[]>("agent-memory-changed", (event) => handler(event.payload));
 }
 
 export function agentStop(runId: number) {

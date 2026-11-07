@@ -690,7 +690,22 @@ pub struct AutomationSettings {
     pub scheduler_enabled: bool,
     /// Scheduled runs wait while the PC is on battery.
     pub pause_on_battery: bool,
+    /// Autonomy new agent runs start with: `ask`, `auto` or `full`.
+    pub default_autonomy: String,
+    /// Helper agents one run may have working at once. Zero turns helpers off.
+    pub max_parallel_agents: u32,
+    /// The agent keeps notes across runs and reads them back.
+    pub agent_memory: bool,
+    /// Show a Windows notification when a background run finishes or needs you.
+    pub agent_notify: bool,
+    /// The agent may run JavaScript in pages.
+    pub agent_allow_script: bool,
+    /// Show the model's reply as it is written.
+    pub stream_replies: bool,
 }
+
+pub const MAX_AGENT_STEPS: u32 = 500;
+pub const MAX_PARALLEL_AGENTS: u32 = 6;
 
 impl Default for AutomationSettings {
     fn default() -> Self {
@@ -708,6 +723,12 @@ impl Default for AutomationSettings {
             mcp_allow_evaluate: false,
             scheduler_enabled: true,
             pause_on_battery: true,
+            default_autonomy: "ask".into(),
+            max_parallel_agents: 3,
+            agent_memory: true,
+            agent_notify: true,
+            agent_allow_script: false,
+            stream_replies: true,
         }
     }
 }
@@ -715,7 +736,11 @@ impl Default for AutomationSettings {
 impl AutomationSettings {
     fn normalize(mut self) -> Self {
         self.agent_model = self.agent_model.trim().chars().take(120).collect();
-        self.max_steps = self.max_steps.clamp(5, 200);
+        self.max_steps = self.max_steps.clamp(5, MAX_AGENT_STEPS);
+        if !matches!(self.default_autonomy.as_str(), "ask" | "auto" | "full") {
+            self.default_autonomy = "ask".into();
+        }
+        self.max_parallel_agents = self.max_parallel_agents.min(MAX_PARALLEL_AGENTS);
         if self.mcp_port < 1024 {
             self.mcp_port = DEFAULT_MCP_PORT;
         }

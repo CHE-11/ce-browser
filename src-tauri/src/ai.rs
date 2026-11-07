@@ -621,13 +621,15 @@ pub fn complete(
 const TOOL_MAX_TOKENS: u32 = 4096;
 
 /// One piece of a chat message. Images are base64 without the `data:` prefix.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ChatPart {
     Text(String),
     Image { media_type: String, data: String },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ChatMessage {
     User(Vec<ChatPart>),
     Assistant {
@@ -648,17 +650,49 @@ pub struct ToolSpec {
     pub parameters: Value,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: Value,
 }
 
+/// Tokens one request used, as the provider reported them. Zero when it didn't say.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Usage {
+    pub input: u64,
+    pub output: u64,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ToolReply {
     pub text: String,
     pub calls: Vec<ToolCall>,
+    pub usage: Usage,
+}
+
+fn openai_usage(value: &Value) -> Usage {
+    let usage = value.get("usage").unwrap_or(&Value::Null);
+    Usage {
+        input: usage
+            .get("prompt_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        output: usage
+            .get("completion_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+    }
+}
+
+fn anthropic_usage(usage: &Value) -> Usage {
+    let count = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+    Usage {
+        input: count("input_tokens")
+            + count("cache_read_input_tokens")
+            + count("cache_creation_input_tokens"),
+        output: count("output_tokens"),
+    }
 }
 
 fn openai_parts(parts: &[ChatPart]) -> Value {
@@ -889,11 +923,18 @@ pub fn openai_tool_reply(value: &Value) -> ToolReply {
                 .collect()
         })
         .unwrap_or_default();
-    ToolReply { text, calls }
+    ToolReply {
+        text,
+        calls,
+        usage: openai_usage(value),
+    }
 }
 
 pub fn anthropic_tool_reply(value: &Value) -> ToolReply {
-    let mut reply = ToolReply::default();
+    let mut reply = ToolReply {
+        usage: anthropic_usage(value.get("usage").unwrap_or(&Value::Null)),
+        ..ToolReply::default()
+    };
     let Some(blocks) = value.get("content").and_then(Value::as_array) else {
         return reply;
     };
@@ -937,16 +978,22 @@ pub fn anthropic_tool_reply(value: &Value) -> ToolReply {
     reply
 }
 
-/// One model turn that may call tools. `model` overrides the provider model when it is not blank.
-pub fn complete_tools(
+struct ToolRequest {
+    provider: &'static str,
+    url: String,
+    endpoint: String,
+    key: String,
+    body: Value,
+}
+
+fn tool_request(
     app: &AppHandle,
     current: &settings::BrowserSettings,
     model: &str,
     system: &str,
     messages: &[ChatMessage],
     tools: &[ToolSpec],
-    timeout: Duration,
-) -> Result<ToolReply, String> {
+) -> Result<ToolRequest, String> {
     let provider = provider_id(current);
     let endpoint = endpoint_of(current);
     if endpoint.is_empty() {
@@ -974,10 +1021,37 @@ pub fn complete_tools(
     if provider == "claude" && body["max_tokens"].as_u64().unwrap_or(0) < TOOL_MAX_TOKENS as u64 {
         body["max_tokens"] = json!(TOOL_MAX_TOKENS);
     }
-    let text = send(provider, &url, &endpoint, &key, &body, timeout)?;
+    Ok(ToolRequest {
+        provider,
+        url,
+        endpoint,
+        key,
+        body,
+    })
+}
+
+/// One model turn that may call tools. `model` overrides the provider model when it is not blank.
+pub fn complete_tools(
+    app: &AppHandle,
+    current: &settings::BrowserSettings,
+    model: &str,
+    system: &str,
+    messages: &[ChatMessage],
+    tools: &[ToolSpec],
+    timeout: Duration,
+) -> Result<ToolReply, String> {
+    let request = tool_request(app, current, model, system, messages, tools)?;
+    let text = send(
+        request.provider,
+        &request.url,
+        &request.endpoint,
+        &request.key,
+        &request.body,
+        timeout,
+    )?;
     let value: Value =
         serde_json::from_str(&text).map_err(|_| "The assistant returned nothing.".to_string())?;
-    let reply = if provider == "claude" {
+    let reply = if request.provider == "claude" {
         anthropic_tool_reply(&value)
     } else {
         openai_tool_reply(&value)
@@ -986,6 +1060,318 @@ pub fn complete_tools(
         return Err("The assistant returned nothing.".into());
     }
     Ok(reply)
+}
+
+/// What a streaming reply has written so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamPiece {
+    Text,
+    Thinking,
+}
+
+/// Endpoints that answered a streaming request with an error, so later turns skip streaming.
+fn no_stream() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static ENDPOINTS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    ENDPOINTS.get_or_init(Default::default)
+}
+
+/// Like `complete_tools`, but calls `on_delta` with each piece of text as the model writes it.
+/// `on_delta` returns false to stop reading. Falls back to one plain request when the endpoint
+/// can't stream.
+#[allow(clippy::too_many_arguments)]
+pub fn complete_tools_stream(
+    app: &AppHandle,
+    current: &settings::BrowserSettings,
+    model: &str,
+    system: &str,
+    messages: &[ChatMessage],
+    tools: &[ToolSpec],
+    timeout: Duration,
+    on_delta: &mut dyn FnMut(StreamPiece, &str) -> bool,
+) -> Result<ToolReply, String> {
+    let mut request = tool_request(app, current, model, system, messages, tools)?;
+    if no_stream()
+        .lock()
+        .is_ok_and(|skip| skip.contains(&request.endpoint))
+    {
+        return complete_tools(app, current, model, system, messages, tools, timeout);
+    }
+    request.body["stream"] = json!(true);
+    if request.provider != "claude" {
+        request.body["stream_options"] = json!({ "include_usage": true });
+    }
+    let payload = serde_json::to_string(&request.body)
+        .map_err(|_| "Couldn't reach the assistant.".to_string())?;
+    let mut http = ureq::post(&request.url)
+        .timeout(timeout)
+        .set("Content-Type", "application/json")
+        .set("Accept", "text/event-stream");
+    http = authorize(http, request.provider, &request.key);
+    let response = match http.send_string(&payload) {
+        Ok(response) => response,
+        Err(ureq::Error::Status(status, response)) => {
+            let body = error_body(response);
+            if status == 400 || status == 404 || status == 415 || status == 422 {
+                if let Ok(mut skip) = no_stream().lock() {
+                    skip.insert(request.endpoint.clone());
+                }
+                return complete_tools(app, current, model, system, messages, tools, timeout);
+            }
+            return Err(http_error(status, &request.endpoint, &body));
+        }
+        Err(ureq::Error::Transport(error)) => {
+            return Err(transport_error(&request.endpoint, &error.to_string()));
+        }
+    };
+    let streamed = response
+        .header("Content-Type")
+        .is_some_and(|kind| kind.contains("event-stream"));
+    if !streamed {
+        let text = read_body(response)?;
+        let value: Value = serde_json::from_str(&text)
+            .map_err(|_| "The assistant returned nothing.".to_string())?;
+        let reply = if request.provider == "claude" {
+            anthropic_tool_reply(&value)
+        } else {
+            openai_tool_reply(&value)
+        };
+        if !reply.text.is_empty() {
+            on_delta(StreamPiece::Text, &reply.text);
+        }
+        return non_empty(reply);
+    }
+    let reader = std::io::BufReader::new(response.into_reader().take(4_000_000));
+    let reply = if request.provider == "claude" {
+        read_anthropic_stream(reader, on_delta)?
+    } else {
+        read_openai_stream(reader, on_delta)?
+    };
+    non_empty(reply)
+}
+
+fn non_empty(reply: ToolReply) -> Result<ToolReply, String> {
+    if reply.text.is_empty() && reply.calls.is_empty() {
+        Err("The assistant returned nothing.".into())
+    } else {
+        Ok(reply)
+    }
+}
+
+/// The JSON of each `data:` line of a server-sent event stream, until `[DONE]`.
+fn stream_events(
+    reader: impl std::io::BufRead,
+    mut each: impl FnMut(Value) -> Result<bool, String>,
+) -> Result<(), String> {
+    for line in reader.lines() {
+        let line = line.map_err(|_| "The assistant stopped answering.".to_string())?;
+        let Some(data) = line.strip_prefix("data:") else {
+            continue;
+        };
+        let data = data.trim();
+        if data == "[DONE]" {
+            break;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(data) else {
+            continue;
+        };
+        if let Some(error) = value.get("error") {
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("The assistant returned an error.");
+            return Err(message.to_string());
+        }
+        if !each(value)? {
+            break;
+        }
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct PartialCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+fn finish_calls(calls: Vec<PartialCall>, prefix: &str) -> Vec<ToolCall> {
+    calls
+        .into_iter()
+        .enumerate()
+        .filter(|(_, call)| !call.name.is_empty())
+        .map(|(index, call)| ToolCall {
+            id: if call.id.is_empty() {
+                format!("{prefix}{index}")
+            } else {
+                call.id
+            },
+            name: call.name,
+            arguments: parse_arguments(&Value::String(call.arguments)),
+        })
+        .collect()
+}
+
+fn read_openai_stream(
+    reader: impl std::io::BufRead,
+    on_delta: &mut dyn FnMut(StreamPiece, &str) -> bool,
+) -> Result<ToolReply, String> {
+    let mut text = String::new();
+    let mut thinking = String::new();
+    let mut calls: Vec<PartialCall> = Vec::new();
+    let mut usage = Usage::default();
+    stream_events(reader, |value| {
+        if value.get("usage").is_some_and(Value::is_object) {
+            usage = openai_usage(&value);
+        }
+        let Some(delta) = value.pointer("/choices/0/delta") else {
+            return Ok(true);
+        };
+        let mut keep = true;
+        if let Some(piece) = delta.get("content").and_then(Value::as_str)
+            && !piece.is_empty()
+        {
+            text.push_str(piece);
+            keep = on_delta(StreamPiece::Text, &text);
+        }
+        let reasoning = delta
+            .get("reasoning_content")
+            .or_else(|| delta.get("reasoning"))
+            .and_then(Value::as_str);
+        if let Some(piece) = reasoning
+            && !piece.is_empty()
+        {
+            thinking.push_str(piece);
+            keep = keep && on_delta(StreamPiece::Thinking, &thinking);
+        }
+        for call in delta
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let index = call
+                .get("index")
+                .and_then(Value::as_u64)
+                .unwrap_or(calls.len() as u64) as usize;
+            if index > 64 {
+                continue;
+            }
+            while calls.len() <= index {
+                calls.push(PartialCall::default());
+            }
+            let entry = &mut calls[index];
+            if let Some(id) = call.get("id").and_then(Value::as_str) {
+                entry.id = id.to_string();
+            }
+            if let Some(function) = call.get("function") {
+                if let Some(name) = function.get("name").and_then(Value::as_str) {
+                    entry.name.push_str(name);
+                }
+                if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
+                    entry.arguments.push_str(arguments);
+                }
+            }
+        }
+        Ok(keep)
+    })?;
+    Ok(ToolReply {
+        text: text.trim().to_string(),
+        calls: finish_calls(calls, "call_"),
+        usage,
+    })
+}
+
+fn read_anthropic_stream(
+    reader: impl std::io::BufRead,
+    on_delta: &mut dyn FnMut(StreamPiece, &str) -> bool,
+) -> Result<ToolReply, String> {
+    let mut text = String::new();
+    let mut thinking = String::new();
+    // Content blocks by index: tool calls collect their JSON input in pieces.
+    let mut blocks: Vec<Option<PartialCall>> = Vec::new();
+    let mut usage = Usage::default();
+    stream_events(reader, |value| {
+        let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
+        let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+        match kind {
+            "message_start" => {
+                if let Some(start) = value.pointer("/message/usage") {
+                    usage = anthropic_usage(start);
+                }
+            }
+            "content_block_start" => {
+                if index > 64 {
+                    return Ok(true);
+                }
+                while blocks.len() <= index {
+                    blocks.push(None);
+                }
+                let block = value.get("content_block").unwrap_or(&Value::Null);
+                if block.get("type").and_then(Value::as_str) == Some("tool_use") {
+                    blocks[index] = Some(PartialCall {
+                        id: block
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                        name: block
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_string(),
+                        arguments: String::new(),
+                    });
+                } else if block.get("type").and_then(Value::as_str) == Some("text")
+                    && !text.is_empty()
+                {
+                    text.push('\n');
+                }
+            }
+            "content_block_delta" => {
+                let delta = value.get("delta").unwrap_or(&Value::Null);
+                match delta.get("type").and_then(Value::as_str) {
+                    Some("text_delta") => {
+                        text.push_str(delta.get("text").and_then(Value::as_str).unwrap_or(""));
+                        return Ok(on_delta(StreamPiece::Text, &text));
+                    }
+                    Some("thinking_delta") => {
+                        thinking
+                            .push_str(delta.get("thinking").and_then(Value::as_str).unwrap_or(""));
+                        return Ok(on_delta(StreamPiece::Thinking, &thinking));
+                    }
+                    Some("input_json_delta") => {
+                        if let Some(Some(call)) = blocks.get_mut(index) {
+                            call.arguments.push_str(
+                                delta
+                                    .get("partial_json")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or(""),
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            "message_delta" => {
+                if let Some(output) = value
+                    .pointer("/usage/output_tokens")
+                    .and_then(Value::as_u64)
+                {
+                    usage.output = output;
+                }
+            }
+            "message_stop" => return Ok(false),
+            _ => {}
+        }
+        Ok(true)
+    })?;
+    Ok(ToolReply {
+        text: text.trim().to_string(),
+        calls: finish_calls(blocks.into_iter().flatten().collect(), "toolu_"),
+        usage,
+    })
 }
 
 pub fn list_models(app: &AppHandle) -> Result<Vec<String>, String> {
@@ -1193,7 +1579,8 @@ mod tests {
         anthropic_tool_reply, anthropic_tools_body, attach_thinking, attach_tool_thinking,
         chat_tools_require_reasoning_none, chat_url, claude_models_url, http_error, messages_url,
         model_accepts_thinking, model_ids, model_page, models_url, openai_body, openai_text,
-        openai_tool_reply, openai_tools_body, recent_text_models, text_chat_model, transport_error,
+        openai_tool_reply, openai_tools_body, read_anthropic_stream, read_openai_stream,
+        recent_text_models, text_chat_model, transport_error, Usage,
     };
 
     fn tool_history() -> (Vec<ChatMessage>, Vec<ToolSpec>) {
@@ -1535,5 +1922,48 @@ mod tests {
         let mut plain = openai_body("gpt-6-sol", "sys", "user", false);
         attach_thinking("openai", "gpt-6-sol", "high", &mut plain);
         assert_eq!(plain["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn streams_build_text_calls_and_usage() {
+        let openai = "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"lo\",\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"click\",\"arguments\":\"{\\\"ref\\\":\"}}]}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"4}\"}}]}}]}\n\n\
+data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":3}}\n\n\
+data: [DONE]\n";
+        let mut seen = Vec::new();
+        let reply = read_openai_stream(openai.as_bytes(), &mut |_, text| {
+            seen.push(text.to_string());
+            true
+        })
+        .unwrap();
+        assert_eq!(reply.text, "Hello");
+        assert_eq!(seen.last().unwrap(), "Hello");
+        assert_eq!(reply.calls.len(), 1);
+        assert_eq!(reply.calls[0].name, "click");
+        assert_eq!(reply.calls[0].arguments["ref"], 4);
+        assert_eq!(reply.usage, Usage { input: 10, output: 3 });
+
+        let claude = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":20,\"output_tokens\":1}}}\n\n\
+data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n\
+data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Done\"}}\n\n\
+data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"done\"}}\n\n\
+data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"summary\\\":\"}}\n\n\
+data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"ok\\\"}\"}}\n\n\
+data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":7}}\n\n\
+data: {\"type\":\"message_stop\"}\n";
+        let reply = read_anthropic_stream(claude.as_bytes(), &mut |_, _| true).unwrap();
+        assert_eq!(reply.text, "Done");
+        assert_eq!(reply.calls[0].id, "t1");
+        assert_eq!(reply.calls[0].arguments["summary"], "ok");
+        assert_eq!(reply.usage, Usage { input: 20, output: 7 });
+    }
+
+    #[test]
+    fn transcripts_round_trip() {
+        let (messages, _) = tool_history();
+        let saved = serde_json::to_string(&messages).unwrap();
+        let loaded: Vec<ChatMessage> = serde_json::from_str(&saved).unwrap();
+        assert_eq!(loaded.len(), messages.len());
     }
 }

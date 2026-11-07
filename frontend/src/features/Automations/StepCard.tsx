@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { ArrowDown, ArrowUp, Crosshair, Trash2 } from "lucide-react";
-import type { ExtractSpec, FlowStep, FlowTarget, TabInfo } from "@type/browser";
+import type { AgentAutonomy, ExtractSpec, FlowStep, FlowTarget, TabInfo } from "@type/browser";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
+import { AUTONOMY_LEVELS } from "@/lib/agent-autonomy";
 import { extractPick } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { inputClassName } from "@features/Agent/agent-styles";
@@ -293,16 +294,36 @@ export function StepCard({ id, step, index, count, pickTabs, onChange, onMove, o
       ) : null}
 
       {step.kind === "ai" ? (
-        <Field id={`${id}-prompt`} label="What the agent should do here">
-          <textarea
-            id={`${id}-prompt-input`}
-            rows={3}
-            className={inputClassName}
-            value={step.prompt}
-            placeholder="Find the cheapest shipping option and choose it"
-            onChange={(event) => set({ prompt: event.target.value })}
-          />
-        </Field>
+        <div id={`${id}-ai`} className="flex flex-col gap-3">
+          <Field id={`${id}-prompt`} label="What the agent should do here">
+            <textarea
+              id={`${id}-prompt-input`}
+              rows={3}
+              className={inputClassName}
+              value={step.prompt}
+              placeholder="Find the cheapest shipping option and choose it"
+              onChange={(event) => set({ prompt: event.target.value })}
+            />
+          </Field>
+          <Field id={`${id}-autonomy`} label="How much it may do without asking" className="w-56">
+            <select
+              id={`${id}-autonomy-input`}
+              className={inputClassName}
+              value={step.autonomy ?? ""}
+              title={AUTONOMY_LEVELS.find((level) => level.value === step.autonomy)?.hint ?? "Uses the default from Settings."}
+              onChange={(event) => set({ autonomy: event.target.value as AgentAutonomy | "" })}
+            >
+              <option id={`${id}-autonomy-default`} value="">
+                Default from Settings
+              </option>
+              {AUTONOMY_LEVELS.map((level) => (
+                <option id={`${id}-autonomy-${level.value}`} key={level.value} value={level.value}>
+                  {level.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
       ) : null}
 
       {step.kind === "notify" ? (

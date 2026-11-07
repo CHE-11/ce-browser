@@ -4,9 +4,11 @@ import type { BookmarkNode, BookmarkTree, BrowserSettings, ClosedEntry, PageRule
 import { applyFontPreview, applyThemePreview, publishAppearance, publishFont } from "./appearance";
 import { applyChromeMetrics } from "./chrome-metrics";
 import {
+  agentMemory,
   agentRuns,
   automationsSnapshot,
   onAgentChanged,
+  onAgentMemoryChanged,
   onAutomationsChanged,
   currentWindowLabel as browserWindowLabel,
   getPageRules,
@@ -306,6 +308,12 @@ export function useExtensions() {
 export function useAgentRuns() {
   const { value, loaded } = useLiveValue("agent-runs", agentRuns, onAgentChanged);
   return { runs: value ?? [], loaded };
+}
+
+/** Notes the agent keeps across runs. */
+export function useAgentMemoryItems() {
+  const { value, error, loaded } = useLiveValue("agent-memory", agentMemory, onAgentMemoryChanged);
+  return { items: value ?? [], error, loaded };
 }
 
 /** Flows, run history, the current recording, and datasets. */

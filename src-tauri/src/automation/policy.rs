@@ -5,15 +5,72 @@ use crate::settings::{AutomationSettings, sleep_site_key};
 
 use super::driver::ElementInfo;
 
+/// What an action that needs approval could do. Autonomy levels skip asking for some of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Risk {
+    /// Opening a site that is not on the allow list.
+    Open,
+    /// Sending, posting or publishing something.
+    Send,
+    /// Deleting, closing or cancelling something.
+    Destructive,
+    /// Spending money or entering payment details.
+    Payment,
+    /// Putting local files on a page.
+    Upload,
+    /// Running a script in the page.
+    Script,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Verdict {
     Allow,
-    Ask(String),
+    Ask { prompt: String, risk: Risk },
     Block(String),
 }
 
-/// Words that mark a click or submit as spending money, sending, publishing or deleting.
-const SENSITIVE: &[&str] = &[
+impl Verdict {
+    pub fn ask(risk: Risk, prompt: impl Into<String>) -> Self {
+        Verdict::Ask {
+            prompt: prompt.into(),
+            risk,
+        }
+    }
+}
+
+pub const AUTONOMY_LEVELS: [&str; 3] = ["ask", "auto", "full"];
+
+/// `ask`, `auto` or `full`. Anything else is `ask`.
+pub fn autonomy(value: &str) -> &'static str {
+    AUTONOMY_LEVELS
+        .into_iter()
+        .find(|level| *level == value.trim())
+        .unwrap_or("ask")
+}
+
+fn autonomy_rank(value: &str) -> usize {
+    AUTONOMY_LEVELS
+        .iter()
+        .position(|level| *level == autonomy(value))
+        .unwrap_or(0)
+}
+
+/// The lower of two autonomy levels, so a helper never gets more freedom than its parent.
+pub fn lower_autonomy(a: &str, b: &str) -> &'static str {
+    AUTONOMY_LEVELS[autonomy_rank(a).min(autonomy_rank(b))]
+}
+
+/// Whether a run at `level` goes ahead without asking about `risk`. Payments and uploads always ask.
+pub fn autonomy_allows(level: &str, risk: Risk) -> bool {
+    match autonomy(level) {
+        "full" => !matches!(risk, Risk::Payment | Risk::Upload),
+        "auto" => matches!(risk, Risk::Open | Risk::Send),
+        _ => false,
+    }
+}
+
+/// Words that mark a click or submit as spending money.
+const PAYMENT: &[&str] = &[
     "pay",
     "pay now",
     "buy",
@@ -29,26 +86,38 @@ const SENSITIVE: &[&str] = &[
     "complete order",
     "complete purchase",
     "confirm payment",
-    "send",
     "send money",
-    "delete",
-    "remove",
     "transfer",
     "subscribe",
-    "unsubscribe",
     "donate",
     "book now",
     "reserve",
-    "publish",
-    "post",
-    "tweet",
     "withdraw",
+    "accept and pay",
+];
+
+/// Words that mark a click or submit as deleting or closing something.
+const DESTRUCTIVE: &[&str] = &[
+    "delete",
+    "remove",
+    "unsubscribe",
     "close account",
     "deactivate",
     "cancel subscription",
-    "sign and submit",
-    "accept and pay",
 ];
+
+/// Words that mark a click or submit as sending or publishing.
+const SENDING: &[&str] = &["send", "publish", "post", "tweet", "sign and submit"];
+
+fn word_risk(word: &str) -> Risk {
+    if PAYMENT.contains(&word) {
+        Risk::Payment
+    } else if DESTRUCTIVE.contains(&word) {
+        Risk::Destructive
+    } else {
+        Risk::Send
+    }
+}
 
 fn host_listed(list: &[String], host: &str) -> bool {
     !host.is_empty()
@@ -87,9 +156,10 @@ pub fn open(settings: &AutomationSettings, url: &str) -> Verdict {
         && !host.is_empty()
         && !host_listed(&settings.allowed_sites, &host)
     {
-        return Verdict::Ask(format!(
-            "Open {host}? It is not on the automation allow list."
-        ));
+        return Verdict::ask(
+            Risk::Open,
+            format!("Open {host}? It is not on the automation allow list."),
+        );
     }
     Verdict::Allow
 }
@@ -117,11 +187,18 @@ pub fn sensitive_word(label: &str) -> Option<&'static str> {
     if label.is_empty() || label.len() > 160 {
         return None;
     }
-    SENSITIVE
+    PAYMENT
         .iter()
-        .rev()
-        .find(|word| contains_word(label, word))
+        .chain(DESTRUCTIVE)
+        .chain(SENDING)
+        .filter(|word| contains_word(label, word))
+        .max_by_key(|word| word.len())
         .copied()
+}
+
+/// What the sensitive word in `label` could do, if it has one.
+pub fn sensitive_risk(label: &str) -> Option<(&'static str, Risk)> {
+    sensitive_word(label).map(|word| (word, word_risk(word)))
 }
 
 fn label_of(info: &ElementInfo) -> String {
@@ -135,24 +212,27 @@ fn label_of(info: &ElementInfo) -> String {
 /// Clicking this element may spend money, send something or delete something.
 pub fn click(settings: &AutomationSettings, info: &ElementInfo) -> Verdict {
     if info.file {
-        return Verdict::Ask("Choose a file to upload on this page?".into());
+        return Verdict::ask(Risk::Upload, "Choose a file to upload on this page?");
     }
     if !settings.confirm_sensitive {
         return Verdict::Allow;
     }
     let submit = info.kind == "submit"
         || (info.tag == "button" && info.kind.is_empty() && !info.submits.is_empty());
-    if let Some(word) = sensitive_word(&info.name) {
-        return Verdict::Ask(format!(
-            "Click {}? It looks like a \"{word}\" action.",
-            label_of(info)
-        ));
+    if let Some((word, risk)) = sensitive_risk(&info.name) {
+        return Verdict::ask(
+            risk,
+            format!(
+                "Click {}? It looks like a \"{word}\" action.",
+                label_of(info)
+            ),
+        );
     }
     if submit && info.payment {
-        return Verdict::Ask(format!(
-            "Click {}? It submits a payment form.",
-            label_of(info)
-        ));
+        return Verdict::ask(
+            Risk::Payment,
+            format!("Click {}? It submits a payment form.", label_of(info)),
+        );
     }
     Verdict::Allow
 }
@@ -163,7 +243,7 @@ pub fn typing(settings: &AutomationSettings, info: &ElementInfo, secret: bool) -
         return Verdict::Allow;
     }
     if info.autocomplete.starts_with("cc-") {
-        return Verdict::Ask("Type into a payment card field?".into());
+        return Verdict::ask(Risk::Payment, "Type into a payment card field?");
     }
     let name = info.name.to_ascii_lowercase();
     if name.contains("card number")
@@ -171,7 +251,7 @@ pub fn typing(settings: &AutomationSettings, info: &ElementInfo, secret: bool) -
         || name.contains("cvc")
         || name.contains("security code")
     {
-        return Verdict::Ask("Type into a payment card field?".into());
+        return Verdict::ask(Risk::Payment, "Type into a payment card field?");
     }
     Verdict::Allow
 }
@@ -185,12 +265,13 @@ pub fn submit(settings: &AutomationSettings, focused: Option<&ElementInfo>) -> V
         return Verdict::Allow;
     };
     if info.payment {
-        return Verdict::Ask("Press Enter? It submits a payment form.".into());
+        return Verdict::ask(Risk::Payment, "Press Enter? It submits a payment form.");
     }
-    if let Some(word) = info.submits.iter().find_map(|label| sensitive_word(label)) {
-        return Verdict::Ask(format!(
-            "Press Enter? The form's button is a \"{word}\" action."
-        ));
+    if let Some((word, risk)) = info.submits.iter().find_map(|label| sensitive_risk(label)) {
+        return Verdict::ask(
+            risk,
+            format!("Press Enter? The form's button is a \"{word}\" action."),
+        );
     }
     Verdict::Allow
 }
@@ -224,7 +305,31 @@ mod tests {
         assert_eq!(click(&settings, &element("Next")), Verdict::Allow);
         assert!(matches!(
             click(&settings, &element("Delete repository")),
-            Verdict::Ask(_)
+            Verdict::Ask {
+                risk: Risk::Destructive,
+                ..
+            }
+        ));
+        assert!(matches!(
+            click(&settings, &element("Place your order")),
+            Verdict::Ask {
+                risk: Risk::Payment,
+                ..
+            }
+        ));
+        assert!(matches!(
+            click(&settings, &element("Send money")),
+            Verdict::Ask {
+                risk: Risk::Payment,
+                ..
+            }
+        ));
+        assert!(matches!(
+            click(&settings, &element("Post")),
+            Verdict::Ask {
+                risk: Risk::Send,
+                ..
+            }
         ));
         let relaxed = AutomationSettings {
             confirm_sensitive: false,
@@ -249,7 +354,10 @@ mod tests {
         );
         assert!(matches!(
             open(&settings, "https://other.org"),
-            Verdict::Ask(_)
+            Verdict::Ask {
+                risk: Risk::Open,
+                ..
+            }
         ));
         assert!(matches!(
             open(&settings, "https://www.bank.com"),
@@ -264,5 +372,20 @@ mod tests {
             Verdict::Block(_)
         ));
         assert_eq!(page(&settings, "ce://newtab"), Verdict::Allow);
+    }
+
+    #[test]
+    fn autonomy_levels_skip_some_questions() {
+        assert!(!autonomy_allows("ask", Risk::Open));
+        assert!(autonomy_allows("auto", Risk::Send));
+        assert!(!autonomy_allows("auto", Risk::Destructive));
+        assert!(autonomy_allows("full", Risk::Destructive));
+        assert!(autonomy_allows("full", Risk::Script));
+        assert!(!autonomy_allows("full", Risk::Payment));
+        assert!(!autonomy_allows("full", Risk::Upload));
+        assert!(!autonomy_allows("reckless", Risk::Open));
+        assert_eq!(autonomy("bogus"), "ask");
+        assert_eq!(lower_autonomy("full", "auto"), "auto");
+        assert_eq!(lower_autonomy("ask", "full"), "ask");
     }
 }

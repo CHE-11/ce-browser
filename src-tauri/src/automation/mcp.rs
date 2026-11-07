@@ -1024,10 +1024,13 @@ fn run_tool(
             agent::session_gate(
                 app,
                 session,
-                Verdict::Ask(format!(
-                    "Let the MCP client upload {} to this page?",
-                    paths.join(", ")
-                )),
+                Verdict::ask(
+                    policy::Risk::Upload,
+                    format!(
+                        "Let the MCP client upload {} to this page?",
+                        paths.join(", ")
+                    ),
+                ),
             )?;
             commit(session)?;
             driver::upload(app, tab, element, &paths)?;

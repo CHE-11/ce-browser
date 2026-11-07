@@ -907,6 +907,18 @@ export type AutomationSettings = {
   schedulerEnabled: boolean;
   /** Scheduled runs wait while the PC is on battery. */
   pauseOnBattery: boolean;
+  /** Autonomy new agent runs start with. */
+  defaultAutonomy: AgentAutonomy;
+  /** Helper agents one run may have working at once, 0 to 6. Zero turns helpers off. */
+  maxParallelAgents: number;
+  /** The agent keeps notes across runs and reads them back. */
+  agentMemory: boolean;
+  /** Windows notification when a background run finishes or needs you. */
+  agentNotify: boolean;
+  /** The agent may run JavaScript in pages. */
+  agentAllowScript: boolean;
+  /** Show the model's reply as it is written. */
+  streamReplies: boolean;
 };
 
 export type ToastPosition = "top-left" | "top-center" | "top-right" | "bottom-left" | "bottom-center" | "bottom-right";
@@ -1592,7 +1604,10 @@ export type OmniboxState = {
 
 // Automation
 
-export type AgentStepKind = "think" | "action" | "blocked" | "error" | "user" | "answer";
+export type AgentStepKind = "think" | "action" | "tool" | "approved" | "blocked" | "error" | "user" | "answer";
+
+/** `ask` waits for approval on sensitive actions. `auto` lets sends and new sites go ahead. `full` asks only before payments and uploads. */
+export type AgentAutonomy = "ask" | "auto" | "full";
 
 export type AgentStep = {
   kind: AgentStepKind;
@@ -1609,9 +1624,16 @@ export type AgentApproval = {
   /** `confirm` asks allow or deny. `question` asks for a typed answer. */
   kind: "confirm" | "question";
   prompt: string;
+  /** What a `confirm` could do. Blank for questions. */
+  risk: "" | "open" | "send" | "destructive" | "payment" | "upload" | "script" | "budget";
 };
 
 export type AgentRunStatus = "running" | "waiting" | "paused" | "done" | "failed" | "stopped";
+
+export type AgentPlanItem = {
+  text: string;
+  status: "pending" | "active" | "done" | "skipped";
+};
 
 export type AgentRun = {
   id: number;
@@ -1621,7 +1643,9 @@ export type AgentRun = {
   window: string;
   goal: string;
   status: AgentRunStatus;
+  /** Empty for older finished runs in a list; `agentRun` loads them. */
   steps: AgentStep[];
+  stepCount: number;
   approval: AgentApproval | null;
   result: string;
   started: number;
@@ -1629,6 +1653,50 @@ export type AgentRun = {
   finished: number;
   actions: number;
   maxSteps: number;
+  autonomy: AgentAutonomy;
+  /** Model override. Blank uses the agent model from Settings. */
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  /** Tokens before the run asks to keep going. Zero has no limit. */
+  budget: number;
+  plan: AgentPlanItem[];
+  /** The run that started this one as a helper. */
+  parent: number | null;
+  background: boolean;
+  /** Page actions that can be saved as a flow. */
+  flowSteps: number;
+  startUrl: string;
+};
+
+export type AgentStartOptions = {
+  autonomy?: AgentAutonomy;
+  model?: string;
+  background?: boolean;
+  /** Other tabs whose text the agent reads before it starts. */
+  contextTabs?: number[];
+  budget?: number;
+  /** Guidance for the model, such as from a slash command. Not shown as part of the goal. */
+  instructions?: string;
+};
+
+/** The model's reply as it is written. Empty text clears it. */
+export type AgentDelta = {
+  runId: number;
+  text: string;
+  thinking: string;
+};
+
+/** A note the agent keeps across runs. */
+export type AgentMemoryItem = {
+  id: string;
+  text: string;
+  /** Host the note is about. Blank applies everywhere. */
+  site: string;
+  /** Shown to the agent in every run. */
+  pinned: boolean;
+  created: number;
+  used: number;
 };
 
 export type McpStatus = {
@@ -1696,6 +1764,8 @@ export type FlowStep = {
   /** Keep going when this step fails. */
   optional: boolean;
   note: string;
+  /** How much an `ai` step's agent may do without asking. Blank uses the default from Settings. */
+  autonomy?: AgentAutonomy | "";
 };
 
 export type FlowTriggerKind = "interval" | "daily" | "weekly" | "startup" | "visit" | "pageChange" | "download" | "hotkey";

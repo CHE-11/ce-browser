@@ -1,50 +1,29 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { Bot, Eye, Hand, History, Play, Plus, Settings, Square, Trash2, X } from "lucide-react";
-import type { AgentRun, TabInfo } from "@type/browser";
+import { Bot, Hand, Play, Square } from "lucide-react";
+import type { AgentAutonomy } from "@type/browser";
 import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/EmptyState";
-import { IconButton } from "@/components/IconButton";
-import { activateTab, createTab, navigate, resizeAgentPanel, setAgentPanelWidth, toggleAgentPanel } from "@/lib/browser-client";
+import { parseAgentInput, type ComposerMode } from "@/lib/agent-commands";
+import { agentMemorySave, resizeAgentPanel, setAgentPanelWidth } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
+import { useAgentStream } from "@/lib/use-agent-stream";
 import { isActiveRun, useAgentRun } from "@/lib/use-agent-run";
 import { useAppearanceState, useSettings, useTabs } from "@/lib/use-browser";
 import { AgentApproval } from "./AgentApproval";
 import { AgentComposer } from "./AgentComposer";
 import { AgentError } from "./AgentError";
-import { AgentStepList } from "./AgentStepList";
-
-const STATUS_TEXT: Record<AgentRun["status"], string> = {
-  running: "Working",
-  waiting: "Waiting for you",
-  paused: "Paused while you take over",
-  done: "Done",
-  failed: "Failed",
-  stopped: "Stopped",
-};
-
-const STATUS_TONE: Record<AgentRun["status"], string> = {
-  running: "bg-sky-500",
-  waiting: "bg-amber-400",
-  paused: "bg-violet-400",
-  done: "bg-emerald-500",
-  failed: "bg-red-500",
-  stopped: "bg-zinc-500",
-};
+import { AgentGoalCard } from "./AgentGoalCard";
+import { AgentHeader, type AgentPanelView } from "./AgentHeader";
+import { AgentLiveView } from "./AgentLiveView";
+import { AgentMemoryView } from "./AgentMemoryView";
+import { AgentPlan } from "./AgentPlan";
+import { AgentResult } from "./AgentResult";
+import { AgentRunList } from "./AgentRunList";
+import { AgentTimeline } from "./AgentTimeline";
 
 const MIN_PANEL_WIDTH = 280;
 const MAX_PANEL_WIDTH = 720;
 const DEFAULT_PANEL_WIDTH = 380;
-const AI_SETTINGS_URL = "ce://settings?focus=settings-ai";
-
-/** Opens the AI/Agent settings section, reusing a settings tab in this window. */
-function openAiSettings(tabs: TabInfo[]) {
-  const open = tabs.find((tab) => tab.url.startsWith("ce://settings"));
-  if (!open) {
-    void createTab(AI_SETTINGS_URL);
-    return;
-  }
-  void activateTab(open.id).then(() => navigate(open.id, AI_SETTINGS_URL));
-}
 
 function clampPanelWidth(width: number) {
   return Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
@@ -58,13 +37,16 @@ export function AgentPanelPage() {
   const agent = useAgentRun();
   const { run, runs, activeTab } = agent;
   const active = isActiveRun(run);
+  const stream = useAgentStream(active && run ? run.id : null);
   const width = settings?.agentPanelWidth ?? DEFAULT_PANEL_WIDTH;
   const resizing = useRef(false);
   const [resizingPanel, setResizingPanel] = useState(false);
+  const [view, setView] = useState<AgentPanelView>("run");
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    document.title = "Agent";
-  }, []);
+    document.title = run ? `Agent · ${run.goal.slice(0, 40)}` : "Agent";
+  }, [run]);
 
   const stopRef = useRef(agent.stop);
   stopRef.current = agent.stop;
@@ -74,7 +56,7 @@ export function AgentPanelPage() {
       return;
     }
     const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || event.ctrlKey || event.altKey || event.metaKey) {
+      if (event.key !== "Escape" || event.ctrlKey || event.altKey || event.metaKey || event.defaultPrevented) {
         return;
       }
       event.preventDefault();
@@ -114,13 +96,45 @@ export function AgentPanelPage() {
     }
   };
 
+  const mode: ComposerMode = !run ? "start" : active ? "reply" : run.source === "agent" ? "followup" : "start";
+  const showRunAutonomy = !!run && active && run.source === "agent";
+  const autonomy: AgentAutonomy = showRunAutonomy ? run.autonomy : agent.draft.autonomy;
+  const modelFallback = settings?.automation.agentModel || settings?.aiProviders[settings.aiProvider]?.model || "";
+  const history = [...new Set(runs.filter((item) => item.source === "agent" && item.parent === null).map((item) => item.goal))].slice(0, 30);
+  const mentionTabs = tabs.windowTabs.filter((tab) => tab.id !== activeTab?.id && /^https?:/i.test(tab.url));
+
+  const submit = (text: string, contextTabs: number[]) => {
+    setNotice(null);
+    const parsed = parseAgentInput(text, mode);
+    if (parsed.kind === "memory") {
+      setView("memory");
+      return;
+    }
+    if (parsed.kind === "remember") {
+      void agentMemorySave({ id: "", text: parsed.text, site: "", pinned: false, created: 0, used: 0 })
+        .then(() => setNotice("Saved to memory."))
+        .catch((reason: unknown) => setNotice(String(reason)));
+      return;
+    }
+    if (parsed.kind === "message") {
+      if (!run) {
+        return;
+      }
+      if (active) {
+        agent.reply(run.id, parsed.text);
+      } else {
+        agent.followUp(run.id, parsed.text);
+      }
+      return;
+    }
+    setView("run");
+    void agent.start({ goal: parsed.goal, instructions: parsed.instructions, contextTabs, background: parsed.background, autonomy: parsed.autonomy });
+  };
+
   return (
     <div
       id="agent-panel"
-      className={cn(
-        "relative flex h-screen flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100",
-        resizingPanel && "cursor-col-resize select-none",
-      )}
+      className={cn("relative flex h-screen flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100", resizingPanel && "cursor-col-resize select-none")}
       onContextMenu={(event) => event.preventDefault()}
     >
       <div
@@ -140,107 +154,77 @@ export function AgentPanelPage() {
         onPointerDown={onResizePointerDown}
         onKeyDown={onResizeKeyDown}
       />
-      <header id="agent-panel-header" className="flex h-[var(--toolbar-height)] shrink-0 items-center gap-2 border-b border-zinc-800 pl-3 pr-1.5">
-        <Bot id="agent-panel-header-icon" className="size-4 text-sky-400" aria-hidden />
-        <h1 id="agent-panel-title" className="text-sm font-semibold">
-          Agent
-        </h1>
-        <IconButton
-          id="agent-panel-settings"
-          label="AI/Agent settings"
-          className="size-7"
-          onClick={() => openAiSettings(tabs.windowTabs)}
-        >
-          <Settings id="agent-panel-settings-icon" aria-hidden />
-        </IconButton>
-        <div id="agent-panel-header-spacer" className="min-w-0 flex-1" />
-        <IconButton id="agent-panel-new" label="New task" className="size-7" onClick={agent.newTask}>
-          <Plus id="agent-panel-new-icon" aria-hidden />
-        </IconButton>
-        <IconButton id="agent-panel-close" label="Close the agent panel" className="size-7" onClick={() => void toggleAgentPanel(false)}>
-          <X id="agent-panel-close-icon" aria-hidden />
-        </IconButton>
-      </header>
+      <AgentHeader
+        tabs={tabs.windowTabs}
+        view={view}
+        runCount={runs.length}
+        onView={setView}
+        onNewTask={() => {
+          setView("run");
+          agent.newTask();
+        }}
+        autonomy={autonomy}
+        autonomyFor={showRunAutonomy ? "run" : "next"}
+        onAutonomy={(level) => (showRunAutonomy ? agent.setAutonomy(run.id, level) : agent.setDraft({ autonomy: level }))}
+        model={showRunAutonomy ? null : agent.draft.model}
+        modelFallback={modelFallback}
+        onModel={(model) => agent.setDraft({ model })}
+      />
 
-      {runs.length > 1 ? (
-        <div id="agent-panel-history" className="flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3 py-1.5">
-          <History id="agent-panel-history-icon" className="size-3.5 text-zinc-500" aria-hidden />
-          <select
-            id="agent-panel-history-select"
-            className="h-7 min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-900 px-1 text-xs text-zinc-200"
-            value={run?.id ?? ""}
-            onChange={(event) => agent.select(Number(event.target.value))}
-          >
-            {run === null ? (
-              <option id="agent-panel-history-new" value="">
-                New task
-              </option>
-            ) : null}
-            {runs.map((item) => (
-              <option id={`agent-panel-history-${item.id}`} key={item.id} value={item.id}>
-                {`${item.source === "mcp" ? "MCP · " : ""}${item.goal.slice(0, 60)} · ${STATUS_TEXT[item.status]}`}
-              </option>
-            ))}
-          </select>
-          <IconButton id="agent-panel-history-clear" label="Clear finished runs" className="size-7" onClick={agent.clear}>
-            <Trash2 id="agent-panel-history-clear-icon" aria-hidden />
-          </IconButton>
-        </div>
-      ) : null}
-
-      <main id="agent-panel-body" className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        {run ? (
-          <div id="agent-panel-run" className="flex flex-col gap-3">
-            <section id="agent-panel-goal" className="rounded-lg bg-zinc-900 p-3 ring-1 ring-zinc-800">
-              <div id="agent-panel-goal-status" className="mb-1 flex items-center gap-2 text-[11px] text-zinc-400">
-                <span id="agent-panel-goal-dot" className={cn("size-2 rounded-full", STATUS_TONE[run.status], active && run.status === "running" && "animate-pulse")} />
-                {STATUS_TEXT[run.status]}
-                <span id="agent-panel-goal-count" className="ml-auto">
-                  {run.source === "mcp" ? `${run.actions} actions` : `${run.actions} / ${run.maxSteps} actions`}
-                </span>
-              </div>
-              <p id="agent-panel-goal-text" className="whitespace-pre-wrap text-sm">
-                {run.goal}
-              </p>
-              <Button id="agent-panel-goal-tab" size="xs" variant="link" className="mt-1" onClick={() => agent.showTab(run.tabId)}>
-                <Eye id="agent-panel-goal-tab-icon" className="size-3" aria-hidden />
-                Show its tab
-              </Button>
-            </section>
-            <AgentStepList id="agent-panel-steps" steps={run.steps} />
-            {run.result && !active ? (
-              run.status === "failed" ? (
-                <AgentError id="agent-panel-result" text={run.result} />
-              ) : (
-                <section
-                  id="agent-panel-result"
-                  className={cn(
-                    "whitespace-pre-wrap break-words rounded-lg p-3 text-sm ring-1",
-                    run.status === "done" ? "bg-emerald-950/40 ring-emerald-800/60" : "bg-zinc-900 ring-zinc-800",
-                  )}
-                >
-                  {run.result}
-                </section>
-              )
-            ) : null}
-          </div>
-        ) : (
-          <EmptyState
-            id="agent-panel-empty"
-            icon={Bot}
-            title="Give the agent a task"
-            hint={`It works in the selected tab${activeTab ? ` (${activeTab.title || activeTab.url})` : ""}, using real clicks and typing. Purchases, sends, and deletes wait for your approval.`}
-          />
-        )}
-      </main>
+      {view === "runs" ? (
+        <AgentRunList
+          runs={runs}
+          selectedId={run?.id ?? null}
+          onSelect={(id) => {
+            agent.select(id);
+            setView("run");
+          }}
+          onDelete={agent.deleteRun}
+          onClear={agent.clear}
+          onClose={() => setView("run")}
+        />
+      ) : view === "memory" ? (
+        <AgentMemoryView enabled={settings?.automation.agentMemory ?? true} onClose={() => setView("run")} />
+      ) : (
+        <main id="agent-panel-body" className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+          {run ? (
+            <div id="agent-panel-run" className="flex flex-col gap-3">
+              <AgentGoalCard run={run} helpers={agent.childrenOf(run.id)} onShowTab={() => agent.showTab(run.tabId)} onSelect={agent.select} />
+              <AgentPlan id="agent-panel-plan" plan={run.plan} />
+              {active ? <AgentLiveView run={run} onShowTab={() => agent.showTab(run.tabId)} /> : null}
+              {run.steps.length < run.stepCount && run.steps.length === 0 ? (
+                <p id="agent-panel-steps-loading" className="text-xs text-zinc-500">
+                  Loading steps…
+                </p>
+              ) : null}
+              <AgentTimeline id="agent-panel-steps" steps={run.steps} streaming={active ? stream : null} />
+              {!active ? <AgentResult run={run} onSaveFlow={() => agent.saveFlow(run.id)} onError={setNotice} /> : null}
+            </div>
+          ) : (
+            <EmptyState
+              id="agent-panel-empty"
+              icon={Bot}
+              title="Give the agent a task"
+              hint={`It works in the selected tab${activeTab ? ` (${activeTab.title || activeTab.url})` : ""} with real clicks and typing. It can open tabs, run your flows, pull data, remember things, and start helpers. Type / for commands or @ to add a tab.`}
+            />
+          )}
+        </main>
+      )}
 
       <footer id="agent-panel-footer" className="flex shrink-0 flex-col gap-2 border-t border-zinc-800 p-3">
         {agent.error ? <AgentError id="agent-panel-error" text={agent.error} alert /> : null}
+        {notice ? (
+          <p id="agent-panel-notice" role="status" className="text-xs text-zinc-400">
+            {notice}
+          </p>
+        ) : null}
         {run?.approval ? (
           <AgentApproval
             approval={run.approval}
+            autonomy={run.autonomy}
             onAnswer={(allow) => agent.answer(run.id, run.approval!.id, allow)}
             onReply={(text) => agent.reply(run.id, text)}
+            onRaise={run.source === "agent" ? (level) => agent.setAutonomy(run.id, level) : undefined}
           />
         ) : null}
         {run && active ? (
@@ -273,16 +257,18 @@ export function AgentPanelPage() {
             </Button>
           </div>
         ) : null}
-        {run && active && run.source === "agent" ? (
-          <AgentComposer mode="reply" onSubmit={(text) => agent.reply(run.id, text)} />
-        ) : !run || !active ? (
+        {run && active && run.source === "mcp" ? null : (
           <AgentComposer
-            mode="start"
-            disabled={!activeTab}
+            key={`${mode}-${run?.id ?? "new"}`}
+            mode={mode}
+            draftKey={`${mode}-${run?.id ?? "new"}`}
+            disabled={mode === "start" && !activeTab}
             suggestions={settings?.agentSuggestions ?? ["Summarize this page and list the key facts"]}
-            onSubmit={agent.start}
+            tabs={mentionTabs}
+            history={mode === "start" ? history : []}
+            onSubmit={submit}
           />
-        ) : null}
+        )}
       </footer>
     </div>
   );

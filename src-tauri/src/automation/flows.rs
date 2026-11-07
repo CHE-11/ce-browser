@@ -80,6 +80,9 @@ pub struct FlowStep {
     pub pages: u32,
     pub optional: bool,
     pub note: String,
+    /// How much an `ai` step's agent may do without asking: `ask`, `auto` or `full`.
+    /// Blank uses the default from Settings.
+    pub autonomy: String,
     /// Fields from newer builds, written back unchanged.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
@@ -1089,7 +1092,7 @@ fn run_step(context: &mut Context, step: &FlowStep) -> Result<StepOutcome, Strin
             if prompt.trim().is_empty() {
                 return Err("Describe what the AI should do.".into());
             }
-            let result = run_agent(context, &prompt)?;
+            let result = run_agent(context, &prompt, &step.autonomy)?;
             context.vars.insert("output".into(), result.clone());
             context.output.push(result.clone());
             ok(label, clip(&result, 600))
@@ -1223,8 +1226,17 @@ fn heal_with_ai(context: &Context, target: &FlowTarget) -> Result<u32, String> {
 }
 
 /// Hands one step to the agent in the run's tab and waits for its answer.
-fn run_agent(context: &Context, prompt: &str) -> Result<String, String> {
-    let id = agent::start(context.app, context.tab, prompt)?;
+fn run_agent(context: &Context, prompt: &str, autonomy: &str) -> Result<String, String> {
+    let id = agent::start_with(
+        context.app,
+        context.tab,
+        prompt,
+        agent::StartOptions {
+            autonomy: autonomy.to_string(),
+            background: context.flow.background,
+            ..agent::StartOptions::default()
+        },
+    )?;
     let start = Instant::now();
     loop {
         if stopped(context.run) {
