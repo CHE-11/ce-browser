@@ -18,10 +18,12 @@ use super::driver::{self, WaitQuery};
 use super::extract::{self, DatasetInfo, ExtractSpec};
 use super::policy::{self, Verdict};
 use super::recorder::{self, FlowRecording};
+use super::scheduler;
 use super::{agent, audit, clip, fill_secrets, mask_secrets, now_ms, today};
 
 pub const FILE: &str = "automations.json";
-const MAX_RUNS: usize = 60;
+const MAX_RUNS: usize = 300;
+const MAX_FLOW_RUNS: usize = 25;
 const MAX_FLOWS: usize = 500;
 const MAX_STEPS: usize = 500;
 const FIND_TIMEOUT: Duration = Duration::from_secs(10);
@@ -79,6 +81,8 @@ pub struct FlowStep {
     /// Pages an `extract` step follows through the list's Next link.
     pub pages: u32,
     pub optional: bool,
+    /// Skipped by runs and left out of exports, without deleting the step.
+    pub disabled: bool,
     pub note: String,
     /// How much an `ai` step's agent may do without asking: `ask`, `auto` or `full`.
     /// Blank uses the default from Settings.
@@ -130,6 +134,8 @@ pub struct Flow {
     pub background: bool,
     pub notify: bool,
     pub monitor_prompt: String,
+    /// Triggers don't fire while paused. Starting it by hand still works.
+    pub paused: bool,
     pub last_run: u64,
     pub last_status: String,
     pub created: u64,
@@ -147,6 +153,8 @@ pub struct FlowRunStep {
     /// `ok`, `healed`, `failed` or `skipped`.
     pub status: String,
     pub detail: String,
+    /// A screenshot of the page was saved when this step failed. Read it with `run_shot`.
+    pub shot: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -163,6 +171,23 @@ pub struct FlowRun {
     pub steps: Vec<FlowRunStep>,
     pub output: String,
     pub dataset_id: String,
+    /// Index of the step that is running now.
+    pub current: Option<usize>,
+    pub current_label: String,
+    /// First step the run started at. 0 is the whole flow.
+    pub from_step: usize,
+    /// Last step the run stops after. `None` runs to the end.
+    pub to_step: Option<usize>,
+}
+
+/// Which part of a flow a run covers, and where.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RunOptions {
+    pub from_step: usize,
+    pub to_step: Option<usize>,
+    /// Stay on the page already open in the run's tab instead of loading the start address.
+    pub here: bool,
 }
 
 /// Trigger bookkeeping per flow, so restarts neither repeat nor miss runs.
@@ -192,6 +217,10 @@ pub struct AutomationsSnapshot {
     pub runs: Vec<FlowRun>,
     pub recording: Option<FlowRecording>,
     pub datasets: Vec<DatasetInfo>,
+    /// When each flow's triggers next fire, by flow id. Missing for paused and unscheduled flows.
+    pub next_runs: BTreeMap<String, u64>,
+    /// Why no trigger fires right now. Empty while the scheduler runs.
+    pub scheduler_paused: String,
 }
 
 struct Loaded {
@@ -213,6 +242,8 @@ fn load(app: &AppHandle) -> MutexGuard<'static, Option<Loaded>> {
             if run.status == "running" {
                 run.status = "stopped".into();
             }
+            run.current = None;
+            run.current_label.clear();
         }
         *guard = Some(Loaded { path, store });
     }
@@ -245,6 +276,8 @@ pub fn snapshot(app: &AppHandle) -> AutomationsSnapshot {
     runs.reverse();
     datasets.sort_by(|a, b| b.updated.cmp(&a.updated));
     AutomationsSnapshot {
+        next_runs: scheduler::next_runs(app, &flows),
+        scheduler_paused: scheduler::pause_reason(app).unwrap_or_default().to_string(),
         flows,
         runs,
         recording: recorder::current(),
@@ -352,13 +385,137 @@ pub fn save(app: &AppHandle, flow: Flow) -> Result<Flow, String> {
 }
 
 pub fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
-    with_store(app, |store| {
+    let shots = with_store(app, |store| {
         store.flows.retain(|flow| flow.id != id);
         store.schedule.remove(id);
+        let mut shots = Vec::new();
+        for run in store.runs.iter_mut().filter(|run| run.flow_id == id) {
+            shots.push(run.clone());
+            for step in &mut run.steps {
+                step.shot = false;
+            }
+        }
+        shots
     });
+    remove_shots(app, &shots);
     persist(app);
     emit(app);
     Ok(())
+}
+
+pub fn set_paused(app: &AppHandle, id: &str, paused: bool) -> Result<(), String> {
+    with_store(app, |store| {
+        let flow = store
+            .flows
+            .iter_mut()
+            .find(|flow| flow.id == id)
+            .ok_or("That flow no longer exists.")?;
+        flow.paused = paused;
+        Ok::<(), String>(())
+    })?;
+    persist(app);
+    emit(app);
+    Ok(())
+}
+
+/// A flow with fresh ids and no run state, ready to save as a new flow. A copy with enabled
+/// triggers starts paused, so it can't run alongside its original or start by itself after an import.
+fn as_new(mut flow: Flow) -> Flow {
+    flow.id = String::new();
+    flow.created = 0;
+    flow.last_run = 0;
+    flow.last_status = String::new();
+    for step in &mut flow.steps {
+        step.id = String::new();
+    }
+    if flow.triggers.iter().any(|trigger| trigger.enabled) {
+        flow.paused = true;
+    }
+    flow
+}
+
+pub fn duplicate(app: &AppHandle, id: &str) -> Result<Flow, String> {
+    let source = flow(app, id).ok_or("That flow no longer exists.")?;
+    let mut copy = as_new(source);
+    copy.name = clip(&format!("Copy of {}", copy.name), 120);
+    save(app, copy)
+}
+
+const EXPORT_VERSION: u64 = 1;
+
+fn export_value(flow: &Flow) -> Value {
+    let mut flow = flow.clone();
+    flow.last_run = 0;
+    flow.last_status = String::new();
+    json!({ "ceFlow": EXPORT_VERSION, "flow": flow })
+}
+
+pub fn export(app: &AppHandle, id: &str, path: &str) -> Result<(), String> {
+    let flow = flow(app, id).ok_or("That flow no longer exists.")?;
+    let text =
+        serde_json::to_string_pretty(&export_value(&flow)).map_err(|error| error.to_string())?;
+    files::write_text_file(std::path::Path::new(path), &text)
+}
+
+/// Reads an exported flow, or a bare flow object, as a new flow that is not saved yet.
+fn parse_export(text: &str) -> Result<Flow, String> {
+    let value: Value = serde_json::from_str(text.trim_start_matches('\u{feff}'))
+        .map_err(|_| "That file isn't a ce-browser flow.".to_string())?;
+    let raw = match value.get("flow") {
+        Some(inner) if value.get("ceFlow").is_some() => inner.clone(),
+        _ => value,
+    };
+    if !raw.is_object() || raw.get("steps").is_none_or(|steps| !steps.is_array()) {
+        return Err("That file isn't a ce-browser flow.".into());
+    }
+    let flow: Flow =
+        serde_json::from_value(raw).map_err(|_| "That file isn't a ce-browser flow.".to_string())?;
+    Ok(as_new(flow))
+}
+
+pub fn import(app: &AppHandle, path: &str) -> Result<Flow, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| format!("Couldn't read {path}: {error}"))?;
+    save(app, parse_export(&text)?)
+}
+
+/// What `test_target` found on the page.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetTest {
+    pub found: bool,
+    /// The locator that matched: `testId`, `role`, `css`, `text` or `xpath`.
+    pub by: String,
+}
+
+/// Lets the user click the element a step should use, in `tab`. Shows the tab first.
+pub fn pick_target(app: &AppHandle, tab: u32) -> Result<Option<FlowTarget>, String> {
+    tabs::activate(app, tab)?;
+    let Some(value) = driver::pick_element(app, tab)? else {
+        return Ok(None);
+    };
+    let Some(target) = value.get("target") else {
+        return Ok(None);
+    };
+    serde_json::from_value(target.clone())
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+/// Looks for a step's element in `tab` with its saved locators and outlines it when found.
+pub fn test_target(app: &AppHandle, tab: u32, target: &FlowTarget) -> Result<TargetTest, String> {
+    tabs::activate(app, tab)?;
+    let value = serde_json::to_value(target).map_err(|error| error.to_string())?;
+    match driver::locate(app, tab, &value)? {
+        Some((element, by)) => {
+            let _ = driver::flash(app, tab, element);
+            Ok(TargetTest { found: true, by })
+        }
+        None => Ok(TargetTest {
+            found: false,
+            by: String::new(),
+        }),
+    }
 }
 
 /// A short list for MCP clients.
@@ -440,6 +597,17 @@ pub fn run(app: &AppHandle, flow_id: &str, tab: Option<u32>, trigger: &str) -> R
     run_with(app, flow_id, tab, trigger, BTreeMap::new())
 }
 
+/// Like `run`, covering only the steps `options` names.
+pub fn run_part(
+    app: &AppHandle,
+    flow_id: &str,
+    tab: Option<u32>,
+    trigger: &str,
+    options: RunOptions,
+) -> Result<u32, String> {
+    launch(app, flow_id, tab, trigger, BTreeMap::new(), options)
+}
+
 /// Like `run`, with extra `{{name}}` values from the trigger, such as a downloaded file's path.
 pub fn run_with(
     app: &AppHandle,
@@ -448,7 +616,7 @@ pub fn run_with(
     trigger: &str,
     vars: BTreeMap<String, String>,
 ) -> Result<u32, String> {
-    launch(app, flow_id, tab, false, trigger, vars)
+    launch(app, flow_id, tab, trigger, vars, RunOptions::default())
 }
 
 /// Runs a flow on the page already open in `tab`, without loading its start address.
@@ -459,16 +627,20 @@ pub fn run_here(
     trigger: &str,
     vars: BTreeMap<String, String>,
 ) -> Result<u32, String> {
-    launch(app, flow_id, Some(tab), true, trigger, vars)
+    let options = RunOptions {
+        here: true,
+        ..RunOptions::default()
+    };
+    launch(app, flow_id, Some(tab), trigger, vars, options)
 }
 
 fn launch(
     app: &AppHandle,
     flow_id: &str,
     tab: Option<u32>,
-    here: bool,
     trigger: &str,
     vars: BTreeMap<String, String>,
+    mut options: RunOptions,
 ) -> Result<u32, String> {
     if !settings::get(app).automation.enabled {
         return Err("Automation is turned off in Settings.".into());
@@ -480,10 +652,19 @@ fn launch(
     if flow.steps.is_empty() && flow.start_url.is_empty() {
         return Err("Add a step to this flow first.".into());
     }
-    let id = push_run(app, &flow, trigger, "running", "");
+    if options.from_step > 0 && options.from_step >= flow.steps.len() {
+        return Err("That step is no longer in the flow.".into());
+    }
+    options.to_step = options
+        .to_step
+        .map(|to| to.max(options.from_step).min(flow.steps.len().saturating_sub(1)));
+    if tab.is_none() {
+        options.here = false;
+    }
+    let id = push_run(app, &flow, trigger, "running", "", &options);
     let handle = app.clone();
     let trigger = trigger.to_string();
-    thread::spawn(move || execute(&handle, id, flow, tab, here, &trigger, vars));
+    thread::spawn(move || execute(&handle, id, flow, tab, options, &trigger, vars));
     Ok(id)
 }
 
@@ -498,10 +679,17 @@ fn next_run_id(app: &AppHandle) -> u32 {
     runtime.next
 }
 
-fn push_run(app: &AppHandle, flow: &Flow, trigger: &str, status: &str, output: &str) -> u32 {
+fn push_run(
+    app: &AppHandle,
+    flow: &Flow,
+    trigger: &str,
+    status: &str,
+    output: &str,
+    options: &RunOptions,
+) -> u32 {
     let id = next_run_id(app);
     let now = now_ms();
-    with_store(app, |store| {
+    let removed = with_store(app, |store| {
         store.runs.push(FlowRun {
             id,
             flow_id: flow.id.clone(),
@@ -511,23 +699,20 @@ fn push_run(app: &AppHandle, flow: &Flow, trigger: &str, status: &str, output: &
             started: now,
             finished: if status == "running" { 0 } else { now },
             output: clip(output, 8000),
+            from_step: options.from_step,
+            to_step: options.to_step,
             ..FlowRun::default()
         });
-        while store.runs.len() > MAX_RUNS {
-            match store.runs.iter().position(|run| run.status != "running") {
-                Some(index) => {
-                    store.runs.remove(index);
-                }
-                None => break,
-            }
-        }
+        let removed = trim_runs(&mut store.runs);
         if status != "running"
             && let Some(saved) = store.flows.iter_mut().find(|item| item.id == flow.id)
         {
             saved.last_run = now;
             saved.last_status = status.into();
         }
+        removed
     });
+    remove_shots(app, &removed);
     if status != "running" {
         persist(app);
     }
@@ -535,9 +720,80 @@ fn push_run(app: &AppHandle, flow: &Flow, trigger: &str, status: &str, output: &
     id
 }
 
+/// Drops the oldest finished runs past the per-flow and overall limits. Returns what it dropped.
+fn trim_runs(runs: &mut Vec<FlowRun>) -> Vec<FlowRun> {
+    let mut removed = Vec::new();
+    let mut kept: BTreeMap<String, usize> = BTreeMap::new();
+    let mut keep = vec![true; runs.len()];
+    for (index, run) in runs.iter().enumerate().rev() {
+        if run.status == "running" {
+            continue;
+        }
+        let count = kept.entry(run.flow_id.clone()).or_default();
+        *count += 1;
+        if *count > MAX_FLOW_RUNS {
+            keep[index] = false;
+        }
+    }
+    let mut index = 0;
+    runs.retain(|run| {
+        let stay = keep[index];
+        index += 1;
+        if !stay {
+            removed.push(run.clone());
+        }
+        stay
+    });
+    while runs.len() > MAX_RUNS {
+        match runs.iter().position(|run| run.status != "running") {
+            Some(index) => removed.push(runs.remove(index)),
+            None => break,
+        }
+    }
+    removed
+}
+
+fn shots_dir(app: &AppHandle) -> PathBuf {
+    paths::root_local_dir(app)
+        .join("automation-shots")
+        .join(files::sanitize_file_name(&crate::profiles::active_id()))
+}
+
+fn shot_path(app: &AppHandle, run: u32, index: usize) -> PathBuf {
+    shots_dir(app).join(format!("{run}-{index}.jpg"))
+}
+
+/// Saves what the run's tab shows, for a failed step. Returns whether it worked.
+fn save_shot(app: &AppHandle, run: u32, index: usize, tab: u32) -> bool {
+    let Ok(shot) = driver::screenshot(app, tab, false, 1280) else {
+        return false;
+    };
+    let path = shot_path(app, run, index);
+    if let Some(parent) = path.parent()
+        && std::fs::create_dir_all(parent).is_err()
+    {
+        return false;
+    }
+    std::fs::write(&path, &shot.bytes).is_ok()
+}
+
+fn remove_shots(app: &AppHandle, runs: &[FlowRun]) {
+    for run in runs {
+        for step in run.steps.iter().filter(|step| step.shot) {
+            let _ = std::fs::remove_file(shot_path(app, run.id, step.index));
+        }
+    }
+}
+
+/// The screenshot saved when step `index` of run `run` failed, as a `data:` URL.
+pub fn run_shot(app: &AppHandle, run: u32, index: usize) -> Option<String> {
+    let bytes = std::fs::read(shot_path(app, run, index)).ok()?;
+    Some(super::jpeg_data_url(&bytes))
+}
+
 /// Adds a finished entry to the run history, for monitor checks that don't run steps.
 pub fn log_run(app: &AppHandle, flow: &Flow, trigger: &str, status: &str, output: &str) {
-    push_run(app, flow, trigger, status, output);
+    push_run(app, flow, trigger, status, output, &RunOptions::default());
 }
 
 pub fn stop_run(app: &AppHandle, run: u32) {
@@ -555,9 +811,14 @@ pub fn stop_run(app: &AppHandle, run: u32) {
 }
 
 pub fn clear_runs(app: &AppHandle) {
-    with_store(app, |store| {
-        store.runs.retain(|run| run.status == "running")
+    let removed = with_store(app, |store| {
+        let (running, finished) = std::mem::take(&mut store.runs)
+            .into_iter()
+            .partition(|run| run.status == "running");
+        store.runs = running;
+        finished
     });
+    remove_shots(app, &removed);
     persist(app);
     emit(app);
 }
@@ -621,6 +882,8 @@ struct Context<'a> {
     run: u32,
     flow: &'a Flow,
     tab: u32,
+    from: usize,
+    to: Option<usize>,
     auto: AutomationSettings,
     vars: BTreeMap<String, String>,
     rows: Vec<Map<String, Value>>,
@@ -723,11 +986,11 @@ fn execute(
     run: u32,
     flow: Flow,
     tab: Option<u32>,
-    here: bool,
+    options: RunOptions,
     trigger: &str,
     extra: BTreeMap<String, String>,
 ) {
-    let (status, output, dataset) = match run_tab(app, &flow, tab, here) {
+    let (status, output, dataset) = match run_tab(app, &flow, tab, options.here) {
         Ok((tab, hidden)) => {
             runtime_lock().tabs.insert(run, tab);
             tabs::set_automated(app, tab, true);
@@ -736,6 +999,8 @@ fn execute(
                 run,
                 flow: &flow,
                 tab,
+                from: options.from_step,
+                to: options.to_step,
                 auto: settings::get(app).automation_with_blocks(),
                 vars: flow.variables.clone(),
                 rows: Vec::new(),
@@ -784,6 +1049,8 @@ fn execute(
             item.finished = finished;
             item.output = clip(&output, 8000);
             item.dataset_id = dataset.clone();
+            item.current = None;
+            item.current_label.clear();
         }
         if let Some(saved) = store.flows.iter_mut().find(|item| item.id == flow.id) {
             saved.last_run = finished;
@@ -834,9 +1101,32 @@ fn apply_healed(app: &AppHandle, flow_id: &str, healed: Vec<(String, FlowTarget)
     persist(app);
 }
 
+/// Marks the step a run is on, so the editor and history can follow it live.
+fn set_current(app: &AppHandle, run: u32, current: Option<(usize, String)>) {
+    with_store(app, |store| {
+        if let Some(item) = store.runs.iter_mut().find(|item| item.id == run) {
+            match current {
+                Some((index, label)) => {
+                    item.current = Some(index);
+                    item.current_label = clip(&label, 200);
+                }
+                None => {
+                    item.current = None;
+                    item.current_label.clear();
+                }
+            }
+        }
+    });
+    emit(app);
+}
+
 fn drive(context: &mut Context) -> &'static str {
     let steps = context.flow.steps.clone();
+    let last = context.to.unwrap_or(usize::MAX);
     for (index, step) in steps.iter().enumerate() {
+        if index < context.from || index > last {
+            continue;
+        }
         if stopped(context.run) {
             return "stopped";
         }
@@ -844,6 +1134,26 @@ fn drive(context: &mut Context) -> &'static str {
             context.output.push("The tab was closed.".into());
             return "stopped";
         }
+        if step.disabled {
+            record(
+                context.app,
+                context.run,
+                FlowRunStep {
+                    index,
+                    kind: step.kind.clone(),
+                    label: clip(&step_label(step, &context.vars), 200),
+                    status: "skipped".into(),
+                    detail: "Turned off in the editor.".into(),
+                    shot: false,
+                },
+            );
+            continue;
+        }
+        set_current(
+            context.app,
+            context.run,
+            Some((index, step_label(step, &context.vars))),
+        );
         let result = run_step(context, step);
         let (status, label, detail) = match &result {
             Ok(outcome) => (
@@ -853,6 +1163,10 @@ fn drive(context: &mut Context) -> &'static str {
             ),
             Err(error) => ("failed", step_label(step, &context.vars), error.clone()),
         };
+        let shot = result.is_err()
+            && !stopped(context.run)
+            && result.as_ref().err().is_none_or(|error| error != "Stopped.")
+            && save_shot(context.app, context.run, index, context.tab);
         record(
             context.app,
             context.run,
@@ -862,6 +1176,7 @@ fn drive(context: &mut Context) -> &'static str {
                 label: clip(&label, 200),
                 status: status.into(),
                 detail: clip(&detail, 600),
+                shot,
             },
         );
         if let Err(error) = result {
@@ -1381,7 +1696,7 @@ fn playwright_script(flow: &Flow) -> String {
             js_string(&fill_vars(&flow.start_url, vars))
         ));
     }
-    for step in &flow.steps {
+    for step in flow.steps.iter().filter(|step| !step.disabled) {
         let locator = step
             .target
             .as_ref()
@@ -1484,6 +1799,77 @@ mod tests {
         assert_eq!(written["flows"][0]["steps"][0]["future"]["x"], 1);
         let empty: Store = serde_json::from_str("{}").unwrap();
         assert!(empty.flows.is_empty());
+    }
+
+    #[test]
+    fn older_files_get_the_new_defaults() {
+        let raw = r#"{"flows":[{"id":"a","steps":[{"id":"s","kind":"click"}]}],"runs":[{"id":3,"flowId":"a","status":"running","steps":[{"index":0,"status":"ok"}]}]}"#;
+        let store: Store = serde_json::from_str(raw).unwrap();
+        assert!(!store.flows[0].paused);
+        assert!(!store.flows[0].steps[0].disabled);
+        let run = &store.runs[0];
+        assert_eq!((run.current, run.from_step, run.to_step), (None, 0, None));
+        assert!(!run.steps[0].shot);
+        let written = serde_json::to_value(&store).unwrap();
+        let again: Store = serde_json::from_value(written.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&again).unwrap(), written);
+    }
+
+    #[test]
+    fn runs_are_capped_per_flow_and_overall() {
+        let run = |id: u32, flow: &str, status: &str| FlowRun {
+            id,
+            flow_id: flow.into(),
+            status: status.into(),
+            ..FlowRun::default()
+        };
+        let mut runs: Vec<FlowRun> = (1..=30).map(|id| run(id, "a", "done")).collect();
+        runs.push(run(31, "b", "done"));
+        runs.insert(0, run(100, "a", "running"));
+        let removed = trim_runs(&mut runs);
+        assert_eq!(removed.len(), 5);
+        assert!(removed.iter().all(|run| run.flow_id == "a" && run.id <= 5));
+        assert!(runs.iter().any(|run| run.id == 100));
+        assert_eq!(runs.iter().filter(|run| run.flow_id == "a").count(), MAX_FLOW_RUNS + 1);
+
+        let mut many: Vec<FlowRun> = (1..=400)
+            .map(|id| run(id, &format!("f{id}"), "failed"))
+            .collect();
+        trim_runs(&mut many);
+        assert_eq!(many.len(), MAX_RUNS);
+        assert_eq!(many[0].id, 101);
+    }
+
+    #[test]
+    fn exports_import_as_new_paused_flows() {
+        let flow = Flow {
+            id: "keep-me-out".into(),
+            name: "Prices".into(),
+            steps: vec![FlowStep {
+                id: "s1".into(),
+                kind: "click".into(),
+                ..FlowStep::default()
+            }],
+            triggers: vec![FlowTrigger::default()],
+            last_run: 5,
+            last_status: "done".into(),
+            ..Flow::default()
+        };
+        let text = export_value(&flow).to_string();
+        let imported = parse_export(&text).unwrap();
+        assert_eq!(imported.name, "Prices");
+        assert!(imported.id.is_empty());
+        assert!(imported.steps[0].id.is_empty());
+        assert_eq!((imported.last_run, imported.paused), (0, true));
+
+        let bare = serde_json::to_string(&Flow {
+            triggers: Vec::new(),
+            ..flow.clone()
+        })
+        .unwrap();
+        assert!(!parse_export(&bare).unwrap().paused);
+        assert!(parse_export("{\"name\":\"no steps\"}").is_err());
+        assert!(parse_export("not json").is_err());
     }
 
     #[test]

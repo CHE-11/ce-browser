@@ -142,13 +142,100 @@ fn last_due(trigger: &FlowTrigger, local: LocalTime, now: u64) -> Option<u64> {
     None
 }
 
+/// The first time after `now` that a daily or weekly trigger is due, in epoch ms.
+fn next_due(trigger: &FlowTrigger, local: LocalTime, now: u64) -> Option<u64> {
+    let (hour, minute) = parse_time(&trigger.time);
+    let offset = offset_minutes(local, now);
+    let today = days_from_civil(local.year, local.month, local.day);
+    for ahead in 0..9i64 {
+        let day = today + ahead;
+        let weekday = ((local.weekday as i64 + ahead).rem_euclid(7)) as u8;
+        if trigger.kind == "weekly" && !trigger.days.is_empty() && !trigger.days.contains(&weekday)
+        {
+            continue;
+        }
+        let minutes = day * 1440 + (hour * 60 + minute) as i64 - offset;
+        if minutes < 0 {
+            continue;
+        }
+        let at = minutes as u64 * 60_000;
+        if at > now {
+            return Some(at);
+        }
+    }
+    None
+}
+
+/// When one trigger fires next, given when it last fired. `None` for triggers without a clock.
+fn trigger_next(
+    trigger: &FlowTrigger,
+    fired: Option<u64>,
+    local: LocalTime,
+    now: u64,
+) -> Option<u64> {
+    let every = trigger.minutes.max(1) as u64 * 60_000;
+    match trigger.kind.as_str() {
+        "interval" => Some(fired.map_or(now + every, |last| last + every).max(now)),
+        "pageChange" => Some(fired.map_or(now, |last| last + every).max(now)),
+        "daily" | "weekly" => next_due(trigger, local, now),
+        _ => None,
+    }
+}
+
+/// The next run of each flow whose triggers run on a clock. Empty while the scheduler is paused.
+pub fn next_runs(app: &AppHandle, flows: &[Flow]) -> BTreeMap<String, u64> {
+    let mut out = BTreeMap::new();
+    if paused(app) {
+        return out;
+    }
+    let now = now_ms();
+    let local = local_now();
+    let fired: BTreeMap<String, BTreeMap<String, u64>> = flows::with_store(app, |store| {
+        store
+            .schedule
+            .iter()
+            .map(|(id, state)| (id.clone(), state.fired.clone()))
+            .collect()
+    });
+    for flow in flows.iter().filter(|flow| !flow.paused) {
+        let seen = fired.get(&flow.id);
+        let next = flow
+            .triggers
+            .iter()
+            .enumerate()
+            .filter(|(_, trigger)| trigger.enabled)
+            .filter_map(|(index, trigger)| {
+                let last = seen.and_then(|map| map.get(&trigger_key(index, trigger)).copied());
+                trigger_next(trigger, last, local, now)
+            })
+            .min();
+        if let Some(at) = next {
+            out.insert(flow.id.clone(), at);
+        }
+    }
+    out
+}
+
 fn trigger_key(index: usize, trigger: &FlowTrigger) -> String {
     format!("{}:{index}", trigger.kind)
 }
 
-fn paused(app: &AppHandle) -> bool {
+/// Why triggers aren't firing right now, in words for the UI. `None` while they run.
+pub fn pause_reason(app: &AppHandle) -> Option<&'static str> {
     let auto = settings::get(app).automation;
-    !auto.enabled || !auto.scheduler_enabled || (auto.pause_on_battery && system::on_battery())
+    if !auto.enabled {
+        Some("Automation is turned off in Settings.")
+    } else if !auto.scheduler_enabled {
+        Some("Triggers are turned off in Settings, under Automation.")
+    } else if auto.pause_on_battery && system::on_battery() {
+        Some("Triggers wait while this computer runs on battery.")
+    } else {
+        None
+    }
+}
+
+fn paused(app: &AppHandle) -> bool {
+    pause_reason(app).is_some()
 }
 
 fn fired_at(app: &AppHandle, flow: &str, key: &str) -> Option<u64> {
@@ -191,10 +278,11 @@ fn fire_startup(app: &AppHandle) {
         return;
     }
     for flow in flows::flows(app) {
-        if flow
-            .triggers
-            .iter()
-            .any(|trigger| trigger.enabled && trigger.kind == "startup")
+        if !flow.paused
+            && flow
+                .triggers
+                .iter()
+                .any(|trigger| trigger.enabled && trigger.kind == "startup")
         {
             start(app, &flow, None, "startup", BTreeMap::new());
         }
@@ -209,6 +297,8 @@ fn tick(app: &AppHandle) {
     let local = local_now();
     let mut changed = false;
     for flow in flows::flows(app) {
+        // A paused flow still marks its times as fired, so resuming it doesn't replay them.
+        let live = !flow.paused;
         for (index, trigger) in flow.triggers.iter().enumerate() {
             if !trigger.enabled {
                 continue;
@@ -226,7 +316,9 @@ fn tick(app: &AppHandle) {
                         Some(last) if now.saturating_sub(last) >= every => {
                             set_fired(app, &flow.id, &key, now);
                             changed = true;
-                            start(app, &flow, None, "interval", BTreeMap::new());
+                            if live {
+                                start(app, &flow, None, "interval", BTreeMap::new());
+                            }
                         }
                         _ => {}
                     }
@@ -239,14 +331,16 @@ fn tick(app: &AppHandle) {
                         None => {
                             set_fired(app, &flow.id, &key, now);
                             changed = true;
-                            if now.saturating_sub(due) <= GRACE_MS {
+                            if live && now.saturating_sub(due) <= GRACE_MS {
                                 start(app, &flow, None, &trigger.kind, BTreeMap::new());
                             }
                         }
                         Some(last) if last < due => {
                             set_fired(app, &flow.id, &key, now);
                             changed = true;
-                            start(app, &flow, None, &trigger.kind, BTreeMap::new());
+                            if live {
+                                start(app, &flow, None, &trigger.kind, BTreeMap::new());
+                            }
                         }
                         _ => {}
                     }
@@ -256,9 +350,11 @@ fn tick(app: &AppHandle) {
                     if last.is_none_or(|last| now.saturating_sub(last) >= every) {
                         set_fired(app, &flow.id, &key, now);
                         changed = true;
-                        let handle = app.clone();
-                        let watched = flow.clone();
-                        thread::spawn(move || check_page(&handle, &watched));
+                        if live {
+                            let handle = app.clone();
+                            let watched = flow.clone();
+                            thread::spawn(move || check_page(&handle, &watched));
+                        }
                     }
                 }
                 _ => {}
@@ -267,6 +363,7 @@ fn tick(app: &AppHandle) {
     }
     if changed {
         flows::persist(app);
+        flows::emit(app);
     }
 }
 
@@ -282,6 +379,9 @@ fn hash_text(text: &str) -> String {
 /// Loads a monitored page in a hidden tab and compares its text with the last check.
 fn check_page(app: &AppHandle, flow: &Flow) {
     if flow.start_url.trim().is_empty() {
+        return;
+    }
+    if flows::flow(app, &flow.id).is_none_or(|current| current.paused) {
         return;
     }
     let url = tabs::resolve(app, &flow.start_url);
@@ -451,9 +551,10 @@ pub fn on_visit(app: &AppHandle, tab: u32, url: &str) {
         }
         let now = now_ms();
         for flow in flows::flows(&handle) {
-            let matches = flow.triggers.iter().any(|trigger| {
-                trigger.enabled && trigger.kind == "visit" && wildcard(&trigger.pattern, &url)
-            });
+            let matches = !flow.paused
+                && flow.triggers.iter().any(|trigger| {
+                    trigger.enabled && trigger.kind == "visit" && wildcard(&trigger.pattern, &url)
+                });
             if !matches {
                 continue;
             }
@@ -490,11 +591,12 @@ pub fn on_download(app: &AppHandle, name: &str, path: &str) {
             return;
         }
         for flow in flows::flows(&handle) {
-            let matches = flow.triggers.iter().any(|trigger| {
-                trigger.enabled
-                    && trigger.kind == "download"
-                    && (trigger.pattern.trim().is_empty() || wildcard(&trigger.pattern, &name))
-            });
+            let matches = !flow.paused
+                && flow.triggers.iter().any(|trigger| {
+                    trigger.enabled
+                        && trigger.kind == "download"
+                        && (trigger.pattern.trim().is_empty() || wildcard(&trigger.pattern, &name))
+                });
             if matches {
                 let vars = BTreeMap::from([
                     ("file".to_string(), name.clone()),
@@ -515,6 +617,7 @@ pub fn hotkey(app: &AppHandle, slot: usize) {
         }
         let active = tabs::active_id(&handle);
         let mut found = false;
+        let mut paused_only = false;
         for flow in flows::flows(&handle) {
             let bound = flow.triggers.iter().any(|trigger| {
                 trigger.enabled && trigger.kind == "hotkey" && trigger.slot as usize == slot
@@ -522,11 +625,21 @@ pub fn hotkey(app: &AppHandle, slot: usize) {
             if !bound {
                 continue;
             }
+            if flow.paused {
+                paused_only = true;
+                continue;
+            }
             found = true;
             let target = if flow.background { None } else { active };
             start(&handle, &flow, target, "hotkey", BTreeMap::new());
         }
-        if !found {
+        if !found && paused_only {
+            system::toast(
+                "Automations",
+                &format!("The flow on hotkey slot {slot} is paused. Resume it in ce://automations."),
+                "",
+            );
+        } else if !found {
             system::toast(
                 "Automations",
                 &format!(
@@ -587,6 +700,61 @@ mod tests {
             now - last_due(&weekly, local, now).unwrap(),
             (4 * 1440 + 90) * 60_000
         );
+    }
+
+    #[test]
+    fn next_due_is_later_today_or_on_the_next_day() {
+        let local = LocalTime {
+            year: 2026,
+            month: 11,
+            day: 6,
+            weekday: 5,
+            hour: 10,
+            minute: 30,
+        };
+        let now = (days_from_civil(2026, 11, 6) * 1440 + 10 * 60 + 30) as u64 * 60_000;
+        let daily = FlowTrigger {
+            kind: "daily".into(),
+            time: "11:00".into(),
+            ..FlowTrigger::default()
+        };
+        assert_eq!(next_due(&daily, local, now).unwrap() - now, 30 * 60_000);
+        let earlier = FlowTrigger {
+            time: "09:00".into(),
+            ..daily.clone()
+        };
+        assert_eq!(
+            next_due(&earlier, local, now).unwrap() - now,
+            (22 * 60 + 30) * 60_000
+        );
+        let monday = FlowTrigger {
+            kind: "weekly".into(),
+            time: "09:00".into(),
+            days: vec![1],
+            ..FlowTrigger::default()
+        };
+        assert_eq!(
+            next_due(&monday, local, now).unwrap() - now,
+            (2 * 1440 + 22 * 60 + 30) * 60_000
+        );
+        let interval = FlowTrigger {
+            kind: "interval".into(),
+            minutes: 15,
+            ..FlowTrigger::default()
+        };
+        assert_eq!(
+            trigger_next(&interval, Some(now - 5 * 60_000), local, now),
+            Some(now + 10 * 60_000)
+        );
+        assert_eq!(
+            trigger_next(&interval, Some(now - 60 * 60_000), local, now),
+            Some(now)
+        );
+        let startup = FlowTrigger {
+            kind: "startup".into(),
+            ..FlowTrigger::default()
+        };
+        assert_eq!(trigger_next(&startup, None, local, now), None);
     }
 
     #[test]

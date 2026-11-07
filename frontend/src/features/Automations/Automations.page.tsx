@@ -1,295 +1,338 @@
-import { useEffect, useMemo, useState } from "react";
-import { Circle, Database, History, Plus, Square, Workflow } from "lucide-react";
-import type { Flow } from "@type/browser";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Plus, Workflow } from "lucide-react";
+import type { Flow, FlowRun } from "@type/browser";
 import { Button } from "@/components/Button";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EmptyState } from "@/components/EmptyState";
-import { SkeletonRows } from "@/components/Skeleton";
-import { activateTab, startFlowRecording, stopFlowRecording } from "@/lib/browser-client";
-import { cn } from "@/lib/cn";
-import { focusRow } from "@/lib/focus-ring";
+import {
+  activateTab,
+  deleteFlow,
+  duplicateFlow,
+  exportFlow,
+  importFlow,
+  removeRecordedStep,
+  runFlow,
+  setFlowPaused,
+  startFlowRecording,
+  stopFlowRecording,
+  stopFlowRun,
+} from "@/lib/browser-client";
+import { NEW_FLOW, useAutomationsRoute, type AutomationsView } from "@/lib/use-automations-route";
 import { useAppearanceFromSettings, useAutomations, useTabs } from "@/lib/use-browser";
-import { inputClassName } from "@features/Agent/agent-styles";
+import { AutomationsSidebar } from "./AutomationsSidebar";
 import { DatasetsView } from "./DatasetsView";
-import { FlowEditor } from "./FlowEditor";
+import type { FlowAction } from "./FlowContextMenu";
+import { FlowEditor, type FlowEditorAction } from "./FlowEditor";
+import { blankFlow } from "./flow-model";
+import { PageNotice, type Notice } from "./PageNotice";
+import { RecordingView } from "./RecordingView";
 import { RunHistory } from "./RunHistory";
-import { blankFlow, statusTone, triggerSummary } from "./flow-model";
+import { RunShotDialog, type RunShot } from "./RunShotDialog";
 
 type AutomationsPageProps = {
   params: URLSearchParams;
 };
 
-type View = "flows" | "history" | "datasets";
-
-const NEW_FLOW = "new";
-
-function viewFromParams(params: URLSearchParams): View {
-  if (params.get("dataset") || params.get("tab") === "datasets") {
-    return "datasets";
-  }
-  if (params.get("tab") === "history") {
-    return "history";
-  }
-  return "flows";
-}
-
 export function AutomationsPage({ params }: AutomationsPageProps) {
   useAppearanceFromSettings();
   const { snapshot, loaded } = useAutomations();
   const { windowTabs } = useTabs();
-  const [view, setView] = useState<View>(() => viewFromParams(params));
-  const [flowId, setFlowId] = useState<string | null>(() => params.get("flow"));
-  const [datasetId, setDatasetId] = useState<string | null>(() => params.get("dataset"));
+  const dirtyRef = useRef(false);
+  const saveRef = useRef<(() => Promise<boolean>) | null>(null);
+  const { location, pending, go, confirmLeave, cancelLeave } = useAutomationsRoute(params, () => !dirtyRef.current);
   const [draft, setDraft] = useState<Flow | null>(null);
+  const [draftSerial, setDraftSerial] = useState(0);
+  const [createdId, setCreatedId] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<Flow | null>(null);
-  const [recordTab, setRecordTab] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const query = params.toString();
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [deleting, setDeleting] = useState<Flow | null>(null);
+  const [shot, setShot] = useState<RunShot | null>(null);
 
   useEffect(() => {
     document.title = "Automations";
   }, []);
 
-  useEffect(() => {
-    const next = new URLSearchParams(query);
-    setView(viewFromParams(next));
-    if (next.get("flow")) {
-      setFlowId(next.get("flow"));
-      setDraft(null);
-    }
-    if (next.get("dataset")) {
-      setDatasetId(next.get("dataset"));
-    }
-  }, [query]);
-
   const webTabs = useMemo(
     () => windowTabs.filter((tab) => /^(https?|file):/i.test(tab.url) && !tab.automated).sort((a, b) => b.lastActive - a.lastActive),
     [windowTabs],
   );
-  const chosenRecordTab = webTabs.some((tab) => tab.id === recordTab) ? recordTab : (webTabs[0]?.id ?? null);
-
   const flows = useMemo(() => (snapshot?.flows ?? []).slice().sort((a, b) => b.updated - a.updated), [snapshot?.flows]);
   const runs = snapshot?.runs ?? [];
-  const running = runs.filter((run) => run.status === "running").length;
   const recording = snapshot?.recording ?? null;
   const recordingTab = recording ? windowTabs.find((tab) => tab.id === recording.tabId) : undefined;
+  const recordingTarget = recording?.flowId ? flows.find((flow) => flow.id === recording.flowId) : undefined;
+
+  const onNew = location.view === "flows" && location.flowId === NEW_FLOW;
+  const firstTabUrl = webTabs[0]?.url ?? "";
+  useEffect(() => {
+    if (onNew && !draft) {
+      setDraft(blankFlow(firstTabUrl));
+      setDraftSerial((serial) => serial + 1);
+    } else if (!onNew && draft) {
+      setDraft(null);
+    }
+  }, [onNew, draft, firstTabUrl]);
 
   const selectedFlow =
-    flowId === NEW_FLOW
-      ? draft
-      : (flows.find((flow) => flow.id === flowId) ?? (lastSaved && lastSaved.id === flowId ? lastSaved : null));
+    location.view !== "flows" || !location.flowId
+      ? null
+      : location.flowId === NEW_FLOW
+        ? draft
+        : (flows.find((flow) => flow.id === location.flowId) ?? (lastSaved?.id === location.flowId ? lastSaved : null));
+  const editorKey = onNew || (createdId !== null && location.flowId === createdId) ? `draft-${draftSerial}` : (location.flowId ?? "");
 
-  const newFlow = () => {
-    setDraft(blankFlow(webTabs[0]?.url ?? ""));
-    setFlowId(NEW_FLOW);
-    setView("flows");
+  const clearNotice = useCallback(() => setNotice(null), []);
+  const say = useCallback((text: string) => setNotice({ tone: "info", text }), []);
+  const fail = useCallback((reason: unknown) => setNotice({ tone: "error", text: String(reason) }), []);
+  const onDirtyChange = useCallback((dirty: boolean) => {
+    dirtyRef.current = dirty;
+  }, []);
+
+  const showView = (view: AutomationsView) => go({ view });
+  const openFlow = (id: string, step?: number) => go({ view: "flows", flowId: id, step: step ?? null });
+  const openDataset = (id: string | null) => go({ view: "datasets", datasetId: id });
+  const newFlow = () => go({ view: "flows", flowId: NEW_FLOW });
+
+  const runningRun = (flowId: string) => runs.find((run) => run.flowId === flowId && run.status === "running");
+
+  const flowAction = (flow: Flow, action: FlowAction | FlowEditorAction) => {
+    const name = flow.name || "the flow";
+    switch (action) {
+      case "run":
+        void runFlow(flow.id)
+          .then(() => say(`Running ${name}.`))
+          .catch(fail);
+        break;
+      case "stop": {
+        const active = runningRun(flow.id);
+        if (active) {
+          void stopFlowRun(active.id).catch(fail);
+        }
+        break;
+      }
+      case "duplicate":
+        void duplicateFlow(flow.id)
+          .then((copy) => {
+            openFlow(copy.id);
+            say(copy.paused ? `Made ${copy.name}. Its triggers are paused so it doesn't run twice.` : `Made ${copy.name}.`);
+          })
+          .catch(fail);
+        break;
+      case "export":
+        void exportFlow(flow.id, flow.name)
+          .then((saved) => saved && say(`Exported ${name}.`))
+          .catch(fail);
+        break;
+      case "pause":
+      case "resume":
+        void setFlowPaused(flow.id, action === "pause")
+          .then(() => say(action === "pause" ? `Paused the triggers of ${name}.` : `Resumed the triggers of ${name}.`))
+          .catch(fail);
+        break;
+      case "delete":
+        if (!flow.id) {
+          dirtyRef.current = false;
+          go({ view: "flows" }, true);
+        } else {
+          setDeleting(flow);
+        }
+        break;
+    }
   };
 
-  const openFlow = (id: string) => {
-    setFlowId(id);
-    setDraft(null);
-    setView("flows");
-  };
-
-  const openDataset = (id: string | null) => {
-    setDatasetId(id);
-    setView("datasets");
-  };
-
-  const record = () => {
-    if (chosenRecordTab === null) {
+  const confirmDelete = () => {
+    const flow = deleting;
+    setDeleting(null);
+    if (!flow) {
       return;
     }
-    setError(null);
-    void startFlowRecording(chosenRecordTab)
-      .then(() => activateTab(chosenRecordTab))
-      .catch((reason: unknown) => setError(String(reason)));
+    void deleteFlow(flow.id)
+      .then(() => {
+        say(`Deleted ${flow.name || "the flow"}.`);
+        if (location.flowId === flow.id) {
+          dirtyRef.current = false;
+          go({ view: "flows" }, true);
+        }
+      })
+      .catch(fail);
   };
 
+  const importOne = () => {
+    void importFlow()
+      .then((flow) => {
+        if (flow) {
+          openFlow(flow.id);
+          say(flow.paused ? `Imported ${flow.name}. Its triggers are paused until you resume them.` : `Imported ${flow.name}.`);
+        }
+      })
+      .catch(fail);
+  };
+
+  const record = (tabId: number, flowId?: string) =>
+    startFlowRecording(tabId, flowId)
+      .then(() => activateTab(tabId))
+      .catch((reason: unknown) => {
+        fail(reason);
+        throw reason;
+      });
+
   const stopRecording = (save: boolean) => {
-    setError(null);
     void stopFlowRecording(save)
       .then((id) => {
         if (id) {
           openFlow(id);
+          say("Saved the recorded steps.");
         }
       })
-      .catch((reason: unknown) => setError(String(reason)));
+      .catch(fail);
   };
+
+  const rerun = (run: FlowRun) => {
+    void runFlow(run.flowId, undefined, { fromStep: run.fromStep, toStep: run.toStep })
+      .then(() => say(`Running ${run.flowName || "the flow"} again.`))
+      .catch(fail);
+  };
+
+  const showRecording = () => {
+    if (recording?.flowId) {
+      openFlow(recording.flowId);
+    } else {
+      go({ view: "flows" });
+    }
+  };
+
+  const leaveWithSave = () => {
+    void saveRef.current?.().then((saved) => {
+      if (saved) {
+        confirmLeave();
+      } else {
+        cancelLeave();
+      }
+    });
+  };
+
+  const showRecordingView = recording !== null && location.view === "flows" && (!selectedFlow || (recording.flowId !== "" && recording.flowId === selectedFlow.id));
+
+  let main;
+  if (location.view === "history") {
+    main = <RunHistory runs={runs} flows={flows} onOpenFlow={openFlow} onOpenDataset={openDataset} onRerun={rerun} onShowShot={setShot} />;
+  } else if (location.view === "datasets") {
+    main = <DatasetsView datasets={snapshot?.datasets ?? []} selectedId={location.datasetId} pickTabs={webTabs} onSelect={openDataset} />;
+  } else if (showRecordingView && recording) {
+    main = (
+      <RecordingView
+        recording={recording}
+        targetName={recordingTarget ? recordingTarget.name || "Untitled flow" : null}
+        tab={recordingTab}
+        onShowTab={() => void activateTab(recording.tabId).catch(fail)}
+        onRemove={(index) => void removeRecordedStep(index).catch(fail)}
+        onStop={stopRecording}
+      />
+    );
+  } else if (selectedFlow) {
+    main = (
+      <FlowEditor
+        key={editorKey}
+        flow={selectedFlow}
+        flows={flows}
+        runs={runs}
+        nextRun={snapshot?.nextRuns[selectedFlow.id]}
+        schedulerPaused={snapshot?.schedulerPaused ?? ""}
+        pickTabs={webTabs}
+        focusStep={location.step}
+        saveRef={saveRef}
+        onDirtyChange={onDirtyChange}
+        onSaved={(saved) => {
+          setLastSaved(saved);
+          dirtyRef.current = false;
+          if (onNew) {
+            setCreatedId(saved.id);
+            go({ view: "flows", flowId: saved.id }, true);
+          }
+        }}
+        onAction={flowAction}
+        onRecordMore={(flowId, tabId) => record(tabId, flowId)}
+        onOpenFlow={openFlow}
+        onOpenDataset={openDataset}
+        onShowShot={setShot}
+      />
+    );
+  } else {
+    const missing = loaded && location.flowId !== null && location.flowId !== NEW_FLOW;
+    main = (
+      <section id="automations-welcome" className="flex min-w-0 flex-1 items-center justify-center">
+        <EmptyState
+          id="automations-welcome-empty"
+          icon={Workflow}
+          title={missing ? "That flow no longer exists" : flows.length ? "Choose a flow" : "Automate the web"}
+          hint="Flows repeat what you do on a page: click, type, read lists, ask AI. They heal themselves when a site changes, and run on a schedule, when a page changes, when you visit a site, or after a download."
+          action={
+            <Button id="automations-welcome-new" size="sm" variant="primary" onClick={newFlow}>
+              <Plus id="automations-welcome-new-icon" className="size-3.5" aria-hidden />
+              New flow
+            </Button>
+          }
+        />
+      </section>
+    );
+  }
+
+  const pendingName = selectedFlow?.name || "this flow";
 
   return (
     <main id="automations-page" className="flex h-full bg-zinc-950 text-zinc-100">
-      <aside id="automations-nav" className="flex w-64 shrink-0 flex-col gap-1 border-r border-zinc-800 p-3">
-        <div id="automations-nav-title" className="px-2 pb-2 text-sm font-semibold text-zinc-300">
-          Automations
-        </div>
-        <button
-          id="automations-nav-history"
-          type="button"
-          aria-current={view === "history" ? "page" : undefined}
-          className={cn("flex h-8 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-zinc-800", focusRow, view === "history" && "bg-zinc-800")}
-          onClick={() => setView("history")}
-        >
-          <History id="automations-nav-history-icon" className="size-4 text-zinc-400" aria-hidden />
-          <span id="automations-nav-history-label" className="flex-1">
-            History
-          </span>
-          {running ? (
-            <span id="automations-nav-running" className="text-xs text-sky-400">
-              {running} running
-            </span>
-          ) : null}
-        </button>
-        <button
-          id="automations-nav-datasets"
-          type="button"
-          aria-current={view === "datasets" ? "page" : undefined}
-          className={cn("flex h-8 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-zinc-800", focusRow, view === "datasets" && "bg-zinc-800")}
-          onClick={() => setView("datasets")}
-        >
-          <Database id="automations-nav-datasets-icon" className="size-4 text-zinc-400" aria-hidden />
-          <span id="automations-nav-datasets-label" className="flex-1">
-            Datasets
-          </span>
-          <span id="automations-nav-datasets-count" className="text-xs text-zinc-500">
-            {snapshot?.datasets.length ?? 0}
-          </span>
-        </button>
+      <AutomationsSidebar
+        snapshot={snapshot}
+        loaded={loaded}
+        flows={flows}
+        view={location.view}
+        currentFlowId={location.flowId}
+        draftName={onNew && draft ? draft.name : null}
+        webTabs={webTabs}
+        recordingTab={recordingTab}
+        recordingTargetName={recordingTarget ? recordingTarget.name || "Untitled flow" : null}
+        onView={showView}
+        onOpenFlow={(id) => openFlow(id)}
+        onNewFlow={newFlow}
+        onImport={importOne}
+        onFlowAction={flowAction}
+        onRecord={(tabId) => void record(tabId).catch(() => undefined)}
+        onStopRecording={stopRecording}
+        onShowRecording={showRecording}
+      />
 
-        <div id="automations-nav-flows-title" className="mt-3 flex items-center justify-between px-2 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Flows
-          <button id="automations-new" type="button" className={cn("inline-flex items-center gap-1 rounded px-1 text-sky-300 hover:bg-zinc-800", focusRow)} onClick={newFlow}>
-            <Plus id="automations-new-icon" className="size-3.5" aria-hidden />
-            New
-          </button>
-        </div>
-        <div id="automations-flow-list" className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
-          {!loaded ? <SkeletonRows id="automations-loading" rows={3} className="px-2 py-1" /> : null}
-          {loaded && flows.length === 0 ? (
-            <p id="automations-flows-empty" className="px-2 py-2 text-xs leading-relaxed text-zinc-500">
-              No flows yet. Record one on a page, or build it step by step.
-            </p>
-          ) : null}
-          {flowId === NEW_FLOW && draft ? (
-            <div id="automations-flow-draft" className="flex h-9 items-center rounded-md bg-zinc-800 px-2 text-sm text-zinc-300 italic">
-              {draft.name || "New flow"}
-            </div>
-          ) : null}
-          {flows.map((flow) => {
-            const current = view === "flows" && flow.id === flowId;
-            const trigger = flow.triggers.find((item) => item.enabled);
-            return (
-              <button
-                id={`automations-flow-${flow.id}`}
-                key={flow.id}
-                type="button"
-                aria-current={current ? "true" : undefined}
-                className={cn("flex flex-col rounded-md px-2 py-1.5 text-left hover:bg-zinc-800", focusRow, current && "bg-zinc-800")}
-                onClick={() => openFlow(flow.id)}
-              >
-                <span id={`automations-flow-${flow.id}-name`} className="truncate text-sm text-zinc-200">
-                  {flow.name || "Untitled flow"}
-                </span>
-                <span id={`automations-flow-${flow.id}-meta`} className="flex gap-2 truncate text-xs text-zinc-500">
-                  <span id={`automations-flow-${flow.id}-steps`}>{flow.steps.length} steps</span>
-                  {trigger ? <span id={`automations-flow-${flow.id}-trigger`}>{triggerSummary(trigger)}</span> : null}
-                  {flow.lastStatus ? (
-                    <span id={`automations-flow-${flow.id}-status`} className={statusTone(flow.lastStatus)}>
-                      {flow.lastStatus}
-                    </span>
-                  ) : null}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+      {main}
 
-        <div id="automations-record" className="flex flex-col gap-2 border-t border-zinc-800 pt-3">
-          {recording ? (
-            <>
-              <p id="automations-record-status" className="flex items-center gap-2 px-1 text-xs text-red-300">
-                <Circle id="automations-record-dot" className="size-2.5 animate-pulse fill-red-500 text-red-500" aria-hidden />
-                Recording {recording.steps.length} steps{recordingTab ? ` on ${recordingTab.title || recordingTab.url}` : ""}
-              </p>
-              <div id="automations-record-actions" className="flex gap-2">
-                <Button id="automations-record-save" size="sm" variant="destructive" className="flex-1" onClick={() => stopRecording(true)}>
-                  <Square id="automations-record-save-icon" className="size-3" aria-hidden />
-                  Stop and save
-                </Button>
-                <Button id="automations-record-discard" size="sm" variant="ghost" onClick={() => stopRecording(false)}>
-                  Discard
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <select
-                id="automations-record-tab"
-                className={inputClassName}
-                value={chosenRecordTab ?? ""}
-                disabled={webTabs.length === 0}
-                onChange={(event) => setRecordTab(Number(event.target.value))}
-                aria-label="Page to record on"
-              >
-                {webTabs.length === 0 ? (
-                  <option id="automations-record-tab-none" value="">
-                    Open a web page to record on
-                  </option>
-                ) : null}
-                {webTabs.map((tab) => (
-                  <option id={`automations-record-tab-${tab.id}`} key={tab.id} value={tab.id}>
-                    {tab.title || tab.url}
-                  </option>
-                ))}
-              </select>
-              <Button id="automations-record-start" size="sm" variant="outline" disabled={chosenRecordTab === null} onClick={record}>
-                <Circle id="automations-record-start-icon" className="size-3 fill-red-500 text-red-500" aria-hidden />
-                Record a flow
-              </Button>
-            </>
-          )}
-          {error ? (
-            <p id="automations-record-error" role="alert" className="px-1 text-xs text-red-300">
-              {error}
-            </p>
-          ) : null}
-        </div>
-      </aside>
+      <ConfirmDialog
+        id="automations-leave"
+        title="Save your changes?"
+        open={pending !== null}
+        confirm={{ label: "Save", onClick: leaveWithSave }}
+        alternative={{
+          label: "Discard",
+          variant: "destructive",
+          onClick: () => {
+            dirtyRef.current = false;
+            confirmLeave();
+          },
+        }}
+        onCancel={cancelLeave}
+      >
+        {selectedFlow?.id ? `${pendingName} has changes that aren't saved.` : "This new flow isn't saved yet."}
+      </ConfirmDialog>
 
-      {view === "history" ? <RunHistory runs={runs} onOpenFlow={openFlow} onOpenDataset={(id) => openDataset(id)} /> : null}
-      {view === "datasets" ? <DatasetsView datasets={snapshot?.datasets ?? []} selectedId={datasetId} pickTabs={webTabs} onSelect={openDataset} /> : null}
-      {view === "flows" ? (
-        selectedFlow ? (
-          <FlowEditor
-            key={selectedFlow.id || NEW_FLOW}
-            flow={selectedFlow}
-            pickTabs={webTabs}
-            onSaved={(saved) => {
-              setLastSaved(saved);
-              setFlowId(saved.id);
-              setDraft(null);
-            }}
-            onDeleted={() => {
-              setFlowId(null);
-              setDraft(null);
-            }}
-          />
-        ) : (
-          <section id="automations-welcome" className="flex min-w-0 flex-1 items-center justify-center">
-            <EmptyState
-              id="automations-welcome-empty"
-              icon={Workflow}
-              title={flows.length ? "Choose a flow" : "Automate the web"}
-              hint="Flows repeat what you do on a page: click, type, read lists, ask AI. They heal themselves when a site changes, and run on a schedule, when a page changes, when you visit a site, or after a download."
-              action={
-                <Button id="automations-welcome-new" size="sm" variant="primary" onClick={newFlow}>
-                  <Plus id="automations-welcome-new-icon" className="size-3.5" aria-hidden />
-                  New flow
-                </Button>
-              }
-            />
-          </section>
-        )
-      ) : null}
+      <ConfirmDialog
+        id="automations-delete"
+        title="Delete this flow?"
+        open={deleting !== null}
+        confirm={{ label: "Delete", variant: "destructive", onClick: confirmDelete }}
+        onCancel={() => setDeleting(null)}
+      >
+        {deleting ? `${deleting.name || "The flow"} and its triggers are removed. Its past runs stay in History.` : null}
+      </ConfirmDialog>
+
+      <RunShotDialog shot={shot} onClose={() => setShot(null)} />
+      <PageNotice notice={notice} onClose={clearNotice} />
     </main>
   );
 }

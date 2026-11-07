@@ -6,6 +6,7 @@
   var next = 1;
   var lastShown = [];
   var MARK_ID = "ce-automation-marks";
+  var FLASH_ID = "ce-automation-flash";
 
   function refOf(el) {
     var id = ids.get(el);
@@ -531,7 +532,33 @@
 
   var picking = null;
 
+  /** The nearest element a click on `node` acts on, the same way the recorder picks it. */
+  function actionable(node) {
+    var current = node;
+    while (current && current.nodeType === 1) {
+      if (L.interactive(current) || L.pointerOnly(current)) return current;
+      current = current.parentElement || (current.getRootNode && current.getRootNode().host) || null;
+    }
+    return node && node.nodeType === 1 ? node : null;
+  }
+
+  function targetFor(node) {
+    var loc = L.locatorsOf(node);
+    var role = loc.role || loc.tag;
+    loc.description = loc.name ? "the " + loc.name + " " + role : "the " + role;
+    return loc;
+  }
+
   function pick(timeoutMs) {
+    return pickWith(timeoutMs, false);
+  }
+
+  /** Lets the user click one element. Resolves with its ref and locators, or null. */
+  function pickElement(timeoutMs) {
+    return pickWith(timeoutMs, true);
+  }
+
+  function pickWith(timeoutMs, single) {
     if (picking) picking.cancel();
     return new Promise(function (resolve) {
       var layer = document.createElement("div");
@@ -542,7 +569,7 @@
       box.style.cssText = "position:fixed;box-sizing:border-box;border:2px solid #0ea5e9;background:rgba(14,165,233,.12);border-radius:3px;display:none;";
       var group = document.createElement("div");
       var hint = document.createElement("div");
-      hint.textContent = "Click an item in the list to extract. Esc cancels.";
+      hint.textContent = single ? "Click the element this step should use. Esc cancels." : "Click an item in the list to extract. Esc cancels.";
       hint.style.cssText = "position:fixed;left:50%;top:12px;transform:translateX(-50%);background:#0f172a;color:#e2e8f0;font:13px Segoe UI,Arial,sans-serif;padding:6px 10px;border-radius:6px;box-shadow:0 2px 10px rgba(0,0,0,.4);";
       shadow.appendChild(group);
       shadow.appendChild(box);
@@ -550,6 +577,7 @@
       (document.body || document.documentElement).appendChild(layer);
       var timer = setTimeout(function () { finish(null); }, timeoutMs || 120000);
       function outline(node) {
+        if (single) node = actionable(node) || node;
         var rect = node.getBoundingClientRect();
         box.style.display = "block";
         box.style.left = rect.left + "px";
@@ -557,6 +585,7 @@
         box.style.width = rect.width + "px";
         box.style.height = rect.height + "px";
         group.textContent = "";
+        if (single) return;
         var like = siblingsLike(itemOf(node));
         for (var i = 0; i < like.length && i < 200; i++) {
           var r = like[i].getBoundingClientRect();
@@ -575,6 +604,11 @@
         event.stopImmediatePropagation();
         var node = event.composedPath ? event.composedPath()[0] : event.target;
         if (!node || node.nodeType !== 1) return;
+        if (single) {
+          var chosen = actionable(node) || node;
+          finish({ ref: refOf(chosen), target: targetFor(chosen) });
+          return;
+        }
         var spec = specFor(node);
         finish({ spec: spec, preview: extract(spec).slice(0, 5) });
       }
@@ -619,6 +653,26 @@
     return el(id);
   }
 
+  /** Outlines an element for a moment so the user can see what a locator matched. */
+  function flash(id) {
+    var node = el(id);
+    node.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+    var rect = topRect(node);
+    var old = document.getElementById(FLASH_ID);
+    if (old) old.remove();
+    var layer = document.createElement("div");
+    layer.id = FLASH_ID;
+    layer.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:2147483647;";
+    var shadow = layer.attachShadow({ mode: "closed" });
+    var box = document.createElement("div");
+    box.style.cssText = "position:fixed;box-sizing:border-box;border:3px solid #22c55e;background:rgba(34,197,94,.15);border-radius:4px;transition:opacity .4s;left:" + rect.x + "px;top:" + rect.y + "px;width:" + rect.width + "px;height:" + rect.height + "px;";
+    shadow.appendChild(box);
+    (document.body || document.documentElement).appendChild(layer);
+    setTimeout(function () { box.style.opacity = "0"; }, 1200);
+    setTimeout(function () { layer.remove(); }, 1700);
+    return true;
+  }
+
   globalThis.__ce = {
     snapshot: snapshot,
     point: point,
@@ -637,6 +691,8 @@
     nextLink: nextLink,
     extract: extract,
     pick: pick,
+    pickElement: pickElement,
+    flash: flash,
     scrollBy: scrollBy,
     element: element
   };

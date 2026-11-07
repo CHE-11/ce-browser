@@ -2205,8 +2205,55 @@ fn delete_flow(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn run_flow(app: AppHandle, id: String, tab_id: Option<u32>) -> Result<u32, String> {
-    automation::flows::run(&app, &id, tab_id, "manual")
+fn run_flow(
+    app: AppHandle,
+    id: String,
+    tab_id: Option<u32>,
+    options: Option<automation::flows::RunOptions>,
+) -> Result<u32, String> {
+    automation::flows::run_part(&app, &id, tab_id, "manual", options.unwrap_or_default())
+}
+
+#[tauri::command]
+fn flow_run_shot(app: AppHandle, run_id: u32, index: usize) -> Option<String> {
+    automation::flows::run_shot(&app, run_id, index)
+}
+
+#[tauri::command]
+fn duplicate_flow(app: AppHandle, id: String) -> Result<automation::flows::Flow, String> {
+    automation::flows::duplicate(&app, &id)
+}
+
+#[tauri::command]
+fn export_flow(app: AppHandle, id: String, path: String) -> Result<(), String> {
+    automation::flows::export(&app, &id, &path)
+}
+
+#[tauri::command]
+fn import_flow(app: AppHandle, path: String) -> Result<automation::flows::Flow, String> {
+    automation::flows::import(&app, &path)
+}
+
+#[tauri::command]
+fn set_flow_paused(app: AppHandle, id: String, paused: bool) -> Result<(), String> {
+    automation::flows::set_paused(&app, &id, paused)
+}
+
+#[tauri::command]
+async fn flow_pick_target(
+    app: AppHandle,
+    tab_id: u32,
+) -> Result<Option<automation::flows::FlowTarget>, String> {
+    blocking(move || automation::flows::pick_target(&app, tab_id)).await
+}
+
+#[tauri::command]
+async fn flow_test_target(
+    app: AppHandle,
+    tab_id: u32,
+    target: automation::flows::FlowTarget,
+) -> Result<automation::flows::TargetTest, String> {
+    blocking(move || automation::flows::test_target(&app, tab_id, &target)).await
 }
 
 #[tauri::command]
@@ -2220,8 +2267,17 @@ fn clear_flow_runs(app: AppHandle) {
 }
 
 #[tauri::command]
-async fn start_flow_recording(app: AppHandle, tab_id: u32) -> Result<(), String> {
-    blocking(move || automation::recorder::start(&app, tab_id)).await
+async fn start_flow_recording(
+    app: AppHandle,
+    tab_id: u32,
+    flow_id: Option<String>,
+) -> Result<(), String> {
+    blocking(move || automation::recorder::start(&app, tab_id, flow_id.as_deref())).await
+}
+
+#[tauri::command]
+fn recording_remove_step(app: AppHandle, index: usize) -> Result<(), String> {
+    automation::recorder::remove_step(&app, index)
 }
 
 #[tauri::command]
@@ -2806,9 +2862,17 @@ pub fn run() {
             save_flow,
             delete_flow,
             run_flow,
+            flow_run_shot,
+            duplicate_flow,
+            export_flow,
+            import_flow,
+            set_flow_paused,
+            flow_pick_target,
+            flow_test_target,
             stop_flow_run,
             clear_flow_runs,
             start_flow_recording,
+            recording_remove_step,
             stop_flow_recording,
             flow_playwright,
             open_automations,

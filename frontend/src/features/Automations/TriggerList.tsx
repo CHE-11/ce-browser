@@ -9,14 +9,24 @@ import { TRIGGER_KINDS, WEEKDAYS, blankTrigger } from "./flow-model";
 type TriggerListProps = {
   id: string;
   triggers: FlowTrigger[];
+  /** Problems by trigger index. */
+  issues?: Record<number, string[]>;
   onChange: (triggers: FlowTrigger[]) => void;
 };
 
-function TriggerRow({ id, trigger, onChange, onRemove }: { id: string; trigger: FlowTrigger; onChange: (trigger: FlowTrigger) => void; onRemove: () => void }) {
+type TriggerRowProps = {
+  id: string;
+  trigger: FlowTrigger;
+  issues: string[];
+  onChange: (trigger: FlowTrigger) => void;
+  onRemove: () => void;
+};
+
+function TriggerRow({ id, trigger, issues, onChange, onRemove }: TriggerRowProps) {
   const set = (change: Partial<FlowTrigger>) => onChange({ ...trigger, ...change });
   const known = TRIGGER_KINDS.some((item) => item.kind === trigger.kind);
   return (
-    <li id={id} className="flex flex-wrap items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2">
+    <li id={id} className={cn("flex flex-wrap items-center gap-2 rounded-md border bg-zinc-900/60 px-3 py-2", issues.length ? "border-amber-900/70" : "border-zinc-800", !trigger.enabled && "opacity-60")}>
       <Toggle id={`${id}-enabled`} size="sm" checked={trigger.enabled} onChange={(enabled) => set({ enabled })} aria-label="Trigger on" />
       {known ? (
         <select id={`${id}-kind`} className={cn(inputClassName, "w-52")} value={trigger.kind} onChange={(event) => onChange({ ...blankTrigger(event.target.value as FlowTriggerKind), enabled: trigger.enabled })}>
@@ -96,11 +106,16 @@ function TriggerRow({ id, trigger, onChange, onRemove }: { id: string; trigger: 
       <IconButton id={`${id}-remove`} label="Remove trigger" onClick={onRemove}>
         <Trash2 id={`${id}-remove-icon`} aria-hidden />
       </IconButton>
+      {issues.length ? (
+        <p id={`${id}-issues`} className="w-full text-xs text-amber-300">
+          {issues.join(" ")}
+        </p>
+      ) : null}
     </li>
   );
 }
 
-export function TriggerList({ id, triggers, onChange }: TriggerListProps) {
+export function TriggerList({ id, triggers, issues = {}, onChange }: TriggerListProps) {
   return (
     <div id={id} className="flex flex-col gap-2">
       {triggers.length === 0 ? (
@@ -114,6 +129,7 @@ export function TriggerList({ id, triggers, onChange }: TriggerListProps) {
               id={`${id}-${index}`}
               key={index}
               trigger={trigger}
+              issues={issues[index] ?? []}
               onChange={(next) => onChange(triggers.map((item, at) => (at === index ? next : item)))}
               onRemove={() => onChange(triggers.filter((_, at) => at !== index))}
             />

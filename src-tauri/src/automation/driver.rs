@@ -851,6 +851,18 @@ pub fn pick(app: &AppHandle, id: u32) -> Result<Option<Value>, String> {
     Ok(if value.is_null() { None } else { Some(value) })
 }
 
+/// Lets the user click one element on the page. Returns `{ ref, target }` with its locators.
+pub fn pick_element(app: &AppHandle, id: u32) -> Result<Option<Value>, String> {
+    let limit = Duration::from_secs(180);
+    let value = call_with(app, id, "__ce.pickElement(175000)", true, limit)?;
+    Ok(if value.is_null() { None } else { Some(value) })
+}
+
+/// Outlines an element on the page for a moment.
+pub fn flash(app: &AppHandle, id: u32, element: u32) -> Result<(), String> {
+    call(app, id, &format!("__ce.flash({element})")).map(|_| ())
+}
+
 pub fn extract_rows(
     app: &AppHandle,
     id: u32,

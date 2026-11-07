@@ -25,6 +25,9 @@ import type {
   ExtractPick,
   ExtractSpec,
   Flow,
+  FlowRunOptions,
+  FlowTarget,
+  FlowTargetTest,
   McpStatus,
   ModelPrice,
   SniffedEndpoint,
@@ -1836,8 +1839,9 @@ export function deleteFlow(id: string) {
   return invoke<void>("delete_flow", { id });
 }
 
-export function runFlow(id: string, tabId?: number) {
-  return invoke<number>("run_flow", { id, tabId: tabId ?? null });
+/** Starts a run and returns its id. `options` runs part of the flow or stays on the tab's page. */
+export function runFlow(id: string, tabId?: number, options?: FlowRunOptions) {
+  return invoke<number>("run_flow", { id, tabId: tabId ?? null, options: options ?? null });
 }
 
 export function stopFlowRun(runId: number) {
@@ -1848,13 +1852,69 @@ export function clearFlowRuns() {
   return invoke<void>("clear_flow_runs");
 }
 
-export function startFlowRecording(tabId: number) {
-  return invoke<void>("start_flow_recording", { tabId });
+/** The screenshot saved when a run's step failed, as a `data:` URL. */
+export function flowRunShot(runId: number, index: number) {
+  return invoke<string | null>("flow_run_shot", { runId, index });
 }
 
-/** Ends the flow recording. `save` stores it as a new flow and returns its id. */
+export function duplicateFlow(id: string) {
+  return invoke<Flow>("duplicate_flow", { id });
+}
+
+export function setFlowPaused(id: string, paused: boolean) {
+  return invoke<void>("set_flow_paused", { id, paused });
+}
+
+/** Asks where to save the flow and writes it there. Returns false when the dialog was closed. */
+export async function exportFlow(id: string, name: string) {
+  const path = await save({
+    title: "Export flow",
+    defaultPath: `${(name || "flow").replace(/[\\/:*?"<>|]+/g, " ").trim() || "flow"}.ceflow.json`,
+    filters: [{ name: "Flow", extensions: ["json"] }],
+  });
+  if (!path) {
+    return false;
+  }
+  await invoke<void>("export_flow", { id, path });
+  return true;
+}
+
+/** Asks for an exported flow file and saves it as a new flow. Returns null when the dialog was closed. */
+export async function importFlow() {
+  const path = await open({
+    title: "Import a flow",
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Flow", extensions: ["json"] }],
+  });
+  if (typeof path !== "string") {
+    return null;
+  }
+  return invoke<Flow>("import_flow", { path });
+}
+
+/** Lets the user click the element a step should use in the tab. Null when cancelled. */
+export function flowPickTarget(tabId: number) {
+  return invoke<FlowTarget | null>("flow_pick_target", { tabId });
+}
+
+/** Looks for a step's element in the tab and outlines it when found. */
+export function flowTestTarget(tabId: number, target: FlowTarget) {
+  return invoke<FlowTargetTest>("flow_test_target", { tabId, target });
+}
+
+/** Records in the tab. With `flowId`, saving adds the steps to the end of that flow. */
+export function startFlowRecording(tabId: number, flowId?: string) {
+  return invoke<void>("start_flow_recording", { tabId, flowId: flowId ?? null });
+}
+
+/** Ends the flow recording. `save` stores the steps and returns the id of the flow that holds them. */
 export function stopFlowRecording(save: boolean) {
   return invoke<string | null>("stop_flow_recording", { save });
+}
+
+export function removeRecordedStep(index: number) {
+  return invoke<void>("recording_remove_step", { index });
 }
 
 export function flowPlaywright(id: string) {

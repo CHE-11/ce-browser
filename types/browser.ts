@@ -1827,6 +1827,8 @@ export type FlowStep = {
   pages: number;
   /** Keep going when this step fails. */
   optional: boolean;
+  /** Skipped by runs and left out of exports, without deleting the step. */
+  disabled: boolean;
   note: string;
   /** How much an `ai` step's agent may do without asking. Blank uses the default from Settings. */
   autonomy?: AgentAutonomy | "";
@@ -1864,6 +1866,8 @@ export type Flow = {
   notify: boolean;
   /** For monitors: notify when the AI says this is true of the page. Blank notifies on any change. */
   monitorPrompt: string;
+  /** Triggers don't fire while paused. Starting it by hand still works. */
+  paused: boolean;
   lastRun: number;
   lastStatus: string;
   created: number;
@@ -1878,6 +1882,23 @@ export type FlowRunStep = {
   label: string;
   status: FlowRunStepStatus;
   detail: string;
+  /** A screenshot was saved when this step failed. Read it with `flowRunShot`. */
+  shot: boolean;
+};
+
+export type FlowRunOptions = {
+  /** First step to run. 0 runs the whole flow. */
+  fromStep?: number;
+  /** Last step to run. Leave out to run to the end. */
+  toStep?: number | null;
+  /** Stay on the page open in the chosen tab instead of loading the start address. */
+  here?: boolean;
+};
+
+export type FlowTargetTest = {
+  found: boolean;
+  /** The locator that matched: `testId`, `role`, `css`, `text` or `xpath`. */
+  by: string;
 };
 
 export type FlowRun = {
@@ -1893,12 +1914,21 @@ export type FlowRun = {
   output: string;
   /** Dataset written by the run's extract steps. */
   datasetId: string;
+  /** Index of the step running now. */
+  current: number | null;
+  currentLabel: string;
+  /** First step the run started at. 0 is the whole flow. */
+  fromStep: number;
+  /** Last step the run stops after. `null` runs to the end. */
+  toStep: number | null;
 };
 
 export type FlowRecording = {
   tabId: number;
   steps: FlowStep[];
   started: number;
+  /** Flow the steps are added to when saved. Empty saves a new flow. */
+  flowId: string;
 };
 
 export type DatasetInfo = {
@@ -1921,6 +1951,10 @@ export type AutomationsSnapshot = {
   runs: FlowRun[];
   recording: FlowRecording | null;
   datasets: DatasetInfo[];
+  /** When each flow's triggers next fire, by flow id. Missing for paused and unscheduled flows. */
+  nextRuns: Record<string, number>;
+  /** Why no trigger fires right now. Empty while the scheduler runs. */
+  schedulerPaused: string;
 };
 
 export type ExtractField = {

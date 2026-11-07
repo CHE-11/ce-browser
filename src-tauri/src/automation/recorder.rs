@@ -24,6 +24,8 @@ pub struct FlowRecording {
     pub tab_id: u32,
     pub steps: Vec<FlowStep>,
     pub started: u64,
+    /// Flow the steps are added to when saved. Empty saves a new flow.
+    pub flow_id: String,
 }
 
 struct Recording {
@@ -33,6 +35,7 @@ struct Recording {
     script: Option<String>,
     steps: Vec<FlowStep>,
     started: u64,
+    flow_id: String,
 }
 
 fn state() -> &'static Mutex<Option<Recording>> {
@@ -49,6 +52,7 @@ pub fn current() -> Option<FlowRecording> {
             tab_id: recording.tab,
             steps: recording.steps.clone(),
             started: recording.started,
+            flow_id: recording.flow_id.clone(),
         })
 }
 
@@ -73,9 +77,14 @@ fn new_token() -> String {
     raw.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// Starts recording in `tab`. A recording in another tab is saved first.
-pub fn start(app: &AppHandle, tab: u32) -> Result<(), String> {
+/// Starts recording in `tab`. A recording in another tab is saved first. With `flow_id`, saving
+/// adds the steps to the end of that flow instead of making a new one.
+pub fn start(app: &AppHandle, tab: u32, flow_id: Option<&str>) -> Result<(), String> {
     let info = tabs::tab_info(app, tab).ok_or("That tab is closed.")?;
+    let flow_id = flow_id.map(str::trim).unwrap_or_default().to_string();
+    if !flow_id.is_empty() && flows::flow(app, &flow_id).is_none() {
+        return Err("That flow no longer exists.".into());
+    }
     if !info.url.starts_with("http://")
         && !info.url.starts_with("https://")
         && !info.url.starts_with("file:")
@@ -107,6 +116,7 @@ pub fn start(app: &AppHandle, tab: u32) -> Result<(), String> {
         script: identifier,
         steps: Vec::new(),
         started: now_ms(),
+        flow_id,
     });
     driver::evaluate_main(app, tab, &source).map_err(|error| {
         *state().lock().expect("recorder lock") = None;
@@ -116,7 +126,8 @@ pub fn start(app: &AppHandle, tab: u32) -> Result<(), String> {
     Ok(())
 }
 
-/// Ends the recording. With `save` and at least one step, stores a new flow and returns its id.
+/// Ends the recording. With `save` and at least one step, stores the steps and returns the id of
+/// the flow that holds them.
 pub fn stop(app: &AppHandle, save: bool) -> Result<Option<String>, String> {
     let Some((tab, token, script)) =
         state()
@@ -157,6 +168,19 @@ pub fn stop(app: &AppHandle, save: bool) -> Result<Option<String>, String> {
     if !save || steps.is_empty() {
         return Ok(None);
     }
+    let existing = if recording.flow_id.is_empty() {
+        None
+    } else {
+        flows::flow(app, &recording.flow_id)
+    };
+    if let Some(mut flow) = existing {
+        if flow.start_url.trim().is_empty() {
+            flow.start_url = recording.start_url;
+        }
+        flow.steps.extend(steps);
+        let saved = flows::save(app, flow)?;
+        return Ok(Some(saved.id));
+    }
     let host = url::Url::parse(&recording.start_url)
         .ok()
         .and_then(|url| {
@@ -188,7 +212,7 @@ pub fn toggle(app: &AppHandle, tab: u32) -> Result<(), String> {
                 None => Ok(()),
             })
         } else {
-            start(&handle, tab)
+            start(&handle, tab, None)
         };
         if let Err(error) = result {
             crate::system::toast("Recording", &error, "");
@@ -217,6 +241,20 @@ pub fn on_message(app: &AppHandle, tab: u32, message: &Value) {
     if changed {
         flows::emit(app);
     }
+}
+
+/// Drops a recorded step before the recording is saved.
+pub fn remove_step(app: &AppHandle, index: usize) -> Result<(), String> {
+    {
+        let mut guard = state().lock().expect("recorder lock");
+        let recording = guard.as_mut().ok_or("Nothing is being recorded.")?;
+        if index >= recording.steps.len() {
+            return Err("That step is no longer in the recording.".into());
+        }
+        recording.steps.remove(index);
+    }
+    flows::emit(app);
+    Ok(())
 }
 
 /// The user loaded an address from the address bar in the recording tab.
