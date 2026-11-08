@@ -1,0 +1,45 @@
+@import "tailwindcss" source(none);
+
+@source ".";
+
+@theme {
+  --font-sans: "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: #09090b;
+  color: #fafafa;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body:has(#studio-popup) {
+  width: 320px;
+}
+
+html:has(#studio-bar),
+html:has(#studio-bar) body,
+html:has(#studio-bar) #root,
+html:has(#studio-panel),
+html:has(#studio-panel) body,
+html:has(#studio-panel) #root,
+html:has(#studio-home),
+html:has(#studio-home) body,
+html:has(#studio-home) #root,
+html:has(#studio-downloads),
+html:has(#studio-downloads) body,
+html:has(#studio-downloads) #root,
+html:has(#studio-popout),
+html:has(#studio-popout) body,
+html:has(#studio-popout) #root,
+html:has(#studio-strip),
+html:has(#studio-strip) body,
+html:has(#studio-strip) #root {
+  height: 100%;
+  overflow: hidden;
+}

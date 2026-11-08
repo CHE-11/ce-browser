@@ -89,7 +89,8 @@ import type {
   StatusText,
   ExtensionInfo,
   HostExtensionInfo,
-  HostPanelLayout,
+  HostPanelSide,
+  ToolbarSide,
   OmniboxState,
   Container,
   NetworkEntry,
@@ -1419,8 +1420,16 @@ export function toggleHostPanel(id: string) {
   return invoke<boolean>("toggle_host_panel", { id });
 }
 
-export function setHostPanelLayout(id: string, layout: HostPanelLayout) {
-  return invoke<void>("set_host_panel_layout", { id, ...layout });
+export function setHostPanelLayout(id: string, side: HostPanelSide) {
+  return invoke<void>("set_host_panel_layout", { id, side });
+}
+
+export function setHostPageToolbarSide(id: string, side: ToolbarSide) {
+  return invoke<void>("set_host_page_toolbar_side", { id, side });
+}
+
+export function setHostPageToolbarOpen(id: string, open: boolean) {
+  return invoke<void>("set_host_page_toolbar_open", { id, open });
 }
 
 export function openHostPopout(id: string) {

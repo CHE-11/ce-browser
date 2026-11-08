@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Plus, RotateCcw, Trash2 } from "lucide-react";
-import type { PrintEditorSettings, PrintFont, PrintPaper, PrintPreset } from "@type/browser";
+import type { PrintEditorSettings, PrintFont, PrintPageNumberLocation, PrintPaper, PrintPreset } from "@type/browser";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import {
@@ -11,6 +11,7 @@ import {
   MARGIN_OPTIONS,
   MAX_PRINT_PRESETS,
   MODE_OPTIONS,
+  PAGE_NUMBER_LOCATIONS,
   PAPER_GROUPS,
   customPaperReady,
   newPrintPreset,
@@ -362,6 +363,33 @@ function PresetFields({
           />
           Page headers and footers
         </label>
+        <label id={`settings-print-preset-${preset.id}-page-numbers`} className="flex items-center gap-2 text-sm text-zinc-200">
+          <input
+            id={`settings-print-preset-${preset.id}-page-numbers-input`}
+            type="checkbox"
+            className="size-3.5 accent-sky-500"
+            checked={preset.showPageNumbers}
+            onChange={(event) => onChange({ showPageNumbers: event.target.checked })}
+          />
+          Show page numbers
+        </label>
+        {preset.showPageNumbers ? (
+          <div id={`settings-print-preset-${preset.id}-page-number-place`} className="flex flex-col gap-1">
+            <span id={`settings-print-preset-${preset.id}-page-number-caption`} className="text-xs text-zinc-400">
+              Location
+            </span>
+            <Segmented
+              id={`settings-print-preset-${preset.id}-page-number-location`}
+              label="Page number location"
+              value={preset.pageNumberLocation}
+              options={PAGE_NUMBER_LOCATIONS}
+              onChange={(pageNumberLocation: PrintPageNumberLocation) => onChange({ pageNumberLocation })}
+            />
+            <p id={`settings-print-preset-${preset.id}-page-number-hint`} className="text-xs text-zinc-500">
+              Each page shows its number and the total, such as 2/12.
+            </p>
+          </div>
+        ) : null}
       </fieldset>
     </div>
   );

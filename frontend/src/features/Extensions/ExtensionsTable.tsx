@@ -1,5 +1,6 @@
 import { Button } from "@/components/Button";
 import { ExtensionIcon, isComponentExtension } from "@/components/ExtensionIcon";
+import { RemoveExtensionDialog } from "./RemoveExtensionDialog";
 import { PinPlacement } from "@/components/PinPlacement";
 import { Skeleton } from "@/components/Skeleton";
 import { Toggle } from "@/components/Toggle";
@@ -188,32 +189,30 @@ export function ExtensionsTable({
   onUpdate: (id: string) => void;
 }) {
   const [sort, setSort] = useState<Sort | null>(null);
+  const [pending, setPending] = useState<{ id: string; name: string } | null>(null);
   const list = sortedRows(rows(loaded ? extensions : [], settings), sort);
 
   return (
     <div id="extensions-table-wrap" className="overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-900">
-      <table id="extensions-table" className="w-full min-w-[64rem] border-collapse text-left text-sm">
+      <table id="extensions-table" className="w-full min-w-[52rem] table-fixed border-collapse text-left text-sm">
         <thead id="extensions-table-head">
           <tr id="extensions-table-head-row" className="border-b border-zinc-800 text-xs text-zinc-500">
             <SortHeader id="extensions-table-name" label="Extension" column="name" sort={sort} onSort={(column) => setSort((current) => nextSort(current, column))} />
             <SortHeader id="extensions-table-source" label="Source" column="source" sort={sort} onSort={(column) => setSort((current) => nextSort(current, column))} className="w-44" />
-            <th id="extensions-table-version" className="w-24 px-3 py-2 font-medium">
-              Version
-            </th>
-            <th id="extensions-table-placement" className="w-64 px-3 py-2 font-medium">
+            <th id="extensions-table-placement" className="w-28 px-3 py-2 font-medium">
               Placement
             </th>
-            <SortHeader id="extensions-table-enabled" label="Enabled" column="enabled" sort={sort} onSort={(column) => setSort((current) => nextSort(current, column))} className="w-28" />
-            <th id="extensions-table-actions" className="px-3 py-2 font-medium">
+            <th id="extensions-table-actions" className="w-[80px] px-1 py-2 font-medium">
               Actions
             </th>
+            <SortHeader id="extensions-table-enabled" label="Enabled" column="enabled" sort={sort} onSort={(column) => setSort((current) => nextSort(current, column))} className="w-28" />
           </tr>
         </thead>
         <tbody id="extensions-table-body">
           {!loaded
             ? [0, 1, 2].map((index) => (
                 <tr id={`extensions-table-loading-${index}`} key={`loading-${index}`} className="border-t border-zinc-800">
-                  <td id={`extensions-table-loading-${index}-cell`} colSpan={6} className="px-3 py-2">
+                  <td id={`extensions-table-loading-${index}-cell`} colSpan={5} className="px-3 py-2">
                     <Skeleton id={`extensions-table-loading-${index}-bar`} className="h-10 rounded-md" />
                   </td>
                 </tr>
@@ -240,8 +239,13 @@ export function ExtensionsTable({
                     <div id={`${domId}-text`} className="min-w-0">
                       <p id={`${domId}-title`} className="truncate font-medium text-zinc-100">
                         {row.name}
+                        {row.version ? (
+                          <span id={`${domId}-version`} className="font-normal text-zinc-500">
+                            {` (${row.version})`}
+                          </span>
+                        ) : null}
                       </p>
-                      <p id={`${domId}-description`} className="line-clamp-1 text-xs text-zinc-400">
+                      <p id={`${domId}-description`} className="whitespace-normal text-xs text-zinc-400">
                         {row.description}
                       </p>
                       {!row.builtin ? (
@@ -266,9 +270,6 @@ export function ExtensionsTable({
                     ))}
                   </div>
                 </td>
-                <td id={`${domId}-version`} className="px-3 py-2.5 font-mono text-xs text-zinc-400">
-                  {row.version ?? "—"}
-                </td>
                 <td id={`${domId}-placement`} className="px-3 py-2.5">
                   <PinPlacement
                     id={`${domId}-pin`}
@@ -277,16 +278,7 @@ export function ExtensionsTable({
                     onChange={(placement) => onPlacement(row.id, placement)}
                   />
                 </td>
-                <td id={`${domId}-enabled`} className="px-3 py-2.5">
-                  <Toggle
-                    id={`${domId}-toggle`}
-                    checked={row.enabled}
-                    disabled={row.builtin && !settings}
-                    title={row.enabled ? "Disable" : "Enable"}
-                    onChange={(enabled) => onEnabled(row.id, enabled)}
-                  />
-                </td>
-                <td id={`${domId}-actions`} className="px-3 py-2.5">
+                <td id={`${domId}-actions`} className="w-[80px] px-1 py-2.5 align-middle">
                   <div id={`${domId}-action-row`} className="flex flex-wrap items-center gap-1">
                     {row.updateVersion ? (
                       <Button id={`${domId}-update`} size="sm" variant="primary" disabled={busy} onClick={() => onUpdate(row.id)}>
@@ -300,18 +292,47 @@ export function ExtensionsTable({
                       </Button>
                     ) : null}
                     {!row.builtin ? (
-                      <Button id={`${domId}-remove`} size="sm" variant="ghost" onClick={() => onRemove(row.id)}>
+                      <Button
+                        id={`${domId}-remove`}
+                        size="sm"
+                        variant="destructive"
+                        className="size-7 px-0"
+                        aria-label="Remove"
+                        title="Remove"
+                        onClick={() => setPending({ id: row.id, name: row.name })}
+                      >
                         <Trash2 id={`${domId}-remove-icon`} className="size-3.5" aria-hidden />
-                        Remove
                       </Button>
                     ) : null}
                   </div>
+                </td>
+                <td id={`${domId}-enabled`} className="px-3 py-2.5 align-middle">
+                  <Toggle
+                    id={`${domId}-toggle`}
+                    checked={row.enabled}
+                    disabled={row.builtin && !settings}
+                    title={row.enabled ? "Disable" : "Enable"}
+                    onChange={(enabled) => onEnabled(row.id, enabled)}
+                  />
                 </td>
               </tr>
             );
           })}
         </tbody>
       </table>
+      <RemoveExtensionDialog
+        id="extensions-table-remove-dialog"
+        name={pending?.name ?? null}
+        open={pending !== null}
+        onCancel={() => setPending(null)}
+        onConfirm={() => {
+          if (!pending) {
+            return;
+          }
+          onRemove(pending.id);
+          setPending(null);
+        }}
+      />
     </div>
   );
 }

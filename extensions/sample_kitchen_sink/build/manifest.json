@@ -1,0 +1,25 @@
+{
+  "manifestVersion": 1,
+  "id": "sample.kitchen",
+  "name": "Studio",
+  "version": "1.0.0",
+  "description": "One extension that uses every host surface.",
+  "permissions": ["tabs", "bookmarks", "downloads", "storage"],
+  "icon": "icon.svg",
+  "background": "background.html",
+  "toolbar": { "title": "Studio", "popup": "popup.html" },
+  "panel": {
+    "path": "panel.html",
+    "side": "right",
+    "resizable": true,
+    "minWidth": 260,
+    "maxWidth": 520,
+    "defaultWidth": 320
+  },
+  "popout": { "path": "popout.html", "title": "Studio", "width": 440, "height": 560, "minWidth": 320, "minHeight": 280 },
+  "pages": [{ "id": "home", "title": "Studio", "path": "home.html" }],
+  "pageToolbar": { "path": "strip.html", "side": "bottom", "thickness": 48 },
+  "bookmarksBar": "bar.html",
+  "downloads": "downloads.html",
+  "contentScripts": [{ "matches": ["https://example.com/*"], "js": ["content.js"] }]
+}

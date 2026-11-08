@@ -5606,12 +5606,14 @@ fn page_rect(app: &AppHandle, window_label: &str) -> (PhysicalPosition<i32>, Phy
     if fullscreen {
         return (PhysicalPosition::new(0, 0), size);
     }
+    let bars = crate::host_extensions::page_toolbar_insets(app);
     let scale = window.scale_factor().unwrap_or(1.0);
-    let top = ((ui_height * scale).round() as u32).min(size.height);
-    let left = ((ui_left * scale).round() as u32).min(size.width.saturating_sub(1));
-    let right =
-        ((ui_right * scale).round() as u32).min(size.width.saturating_sub(left).saturating_sub(1));
-    let bottom = ((ui_bottom * scale).round() as u32).min(size.height.saturating_sub(top));
+    let top = (((ui_height + bars.top) * scale).round() as u32).min(size.height);
+    let left = (((ui_left + bars.left) * scale).round() as u32).min(size.width.saturating_sub(1));
+    let right = (((ui_right + bars.right) * scale).round() as u32)
+        .min(size.width.saturating_sub(left).saturating_sub(1));
+    let bottom = (((ui_bottom + bars.bottom) * scale).round() as u32)
+        .min(size.height.saturating_sub(top));
     (
         PhysicalPosition::new(left as i32, top as i32),
         PhysicalSize::new(size.width - left - right, size.height - top - bottom),
@@ -5627,6 +5629,14 @@ pub fn agent_panel_label(window: &str) -> String {
 
 pub fn automation_panel_label(window: &str) -> String {
     format!("{AUTOMATION_PANEL_PREFIX}{window}")
+}
+
+pub fn is_fullscreen(app: &AppHandle, window: &str) -> bool {
+    with_state(app, |state| {
+        state
+            .chrome(window)
+            .is_some_and(|chrome| chrome.fullscreen)
+    })
 }
 
 pub fn host_panel_label(window: &str) -> String {
@@ -5913,6 +5923,7 @@ pub fn layout(app: &AppHandle, window_label: &str) {
         let _ = ui.set_size(size);
     }
     place_pages(app, window_label, true);
+    crate::host_extensions::place_page_toolbars(app, window_label);
     crate::peek::relayout(app, window_label);
     crate::popup::close_all(app, window_label, false);
     place_toast(app, window_label);

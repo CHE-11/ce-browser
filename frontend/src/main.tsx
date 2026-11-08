@@ -14,7 +14,7 @@ import { BrowserPage } from "./features/Browser/Browser.page";
 import { DownloadsPage } from "./features/Downloads/Downloads.page";
 import { FilesPage } from "./features/BuiltInExtensions/files/Files.page";
 import { NetworkPage } from "./features/BuiltInExtensions/network/Network.page";
-import { ExtensionsPage } from "./features/ExtensionsPage/Extensions.page";
+import { ExtensionsPage } from "./features/Extensions/Extensions.page";
 import { PeekPage } from "./features/Peek/Peek.page";
 import { PermissionsPage } from "./features/Permissions/Permissions.page";
 import { PopupPage } from "./features/Popup/Popup.page";

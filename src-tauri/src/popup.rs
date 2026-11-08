@@ -439,6 +439,45 @@ fn create_app_window(app: &AppHandle, window: &str, label: &str) -> Result<(), S
     Ok(())
 }
 
+const POPUP_CHROME_JS: &str = r##"(function () {
+  if (window.__cePopupChrome) return;
+  if (String(location.href || "").indexOf("about:blank") === 0) return;
+  window.__cePopupChrome = true;
+  var style = document.createElement("style");
+  style.id = "ce-popup-chrome-style";
+  style.textContent = [
+    "#ce-popup-chrome{position:fixed;top:6px;right:6px;z-index:2147483647;user-select:none}",
+    "#ce-popup-chrome-close{width:22px;height:22px;border:0;border-radius:6px;padding:0;margin:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;background:rgba(24,24,27,.94);border:1px solid #3f3f46;color:#a1a1aa;box-shadow:0 1px 2px rgba(0,0,0,.4)}",
+    "#ce-popup-chrome-close:hover{background:#27272a;color:#fafafa}"
+  ].join("");
+  function stop(event) { event.stopPropagation(); }
+  function mount() {
+    if (document.getElementById("ce-popup-chrome")) return;
+    (document.head || document.documentElement).appendChild(style);
+    var root = document.createElement("div");
+    root.id = "ce-popup-chrome";
+    ["pointerdown", "pointerup", "click", "mousedown", "mouseup", "contextmenu"].forEach(function (type) {
+      root.addEventListener(type, stop);
+    });
+    var close = document.createElement("button");
+    close.id = "ce-popup-chrome-close";
+    close.type = "button";
+    close.title = "Close";
+    close.setAttribute("aria-label", "Close");
+    close.innerHTML = '<svg id="ce-popup-chrome-close-icon" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"></path></svg>';
+    close.addEventListener("click", function () {
+      var host = window.__ceHost && window.__ceHost.postMessage ? window.__ceHost : (window.chrome && window.chrome.webview);
+      if (!host || !host.postMessage) return;
+      host.postMessage(JSON.stringify({ type: "ce-chrome", action: "close" }));
+    });
+    root.appendChild(close);
+    (document.documentElement || document.body).appendChild(root);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", mount);
+  else mount();
+})();
+"##;
+
 fn create_ext_window(app: &AppHandle, window: &str, label: &str) -> Result<(), String> {
     let popup = build_window(
         app,
@@ -458,6 +497,7 @@ fn create_ext_window(app: &AppHandle, window: &str, label: &str) -> Result<(), S
         .disable_drag_drop_handler()
         .background_color(surface)
         .focused(false)
+        .initialization_script(POPUP_CHROME_JS)
         .on_page_load(move |webview, payload| {
             if !matches!(payload.event(), PageLoadEvent::Finished) {
                 return;

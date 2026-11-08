@@ -6,6 +6,7 @@ import {
   PrintImageSize,
   PrintMargins,
   PrintMode,
+  PrintPageNumberLocation,
   PrintPaper,
   PrintPreset,
 } from "@type/browser";
@@ -184,6 +185,13 @@ export const MARGIN_OPTIONS: { value: PrintMargins; label: string }[] = [
   { value: "wide", label: "Wide" },
 ];
 
+/** Where `2/12` sits along the bottom of each page. */
+export const PAGE_NUMBER_LOCATIONS: { value: PrintPageNumberLocation; label: string }[] = [
+  { value: "left", label: "Left" },
+  { value: "center", label: "Center" },
+  { value: "right", label: "Right" },
+];
+
 export const MAX_PRINT_PRESETS = 12;
 
 type CleanupFlag = "removeAds" | "removeNavigation" | "removePopups" | "removeSocial" | "removeMedia";
@@ -217,6 +225,8 @@ function articlePreset(): PrintPreset {
     landscape: false,
     margins: "normal",
     headerFooter: false,
+    showPageNumbers: false,
+    pageNumberLocation: "right",
     printBackgrounds: true,
     fileNameTemplate: FILE_NAME_TEMPLATES.article,
   };
@@ -285,6 +295,8 @@ export function applyPrintPreset(settings: PrintEditorSettings, presetId: string
     landscape: preset.landscape,
     margins: preset.margins,
     headerFooter: preset.headerFooter,
+    showPageNumbers: preset.showPageNumbers,
+    pageNumberLocation: preset.pageNumberLocation,
     printBackgrounds: preset.printBackgrounds,
   };
 }
@@ -319,6 +331,8 @@ export const DEFAULT_PRINT_SETTINGS: PrintEditorSettings = {
   landscape: false,
   margins: "normal",
   headerFooter: false,
+  showPageNumbers: false,
+  pageNumberLocation: "right",
   printBackgrounds: true,
   openAfterSave: false,
   presets: DEFAULT_PRINT_PRESETS.map((preset) => ({ ...preset })),
@@ -352,6 +366,8 @@ export function pdfOptions(settings: PrintEditorSettings, title: string, url: st
     margin: MARGIN_INCHES[settings.margins] ?? MARGIN_INCHES.normal,
     backgrounds: settings.printBackgrounds,
     headerFooter: settings.headerFooter,
+    pageNumbers: settings.showPageNumbers,
+    pageNumberLocation: settings.pageNumberLocation,
     scale: 1,
     title,
     url,

@@ -41,6 +41,10 @@ pub struct PdfOptions {
     pub margin: f64,
     pub backgrounds: bool,
     pub header_footer: bool,
+    /// `current/total`, such as `2/12`, along the bottom of every page.
+    pub page_numbers: bool,
+    /// `left`, `center`, or `right`.
+    pub page_number_location: String,
     pub scale: f64,
     pub title: String,
     pub url: String,
@@ -55,6 +59,8 @@ impl Default for PdfOptions {
             margin: 0.5,
             backgrounds: false,
             header_footer: false,
+            page_numbers: false,
+            page_number_location: "right".into(),
             scale: 1.0,
             title: String::new(),
             url: String::new(),
@@ -71,11 +77,48 @@ impl PdfOptions {
             margin: self.margin.clamp(0.0, 3.0),
             backgrounds: self.backgrounds,
             header_footer: self.header_footer,
+            page_numbers: self.page_numbers,
+            header_template: page_number_header(self.header_footer),
+            footer_template: page_number_footer(self.header_footer, &self.page_number_location),
             title: self.title.clone(),
             url: self.url.clone(),
             scale: if self.scale > 0.0 { self.scale } else { 1.0 },
         }
     }
+}
+
+/// Chromium's print footer fills `pageNumber` and `totalPages`. An empty template is replaced
+/// by the default header, which also prints the title, so the unused header stays a blank div.
+pub fn page_number_header(header_footer: bool) -> String {
+    if header_footer {
+        r#"<div style="font-size:9px;width:100%;color:#444;padding:0 8px;"><span style="float:left;"><span class="title"></span></span><span style="float:right;"><span class="date"></span></span></div>"#.to_string()
+    } else {
+        r#"<div style="font-size:9px;"></div>"#.to_string()
+    }
+}
+
+/// `current/total` at `location`. With headers on, the page URL keeps the opposite side.
+pub fn page_number_footer(header_footer: bool, location: &str) -> String {
+    let align = match location {
+        "left" => "left",
+        "center" => "center",
+        _ => "right",
+    };
+    let number = r#"<span class="pageNumber"></span>/<span class="totalPages"></span>"#;
+    if !header_footer {
+        return format!(
+            r#"<div style="font-size:9px;width:100%;text-align:{align};color:#444;padding:0 8px;">{number}</div>"#
+        );
+    }
+    let url = r#"<span class="url"></span>"#;
+    let (left, center, right) = match align {
+        "left" => (number, "", url),
+        "center" => (url, number, ""),
+        _ => (url, "", number),
+    };
+    format!(
+        r#"<table style="font-size:9px;width:100%;color:#444;"><tr><td style="width:33%;text-align:left;">{left}</td><td style="width:34%;text-align:center;">{center}</td><td style="width:33%;text-align:right;">{right}</td></tr></table>"#
+    )
 }
 
 /// Copies the live document into standalone HTML: no scripts, absolute URLs, lazy images
@@ -361,4 +404,30 @@ fn open_host(app: &AppHandle, html: &str) -> Result<(Webview, PathBuf), String> 
         PRINT_FAILURE,
     );
     Ok((webview, file))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{page_number_footer, page_number_header};
+
+    #[test]
+    fn page_numbers_are_current_over_total_at_the_chosen_side() {
+        let right = page_number_footer(false, "right");
+        assert!(right.contains(r#"text-align:right"#));
+        assert!(right.contains(r#"<span class="pageNumber"></span>/<span class="totalPages"></span>"#));
+        assert!(!right.contains("url"));
+
+        let center = page_number_footer(false, "center");
+        assert!(center.contains(r#"text-align:center"#));
+
+        let left = page_number_footer(false, "nope");
+        assert!(left.contains(r#"text-align:right"#));
+
+        let with_url = page_number_footer(true, "left");
+        assert!(with_url.contains(r#"text-align:left"#));
+        assert!(with_url.find(r#"pageNumber"#).unwrap() < with_url.find(r#"class="url""#).unwrap());
+        let header = page_number_header(false);
+        assert!(!header.contains("title"));
+        assert!(page_number_header(true).contains(r#"class="title""#));
+    }
 }

@@ -1116,24 +1116,18 @@ async fn toggle_host_panel(app: AppHandle, window: Window, id: String) -> Result
 }
 
 #[tauri::command]
-async fn set_host_panel_layout(
-    app: AppHandle,
-    id: String,
-    side: String,
-    resizable: bool,
-    min_width: u32,
-    max_width: u32,
-    default_width: u32,
-) -> Result<(), String> {
-    host_extensions::set_panel_layout(
-        &app,
-        &id,
-        &side,
-        resizable,
-        min_width,
-        max_width,
-        default_width,
-    )
+async fn set_host_panel_layout(app: AppHandle, id: String, side: String) -> Result<(), String> {
+    host_extensions::set_panel_layout(&app, &id, &side)
+}
+
+#[tauri::command]
+fn set_host_page_toolbar_side(app: AppHandle, id: String, side: String) -> Result<(), String> {
+    host_extensions::set_page_toolbar_side(&app, &id, &side)
+}
+
+#[tauri::command]
+fn set_host_page_toolbar_open(app: AppHandle, id: String, open: bool) -> Result<(), String> {
+    host_extensions::set_page_toolbar_open(&app, &id, open)
 }
 
 #[tauri::command]
@@ -2814,6 +2808,8 @@ pub fn run() {
             remove_host_extension,
             toggle_host_panel,
             set_host_panel_layout,
+            set_host_page_toolbar_side,
+            set_host_page_toolbar_open,
             open_host_popout,
             set_host_bookmarks_bounds,
             open_extension_options,

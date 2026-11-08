@@ -1,10 +1,10 @@
 import { useRef, useState, type DragEvent } from "react";
 import { PanelRight, Puzzle } from "lucide-react";
 import type { BrowserSettings, ExtensionInfo, TabInfo } from "@type/browser";
-import { createTab, saveSettings } from "@/lib/browser-client";
+import { openPopup, saveSettings } from "@/lib/browser-client";
 import { toolbarDropEdge, toolbarIndexAt } from "@/lib/toolbar-pin";
 import { IconButton } from "@/components/IconButton";
-import { ToolbarEntry } from "../ExtensionsToolbar/ExtensionsToolbar";
+import { ToolbarEntry } from "../Extensions/ExtensionsToolbar";
 
 type AddressBarExtensionsProps = {
   addressExtensions: string[];
@@ -116,7 +116,8 @@ export function AddressBarExtensions({
       <IconButton
         id="address-extensions-page"
         label="Extensions"
-        onClick={() => void createTab("ce://extensions")}
+        aria-haspopup="dialog"
+        onClick={(event) => void openPopup("extensions-menu", event.currentTarget)}
       >
         <Puzzle id="address-extensions-page-icon" aria-hidden />
       </IconButton>

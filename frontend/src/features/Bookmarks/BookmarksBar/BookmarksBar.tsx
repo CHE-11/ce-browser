@@ -300,7 +300,7 @@ export function BookmarksBar({ tree, activeId, activePinned = false, textSize, p
       <div
         id="bookmarks-bar-items"
         ref={slotRef}
-        className="flex min-w-0 flex-1 items-center gap-0.5 self-stretch overflow-hidden"
+        className="flex min-w-0 flex-1 items-center gap-0.5 self-stretch overflow-x-clip overflow-y-visible"
         onDragOver={drag.listProps.onDragOver}
         onDrop={dropAtVisibleEnd}
       >

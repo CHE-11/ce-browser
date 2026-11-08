@@ -55,6 +55,8 @@ export function Dialog({ id, title, open, onClose, onEnter, children, panelClass
     }
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
         onClose();
         return;
       }
@@ -93,11 +95,11 @@ export function Dialog({ id, title, open, onClose, onEnter, children, panelClass
     const onFocus = () => {
       ignoreBackdropUntil.current = Date.now() + 500;
     };
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     window.addEventListener("keydown", onEnterKey, true);
     window.addEventListener("focus", onFocus);
     return () => {
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("keydown", onEnterKey, true);
       window.removeEventListener("focus", onFocus);
     };

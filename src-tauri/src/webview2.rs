@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
+use base64::Engine;
 use tauri::webview::PlatformWebview;
 use tauri::{AppHandle, Manager, Webview};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
@@ -4196,6 +4198,10 @@ pub struct PdfLayout {
     pub margin: f64,
     pub backgrounds: bool,
     pub header_footer: bool,
+    /// Print `current/total` in `footer_template` instead of WebView2's fixed footer.
+    pub page_numbers: bool,
+    pub header_template: String,
+    pub footer_template: String,
     pub title: String,
     pub url: String,
     pub scale: f64,
@@ -4236,6 +4242,9 @@ pub fn print_to_pdf(
     path: &std::path::Path,
     layout: PdfLayout,
 ) -> std::result::Result<(), String> {
+    if layout.page_numbers {
+        return print_to_pdf_numbered(webview, path, &layout);
+    }
     const FAILURE: &str = "Couldn't save the PDF.";
     let (tx, rx) = mpsc::channel::<std::result::Result<(), String>>();
     let path = HSTRING::from(path.as_os_str());
@@ -4263,6 +4272,56 @@ pub fn print_to_pdf(
         .map_err(|error| error.to_string())?;
     rx.recv_timeout(Duration::from_secs(120))
         .map_err(|_| format!("{FAILURE} Printing took too long."))?
+}
+
+/// Page numbers need Chromium's header template, which can fill in the current page and the
+/// total. WebView2's own footer always pins that number to the right, beside the URL.
+/// The footer is drawn in the bottom margin, so a tight margin is opened up enough to show it.
+fn print_to_pdf_numbered(
+    webview: &Webview,
+    path: &Path,
+    layout: &PdfLayout,
+) -> std::result::Result<(), String> {
+    const FAILURE: &str = "Couldn't save the PDF.";
+    let margin_top = if layout.header_footer {
+        layout.margin.max(0.4)
+    } else {
+        layout.margin
+    };
+    let params = serde_json::json!({
+        "paperWidth": layout.page_width,
+        "paperHeight": layout.page_height,
+        "landscape": layout.landscape,
+        "marginTop": margin_top,
+        "marginBottom": layout.margin.max(0.4),
+        "marginLeft": layout.margin,
+        "marginRight": layout.margin,
+        "printBackground": layout.backgrounds,
+        "scale": layout.scale.clamp(0.1, 2.0),
+        "displayHeaderFooter": true,
+        "headerTemplate": layout.header_template,
+        "footerTemplate": layout.footer_template,
+        "preferCSSPageSize": false,
+    });
+    let response = call_cdp_json(
+        webview,
+        "Page.printToPDF",
+        &params.to_string(),
+        Duration::from_secs(120),
+        FAILURE,
+    )?;
+    let data = response
+        .get("data")
+        .and_then(|value| value.as_str())
+        .filter(|data| !data.is_empty())
+        .ok_or_else(|| format!("{FAILURE} The page did not return a PDF."))?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|error| format!("{FAILURE} {error}"))?;
+    if bytes.is_empty() {
+        return Err(format!("{FAILURE} The page did not return a PDF."));
+    }
+    std::fs::write(path, bytes).map_err(|error| format!("{FAILURE} {error}"))
 }
 
 /// Opens the Windows print dialog for what the webview shows.

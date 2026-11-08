@@ -6,7 +6,7 @@ import { PageFailure } from "@/components/PageFailure";
 import { SplitDivider } from "@/components/SplitDivider";
 import { VerticalTabs } from "../Tabs/VerticalTabs";
 import { PageLoading, pagePending } from "./PageLoading";
-import { ExtensionsToolbar } from "../ExtensionsToolbar/ExtensionsToolbar";
+import { ExtensionsToolbar } from "../Extensions/ExtensionsToolbar";
 import { ViewportBar } from "./ViewportBar";
 import { ViewportHandles } from "./ViewportHandles";
 

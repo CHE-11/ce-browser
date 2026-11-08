@@ -438,6 +438,7 @@ export type PopupKind =
   | "bookmark-rename"
   | "tab-menu"
   | "address-bar-ellipsis-menu"
+  | "extensions-menu"
   | "status"
   | "omnibox"
   | "command-palette"
@@ -628,7 +629,10 @@ export type HostExtensionPage = {
 
 export type HostPanelSide = "left" | "right";
 
-/** Side and size of a host extension's docked panel. Widths are CSS pixels. */
+/**
+ * Side and size of a host extension's docked panel. Widths are CSS pixels from the
+ * manifest. `side` is the user's choice, or the manifest side when they have not chosen.
+ */
 export type HostPanelLayout = {
   side: HostPanelSide;
   resizable: boolean;
@@ -647,6 +651,16 @@ export type HostExtensionSurfaces = {
   contentScripts: boolean;
   background: boolean;
   popout: boolean;
+  /** A strip the extension draws around the page. */
+  pageToolbar: boolean;
+};
+
+/** Edge and CSS-pixel thickness of a host extension's page toolbar. */
+export type HostPageToolbar = {
+  side: ToolbarSide;
+  thickness: number;
+  /** False after the toolbar's close control hides it. The extension stays enabled. */
+  open: boolean;
 };
 
 /** A folder of HTML, CSS, and JavaScript loaded by the browser, not a Chrome extension. */
@@ -661,6 +675,8 @@ export type HostExtensionInfo = {
   surfaces: HostExtensionSurfaces;
   /** Present when the extension has a side panel. */
   panel: HostPanelLayout | null;
+  /** Present when the extension draws a toolbar around the page. */
+  pageToolbar: HostPageToolbar | null;
 };
 
 export type ExtensionInfo = {
@@ -1209,6 +1225,8 @@ export type PaperSize =
 /** A catalog size, or the one custom size stored beside it. */
 export type PrintPaper = PaperSize | "custom";
 export type PrintMargins = "none" | "narrow" | "normal" | "wide";
+/** Where `2/12` sits along the bottom of each page. */
+export type PrintPageNumberLocation = "left" | "center" | "right";
 
 /** A named recipe for Quick clean PDF. */
 export type PrintPreset = {
@@ -1237,6 +1255,10 @@ export type PrintPreset = {
   margins: PrintMargins;
   /** WebView2's own header and footer on every page. */
   headerFooter: boolean;
+  /** `current/total`, such as `2/12`, along the bottom of every page. */
+  showPageNumbers: boolean;
+  /** Where the page number sits. Used when `showPageNumbers` is on. */
+  pageNumberLocation: PrintPageNumberLocation;
   printBackgrounds: boolean;
   /**
    * Suggested PDF file name. Placeholders such as `{title}`, `{author}`, and `{article}` fill in from the page.
@@ -1271,6 +1293,10 @@ export type PrintEditorSettings = {
   margins: PrintMargins;
   /** WebView2's own header and footer on every page. */
   headerFooter: boolean;
+  /** `current/total`, such as `2/12`, along the bottom of every page. */
+  showPageNumbers: boolean;
+  /** Where the page number sits. Used when `showPageNumbers` is on. */
+  pageNumberLocation: PrintPageNumberLocation;
   printBackgrounds: boolean;
   openAfterSave: boolean;
   /** Named recipes for Quick clean PDF. Empty uses the editor's last choices. */
@@ -1513,6 +1539,10 @@ export type PdfOptions = {
   margin: number;
   backgrounds: boolean;
   headerFooter: boolean;
+  /** `current/total`, such as `2/12`, along the bottom of every page. */
+  pageNumbers: boolean;
+  /** Where the page number sits. Used when `pageNumbers` is on. */
+  pageNumberLocation: PrintPageNumberLocation;
   scale: number;
   title: string;
   url: string;

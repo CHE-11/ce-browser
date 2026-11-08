@@ -3,7 +3,7 @@ import { ListCollapse } from "lucide-react";
 import type { BrowserSettings, ExtensionInfo, TabInfo, ToolbarSide } from "@type/browser";
 import { ToolbarIcon } from "@features/BuiltInExtensions";
 import { builtinTool } from "@features/BuiltInExtensions/builtin";
-import { HostToolbarButton } from "@features/HostExtensions/HostToolbarButton";
+import { HostToolbarButton } from "@/features/Extensions/HostToolbarButton";
 import { openPopup, saveSettings } from "@/lib/browser-client";
 import { useHostExtensions } from "@/lib/use-browser";
 import { cn } from "@/lib/cn";

@@ -5,10 +5,10 @@ import { FindBar } from "@/components/FindBar";
 import { SyncToast } from "@/components/SyncToast";
 import { AddressBar } from "../AddressBar/AddressBar";
 import { BookmarksBar } from "../Bookmarks/BookmarksBar/BookmarksBar";
-import { HostBookmarksBar } from "../HostExtensions/HostBookmarksBar";
+import { HostBookmarksBar } from "../Extensions/HostBookmarksBar";
 import { useHostExtensions } from "@/lib/use-browser";
 import { TabStrip } from "../Tabs/TabStrip";
-import { ExtensionsToolbar } from "../ExtensionsToolbar/ExtensionsToolbar";
+import { ExtensionsToolbar } from "../Extensions/ExtensionsToolbar";
 
 
 type BrowserHeaderProps = {

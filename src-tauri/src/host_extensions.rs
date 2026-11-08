@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use base64::Engine;
@@ -53,16 +53,20 @@ struct HostRecord {
     id: String,
     enabled: bool,
     granted: Vec<String>,
-    /// `left`, `right`, or empty to use the manifest.
+    /// `left`, `right`, or empty to use the manifest. Size and whether the panel
+    /// can be resized come from the manifest, not this record.
     panel_side: String,
-    /// `None` uses the manifest. The extensions page writes `Some` when the user chooses.
-    panel_resizable: Option<bool>,
-    /// Zero uses the manifest, then the built-in default.
-    panel_min_width: u32,
-    panel_max_width: u32,
-    panel_default_width: u32,
-    /// Last dragged width. Zero uses the default width.
+    /// Last dragged width. Zero uses the manifest default width.
     panel_width: u32,
+    /// `top`, `right`, `bottom`, `left`, or empty to use the manifest.
+    toolbar_side: String,
+    /// The page toolbar is showing. Missing in older files, which stay open.
+    #[serde(default = "default_true")]
+    toolbar_open: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for HostRecord {
@@ -72,11 +76,9 @@ impl Default for HostRecord {
             enabled: false,
             granted: Vec::new(),
             panel_side: String::new(),
-            panel_resizable: None,
-            panel_min_width: 0,
-            panel_max_width: 0,
-            panel_default_width: 0,
             panel_width: 0,
+            toolbar_side: String::new(),
+            toolbar_open: true,
         }
     }
 }
@@ -116,10 +118,46 @@ struct Manifest {
     pages: Vec<PageManifest>,
     #[serde(default)]
     bookmarks_bar: String,
+    /// A strip around the page. A string is the HTML path. An object can also set the starting edge and thickness.
+    #[serde(default)]
+    page_toolbar: PageToolbarSpec,
     #[serde(default)]
     downloads: String,
     #[serde(default)]
     content_scripts: Vec<ContentManifest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum PageToolbarSpec {
+    Path(String),
+    Detail(PageToolbarDetail),
+}
+
+impl Default for PageToolbarSpec {
+    fn default() -> Self {
+        Self::Path(String::new())
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct PageToolbarDetail {
+    path: String,
+    /// `top`, `right`, `bottom`, or `left`. Empty starts on the bottom edge.
+    side: String,
+    /// CSS pixels. Height on the top or bottom, width on the left or right.
+    thickness: u32,
+}
+
+impl Default for PageToolbarDetail {
+    fn default() -> Self {
+        Self {
+            path: String::new(),
+            side: String::new(),
+            thickness: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -242,6 +280,17 @@ pub struct HostSurfaces {
     pub content_scripts: bool,
     pub background: bool,
     pub popout: bool,
+    pub page_toolbar: bool,
+}
+
+/// Where an extension's page toolbar sits, and how thick it is in CSS pixels.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostPageToolbar {
+    pub side: String,
+    pub thickness: u32,
+    /// False after the toolbar's own close control hides it. The extension stays enabled.
+    pub open: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -265,8 +314,10 @@ pub struct HostExtensionInfo {
     pub icon: Option<String>,
     pub permissions: Vec<String>,
     pub surfaces: HostSurfaces,
-    /// The side and size the panel opens with. Empty when the extension has no panel.
+    /// The side the panel opens on, and the size declared in the manifest. Empty when the extension has no panel.
     pub panel: Option<HostPanelLayout>,
+    /// The edge and thickness of the page toolbar. Empty when the extension has none.
+    pub page_toolbar: Option<HostPageToolbar>,
 }
 
 struct Loaded {
@@ -303,6 +354,7 @@ fn save_records(app: &AppHandle, records: Vec<HostRecord>) -> Result<(), String>
         host.0.lock().expect("host extensions lock").records = records.clone();
     }
     invalidate_content_cache();
+    toolbar_generation().fetch_add(1, Ordering::AcqRel);
     crate::sync_conflicts::store(
         app,
         &paths::data_file(app, FILE),
@@ -333,6 +385,7 @@ pub fn start(app: &AppHandle) {
     std::thread::spawn(move || {
         reconcile_permissions(&app);
         sync_backgrounds(&app);
+        sync_page_toolbars(&app);
         refresh_webviews(&app);
     });
 }
@@ -349,6 +402,7 @@ pub fn adopt_saved(app: &AppHandle) {
     std::thread::spawn(move || {
         reconcile_permissions(&app);
         sync_backgrounds(&app);
+        sync_page_toolbars(&app);
         refresh_webviews(&app);
     });
 }
@@ -389,6 +443,11 @@ fn info_of(app: &AppHandle, record: &HostRecord) -> Option<HostExtensionInfo> {
     let has_panel = !panel_path.is_empty();
     let has_popout = resolve_popout(manifest).is_some();
     let layout = has_panel.then(|| publish_panel(&resolve_panel(record, manifest)));
+    let page_toolbar = resolve_page_toolbar(record, manifest).map(|toolbar| HostPageToolbar {
+        side: toolbar.side,
+        thickness: toolbar.thickness.round() as u32,
+        open: record.toolbar_open,
+    });
     Some(HostExtensionInfo {
         id: record.id.clone(),
         name: manifest.name.clone(),
@@ -424,8 +483,10 @@ fn info_of(app: &AppHandle, record: &HostRecord) -> Option<HostExtensionInfo> {
             content_scripts: !manifest.content_scripts.is_empty(),
             background: !manifest.background.is_empty(),
             popout: has_popout,
+            page_toolbar: page_toolbar.is_some(),
         },
         panel: layout,
+        page_toolbar,
     })
 }
 
@@ -481,11 +542,9 @@ pub fn install_folder(app: &AppHandle, path: &Path) -> Result<HostExtensionInfo,
     };
     if let Some(previous) = previous {
         next.panel_side = previous.panel_side;
-        next.panel_resizable = previous.panel_resizable;
-        next.panel_min_width = previous.panel_min_width;
-        next.panel_max_width = previous.panel_max_width;
-        next.panel_default_width = previous.panel_default_width;
         next.panel_width = previous.panel_width;
+        next.toolbar_side = previous.toolbar_side;
+        next.toolbar_open = previous.toolbar_open;
     }
     records.push(next);
     save_records(app, records)?;
@@ -516,6 +575,7 @@ pub fn set_enabled(app: &AppHandle, id: &str, enabled: bool) -> Result<(), Strin
         close_background(app, &id);
         close_popout(app, &id);
         close_panels_for(app, &id);
+        close_page_toolbars(app, &id);
     }
     refresh_after_change(app);
     Ok(())
@@ -533,6 +593,7 @@ pub fn remove(app: &AppHandle, id: &str) -> Result<(), String> {
     close_background(app, &id);
     close_popout(app, &id);
     close_panels_for(app, &id);
+    close_page_toolbars(app, &id);
     let root = package_dir(app, &id);
     if root.exists() {
         fs::remove_dir_all(&root).map_err(|error| error.to_string())?;
@@ -560,6 +621,7 @@ fn refresh_after_change(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         sync_backgrounds(&app);
+        sync_page_toolbars(&app);
         refresh_webviews(&app);
     });
 }
@@ -694,6 +756,359 @@ pub fn place_bookmarks_bar(app: &AppHandle, window: &str, x: f64, y: f64, width:
     ));
 }
 
+const TOOLBAR_MIN: u32 = 28;
+const TOOLBAR_MAX: u32 = 96;
+const TOOLBAR_DEFAULT: u32 = 40;
+
+struct ResolvedPageToolbar {
+    path: String,
+    side: String,
+    thickness: f64,
+}
+
+#[derive(Clone)]
+struct CachedToolbar {
+    id: String,
+    path: String,
+    side: String,
+    thickness: f64,
+}
+
+struct ToolbarCache {
+    generation: u64,
+    bars: Vec<CachedToolbar>,
+}
+
+fn toolbar_generation() -> &'static AtomicU64 {
+    static GENERATION: AtomicU64 = AtomicU64::new(0);
+    &GENERATION
+}
+
+fn toolbar_cache() -> &'static Mutex<ToolbarCache> {
+    static CACHE: Mutex<ToolbarCache> = Mutex::new(ToolbarCache {
+        generation: u64::MAX,
+        bars: Vec::new(),
+    });
+    &CACHE
+}
+
+fn toolbar_syncing() -> &'static AtomicBool {
+    static SYNCING: AtomicBool = AtomicBool::new(false);
+    &SYNCING
+}
+
+/// CSS pixels reserved around the page for extension toolbars.
+pub struct PageToolbarInsets {
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+    pub left: f64,
+}
+
+pub fn page_toolbar_insets(app: &AppHandle) -> PageToolbarInsets {
+    let mut insets = PageToolbarInsets {
+        top: 0.0,
+        right: 0.0,
+        bottom: 0.0,
+        left: 0.0,
+    };
+    for bar in cached_toolbars(app) {
+        match bar.side.as_str() {
+            "top" => insets.top += bar.thickness,
+            "right" => insets.right += bar.thickness,
+            "left" => insets.left += bar.thickness,
+            _ => insets.bottom += bar.thickness,
+        }
+    }
+    insets
+}
+
+fn cached_toolbars(app: &AppHandle) -> Vec<CachedToolbar> {
+    let generation = toolbar_generation().load(Ordering::Acquire);
+    {
+        let cache = toolbar_cache().lock().expect("page toolbars");
+        if cache.generation == generation {
+            return cache.bars.clone();
+        }
+    }
+    let bars = enabled_page_toolbars(app);
+    let mut cache = toolbar_cache().lock().expect("page toolbars");
+    cache.generation = generation;
+    cache.bars = bars.clone();
+    bars
+}
+
+fn enabled_page_toolbars(app: &AppHandle) -> Vec<CachedToolbar> {
+    let mut bars = Vec::new();
+    for record in state(app) {
+        if !record.enabled {
+            continue;
+        }
+        let Some(loaded) = load_record(app, &record) else {
+            continue;
+        };
+        if !grants_cover(&record.granted, &loaded.manifest.permissions) {
+            continue;
+        }
+        let Some(toolbar) = page_toolbar_for_layout(&record, &loaded.manifest) else {
+            continue;
+        };
+        bars.push(CachedToolbar {
+            id: record.id.clone(),
+            path: toolbar.path,
+            side: toolbar.side,
+            thickness: toolbar.thickness,
+        });
+    }
+    bars.sort_by(|left, right| left.id.cmp(&right.id));
+    bars
+}
+
+/// A toolbar that should take space around the page. A closed toolbar still resolves, so the
+/// extensions page can show it again, but it is left out of the layout.
+fn page_toolbar_for_layout(record: &HostRecord, manifest: &Manifest) -> Option<ResolvedPageToolbar> {
+    if !record.toolbar_open {
+        return None;
+    }
+    resolve_page_toolbar(record, manifest)
+}
+
+fn resolve_page_toolbar(record: &HostRecord, manifest: &Manifest) -> Option<ResolvedPageToolbar> {
+    let detail = match &manifest.page_toolbar {
+        PageToolbarSpec::Path(path) => {
+            if path.trim().is_empty() {
+                return None;
+            }
+            PageToolbarDetail {
+                path: path.clone(),
+                ..PageToolbarDetail::default()
+            }
+        }
+        PageToolbarSpec::Detail(detail) => {
+            if detail.path.trim().is_empty() {
+                return None;
+            }
+            detail.clone()
+        }
+    };
+    let side = match record.toolbar_side.as_str() {
+        "top" | "right" | "bottom" | "left" => record.toolbar_side.clone(),
+        _ => match detail.side.as_str() {
+            "top" | "right" | "bottom" | "left" => detail.side.clone(),
+            _ => "bottom".to_string(),
+        },
+    };
+    let thickness = if detail.thickness == 0 {
+        TOOLBAR_DEFAULT
+    } else {
+        detail.thickness
+    }
+    .clamp(TOOLBAR_MIN, TOOLBAR_MAX);
+    Some(ResolvedPageToolbar {
+        path: detail.path,
+        side,
+        thickness: f64::from(thickness),
+    })
+}
+
+fn toolbar_label(window: &str, id: &str) -> String {
+    format!("cext-toolbar-{window}-{}", id.replace('.', "_"))
+}
+
+fn close_page_toolbars(app: &AppHandle, id: &str) {
+    let suffix = format!("-{}", id.replace('.', "_"));
+    let labels: Vec<String> = app
+        .webviews()
+        .keys()
+        .filter(|label| label.starts_with("cext-toolbar-") && label.ends_with(&suffix))
+        .cloned()
+        .collect();
+    for label in labels {
+        if let Some(view) = app.get_webview(&label) {
+            let _ = view.close();
+        }
+    }
+    relayout_windows(app);
+}
+
+pub fn set_page_toolbar_side(app: &AppHandle, id: &str, side: &str) -> Result<(), String> {
+    if !matches!(side, "top" | "right" | "bottom" | "left") {
+        return Err("The toolbar side must be top, right, bottom, or left.".into());
+    }
+    let id = canonical_id(id)?;
+    let mut records = state(app);
+    let record = records
+        .iter_mut()
+        .find(|record| record.id == id)
+        .ok_or("That extension is not installed.")?;
+    let loaded = load_record(app, record).ok_or("That extension folder could not be read.")?;
+    if resolve_page_toolbar(record, &loaded.manifest).is_none() {
+        return Err("That extension has no page toolbar.".into());
+    }
+    if record.toolbar_side == side {
+        return Ok(());
+    }
+    record.toolbar_side = side.to_string();
+    save_records(app, records)?;
+    relayout_windows(app);
+    let payload = json!({ "type": "ce-event", "event": "pageToolbar", "side": side });
+    for window in tabs::snapshot(app).windows {
+        post_label(app, &toolbar_label(&window.label, &id), &payload);
+    }
+    Ok(())
+}
+
+pub fn set_page_toolbar_open(app: &AppHandle, id: &str, open: bool) -> Result<(), String> {
+    let id = canonical_id(id)?;
+    let mut records = state(app);
+    let record = records
+        .iter_mut()
+        .find(|record| record.id == id)
+        .ok_or("That extension is not installed.")?;
+    let loaded = load_record(app, record).ok_or("That extension folder could not be read.")?;
+    if resolve_page_toolbar(record, &loaded.manifest).is_none() {
+        return Err("That extension has no page toolbar.".into());
+    }
+    if record.toolbar_open == open {
+        return Ok(());
+    }
+    record.toolbar_open = open;
+    save_records(app, records)?;
+    relayout_windows(app);
+    Ok(())
+}
+
+fn relayout_windows(app: &AppHandle) {
+    for window in tabs::snapshot(app).windows {
+        tabs::layout(app, &window.label);
+    }
+}
+
+/// Moves extension toolbars into the strip around the page. Missing webviews are created off this thread.
+pub fn place_page_toolbars(app: &AppHandle, window: &str) {
+    let prefix = format!("cext-toolbar-{window}-");
+    let fullscreen = tabs::is_fullscreen(app, window);
+    let bars = if fullscreen {
+        Vec::new()
+    } else {
+        cached_toolbars(app)
+    };
+    let wanted: HashSet<String> = bars
+        .iter()
+        .map(|bar| toolbar_label(window, &bar.id))
+        .collect();
+    let mut missing = false;
+    if !bars.is_empty() {
+        let (origin, size) = tabs::page_area(app, window);
+        let scale = app
+            .get_window(window)
+            .and_then(|host| host.scale_factor().ok())
+            .unwrap_or(1.0)
+            .max(0.01);
+        let insets = page_toolbar_insets(app);
+        let top = (insets.top * scale).round() as i32;
+        let right = (insets.right * scale).round() as i32;
+        let bottom = (insets.bottom * scale).round() as i32;
+        let left = (insets.left * scale).round() as i32;
+        let box_x = origin.x - left;
+        let box_y = origin.y - top;
+        let box_w = (size.width as i32 + left + right).max(1);
+        let box_h = (size.height as i32 + top + bottom).max(1);
+        let mut tops = Vec::new();
+        let mut rights = Vec::new();
+        let mut bottoms = Vec::new();
+        let mut lefts = Vec::new();
+        for bar in &bars {
+            match bar.side.as_str() {
+                "top" => tops.push(bar),
+                "right" => rights.push(bar),
+                "left" => lefts.push(bar),
+                _ => bottoms.push(bar),
+            }
+        }
+        let mut y = box_y;
+        for bar in tops {
+            let height = (bar.thickness * scale).round() as i32;
+            missing |= !place_toolbar(app, window, bar, box_x, y, box_w, height.max(1));
+            y += height;
+        }
+        let mut cursor = box_y + box_h;
+        for bar in &bottoms {
+            let height = (bar.thickness * scale).round() as i32;
+            cursor -= height;
+            missing |= !place_toolbar(app, window, bar, box_x, cursor, box_w, height.max(1));
+        }
+        let mid_y = box_y + top;
+        let mid_h = (box_h - top - bottom).max(1);
+        let mut x = box_x;
+        for bar in lefts {
+            let width = (bar.thickness * scale).round() as i32;
+            missing |= !place_toolbar(app, window, bar, x, mid_y, width.max(1), mid_h);
+            x += width;
+        }
+        let mut x = box_x + box_w;
+        for bar in rights {
+            let width = (bar.thickness * scale).round() as i32;
+            x -= width;
+            missing |= !place_toolbar(app, window, bar, x, mid_y, width.max(1), mid_h);
+        }
+    }
+    for (label, view) in app.webviews() {
+        if label.starts_with(&prefix) && !wanted.contains(label.as_str()) {
+            park(&view);
+        }
+    }
+    if missing && !toolbar_syncing().swap(true, Ordering::AcqRel) {
+        let app = app.clone();
+        std::thread::spawn(move || {
+            sync_page_toolbars(&app);
+            toolbar_syncing().store(false, Ordering::Release);
+        });
+    }
+}
+
+fn place_toolbar(
+    app: &AppHandle,
+    window: &str,
+    bar: &CachedToolbar,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> bool {
+    let Some(view) = app.get_webview(&toolbar_label(window, &bar.id)) else {
+        return false;
+    };
+    let _ = view.set_position(PhysicalPosition::new(x, y));
+    let _ = view.set_size(tauri::PhysicalSize::new(width.max(1) as u32, height.max(1) as u32));
+    true
+}
+
+fn sync_page_toolbars(app: &AppHandle) {
+    let bars = cached_toolbars(app);
+    let windows: Vec<String> = tabs::snapshot(app)
+        .windows
+        .into_iter()
+        .map(|window| window.label)
+        .collect();
+    for window in &windows {
+        for bar in &bars {
+            let Ok(url) = file_url(&bar.id, &bar.path) else {
+                continue;
+            };
+            let label = toolbar_label(window, &bar.id);
+            if ensure_child(app, window, &label, url.clone()).is_ok()
+                && let Some(view) = app.get_webview(&label)
+            {
+                navigate_if_needed(&view, &url);
+            }
+        }
+    }
+    for window in windows {
+        tabs::layout(app, &window);
+    }
+}
+
 fn bookmarks_view(app: &AppHandle, window: &str) -> Option<Webview> {
     let id = settings::get(app).host_bookmarks_bar;
     if id.is_empty() {
@@ -718,11 +1133,19 @@ fn ensure_child(app: &AppHandle, window: &str, label: &str, url: Url) -> Result<
         .get_window(window)
         .ok_or("The browser window is missing.")?;
     let (r, g, b) = settings::popup_surface(app);
-    let mut builder = tabs::base_builder(app, label, WebviewUrl::External(url))
+    // The real page is a virtual host. Mapping that host has to exist before the navigation,
+    // or WebView2 treats `*.ce-ext.localhost` as a refused connection and the document stays
+    // on the error page.
+    let blank = Url::parse("about:blank").map_err(|error| error.to_string())?;
+    let mut builder = tabs::base_builder(app, label, WebviewUrl::External(blank))
         .background_color(Color(r, g, b, 255))
         .focused(false);
     if label.starts_with("cext-panel-") {
-        builder = builder.initialization_script(PANEL_HANDLE_JS);
+        builder = builder
+            .initialization_script(PANEL_HANDLE_JS)
+            .initialization_script(PANEL_CHROME_JS);
+    } else if label.starts_with("cext-toolbar-") {
+        builder = builder.initialization_script(TOOLBAR_CHROME_JS);
     }
     let view = host
         .add_child(
@@ -732,17 +1155,76 @@ fn ensure_child(app: &AppHandle, window: &str, label: &str, url: Url) -> Result<
         )
         .map_err(|error| error.to_string())?;
     attach_webview(app, &view);
+    let _ = view.navigate(url);
     Ok(view)
 }
 
 fn navigate_if_needed(view: &Webview, url: &Url) {
-    let same = view
-        .url()
-        .ok()
-        .is_some_and(|current| current.as_str() == url.as_str());
-    if !same {
+    let current = view.url().ok();
+    let failed = current.as_ref().is_some_and(|current| {
+        let text = current.as_str();
+        text.starts_with("chrome-error:") || text.starts_with("about:blank")
+    });
+    let same = current.is_some_and(|current| current.as_str() == url.as_str());
+    if failed || !same {
         let _ = view.navigate(url.clone());
     }
+}
+
+/// Browser controls on a panel, popover, or page toolbar. The document may be the browser's
+/// error page, which has no `window.ce`, so the webview label says which surface this is.
+fn apply_chrome_action(app: &AppHandle, label: &str, action: &str, side: &str) {
+    if label.starts_with("extpopup-") && action == "close" {
+        crate::popup::close_level(app, label);
+        return;
+    }
+    if let Some(window) = label.strip_prefix("cext-panel-") {
+        let id = tabs::host_panel_extension(app, window);
+        if id.is_empty() {
+            return;
+        }
+        let result = if action == "close" {
+            toggle_panel(app, window, &id).map(|_| ())
+        } else if action == "side" {
+            set_panel_layout(app, &id, side)
+        } else {
+            Ok(())
+        };
+        if let Err(error) = result {
+            eprintln!("panel chrome: {error}");
+        }
+        return;
+    }
+    let Some(id) = toolbar_owner(app, label) else {
+        return;
+    };
+    let result = if action == "close" {
+        set_page_toolbar_open(app, &id, false)
+    } else if action == "side" {
+        set_page_toolbar_side(app, &id, side)
+    } else {
+        Ok(())
+    };
+    if let Err(error) = result {
+        eprintln!("toolbar chrome: {error}");
+    }
+}
+
+fn toolbar_owner(app: &AppHandle, label: &str) -> Option<String> {
+    if !label.starts_with("cext-toolbar-") {
+        return None;
+    }
+    let windows: Vec<String> = tabs::snapshot(app)
+        .windows
+        .into_iter()
+        .map(|window| window.label)
+        .collect();
+    state(app).into_iter().find_map(|record| {
+        windows
+            .iter()
+            .any(|window| toolbar_label(window, &record.id) == label)
+            .then_some(record.id)
+    })
 }
 
 fn park(view: &Webview) {
@@ -844,6 +1326,22 @@ pub fn handle_message(app: &AppHandle, tab_id: Option<u32>, label: &str, source:
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
+    if kind == "ce-chrome" {
+        let action = message
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let side = message
+            .get("side")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let app = app.clone();
+        let label = label.to_string();
+        std::thread::spawn(move || apply_chrome_action(&app, &label, &action, &side));
+        return;
+    }
     if kind != "ce-rpc" && kind != "ce-content" {
         return;
     }
@@ -1207,6 +1705,11 @@ fn dispatch(app: &AppHandle, id: &str, method: &str, params: &Value) -> Result<V
             Ok(Value::Null)
         }
         "ui.panelChrome" => Ok(panel_chrome_payload(&loaded)),
+        "ui.setPanelSide" => {
+            let side = text_field(params, "side")?;
+            set_panel_layout(app, id, &side)?;
+            Ok(json!({ "side": side }))
+        }
         "ui.resizePanel" => resize_open_panel(app, &loaded),
         "ui.openPopout" => {
             open_popout(app, id)?;
@@ -1214,6 +1717,20 @@ fn dispatch(app: &AppHandle, id: &str, method: &str, params: &Value) -> Result<V
         }
         "ui.closePopout" => {
             close_popout(app, id);
+            Ok(Value::Null)
+        }
+        "ui.pageToolbar" => {
+            let toolbar = resolve_page_toolbar(&loaded.record, &loaded.manifest)
+                .ok_or("This extension has no page toolbar.")?;
+            Ok(json!({ "side": toolbar.side, "thickness": toolbar.thickness }))
+        }
+        "ui.setPageToolbarSide" => {
+            let side = text_field(params, "side")?;
+            set_page_toolbar_side(app, id, &side)?;
+            Ok(json!({ "side": side }))
+        }
+        "ui.closePageToolbar" => {
+            set_page_toolbar_open(app, id, false)?;
             Ok(Value::Null)
         }
         _ => Err(format!("Unknown ce method {method}.")),
@@ -1414,25 +1931,22 @@ fn resolve_panel(record: &HostRecord, manifest: &Manifest) -> ResolvedPanel {
             _ => "right",
         },
     };
-    let resizable = record.panel_resizable.unwrap_or(detail.resizable);
-    let min_width = pick_width(record.panel_min_width, detail.min_width, PANEL_MIN);
-    let max_width = pick_width(record.panel_max_width, detail.max_width, PANEL_MAX);
-    let default_width = pick_width(
-        record.panel_default_width,
-        detail.default_width,
-        PANEL_DEFAULT,
-    );
-    normalize_panel(side, resizable, min_width, max_width, default_width)
-}
-
-fn pick_width(chosen: u32, suggested: u32, fallback: u32) -> u32 {
-    if chosen > 0 {
-        chosen
-    } else if suggested > 0 {
-        suggested
+    let min_width = if detail.min_width > 0 {
+        detail.min_width
     } else {
-        fallback
-    }
+        PANEL_MIN
+    };
+    let max_width = if detail.max_width > 0 {
+        detail.max_width
+    } else {
+        PANEL_MAX
+    };
+    let default_width = if detail.default_width > 0 {
+        detail.default_width
+    } else {
+        PANEL_DEFAULT
+    };
+    normalize_panel(side, detail.resizable, min_width, max_width, default_width)
 }
 
 fn normalize_panel(
@@ -1545,60 +2059,24 @@ fn close_panels_for(app: &AppHandle, id: &str) {
     }
 }
 
-pub fn set_panel_layout(
-    app: &AppHandle,
-    id: &str,
-    side: &str,
-    resizable: bool,
-    min_width: u32,
-    max_width: u32,
-    default_width: u32,
-) -> Result<(), String> {
+pub fn set_panel_layout(app: &AppHandle, id: &str, side: &str) -> Result<(), String> {
     if side != "left" && side != "right" {
         return Err("The panel side must be left or right.".into());
     }
-    for (value, label) in [
-        (min_width, "Min width"),
-        (max_width, "Max width"),
-        (default_width, "Default width"),
-    ] {
-        if !(PANEL_FLOOR..=PANEL_CEILING).contains(&value) {
-            return Err(format!(
-                "{label} must be between {PANEL_FLOOR} and {PANEL_CEILING} pixels."
-            ));
-        }
-    }
-    if min_width > max_width {
-        return Err("The minimum width cannot be larger than the maximum.".into());
-    }
-    if resizable && (default_width < min_width || default_width > max_width) {
-        return Err("Default width must sit between the minimum and the maximum.".into());
-    }
     let id = canonical_id(id)?;
     let mut records = state(app);
-    {
-        let record = records
-            .iter_mut()
-            .find(|record| record.id == id)
-            .ok_or("That extension is not installed.")?;
-        let loaded = load_record(app, record).ok_or("That extension folder could not be read.")?;
-        if loaded.manifest.panel_path().is_empty() {
-            return Err("That extension has no side panel.".into());
-        }
-        let current = resolve_panel(record, &loaded.manifest);
-        let reset_width = current.resizable != resizable
-            || current.min_width != min_width
-            || current.max_width != max_width
-            || current.default_width != default_width;
-        record.panel_side = side.to_string();
-        record.panel_resizable = Some(resizable);
-        record.panel_min_width = min_width;
-        record.panel_max_width = max_width;
-        record.panel_default_width = default_width;
-        if reset_width {
-            record.panel_width = 0;
-        }
+    let record = records
+        .iter_mut()
+        .find(|record| record.id == id)
+        .ok_or("That extension is not installed.")?;
+    let loaded = load_record(app, record).ok_or("That extension folder could not be read.")?;
+    if loaded.manifest.panel_path().is_empty() {
+        return Err("That extension has no side panel.".into());
     }
+    if record.panel_side == side {
+        return Ok(());
+    }
+    record.panel_side = side.to_string();
     save_records(app, records)?;
     apply_open_panel(app, &id);
     Ok(())
@@ -1852,6 +2330,9 @@ fn manifest_paths(manifest: &Manifest) -> Vec<String> {
         && !toolbar.popup.is_empty()
     {
         paths.push(toolbar.popup.clone());
+    }
+    if let Some(page_toolbar) = resolve_page_toolbar(&HostRecord::default(), manifest) {
+        paths.push(page_toolbar.path);
     }
     for page in &manifest.pages {
         paths.push(page.path.clone());
@@ -2253,6 +2734,244 @@ fn content_script(app: &AppHandle) -> String {
     format!("{CONTENT_JS_START}{payload}{CONTENT_JS_END}")
 }
 
+const PANEL_CHROME_JS: &str = r##"(function () {
+  if (window.__cePanelChrome) return;
+  window.__cePanelChrome = true;
+  var style = document.createElement("style");
+  style.id = "ce-panel-chrome-style";
+  style.textContent = [
+    "#ce-panel-chrome{position:fixed;top:8px;right:8px;z-index:2147483647;display:flex;align-items:center;gap:2px;padding:2px;border-radius:8px;background:rgba(24,24,27,.94);border:1px solid #3f3f46;box-shadow:0 1px 2px rgba(0,0,0,.4);user-select:none}",
+    "#ce-panel-chrome-side{display:flex}",
+    "#ce-panel-chrome button{width:22px;height:22px;border:0;border-radius:6px;padding:0;margin:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;background:transparent;color:#a1a1aa;font:600 11px/1 ui-sans-serif,system-ui,sans-serif}",
+    "#ce-panel-chrome button:hover{background:#27272a;color:#fafafa}",
+    "#ce-panel-chrome button[aria-pressed=true]{background:#3f3f46;color:#fafafa}"
+  ].join("");
+  function stop(event) { event.stopPropagation(); }
+  function postChrome(action, side) {
+    var target = window.__ceHost && window.__ceHost.postMessage ? window.__ceHost : null;
+    if (!target) {
+      try { target = window.chrome && window.chrome.webview; } catch (error) { target = null; }
+    }
+    if (!target || !target.postMessage) return;
+    var message = { type: "ce-chrome", action: action };
+    if (side) message.side = side;
+    target.postMessage(JSON.stringify(message));
+  }
+  function sideButton(value, text, label) {
+    var button = document.createElement("button");
+    button.id = "ce-panel-chrome-" + value;
+    button.type = "button";
+    button.textContent = text;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.setAttribute("aria-pressed", "false");
+    button.addEventListener("click", function () {
+      paint(value);
+      postChrome("side", value);
+    });
+    return button;
+  }
+  function ensure() {
+    var root = document.getElementById("ce-panel-chrome");
+    if (root) return root;
+    if (!document.getElementById("ce-panel-chrome-style")) {
+      (document.head || document.documentElement).appendChild(style);
+    }
+    root = document.createElement("div");
+    root.id = "ce-panel-chrome";
+    ["pointerdown", "pointerup", "click", "mousedown", "mouseup", "contextmenu"].forEach(function (type) {
+      root.addEventListener(type, stop);
+    });
+    var sides = document.createElement("div");
+    sides.id = "ce-panel-chrome-side";
+    sides.setAttribute("role", "group");
+    sides.setAttribute("aria-label", "Panel side");
+    sides.appendChild(sideButton("left", "L", "Left"));
+    sides.appendChild(sideButton("right", "R", "Right"));
+    var close = document.createElement("button");
+    close.id = "ce-panel-chrome-close";
+    close.type = "button";
+    close.title = "Close";
+    close.setAttribute("aria-label", "Close");
+    close.innerHTML = '<svg id="ce-panel-chrome-close-icon" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"></path></svg>';
+    close.addEventListener("click", function () {
+      postChrome("close");
+    });
+    root.appendChild(sides);
+    root.appendChild(close);
+    (document.documentElement || document.body).appendChild(root);
+    return root;
+  }
+  function paint(side) {
+    ensure();
+    ["left", "right"].forEach(function (value) {
+      var button = document.getElementById("ce-panel-chrome-" + value);
+      if (!button) return;
+      button.setAttribute("aria-pressed", side === value ? "true" : "false");
+    });
+  }
+  function onMessage(event) {
+    var data = event && event.data !== undefined ? event.data : event;
+    if (typeof data === "string") {
+      try { data = JSON.parse(data); } catch (error) { return; }
+    }
+    if (data && data.type === "ce-panel" && data.side) paint(data.side);
+  }
+  function listen() {
+    if (window.__cePanelChromeListening) return;
+    var target = window.chrome && window.chrome.webview;
+    if (!target || !target.addEventListener) return;
+    window.__cePanelChromeListening = true;
+    target.addEventListener("message", onMessage);
+  }
+  function pull() {
+    listen();
+    ensure();
+    var ui = window.ce && window.ce.ui;
+    if (!ui || !ui.panelChrome) {
+      setTimeout(pull, 60);
+      return;
+    }
+    ui.panelChrome().then(function (detail) {
+      if (detail && detail.side) paint(detail.side);
+    }).catch(function () {});
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", pull);
+  else pull();
+})();
+"##;
+
+const TOOLBAR_CHROME_JS: &str = r##"(function () {
+  if (window.__ceToolbarChrome) return;
+  window.__ceToolbarChrome = true;
+  var style = document.createElement("style");
+  style.id = "ce-toolbar-chrome-style";
+  style.textContent = [
+    "#ce-toolbar-chrome{position:fixed;z-index:2147483647;display:flex;align-items:center;gap:4px;background:rgba(24,24,27,.96);box-sizing:border-box;user-select:none}",
+    "#ce-toolbar-chrome[data-axis=horizontal]{top:0;right:0;bottom:0;left:auto;flex-direction:row;padding:0 4px;border-left:1px solid #3f3f46}",
+    "#ce-toolbar-chrome[data-axis=vertical]{left:0;right:0;bottom:0;top:auto;flex-direction:column;padding:4px 0;border-top:1px solid #3f3f46}",
+    "#ce-toolbar-chrome-side{display:grid;grid-template-columns:7px 7px 7px;grid-template-rows:7px 7px 7px;gap:1px}",
+    "#ce-toolbar-chrome-page{grid-column:2;grid-row:2;border-radius:1px;background:#52525b}",
+    "#ce-toolbar-chrome-top{grid-column:2;grid-row:1}",
+    "#ce-toolbar-chrome-left{grid-column:1;grid-row:2}",
+    "#ce-toolbar-chrome-right{grid-column:3;grid-row:2}",
+    "#ce-toolbar-chrome-bottom{grid-column:2;grid-row:3}",
+    "#ce-toolbar-chrome button{border:0;padding:0;margin:0;cursor:pointer;color:#a1a1aa;background:transparent}",
+    "#ce-toolbar-chrome button[role=radio]{width:7px;height:7px;border-radius:1px;background:#3f3f46}",
+    "#ce-toolbar-chrome button[role=radio]:hover{background:#71717a}",
+    "#ce-toolbar-chrome button[role=radio][aria-checked=true]{background:#e4e4e7}",
+    "#ce-toolbar-chrome-close{width:16px;height:16px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center}",
+    "#ce-toolbar-chrome-close:hover{background:#27272a;color:#fafafa}"
+  ].join("");
+  var sides = ["top", "right", "bottom", "left"];
+  function stop(event) { event.stopPropagation(); }
+  function postChrome(action, side) {
+    var target = window.__ceHost && window.__ceHost.postMessage ? window.__ceHost : null;
+    if (!target) {
+      try { target = window.chrome && window.chrome.webview; } catch (error) { target = null; }
+    }
+    if (!target || !target.postMessage) return;
+    var message = { type: "ce-chrome", action: action };
+    if (side) message.side = side;
+    target.postMessage(JSON.stringify(message));
+  }
+  function reserve(side) {
+    var html = document.documentElement;
+    if (!html) return;
+    var vertical = side === "left" || side === "right";
+    html.style.boxSizing = "border-box";
+    html.style.height = "100%";
+    html.style.paddingTop = "0px";
+    html.style.paddingRight = vertical ? "0px" : "52px";
+    html.style.paddingBottom = vertical ? "52px" : "0px";
+    html.style.paddingLeft = "0px";
+    var body = document.body;
+    if (body) {
+      body.style.boxSizing = "border-box";
+      body.style.height = "100%";
+    }
+  }
+  function ensure() {
+    var root = document.getElementById("ce-toolbar-chrome");
+    if (root) return root;
+    if (!document.getElementById("ce-toolbar-chrome-style")) {
+      (document.head || document.documentElement).appendChild(style);
+    }
+    root = document.createElement("div");
+    root.id = "ce-toolbar-chrome";
+    root.setAttribute("data-axis", "horizontal");
+    ["pointerdown", "pointerup", "click", "mousedown", "mouseup", "contextmenu"].forEach(function (type) {
+      root.addEventListener(type, stop);
+    });
+    var group = document.createElement("div");
+    group.id = "ce-toolbar-chrome-side";
+    group.setAttribute("role", "radiogroup");
+    group.setAttribute("aria-label", "Toolbar side");
+    var page = document.createElement("span");
+    page.id = "ce-toolbar-chrome-page";
+    page.setAttribute("aria-hidden", "true");
+    group.appendChild(page);
+    sides.forEach(function (side) {
+      var button = document.createElement("button");
+      button.id = "ce-toolbar-chrome-" + side;
+      button.type = "button";
+      button.setAttribute("role", "radio");
+      button.setAttribute("aria-checked", "false");
+      button.setAttribute("aria-label", side.charAt(0).toUpperCase() + side.slice(1));
+      button.title = "Show on the " + side;
+      button.addEventListener("click", function () {
+        paint(side);
+        postChrome("side", side);
+      });
+      group.appendChild(button);
+    });
+    var close = document.createElement("button");
+    close.id = "ce-toolbar-chrome-close";
+    close.type = "button";
+    close.title = "Close";
+    close.setAttribute("aria-label", "Close");
+    close.innerHTML = '<svg id="ce-toolbar-chrome-close-icon" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"></path></svg>';
+    close.addEventListener("click", function () {
+      postChrome("close");
+    });
+    root.appendChild(group);
+    root.appendChild(close);
+    (document.documentElement || document.body).appendChild(root);
+    return root;
+  }
+  function paint(side) {
+    if (sides.indexOf(side) < 0) side = "bottom";
+    var root = ensure();
+    var vertical = side === "left" || side === "right";
+    root.setAttribute("data-axis", vertical ? "vertical" : "horizontal");
+    reserve(side);
+    sides.forEach(function (value) {
+      var button = document.getElementById("ce-toolbar-chrome-" + value);
+      if (!button) return;
+      button.setAttribute("aria-checked", side === value ? "true" : "false");
+    });
+  }
+  function onEvent(event) {
+    var detail = event && event.detail;
+    if (detail && detail.event === "pageToolbar" && detail.side) paint(detail.side);
+  }
+  function pull() {
+    ensure();
+    var ui = window.ce && window.ce.ui;
+    if (!ui || !ui.pageToolbar) {
+      setTimeout(pull, 60);
+      return;
+    }
+    ui.pageToolbar().then(function (toolbar) {
+      if (toolbar && toolbar.side) paint(toolbar.side);
+    }).catch(function () {});
+  }
+  window.addEventListener("ce-event", onEvent);
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", pull);
+  else pull();
+})();
+"##;
+
 const PANEL_HANDLE_JS: &str = r#"(function () {
   var handleId = "ce-panel-resize";
   function ensure() {
@@ -2447,9 +3166,14 @@ const BRIDGE_JS: &str = r#"(function () {
       openPage: function (pageId) { return rpc("ui.openPage", { pageId: pageId }); },
       notify: function (message) { return rpc("ui.notify", { message: message }); },
       panelChrome: function () { return rpc("ui.panelChrome"); },
+      setPanelSide: function (side) { return rpc("ui.setPanelSide", { side: side || "" }); },
       resizePanel: function () { return rpc("ui.resizePanel"); },
       openPopout: function () { return rpc("ui.openPopout"); },
-      closePopout: function () { return rpc("ui.closePopout"); }
+      closePopout: function () { return rpc("ui.closePopout"); },
+      pageToolbar: function () { return rpc("ui.pageToolbar"); },
+      setPageToolbarSide: function (side) { return rpc("ui.setPageToolbarSide", { side: side || "" }); },
+      closePageToolbar: function () { return rpc("ui.closePageToolbar"); },
+      onPageToolbar: function (handler) { return onEvent("pageToolbar", function (detail) { handler(detail.side || ""); }); }
     }
   };
 })();
@@ -2563,6 +3287,102 @@ mod tests {
         let popout = super::resolve_popout(&sized).unwrap();
         assert_eq!(popout.width, 420.0);
         assert!(!popout.resizable);
+    }
+
+    #[test]
+    fn panel_size_comes_from_the_manifest() {
+        let manifest: super::Manifest = serde_json::from_str(
+            r#"{"panel":{"path":"panel.html","side":"right","resizable":true,"minWidth":260,"maxWidth":520,"defaultWidth":320}}"#,
+        )
+        .unwrap();
+        let record = super::HostRecord {
+            panel_side: "left".into(),
+            panel_width: 400,
+            ..super::HostRecord::default()
+        };
+        let layout = super::resolve_panel(&record, &manifest);
+        assert!(matches!(layout.edge, crate::tabs::PanelEdge::Left));
+        assert!(layout.resizable);
+        assert_eq!(layout.min_width, 260);
+        assert_eq!(layout.max_width, 520);
+        assert_eq!(layout.default_width, 320);
+
+        let bare: super::Manifest = serde_json::from_str(r#"{"panel":"panel.html"}"#).unwrap();
+        let layout = super::resolve_panel(&super::HostRecord::default(), &bare);
+        assert!(matches!(layout.edge, crate::tabs::PanelEdge::Right));
+        assert!(!layout.resizable);
+        assert_eq!(layout.min_width, 240);
+        assert_eq!(layout.max_width, 720);
+        assert_eq!(layout.default_width, 360);
+    }
+
+    #[test]
+    fn an_older_host_record_still_loads() {
+        let file: super::HostFile = serde_json::from_str(
+            r#"{"extensions":[{"id":"notes.example","enabled":true,"panelSide":"left","panelResizable":false,"panelMinWidth":200,"panelMaxWidth":400,"panelDefaultWidth":300,"panelWidth":280}]}"#,
+        )
+        .unwrap();
+        let record = &file.extensions[0];
+        assert_eq!(record.id, "notes.example");
+        assert!(record.enabled);
+        assert_eq!(record.panel_side, "left");
+        assert_eq!(record.panel_width, 280);
+        assert!(record.toolbar_side.is_empty());
+        assert!(record.toolbar_open);
+    }
+
+    #[test]
+    fn a_page_toolbar_stays_open_until_it_is_closed() {
+        let manifest: super::Manifest =
+            serde_json::from_str(r#"{"pageToolbar":"strip.html"}"#).unwrap();
+        let file: super::HostFile =
+            serde_json::from_str(r#"{"extensions":[{"id":"sample.kitchen","enabled":true}]}"#)
+                .unwrap();
+        let record = &file.extensions[0];
+        assert!(record.toolbar_open);
+        assert!(super::page_toolbar_for_layout(record, &manifest).is_some());
+        let closed = super::HostRecord {
+            toolbar_open: false,
+            ..super::HostRecord::default()
+        };
+        assert!(super::resolve_page_toolbar(&closed, &manifest).is_some());
+        assert!(super::page_toolbar_for_layout(&closed, &manifest).is_none());
+    }
+
+    #[test]
+    fn a_page_toolbar_string_starts_on_the_bottom() {
+        let manifest: super::Manifest =
+            serde_json::from_str(r#"{"pageToolbar":"strip.html"}"#).unwrap();
+        let toolbar =
+            super::resolve_page_toolbar(&super::HostRecord::default(), &manifest).unwrap();
+        assert_eq!(toolbar.path, "strip.html");
+        assert_eq!(toolbar.side, "bottom");
+        assert_eq!(toolbar.thickness, 40.0);
+        let moved = super::HostRecord {
+            toolbar_side: "left".into(),
+            ..super::HostRecord::default()
+        };
+        let toolbar = super::resolve_page_toolbar(&moved, &manifest).unwrap();
+        assert_eq!(toolbar.side, "left");
+    }
+
+    #[test]
+    fn a_page_toolbar_object_keeps_its_edge_and_thickness() {
+        let manifest: super::Manifest = serde_json::from_str(
+            r#"{"pageToolbar":{"path":"strip.html","side":"top","thickness":64}}"#,
+        )
+        .unwrap();
+        let toolbar =
+            super::resolve_page_toolbar(&super::HostRecord::default(), &manifest).unwrap();
+        assert_eq!(toolbar.side, "top");
+        assert_eq!(toolbar.thickness, 64.0);
+        let huge: super::Manifest = serde_json::from_str(
+            r#"{"pageToolbar":{"path":"strip.html","side":"sideways","thickness":400}}"#,
+        )
+        .unwrap();
+        let toolbar = super::resolve_page_toolbar(&super::HostRecord::default(), &huge).unwrap();
+        assert_eq!(toolbar.side, "bottom");
+        assert_eq!(toolbar.thickness, 96.0);
     }
 
     #[test]

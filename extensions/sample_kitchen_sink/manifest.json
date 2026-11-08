@@ -18,6 +18,7 @@
   },
   "popout": { "path": "popout.html", "title": "Studio", "width": 440, "height": 560, "minWidth": 320, "minHeight": 280 },
   "pages": [{ "id": "home", "title": "Studio", "path": "home.html" }],
+  "pageToolbar": { "path": "strip.html", "side": "bottom", "thickness": 48 },
   "bookmarksBar": "bar.html",
   "downloads": "downloads.html",
   "contentScripts": [{ "matches": ["https://example.com/*"], "js": ["content.js"] }]

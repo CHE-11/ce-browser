@@ -1,3 +1,4 @@
+import { PinOff } from "lucide-react";
 import type { ToolbarPlacement } from "@type/browser";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
@@ -12,9 +13,9 @@ type PinPlacementProps = {
 export function PinPlacement({ id, placement, disabled, onChange }: PinPlacementProps) {
   const unpinned = !placement.primary && !placement.secondary;
   const options = [
-    { value: "primary" as const, label: "Primary", pressed: placement.primary, title: "Show next to the address bar" },
-    { value: "secondary" as const, label: "Secondary", pressed: placement.secondary, title: "Show on the tools toolbar" },
-    { value: "unpinned" as const, label: "Unpinned", pressed: unpinned, title: "Hide from both bars" },
+    { value: "primary" as const, label: "P", name: "Primary", pressed: placement.primary, title: "Primary: show next to the address bar" },
+    { value: "secondary" as const, label: "S", name: "Secondary", pressed: placement.secondary, title: "Secondary: show on the tools toolbar" },
+    { value: "unpinned" as const, label: "", name: "Unpin", pressed: unpinned, title: "Unpin" },
   ];
   return (
     <div id={id} role="group" aria-label="Where to show this" className={cn("flex w-fit rounded-md border border-zinc-700 p-0.5", disabled && "opacity-40")}>
@@ -24,10 +25,11 @@ export function PinPlacement({ id, placement, disabled, onChange }: PinPlacement
           id={`${id}-${option.value}`}
           type="button"
           aria-pressed={option.pressed}
+          aria-label={option.name}
           disabled={disabled}
           title={option.title}
           className={cn(
-            "rounded px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100 disabled:hover:text-zinc-400",
+            "grid size-6 place-items-center rounded text-xs text-zinc-400 hover:text-zinc-100 disabled:hover:text-zinc-400",
             focusRing,
             option.pressed && "bg-zinc-700 text-zinc-100",
           )}
@@ -41,7 +43,11 @@ export function PinPlacement({ id, placement, disabled, onChange }: PinPlacement
             onChange({ ...placement, [option.value]: !placement[option.value] });
           }}
         >
-          {option.label}
+          {option.value === "unpinned" ? (
+            <PinOff id={`${id}-unpinned-icon`} className="size-3.5" aria-hidden />
+          ) : (
+            option.label
+          )}
         </button>
       ))}
     </div>

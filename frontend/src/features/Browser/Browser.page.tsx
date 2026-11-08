@@ -8,7 +8,7 @@ import { useRef, useState, useEffect, useLayoutEffect } from "react";
 import type { PopupKind } from "@type/browser";
 import { BrowserBody } from "./BrowserBody";
 import { BrowserHeader } from "./BrowserHeader";
-import { ExtensionsToolbar } from "../ExtensionsToolbar/ExtensionsToolbar";
+import { ExtensionsToolbar } from "../Extensions/ExtensionsToolbar";
 
 
 

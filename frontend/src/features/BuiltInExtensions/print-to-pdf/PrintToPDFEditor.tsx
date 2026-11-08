@@ -3,7 +3,7 @@ import { IconButton } from "@/components/IconButton";
 import { extractPage, embedPrintImages, savePrintSettings, defaultDownloadDir, chooseSavePath, printHtmlToPdf, openSavedFile, printHtmlDialog, showSavedFile } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { useSettings } from "@/lib/use-browser";
-import { ExtractedPage, PrintEditorSettings, PaperSize, PrintFont, PrintPaper } from "@type/browser";
+import { ExtractedPage, PrintEditorSettings, PaperSize, PrintFont, PrintPageNumberLocation, PrintPaper } from "@type/browser";
 import { CircleAlert, RotateCcw, LoaderCircle, Printer, Undo2, Redo2, ArrowUpToLine, Trash2, Copy, X, PencilLine, MousePointerClick, FileDown, FileCheck, FolderOpen } from "lucide-react";
 import { useState, useRef, useEffect, useMemo, useCallback, ReactNode } from "react";
 import { Segmented, OptionRow } from "../PopoverParts";
@@ -12,7 +12,7 @@ import { errorText } from "../use-page-tool";
 import { CleanupKind } from "./cleanup";
 import { FrameEditor } from "./editor-dom";
 import { ContentState, BuiltDocument, contentStateFrom, parsePage, buildDocument, FORMAT_STYLE_ID, formatCss, serializeForPrint, finalizeRendered } from "./print-document";
-import { DEFAULT_PRINT_SETTINGS, contentBox, pdfOptions, MODE_OPTIONS, FONT_GROUPS, FONT_OPTIONS, IMAGE_OPTIONS, PAPER_GROUPS, PAPER_SIZES, paperOptionLabel, visiblePapers, MARGIN_OPTIONS } from "./print-options";
+import { DEFAULT_PRINT_SETTINGS, contentBox, pdfOptions, MODE_OPTIONS, FONT_GROUPS, FONT_OPTIONS, IMAGE_OPTIONS, PAPER_GROUPS, PAPER_SIZES, paperOptionLabel, visiblePapers, MARGIN_OPTIONS, PAGE_NUMBER_LOCATIONS } from "./print-options";
 
 
 type PrintEditorProps = {
@@ -786,6 +786,25 @@ export function PrintToPDFEditor({ tabId }: PrintEditorProps) {
               checked={format.headerFooter}
               onChange={(headerFooter) => updateFormat({ headerFooter })}
             />
+            <OptionRow
+              id="print-editor-page-numbers"
+              label="Show page numbers"
+              hint="Current page and total, such as 2/12"
+              checked={format.showPageNumbers}
+              onChange={(showPageNumbers) => updateFormat({ showPageNumbers })}
+            />
+            {format.showPageNumbers ? (
+              <>
+                <FieldLabel id="print-editor-page-number-location-label">Location</FieldLabel>
+                <Segmented
+                  id="print-editor-page-number-location"
+                  label="Page number location"
+                  value={format.pageNumberLocation}
+                  options={PAGE_NUMBER_LOCATIONS}
+                  onChange={(pageNumberLocation: PrintPageNumberLocation) => updateFormat({ pageNumberLocation })}
+                />
+              </>
+            ) : null}
           </SidebarSection>
 
           <SidebarSection id="print-editor-after" title="After saving">

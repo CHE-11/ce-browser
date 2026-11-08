@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { RotateCcw } from "lucide-react";
-import type { PrintEditorSettings } from "@type/browser";
+import type { PrintEditorSettings, PrintPageNumberLocation } from "@type/browser";
 import { IconButton } from "@/components/IconButton";
 import {
   FONT_OPTIONS,
+  PAGE_NUMBER_LOCATIONS,
   PAPER_GROUPS,
   PAPER_SIZES,
   customPaperReady,
@@ -13,7 +14,7 @@ import {
 } from "@/features/BuiltInExtensions/print-to-pdf/print-options";
 import { FILE_NAME_TOKENS } from "@/features/BuiltInExtensions/print-to-pdf/file-name";
 import { SETTINGS_SECTIONS } from "../../settings-sections";
-import { inputClass, matchesQuery, Section, useReportMatch, useSettingChanged, type SettingsSectionProps } from "../../SettingsControls";
+import { inputClass, matchesQuery, Section, Segmented, useReportMatch, useSettingChanged, type SettingsSectionProps } from "../../SettingsControls";
 import { PRESETS_HINT, PRESETS_LABEL, PrintToPDfPresets } from "./PrintToPDfPresets";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-print")!;
@@ -22,6 +23,10 @@ const SIZES_LABEL = "Page sizes";
 const SIZES_HINT = "Checked sizes appear in the print editor. Letter, Tabloid, and Legal start on.";
 const CUSTOM_LABEL = "Custom";
 const CUSTOM_HINT = "Width and height in inches, from 1 to 50.";
+const PAGE_NUMBERS_LABEL = "Page numbers";
+const PAGE_NUMBERS_HINT = "Each page shows its number and the total, such as 2/12, along the bottom.";
+const PAGE_NUMBERS_TOGGLE = "Show page numbers";
+const PAGE_NUMBER_LOCATION_LABEL = "Location";
 
 function patchPrint(settings: PrintEditorSettings, change: Partial<PrintEditorSettings>): PrintEditorSettings {
   return { ...settings, ...change };
@@ -83,6 +88,12 @@ export function PrintToPDfSsection({ settings, query, onUpdate, onMatch }: Setti
     SIZES_HINT,
     CUSTOM_LABEL,
     CUSTOM_HINT,
+    PAGE_NUMBERS_LABEL,
+    PAGE_NUMBERS_HINT,
+    PAGE_NUMBERS_TOGGLE,
+    PAGE_NUMBER_LOCATION_LABEL,
+    "page number",
+    "page numbers",
     "print",
     "pdf",
     "preset",
@@ -98,6 +109,10 @@ export function PrintToPDfSsection({ settings, query, onUpdate, onMatch }: Setti
   );
   useReportMatch(section.id, visible, onMatch);
   const { changed, reset } = useSettingChanged(["printEditor.paperChoices", "printEditor.customWidth", "printEditor.customHeight"]);
+  const { changed: numbersChanged, reset: resetNumbers } = useSettingChanged([
+    "printEditor.showPageNumbers",
+    "printEditor.pageNumberLocation",
+  ]);
   const customOn = print.paperChoices.includes("custom");
 
   if (!visible) {
@@ -116,6 +131,49 @@ export function PrintToPDfSsection({ settings, query, onUpdate, onMatch }: Setti
   return (
     <Section id={section.id} title={section.title}>
       <PrintToPDfPresets print={print} onChange={(printEditor: any) => onUpdate({ printEditor })} />
+      <div id="settings-print-page-numbers" className="flex flex-col gap-3 border-t border-zinc-800 px-5 py-3">
+        <div id="settings-print-page-numbers-heading" className="flex items-start justify-between gap-3">
+          <div id="settings-print-page-numbers-text" className="min-w-0">
+            <div id="settings-print-page-numbers-label" className="text-sm text-zinc-100">
+              {PAGE_NUMBERS_LABEL}
+            </div>
+            <p id="settings-print-page-numbers-hint" className="text-xs text-zinc-500">
+              {PAGE_NUMBERS_HINT}
+            </p>
+          </div>
+          {numbersChanged && resetNumbers ? (
+            <IconButton id="settings-print-page-numbers-reset" label="Reset page numbers to default" className="size-7" onClick={resetNumbers}>
+              <RotateCcw id="settings-print-page-numbers-reset-icon" aria-hidden />
+            </IconButton>
+          ) : null}
+        </div>
+        <label id="settings-print-page-numbers-toggle" className="flex items-center gap-2 text-sm text-zinc-200">
+          <input
+            id="settings-print-page-numbers-input"
+            type="checkbox"
+            className="size-3.5 accent-sky-500"
+            checked={print.showPageNumbers}
+            onChange={(event) => onUpdate({ printEditor: patchPrint(print, { showPageNumbers: event.target.checked }) })}
+          />
+          {PAGE_NUMBERS_TOGGLE}
+        </label>
+        {print.showPageNumbers ? (
+          <div id="settings-print-page-number-place" className="flex max-w-80 flex-col gap-1">
+            <span id="settings-print-page-number-caption" className="text-xs text-zinc-400">
+              {PAGE_NUMBER_LOCATION_LABEL}
+            </span>
+            <Segmented
+              id="settings-print-page-number-location"
+              label={PAGE_NUMBER_LOCATION_LABEL}
+              value={print.pageNumberLocation}
+              options={PAGE_NUMBER_LOCATIONS}
+              onChange={(pageNumberLocation: PrintPageNumberLocation) =>
+                onUpdate({ printEditor: patchPrint(print, { pageNumberLocation }) })
+              }
+            />
+          </div>
+        ) : null}
+      </div>
       <div id="settings-print-papers" className="flex flex-col gap-4 px-5 py-3">
         <div id="settings-print-papers-heading" className="flex items-start justify-between gap-3">
           <div id="settings-print-papers-text" className="min-w-0">

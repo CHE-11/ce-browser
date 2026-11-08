@@ -6,13 +6,13 @@ import { cn } from "@/lib/cn";
 import { saveBuiltinEnabled, saveToolbarPlacement } from "@/lib/toolbar-pin";
 import { toolbarSide, toolbarSidePatch } from "@/lib/toolbar-side";
 import { useExtensions, useHostExtensions, useSettings } from "@/lib/use-browser";
-import { HostExtensionsSection } from "../HostExtensions/HostExtensionsSection";
 import { ExtensionInfo, ToolbarPlacement, ToolbarSide } from "@type/browser";
 import { FileArchive, FolderOpen, Puzzle } from "lucide-react";
 import { useState } from "react";
 import { builtinTool } from "../BuiltInExtensions/builtin";
 import { ExtensionsTable } from "./ExtensionsTable";
-import { ExtensionsToolbarSideControl } from "../ExtensionsToolbar/ExtensionsToolbarSideControl";
+import { ExtensionsToolbarSideControl } from "./ExtensionsToolbarSideControl";
+import { HostExtensionsSection } from "./HostExtensionsSection";
 
 
 export function ExtensionsPage() {

@@ -45,10 +45,14 @@ export function bookmarkItemStyle(
  * Put this on the label, not the row. `text-box-trim` does not inherit, and the row's line box
  * keeps the space under the baseline, so centering the row lines the icon up with that empty
  * space. Trimming the label to the cap height and the baseline makes its box match the letters.
+ * Glyphs still paint past that box. Clip only the inline axis so a `truncate` ellipsis works
+ * without cutting off descenders.
  */
 export const bookmarkLabelStyle = {
   textBoxTrim: "trim-both",
   textBoxEdge: "cap alphabetic",
+  overflowX: "clip",
+  overflowY: "visible",
 } as CSSProperties;
 
 /** Padding and type size for the bookmark editor panel. The gap stays a step tighter than the padding. */

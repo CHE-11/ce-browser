@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PopupShow } from "@type/browser";
 import { AddressBarEllipsisMenu } from "@/features/AddressBar/AddressBarEllipsisMenu";
+import { AddressBarExtensionPopover } from "@/features/AddressBar/AddressBarExtensionPopover";
 import { PopupFrame } from "@/components/PopupFrame";
 import { StatusPopover } from "@/components/StatusPopover";
 import { Toast } from "@/components/Toast";
@@ -12,7 +13,7 @@ import { ProfileSwitcher } from "@/features/AddressBar/ProfileSwitcher";
 import { FontPicker } from "@/features/BuiltInExtensions/font-picker/FontPicker";
 import { StylePicker } from "@/features/BuiltInExtensions/style-picker/StylePicker";
 import { ThemePicker } from "@/features/BuiltInExtensions/theme-picker/ThemePicker";
-import { ExtensionPinContextMenu } from "@/features/AddressBar/ExtensionPinContextMenu";
+import { AddressBarExtensionPinContextMenu } from "@/features/AddressBar/AddressBarExtensionPinContextMenu";
 import { PinContextMenu } from "@/features/AddressBar/PinContextMenu";
 import { BookmarkAdd } from "../Bookmarks/BookmarksBar/BookmarkAdd";
 import { BookmarkEditor } from "../Bookmarks/BookmarksBar/BookmarkEditor";
@@ -175,6 +176,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <TabContextMenu tabId={Number(params.get("id"))} />;
     case "address-bar-ellipsis-menu":
       return <AddressBarEllipsisMenu />;
+    case "extensions-menu":
+      return <AddressBarExtensionPopover />;
     case "status":
       return <StatusPopover />;
     case "omnibox":
@@ -214,7 +217,7 @@ function PopupContent({ popup, params }: PopupPageProps) {
     case "reading":
       return <ReadingPopover params={params} />;
     case "extension-pin":
-      return <ExtensionPinContextMenu extensionId={params.get("id") ?? ""} />;
+      return <AddressBarExtensionPinContextMenu extensionId={params.get("id") ?? ""} />;
     case "pin-menu":
       return <PinContextMenu url={params.get("url") ?? ""} />;
     case "tab-group":

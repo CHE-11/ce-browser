@@ -11,7 +11,7 @@ type ExtensionPinContextMenuProps = {
   extensionId: string;
 };
 
-export function ExtensionPinContextMenu({ extensionId }: ExtensionPinContextMenuProps) {
+export function AddressBarExtensionPinContextMenu({ extensionId }: ExtensionPinContextMenuProps) {
   const { settings, loaded: settingsLoaded } = useSettingsState();
   const { extensions, loaded: extensionsLoaded } = useExtensions();
   const name =

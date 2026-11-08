@@ -1064,6 +1064,7 @@ const PAPER_SIZES: &[&str] = &[
 ];
 const DEFAULT_PAPER_CHOICES: &[&str] = &["letter", "tabloid", "legal"];
 const MARGINS: &[&str] = &["none", "narrow", "normal", "wide"];
+const PAGE_NUMBER_LOCATIONS: &[&str] = &["left", "center", "right"];
 const MAX_PRINT_PRESETS: usize = 12;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -1095,6 +1096,12 @@ pub struct PrintPreset {
     pub landscape: bool,
     pub margins: String,
     pub header_footer: bool,
+    /// `current/total`, such as `2/12`, along the bottom of every page.
+    #[serde(default)]
+    pub show_page_numbers: bool,
+    /// `left`, `center`, or `right`. Used when `show_page_numbers` is on.
+    #[serde(default = "default_page_number_location")]
+    pub page_number_location: String,
     pub print_backgrounds: bool,
     /// Suggested PDF file name. Placeholders such as `{title}` and `{author}` fill in from the page.
     /// Empty uses the page title. Missing on an older file becomes the suggested template for this preset.
@@ -1124,6 +1131,8 @@ impl Default for PrintPreset {
             landscape: false,
             margins: "normal".into(),
             header_footer: false,
+            show_page_numbers: false,
+            page_number_location: default_page_number_location(),
             print_backgrounds: true,
             file_name_template: suggested_file_name("article"),
         }
@@ -1186,6 +1195,12 @@ pub struct PrintEditorSettings {
     pub landscape: bool,
     pub margins: String,
     pub header_footer: bool,
+    /// `current/total`, such as `2/12`, along the bottom of every page.
+    #[serde(default)]
+    pub show_page_numbers: bool,
+    /// `left`, `center`, or `right`. Used when `show_page_numbers` is on.
+    #[serde(default = "default_page_number_location")]
+    pub page_number_location: String,
     pub print_backgrounds: bool,
     pub open_after_save: bool,
     /// Named recipes for Quick clean PDF. Empty uses the editor's last choices.
@@ -1217,6 +1232,8 @@ impl Default for PrintEditorSettings {
             landscape: false,
             margins: "normal".into(),
             header_footer: false,
+            show_page_numbers: false,
+            page_number_location: default_page_number_location(),
             print_backgrounds: true,
             open_after_save: false,
             presets: default_print_presets(),
@@ -1237,6 +1254,11 @@ impl PrintEditorSettings {
         keep(&mut self.font, PRINT_FONTS, defaults.font);
         keep(&mut self.paper, PAPER_SIZES, defaults.paper);
         keep(&mut self.margins, MARGINS, defaults.margins);
+        keep(
+            &mut self.page_number_location,
+            PAGE_NUMBER_LOCATIONS,
+            defaults.page_number_location,
+        );
         self.text_size = snap_text_size(self.text_size);
         self.paper_choices = paper_choices(self.paper_choices);
         self.custom_width = paper_inches(self.custom_width);
@@ -1278,6 +1300,10 @@ const MAX_FILE_NAME_TEMPLATE: usize = 160;
 
 fn file_name_missing() -> String {
     FILE_NAME_MISSING.to_string()
+}
+
+fn default_page_number_location() -> String {
+    "right".into()
 }
 
 /// Keep in sync with `FILE_NAME_TEMPLATES` in `frontend/src/features/BuiltInExtensions/print-to-pdf/file-name.ts`.
@@ -1326,6 +1352,11 @@ fn print_presets(
         keep(&mut preset.font, PRINT_FONTS, &defaults.font);
         keep(&mut preset.paper, PAPER_SIZES, &defaults.paper);
         keep(&mut preset.margins, MARGINS, &defaults.margins);
+        keep(
+            &mut preset.page_number_location,
+            PAGE_NUMBER_LOCATIONS,
+            &defaults.page_number_location,
+        );
         preset.name = preset_name(&preset.name);
         preset.file_name_template = if preset.file_name_template == FILE_NAME_MISSING {
             suggested_file_name(&preset.id)
@@ -3019,6 +3050,39 @@ mod tests {
             serde_json::from_str(r#"{"printEditor":{"openAfterSave":true}}"#)
                 .expect("settings parse");
         assert!(loaded.normalize().print_editor.open_after_save);
+    }
+
+    #[test]
+    fn older_print_settings_omit_page_numbers() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"printEditor":{"headerFooter":true,"presets":[{"id":"article","name":"Article"}]}}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert!(!loaded.print_editor.show_page_numbers);
+        assert_eq!(loaded.print_editor.page_number_location, "right");
+        assert!(!loaded.print_editor.presets[0].show_page_numbers);
+        assert_eq!(loaded.print_editor.presets[0].page_number_location, "right");
+        assert!(loaded.print_editor.header_footer);
+
+        let saved: super::BrowserSettings = serde_json::from_str(
+            r#"{"printEditor":{"showPageNumbers":true,"pageNumberLocation":"center","presets":[{"id":"mine","name":"Mine","showPageNumbers":true,"pageNumberLocation":"left"}]}}"#,
+        )
+        .expect("settings parse");
+        let once = saved.normalize();
+        assert!(once.print_editor.show_page_numbers);
+        assert_eq!(once.print_editor.page_number_location, "center");
+        assert!(once.print_editor.presets[0].show_page_numbers);
+        assert_eq!(once.print_editor.presets[0].page_number_location, "left");
+        assert_eq!(once.clone().normalize(), once);
+
+        let bad: super::BrowserSettings = serde_json::from_str(
+            r#"{"printEditor":{"pageNumberLocation":"top","presets":[{"id":"mine","name":"Mine","pageNumberLocation":"beside"}]}}"#,
+        )
+        .expect("settings parse");
+        let bad = bad.normalize();
+        assert_eq!(bad.print_editor.page_number_location, "right");
+        assert_eq!(bad.print_editor.presets[0].page_number_location, "right");
     }
 
     #[test]

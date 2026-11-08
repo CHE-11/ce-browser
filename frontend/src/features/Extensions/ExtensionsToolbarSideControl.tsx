@@ -26,14 +26,20 @@ export function ExtensionsToolbarSideControl({ id, value, disabled, compact = fa
       id={id}
       role="radiogroup"
       aria-label="Toolbar side"
-      className={cn("grid grid-cols-3 grid-rows-3", compact ? "gap-px" : "gap-0.5", disabled && "opacity-40")}
+      className={cn(
+        "grid w-fit shrink-0 place-items-center",
+        compact
+          ? "grid-cols-[0.75rem_0.75rem_0.75rem] grid-rows-[0.75rem_0.75rem_0.75rem] gap-px"
+          : "grid-cols-[1.75rem_1.75rem_1.75rem] grid-rows-[1.75rem_1.75rem_1.75rem] gap-0.5",
+        disabled && "opacity-40",
+      )}
     >
       <div
         id={`${id}-page`}
         aria-hidden
         className={cn(
-          "col-start-2 row-start-2 rounded-sm border border-zinc-600 bg-zinc-800",
-          compact ? "m-px" : "m-0.5",
+          "col-start-2 row-start-2 rounded-[2px] border border-zinc-600 bg-zinc-800",
+          compact ? "h-[7px] w-[9px]" : "h-3 w-4",
         )}
       />
       {SIDES.map((option) => {

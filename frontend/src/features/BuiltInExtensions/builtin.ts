@@ -94,7 +94,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     id: "password",
     name: "Password",
-    description: "Generate a password on this computer.",
+    description: "Generate a password.",
     icon: KeyRound,
   },
   {
