@@ -14,9 +14,9 @@ import {
   untrackPrice,
 } from "@/lib/browser-client";
 import type { ProductPrice, ShoppingDeals } from "@type/browser";
-import { DealList } from "@features/Shopping/DealList";
-import { checkedLabel, formatPrice, priceChange, siteDomain } from "@features/Shopping/format";
-import { PriceSparkline } from "@features/Shopping/PriceSparkline";
+import { DealList } from "@/features/BuiltInExtensions/shopping/DealList";
+import { checkedLabel, formatPrice, priceChange, siteDomain } from "@/features/BuiltInExtensions/shopping/format";
+import { PriceSparkline } from "@/features/BuiltInExtensions/shopping/PriceSparkline";
 import { PopoverHeader } from "../PopoverParts";
 import { readPopoverTab } from "../shared";
 import { errorText } from "../use-page-tool";

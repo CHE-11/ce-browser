@@ -6,32 +6,32 @@ import { getUserStyles, getWindowsColorScheme, onUserStylesChanged, onWindowsCol
 import { useRoute } from "./lib/route";
 import { applyUserStyles } from "./lib/user-styles";
 import { applyZoom, readZoom } from "./lib/zoom";
-import { AgentPanelPage } from "./features/Agent/AgentPanel.page";
-import { AutomationsPage } from "./features/Automations/Automations.page";
-import { AutomationsPanelPage } from "./features/Automations/AutomationsPanel.page";
-import { BoardsPage } from "./features/Boards/Boards.page";
-import { BookmarksPage } from "./features/Bookmarks/Bookmarks.page";
-import { CaptureEditorPage } from "./features/CaptureEditor/CaptureEditor.page";
+import { AgentPanelPage } from "./features/BuiltInExtensions/agent/AgentPanel.page";
+import { AutomationsPage } from "./features/BuiltInExtensions/automation/Automations.page";
+import { AutomationsPanelPage } from "./features/BuiltInExtensions/automation/AutomationsPanel.page";
+import { CaptureEditorPage } from "./features/BuiltInExtensions/capture-editor/CaptureEditor.page";
 import { BrowserPage } from "./features/Browser/Browser.page";
 import { DownloadsPage } from "./features/Downloads/Downloads.page";
-import { FilesPage } from "./features/Files/Files.page";
-import { HistoryPage } from "./features/History/History.page";
-import { NetworkPage } from "./features/Network/Network.page";
-import { ExtensionsPage } from "./features/Extensions/Extensions.page";
+import { FilesPage } from "./features/BuiltInExtensions/files/Files.page";
+import { NetworkPage } from "./features/BuiltInExtensions/network/Network.page";
+import { ExtensionsPage } from "./features/ExtensionsPage/Extensions.page";
 import { PeekPage } from "./features/Peek/Peek.page";
 import { PermissionsPage } from "./features/Permissions/Permissions.page";
 import { PopupPage } from "./features/Popup/Popup.page";
-import { PrintEditorPage } from "./features/PrintEditor/PrintEditor.page";
-import { ReaderPage } from "./features/Reader/Reader.page";
-import { ScriptsPage } from "./features/Scripts/Scripts.page";
-import { RewritesPage } from "./features/Rewrites/Rewrites.page";
+import { PrintEditorPage } from "./features/BuiltInExtensions/print-to-pdf/PrintEditor.page";
+import { ReaderPage } from "./features/BuiltInExtensions/reader/Reader.page";
+import { ScriptsPage } from "./features/BuiltInExtensions/scripts/Scripts.page";
+import { RewritesPage } from "./features/BuiltInExtensions/rewrites/Rewrites.page";
 import { ShortcutsPage } from "./features/Shortcuts/Shortcuts.page";
 import { StoragePage } from "./features/Storage/Storage.page";
 import { SettingsPage } from "./features/Settings/Settings.page";
 import { StylesPage } from "./features/Styles/Styles.page";
-import { ShoppingPage } from "./features/Shopping/Shopping.page";
+import { ShoppingPage } from "./features/BuiltInExtensions/shopping/Shopping.page";
 import { WhatsNewPage } from "./features/WhatsNew/WhatsNew.page";
 import "./index.css";
+import { BookmarksPage } from "./features/Bookmarks/Bookmarks.page";
+import { BoardsPage } from "./features/BuiltInExtensions/boards/page/Boards.page";
+import { HistoryPage } from "./features/History/History.page";
 
 // Dev builds only. A release bundle leaves these chunks out.
 const DebugHudPage = import.meta.env.DEV

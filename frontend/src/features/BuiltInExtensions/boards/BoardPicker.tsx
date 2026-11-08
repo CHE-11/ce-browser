@@ -4,8 +4,8 @@ import { Button } from "@/components/Button";
 import { createBoard } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import type { BoardsSnapshot } from "@type/browser";
-import { boardChoices } from "@features/Boards/board-tree";
 import { errorText } from "../use-page-tool";
+import { boardChoices } from "./board-tree";
 
 type BoardPickerProps = {
   id: string;

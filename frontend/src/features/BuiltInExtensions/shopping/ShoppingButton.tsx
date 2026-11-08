@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ShoppingCart } from "lucide-react";
 import { listPrices, onPricesChanged } from "@/lib/browser-client";
-import { siteDomain } from "@features/Shopping/format";
+import { siteDomain } from "@/features/BuiltInExtensions/shopping/format";
 import type { ProductPrice, TabInfo } from "@type/browser";
 import { ToolButton } from "../ToolButton";
 

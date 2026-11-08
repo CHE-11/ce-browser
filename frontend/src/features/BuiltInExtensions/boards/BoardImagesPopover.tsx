@@ -5,12 +5,12 @@ import { PopupFrame } from "@/components/PopupFrame";
 import { closePopup, pageMedia, pinImages, showNotice } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import type { PageMedia } from "@type/browser";
-import { boardLabel } from "@features/Boards/board-tree";
-import { useBoards } from "@features/Boards/use-boards";
 import { PopoverHeader } from "../PopoverParts";
 import { readPopoverTab } from "../shared";
 import { errorText } from "../use-page-tool";
 import { BoardPicker } from "./BoardPicker";
+import { useBoards } from "./use-boards";
+import { boardLabel } from "./board-tree";
 
 /** Images smaller than this on both sides are usually icons and spacers. */
 const MIN_SIDE = 48;

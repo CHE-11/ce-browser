@@ -6,9 +6,10 @@ import { toolbarSide } from "@/lib/toolbar-side";
 import { useTabs, useBookmarks, useDownloads, useHistory, useExtensions, useAppearanceFromSettings } from "@/lib/use-browser";
 import { useRef, useState, useEffect, useLayoutEffect } from "react";
 import type { PopupKind } from "@type/browser";
-import { BrowserBody } from "./BrowserBody/BrowserBody";
-import { ToolsToolbar } from "./BrowserBody/ToolsToolbar/ToolsToolbar";
-import { BrowserHeader } from "./BrowserHeader/BrowserHeader";
+import { BrowserBody } from "./BrowserBody";
+import { BrowserHeader } from "./BrowserHeader";
+import { ExtensionsToolbar } from "../ExtensionsToolbar/ExtensionsToolbar";
+
 
 
 export function BrowserPage() {
@@ -169,7 +170,7 @@ export function BrowserPage() {
         extensions={extensions}
       />
       {showTools && toolSide === "bottom" ? (
-        <ToolsToolbar ref={toolbarRef} side="bottom" activeTab={activeTab} extensions={extensions} settings={settings} />
+        <ExtensionsToolbar ref={toolbarRef} side="bottom" activeTab={activeTab} extensions={extensions} settings={settings} />
       ) : null}
     </div>
   );

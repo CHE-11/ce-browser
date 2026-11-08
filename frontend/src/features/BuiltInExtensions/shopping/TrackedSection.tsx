@@ -1,7 +1,7 @@
 import { Button } from "@/components/Button";
 import type { ProductPrice } from "@type/browser";
-import { PriceSparkline } from "@features/Shopping/PriceSparkline";
-import { belowTarget, checkedLabel, formatPrice, priceChange } from "@features/Shopping/format";
+import { PriceSparkline } from "@/features/BuiltInExtensions/shopping/PriceSparkline";
+import { belowTarget, checkedLabel, formatPrice, priceChange } from "@/features/BuiltInExtensions/shopping/format";
 import { Check } from "lucide-react";
 
 export function TrackedSection({

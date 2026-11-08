@@ -3,10 +3,10 @@ import { Download, Search, SearchX } from "lucide-react";
 import { Button } from "@components/Button";
 import { EmptyState } from "@components/EmptyState";
 import { SkeletonRows } from "@components/Skeleton";
-import { DownloadRow } from "@features/Downloads/DownloadRow";
 import { PageShell } from "@components/PageShell";
 import { clearDownloads } from "@lib/browser-client";
 import { useDownloadsState } from "@lib/use-browser";
+import { DownloadRow } from "./DownloadRow";
 
 function dayLabel(ms: number) {
   const date = new Date(ms);

@@ -10,7 +10,7 @@ import {
   paperOptionLabel,
   papersInGroup,
   presetHint,
-} from "@features/BuiltInExtensions/print-pdf/print-options";
+} from "@/features/BuiltInExtensions/print-to-pdf/print-options";
 import { SETTINGS_SECTIONS } from "../../settings-sections";
 import { inputClass, matchesQuery, Section, useReportMatch, useSettingChanged, type SettingsSectionProps } from "../../SettingsControls";
 import { PRESETS_HINT, PRESETS_LABEL, PrintToPDfPresets } from "./PrintToPDfPresets";

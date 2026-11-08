@@ -1,13 +1,12 @@
 import type { BrowserSettings, TabInfo } from "../../../../types/browser";
 import { AdBlockerButton } from "./ad-blocker/AdBlockerButton";
-import { BoardsButton } from "./boards/BoardsButton";
 import { PageControlsButton } from "./page-controls/PageControlsButton";
 import { ClearCacheButton } from "./clear-cache/ClearCacheButton";
 import { PageCaptureButton } from "./page-capture/PageCaptureButton";
 import { WebpageMarkdownButton } from "./webpage-markdown/WebpageMarkdownButton";
 import { PasswordButton } from "./password/Password";
 import { MediaHubButton } from "./media/MediaHubButton";
-import { PrintPdfButton } from "./print-pdf/PrintPdfButton";
+import { PrintPdfButton } from "./print-to-pdf/PrintPdfButton";
 import { ReadingButton } from "./reading/Reading";
 import { ShoppingButton } from "./shopping/ShoppingButton";
 import { TranslateButton } from "./translate/Translate";
@@ -16,6 +15,7 @@ import { AgentButton } from "./automation/AgentButton";
 import { AutomationsButton } from "./automation/AutomationsButton";
 import { ExtractButton } from "./automation/ExtractButton";
 import { RecordFlowButton } from "./automation/RecordFlowButton";
+import { BoardsButton } from "./boards/popover/BoardsButton";
 
 /** One pinned built-in tool. Unknown ids render nothing. */
 export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab: TabInfo | undefined; settings: BrowserSettings | null }) {
