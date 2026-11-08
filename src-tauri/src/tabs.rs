@@ -298,8 +298,9 @@ struct Tab {
     painted: bool,
     /// The next main-frame navigation should park this page. Set before `info.url` changes,
     /// because the navigation event then sees the address it is already going to.
+    /// A page that has already painted is not parked; it stays up while the next one loads.
     blank_next: bool,
-    /// Parked while a different document loads, so the previous page does not stay on screen.
+    /// Parked while a new document replaces a failure, so the error stays up until that document paints.
     blank: bool,
     /// The current title belongs to `info.url`, not the page this tab showed before.
     title_ready: bool,
@@ -2797,9 +2798,9 @@ pub fn awake_ids(app: &AppHandle) -> HashSet<u32> {
     })
 }
 
-/// A main-frame navigation began. A failure is cleared, so the page view shows again,
-/// unless this navigation is leaving the document on screen. That page is parked and the
-/// browser UI shows through until the next document has painted.
+/// A main-frame navigation began. A failure is cleared, so the page view shows again.
+/// A page that has already painted stays on screen and the load bar shows progress.
+/// Replacing a failure still parks that view, so the error stays up until the next document paints.
 /// Runs inside the WebView2 event on the main thread, so moving views is left to a task.
 pub fn navigation_started(app: &AppHandle, id: u32, uri: &str) {
     crate::page_errors::clear_unresponsive(id);
@@ -2821,7 +2822,7 @@ pub fn navigation_started(app: &AppHandle, id: u32, uri: &str) {
             if tab.blank_next || switching {
                 tab.blank_next = false;
                 tab.info.loading = true;
-                blank = tab.painted && !tab.blank;
+                blank = recovered.is_some() && tab.painted && !tab.blank;
             } else {
                 tab.blank_next = false;
             }
@@ -3307,8 +3308,8 @@ fn parked_position() -> LogicalPosition<f64> {
 }
 
 /// Puts each painted page on screen, beside its split partner when it has one.
-/// A tab that has not painted yet, or is waiting on a different document, leaves the
-/// browser UI showing through instead of keeping the previous page up.
+/// A tab that has not painted yet leaves the browser UI showing through. A page that
+/// has already painted stays up while the next document loads.
 fn place_pages(app: &AppHandle, window: &str, resize: bool) {
     devtools_follow(app, window);
     let (position, page_size) = page_rect(app, window);
@@ -3330,7 +3331,7 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         let ratio = split.map(|split| split.ratio).unwrap_or(0.5);
         let dock_ratio =
             (chrome.devtools.visible_for(active) && !fullscreen).then_some(chrome.devtools.ratio);
-        // A tab that failed, or whose next document has not painted, keeps its view off
+        // A tab that failed, or whose first document has not painted, keeps its view off
         // screen so the browser UI behind can show why or that it is still loading.
         let painted_view = |id: u32| {
             state
@@ -4273,28 +4274,25 @@ pub fn navigate(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
     let in_page = current.as_ref().is_some_and(|current| {
         url.fragment().is_some() && same_document(resolve(app, current).as_str(), url.as_str())
     });
-    let (label, hold) = with_state(app, |state| {
+    let label = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
-        let mut hold = false;
         if !same_document(&tab.info.url, &display) {
             let page = |address: &str| address.split(['?', '#']).next().unwrap_or("").to_string();
             if !in_page || page(&tab.info.url) != page(&display) {
                 tab.title_ready = false;
             }
-            hold = tab.painted && !in_page;
-            tab.blank_next = hold;
+            // A failed page is parked once the failure is cleared. A page already on screen
+            // stays up, so a search or a link does not uncover the full-page loader.
+            tab.blank_next = tab.info.failure.is_some() && tab.painted && !in_page;
         }
         tab.info.url = display.clone();
         tab.info.loading = !in_page || tab.webview.is_none();
         if tab.webview.is_none() {
             tab.pending_url = Some(url.clone());
         }
-        Some((tab.webview.clone(), hold))
+        Some(tab.webview.clone())
     })
     .ok_or("That tab is no longer open.")?;
-    if hold {
-        hold_page(app, id);
-    }
     match label.and_then(|label| app.get_webview(&label)) {
         Some(webview) => {
             if let Err(error) = webview.navigate(url) {

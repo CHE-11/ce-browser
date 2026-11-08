@@ -5,7 +5,7 @@ import { DevtoolsDivider } from "@/components/DevtoolsDivider";
 import { PageFailure } from "@/components/PageFailure";
 import { SplitDivider } from "@/components/SplitDivider";
 import { VerticalTabs } from "../Tabs/VerticalTabs";
-import { PageLoading, pagePending } from "./PageLoading";
+import { PageLoading, pagePending, useShownPages } from "./PageLoading";
 import { ExtensionsToolbar } from "../Extensions/ExtensionsToolbar";
 import { ViewportBar } from "./ViewportBar";
 import { ViewportHandles } from "./ViewportHandles";
@@ -40,6 +40,7 @@ export function BrowserBody({
   const devtools = snapshot.devtools;
   const pagesWidth = devtools?.visible ? `calc(${devtools.ratio * 100}% - 3px)` : "100%";
   const showViewportBar = Boolean(devtools?.visible || snapshot.viewport);
+  const shown = useShownPages(snapshot.tabs);
   return (
     <div id="browser-body" className="flex min-h-0 flex-1 pt-[var(--chrome-top-slack,0px)]">
       {vertical && settings && !snapshot.fullscreen ? (
@@ -76,14 +77,14 @@ export function BrowserBody({
                 if (tab?.failure) {
                   return <PageFailure key={id} tab={tab} failure={tab.failure} className="absolute inset-y-0" style={style} />;
                 }
-                if (pagePending(tab)) {
+                if (pagePending(tab, shown)) {
                   return <PageLoading key={id} tab={tab} className="absolute inset-y-0" style={style} />;
                 }
                 return null;
               })
             : activeTab?.failure
               ? <PageFailure tab={activeTab} failure={activeTab.failure} className="absolute inset-0" />
-              : pagePending(activeTab)
+              : pagePending(activeTab, shown)
                 ? <PageLoading tab={activeTab} className="absolute inset-0" />
                 : null}
           {splitShown && split ? <SplitDivider split={split} activeId={snapshot.activeId} /> : null}

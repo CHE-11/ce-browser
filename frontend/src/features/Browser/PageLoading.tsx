@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { LoaderCircle } from "lucide-react";
 import type { TabInfo } from "@type/browser";
 import { hostOf } from "@/lib/format";
@@ -13,8 +13,28 @@ type PageLoadingProps = {
 /** The page view is still off screen. A short wait hides the spinner for loads that finish immediately. */
 const SPINNER_DELAY_MS = 200;
 
-export function pagePending(tab: TabInfo | undefined): tab is TabInfo {
-  return !!tab && !tab.failure && (!tab.loaded || tab.loading);
+/** Tabs that have already shown a document. Later loads keep that page up, so they get no full-page loader. */
+export function useShownPages(tabs: TabInfo[]) {
+  const shown = useRef(new Set<number>());
+  const live = new Set<number>();
+  for (const tab of tabs) {
+    live.add(tab.id);
+    if (!tab.loaded || tab.failure) {
+      shown.current.delete(tab.id);
+    } else if (!tab.loading) {
+      shown.current.add(tab.id);
+    }
+  }
+  for (const id of [...shown.current]) {
+    if (!live.has(id)) {
+      shown.current.delete(id);
+    }
+  }
+  return shown.current;
+}
+
+export function pagePending(tab: TabInfo | undefined, shown: ReadonlySet<number>): tab is TabInfo {
+  return !!tab && !tab.failure && !shown.has(tab.id) && (!tab.loaded || tab.loading);
 }
 
 function loadingText(url: string) {
