@@ -11,6 +11,7 @@ import {
   papersInGroup,
   presetHint,
 } from "@/features/BuiltInExtensions/print-to-pdf/print-options";
+import { FILE_NAME_TOKENS } from "@/features/BuiltInExtensions/print-to-pdf/file-name";
 import { SETTINGS_SECTIONS } from "../../settings-sections";
 import { inputClass, matchesQuery, Section, useReportMatch, useSettingChanged, type SettingsSectionProps } from "../../SettingsControls";
 import { PRESETS_HINT, PRESETS_LABEL, PrintToPDfPresets } from "./PrintToPDfPresets";
@@ -71,7 +72,7 @@ function InchesField({
 export function PrintToPDfSsection({ settings, query, onUpdate, onMatch }: SettingsSectionProps) {
   const print = settings.printEditor;
   const labels = (Object.keys(PAPER_SIZES) as (keyof typeof PAPER_SIZES)[]).map((paper) => PAPER_SIZES[paper].label);
-  const presetText = (print.presets ?? []).flatMap((preset) => [preset.name, presetHint(preset)]);
+  const presetText = (print.presets ?? []).flatMap((preset) => [preset.name, presetHint(preset), preset.fileNameTemplate]);
   const visible = matchesQuery(
     query,
     section.title,
@@ -87,6 +88,10 @@ export function PrintToPDfSsection({ settings, query, onUpdate, onMatch }: Setti
     "preset",
     "cleanup",
     "font",
+    "file name",
+    "filename",
+    "template",
+    ...FILE_NAME_TOKENS.flatMap((token) => [token.token, token.label]),
     ...FONT_OPTIONS.map((option) => option.label),
     ...labels,
     ...presetText,

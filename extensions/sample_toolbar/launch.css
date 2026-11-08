@@ -1,0 +1,35 @@
+:root {
+  color: #2e1065;
+  background: #f5f3ff;
+  font: 13px/1.4 "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body { width: 280px; margin: 0; }
+
+button, input {
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+}
+
+input { width: 100%; padding: 8px 10px; background: white; color: inherit; }
+
+button { padding: 7px 10px; background: #7c3aed; color: white; cursor: pointer; }
+
+h1 { margin: 0 0 10px; font-size: 18px; }
+
+#launch-popup { padding: 14px; }
+
+#launch-form { display: flex; flex-direction: column; gap: 8px; }
+
+.link {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.link button:first-child { flex: 1; text-align: left; background: white; color: #2e1065; }
+
+#launch-error { color: #be123c; }

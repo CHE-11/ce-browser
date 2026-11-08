@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Notes</title>
+    <style>
+      body { margin: 12px; font: 13px/1.4 system-ui, sans-serif; color: #f4f4f5; background: #18181b; }
+      button { display: block; width: 100%; margin: 6px 0; padding: 6px 8px; border: 1px solid #3f3f46; border-radius: 6px; background: #27272a; color: inherit; }
+      pre { white-space: pre-wrap; min-height: 3rem; }
+    </style>
+  </head>
+  <body>
+    <h1 id="host-popup-title">Notes</h1>
+    <button id="host-popup-tabs" type="button">List tabs</button>
+    <button id="host-popup-panel" type="button">Toggle panel</button>
+    <button id="host-popup-page" type="button">Open library</button>
+    <button id="host-popup-notify" type="button">Notify</button>
+    <button id="host-popup-desktop" type="button">Try desktop</button>
+    <pre id="host-popup-output"></pre>
+    <script>
+      var output = document.getElementById("host-popup-output");
+      function show(value) {
+        output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+      }
+      function fail(error) {
+        output.textContent = error && error.message ? error.message : String(error);
+      }
+      document.getElementById("host-popup-tabs").onclick = function () {
+        window.ce.tabs.list().then(show, fail);
+      };
+      document.getElementById("host-popup-panel").onclick = function () {
+        window.ce.ui.togglePanel().then(show, fail);
+      };
+      document.getElementById("host-popup-page").onclick = function () {
+        window.ce.ui.openPage("library").then(show, fail);
+      };
+      document.getElementById("host-popup-notify").onclick = function () {
+        window.ce.ui.notify("Notes is open.").then(function () { show("notified"); }, fail);
+      };
+      document.getElementById("host-popup-desktop").onclick = function () {
+        window.ce.desktop.move(0, 0).then(show, fail);
+      };
+    </script>
+  </body>
+</html>

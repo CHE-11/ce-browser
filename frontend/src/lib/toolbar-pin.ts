@@ -1,7 +1,14 @@
 import type { DragEvent, MouseEvent } from "react";
-import type { BrowserSettings, ToolbarPlacement } from "../../../types/browser";
+import type { BrowserSettings, HostExtensionInfo, ToolbarPlacement } from "../../../types/browser";
 import { BUILTIN_TOOLS, builtinTool } from "../features/BuiltInExtensions/builtin";
 import { openPopup, saveSettings } from "./browser-client";
+
+/** Toolbar ids for enabled host extensions that have a button. */
+export function hostToolbarIds(extensions: HostExtensionInfo[]) {
+  return extensions
+    .filter((extension) => extension.enabled && (extension.surfaces.popup || extension.surfaces.panel))
+    .map((extension) => `host:${extension.id}`);
+}
 
 /** Built-in tools, in the order they had before a custom order was saved. */
 export const DEFAULT_TOOLBAR = BUILTIN_TOOLS.map((tool) => tool.id);
@@ -37,6 +44,9 @@ export function toolbarPlacement(settings: BrowserSettings | null, id: string): 
   }
   const tool = builtinTool(id);
   if (tool && !tool.address) {
+    return { primary: false, secondary: true };
+  }
+  if (id.startsWith("host:")) {
     return { primary: false, secondary: true };
   }
   return { primary: true, secondary: false };

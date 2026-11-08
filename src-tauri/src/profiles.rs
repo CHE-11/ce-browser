@@ -668,13 +668,15 @@ const COPY_PARTS: &[PartSpec] = &[
         ..bare("bookmarks")
     },
     PartSpec {
-        files: &["extensions.json"],
-        dirs: &["extensions"],
+        files: &["extensions.json", "host-extensions.json"],
+        dirs: &["extensions", "host-extensions"],
         settings: &[
             "hiddenToolbarExtensions",
             "toolbarPlacements",
             "toolbarOrder",
             "verticalToolbarExtensions",
+            "hostBookmarksBar",
+            "hostDownloads",
         ],
         ..bare("extensions")
     },
@@ -2141,6 +2143,7 @@ pub(crate) const PROFILE_FILES: &[&str] = &[
     "history.json",
     "bookmarks.json",
     "extensions.json",
+    "host-extensions.json",
     "downloads.json",
     "session.json",
     "window.json",

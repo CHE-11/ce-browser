@@ -1,0 +1,10 @@
+{
+  "manifestVersion": 1,
+  "id": "sample.toolbar",
+  "name": "Launch",
+  "version": "1.0.0",
+  "description": "A toolbar popup of links you open often.",
+  "permissions": ["storage", "tabs"],
+  "icon": "icon.svg",
+  "toolbar": { "title": "Launch", "popup": "popup.html" }
+}

@@ -1,0 +1,11 @@
+{
+  "manifestVersion": 1,
+  "id": "sample.shelf",
+  "name": "Shelf",
+  "version": "1.0.0",
+  "description": "A downloads list that can replace the downloads page.",
+  "permissions": ["downloads"],
+  "icon": "icon.svg",
+  "toolbar": { "title": "Shelf", "popup": "popup.html" },
+  "downloads": "downloads.html"
+}

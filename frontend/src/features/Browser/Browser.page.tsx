@@ -1,9 +1,9 @@
 
 import { backdropSupport, onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
 import { leaveTab } from "@/lib/tab-hover";
-import { splitToolbar } from "@/lib/toolbar-pin";
+import { hostToolbarIds, splitToolbar } from "@/lib/toolbar-pin";
 import { toolbarSide } from "@/lib/toolbar-side";
-import { useTabs, useBookmarks, useDownloads, useHistory, useExtensions, useAppearanceFromSettings } from "@/lib/use-browser";
+import { useTabs, useBookmarks, useDownloads, useHistory, useExtensions, useHostExtensions, useAppearanceFromSettings } from "@/lib/use-browser";
 import { useRef, useState, useEffect, useLayoutEffect } from "react";
 import type { PopupKind } from "@type/browser";
 import { BrowserBody } from "./BrowserBody";
@@ -18,6 +18,7 @@ export function BrowserPage() {
   const downloads = useDownloads();
   const history = useHistory();
   const { extensions } = useExtensions();
+  const hostExtensions = useHostExtensions().extensions;
   const settings = useAppearanceFromSettings();
   const headerRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
@@ -27,7 +28,10 @@ export function BrowserPage() {
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const vertical = settings?.tabLayout === "vertical";
   const hoverPreview = settings?.tabHoverPreview;
-  const toolExtensionIds = extensions.filter((extension) => extension.enabled).map((extension) => extension.id);
+  const toolExtensionIds = [
+    ...extensions.filter((extension) => extension.enabled).map((extension) => extension.id),
+    ...hostToolbarIds(hostExtensions),
+  ];
   const toolSplit = splitToolbar(settings, toolExtensionIds);
   const toolSide = toolbarSide(settings);
   const showTools = !snapshot.fullscreen && settings?.showToolsToolbar !== false && toolSplit.tools.length > 0;

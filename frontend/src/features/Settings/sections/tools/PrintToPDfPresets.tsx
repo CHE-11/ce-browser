@@ -19,12 +19,14 @@ import {
   presetHint,
   printFontStack,
 } from "@/features/BuiltInExtensions/print-to-pdf/print-options";
+import { storedFileNameTemplate } from "@/features/BuiltInExtensions/print-to-pdf/file-name";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { inputClass, Segmented, useSettingChanged } from "../../SettingsControls";
+import { PrintFileNameField } from "./PrintFileNameField";
 
 export const PRESETS_LABEL = "Quick cleanup presets";
-export const PRESETS_HINT = "Named recipes in the Print to PDF menu. Each one saves a cleanup without opening the editor.";
+export const PRESETS_HINT = "Named recipes in the Print to PDF menu. Each one saves a cleanup and a file name without opening the editor.";
 
 const selectClass = cn(inputClass, "max-w-80");
 
@@ -137,6 +139,13 @@ function PresetFields({
         id={`settings-print-preset-${preset.id}-name`}
         value={preset.name}
         onCommit={(name) => onChange({ name })}
+      />
+      <PrintFileNameField
+        id={`settings-print-preset-${preset.id}-file`}
+        presetId={preset.id}
+        presetName={preset.name}
+        value={storedFileNameTemplate(preset)}
+        onChange={(fileNameTemplate) => onChange({ fileNameTemplate })}
       />
       <fieldset id={`settings-print-preset-${preset.id}-content`} className="flex flex-col gap-2">
         <legend id={`settings-print-preset-${preset.id}-content-legend`} className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -397,6 +406,7 @@ export function PrintToPDfPresets({ print, onChange }: Props) {
         ) : (
           presets.map((preset) => {
             const open = openId === preset.id;
+            const fileName = storedFileNameTemplate(preset).trim();
             return (
               <div id={`settings-print-preset-${preset.id}`} key={preset.id} className="border-t border-zinc-800">
                 <div id={`settings-print-preset-${preset.id}-row`} className="flex items-center gap-2 px-3 py-2">
@@ -418,6 +428,9 @@ export function PrintToPDfPresets({ print, onChange }: Props) {
                       </span>
                       <span id={`settings-print-preset-${preset.id}-hint`} className="block truncate text-xs text-zinc-500">
                         {presetHint(preset)}
+                      </span>
+                      <span id={`settings-print-preset-${preset.id}-file-name`} className="block truncate font-mono text-[11px] text-zinc-600">
+                        {fileName || "Page title"}
                       </span>
                     </span>
                   </button>

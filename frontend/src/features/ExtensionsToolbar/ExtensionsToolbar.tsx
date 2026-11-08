@@ -3,11 +3,14 @@ import { ListCollapse } from "lucide-react";
 import type { BrowserSettings, ExtensionInfo, TabInfo, ToolbarSide } from "@type/browser";
 import { ToolbarIcon } from "@features/BuiltInExtensions";
 import { builtinTool } from "@features/BuiltInExtensions/builtin";
+import { HostToolbarButton } from "@features/HostExtensions/HostToolbarButton";
 import { openPopup, saveSettings } from "@/lib/browser-client";
+import { useHostExtensions } from "@/lib/use-browser";
 import { cn } from "@/lib/cn";
 import {
   openToolbarPinMenu,
   reorderToolbarAt,
+  hostToolbarIds,
   splitToolbar,
   toolbarDragHandlers,
   toolbarDropEdge,
@@ -81,8 +84,10 @@ export function ToolbarEntry({
   onDragStart,
   onDragEnd,
 }: ToolbarEntryProps) {
+  const hostExtensions = useHostExtensions().extensions;
+  const host = hostExtensions.find((item) => `host:${item.id}` === id);
   const domId = `${idPrefix}-tool-${id}`;
-  const caption = extension?.name ?? builtinTool(id)?.name ?? "";
+  const caption = extension?.name ?? host?.name ?? builtinTool(id)?.name ?? "";
   const vertical = layout === "vertical";
   const stacked = vertical || labeled;
   const listDrag = toolbarIndex !== undefined;
@@ -125,6 +130,8 @@ export function ToolbarEntry({
       ) : null}
       {extension ? (
         <ExtensionToolbarButton extension={extension} idPrefix={idPrefix} />
+      ) : host ? (
+        <HostToolbarButton extension={host} idPrefix={idPrefix} />
       ) : (
         <ToolbarIcon id={id} activeTab={activeTab} settings={settings} />
       )}
@@ -158,10 +165,8 @@ export const ExtensionsToolbar = forwardRef<HTMLElement, ExtensionsToolbarProps>
   ref,
 ) {
   const toolbarExtensions = extensions.filter((extension) => extension.enabled);
-  const { tools, all } = splitToolbar(
-    settings,
-    toolbarExtensions.map((extension) => extension.id),
-  );
+  const hostIds = hostToolbarIds(useHostExtensions().extensions);
+  const { tools, all } = splitToolbar(settings, [...toolbarExtensions.map((extension) => extension.id), ...hostIds]);
   const labels = settings?.verticalToolbarLabels ?? false;
   const vertical = side === "left" || side === "right";
   const setToolbarSide = (next: ToolbarSide) => {

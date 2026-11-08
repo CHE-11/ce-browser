@@ -1,0 +1,11 @@
+{
+  "manifestVersion": 1,
+  "id": "sample.tabs",
+  "name": "Tab shelf",
+  "version": "1.0.0",
+  "description": "Search, focus, and close open tabs.",
+  "permissions": ["tabs"],
+  "icon": "icon.svg",
+  "toolbar": { "title": "Tab shelf", "popup": "popup.html" },
+  "panel": "panel.html"
+}

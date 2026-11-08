@@ -494,6 +494,7 @@ fn create_ext_window(app: &AppHandle, window: &str, label: &str) -> Result<(), S
     let _ = webview.set_zoom(settings::get(app).ui_zoom_factor());
     webview2::attach_popup_hooks(app, &webview, label);
     webview2::attach_popup_blur(app, &webview, label);
+    crate::host_extensions::attach_webview(app, &webview);
     Ok(())
 }
 
@@ -663,8 +664,16 @@ fn open_at(
     }
 
     ensure_pool(app, window);
-    let extension = request.kind == "extension";
-    let ext_url = if extension {
+    let host_downloads = (request.kind == "downloads")
+        .then(|| crate::host_extensions::downloads_url(app))
+        .flatten();
+    let extension =
+        request.kind == "extension" || request.kind == "host" || host_downloads.is_some();
+    let ext_url = if request.kind == "host" {
+        Some(crate::host_extensions::popup_url(app, &request.params)?)
+    } else if let Some(url) = host_downloads {
+        Some(url)
+    } else if request.kind == "extension" {
         Some(extensions::popup_url(app, &request.params)?)
     } else {
         None

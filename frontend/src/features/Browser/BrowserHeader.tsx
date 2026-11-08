@@ -5,6 +5,8 @@ import { FindBar } from "@/components/FindBar";
 import { SyncToast } from "@/components/SyncToast";
 import { AddressBar } from "../AddressBar/AddressBar";
 import { BookmarksBar } from "../Bookmarks/BookmarksBar/BookmarksBar";
+import { HostBookmarksBar } from "../HostExtensions/HostBookmarksBar";
+import { useHostExtensions } from "@/lib/use-browser";
 import { TabStrip } from "../Tabs/TabStrip";
 import { ExtensionsToolbar } from "../ExtensionsToolbar/ExtensionsToolbar";
 
@@ -43,6 +45,10 @@ export function BrowserHeader({
   activeTab,
   onCloseFind,
 }: BrowserHeaderProps) {
+  const hostBarId = settings?.hostBookmarksBar ?? "";
+  const hostBar = useHostExtensions().extensions.find(
+    (extension) => extension.id === hostBarId && extension.enabled && extension.surfaces.bookmarksBar,
+  );
   return (
     <div id="browser-header" ref={headerRef} className={snapshot.fullscreen ? "hidden" : "flex flex-col"}>
       {vertical ? null : <TabStrip snapshot={snapshot} />}
@@ -58,7 +64,9 @@ export function BrowserHeader({
       {showToolsToolbar ? (
         <ExtensionsToolbar ref={toolbarRef} side="top" activeTab={activeTab} extensions={extensions} settings={settings} />
       ) : null}
-      {showBookmarksBar ? (
+      {showBookmarksBar && hostBar ? (
+        <HostBookmarksBar extensionId={hostBar.id} height={settings?.bookmarksBarHeight} />
+      ) : showBookmarksBar ? (
         <BookmarksBar
           tree={bookmarks}
           activeId={snapshot.activeId}

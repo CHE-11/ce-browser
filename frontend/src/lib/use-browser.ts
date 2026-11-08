@@ -25,7 +25,9 @@ import {
   onBookmarksChanged,
   onDownloadsChanged,
   onFaviconsChanged,
+  listHostExtensions,
   onExtensionsChanged,
+  onHostExtensionsChanged,
   onHistoryChanged,
   onPageRulesChanged,
   onSettingsChanged,
@@ -154,6 +156,7 @@ export function useTabs() {
     peekUrl: mine?.peekUrl ?? null,
     agentPanel: mine?.agentPanel ?? false,
     automationPanel: mine?.automationPanel ?? false,
+    hostPanel: mine?.hostPanel ?? "",
     groups,
     selectedIds: selectedIds.length > 0 ? selectedIds : activeId === null ? [] : [activeId],
     loaded: live.loaded,
@@ -302,6 +305,11 @@ export function useHistory() {
 
 export function useExtensions() {
   const { value, error, loaded } = useLiveValue("extensions", listExtensions, onExtensionsChanged);
+  return { extensions: value ?? [], error, loaded };
+}
+
+export function useHostExtensions() {
+  const { value, error, loaded } = useLiveValue("host-extensions", listHostExtensions, onHostExtensionsChanged);
   return { extensions: value ?? [], error, loaded };
 }
 

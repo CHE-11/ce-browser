@@ -446,6 +446,12 @@ pub struct BrowserSettings {
     /// Built-in tool ids the user turned off. An older file omits this, so every built-in tool stays on.
     #[serde(default)]
     pub disabled_builtin_tools: Vec<String>,
+    /// Host extension that replaces the bookmarks bar. Empty keeps the built-in bar.
+    #[serde(default)]
+    pub host_bookmarks_bar: String,
+    /// Host extension that replaces the downloads popup and `ce://downloads`. Empty keeps the built-in downloads UI.
+    #[serde(default)]
+    pub host_downloads: String,
     /// Built-in tools sit on the right. Off lays that toolbar out above the bookmarks bar.
     /// An older file uses this until `toolbar_side` is set.
     #[serde(default = "default_true")]
@@ -1090,6 +1096,10 @@ pub struct PrintPreset {
     pub margins: String,
     pub header_footer: bool,
     pub print_backgrounds: bool,
+    /// Suggested PDF file name. Placeholders such as `{title}` and `{author}` fill in from the page.
+    /// Empty uses the page title. Missing on an older file becomes the suggested template for this preset.
+    #[serde(default = "file_name_missing")]
+    pub file_name_template: String,
 }
 
 impl Default for PrintPreset {
@@ -1115,6 +1125,7 @@ impl Default for PrintPreset {
             margins: "normal".into(),
             header_footer: false,
             print_backgrounds: true,
+            file_name_template: suggested_file_name("article"),
         }
     }
 }
@@ -1132,6 +1143,7 @@ fn default_print_presets() -> Vec<PrintPreset> {
             mode: "full".into(),
             remove_navigation: false,
             remove_social: false,
+            file_name_template: suggested_file_name("clean-page"),
             ..PrintPreset::default()
         },
         PrintPreset {
@@ -1141,6 +1153,7 @@ fn default_print_presets() -> Vec<PrintPreset> {
             remove_backgrounds: true,
             font: "serif".into(),
             print_backgrounds: false,
+            file_name_template: suggested_file_name("reader"),
             ..PrintPreset::default()
         },
     ]
@@ -1259,6 +1272,37 @@ fn preset_size_missing() -> f64 {
     -1.0
 }
 
+/// Older files omit `fileNameTemplate`. Normalize replaces this with the suggested name.
+const FILE_NAME_MISSING: &str = "\u{1}";
+const MAX_FILE_NAME_TEMPLATE: usize = 160;
+
+fn file_name_missing() -> String {
+    FILE_NAME_MISSING.to_string()
+}
+
+/// Keep in sync with `FILE_NAME_TEMPLATES` in `frontend/src/features/BuiltInExtensions/print-to-pdf/file-name.ts`.
+fn suggested_file_name(id: &str) -> String {
+    match id {
+        "clean-page" => "{site} - {article}".into(),
+        "reader" => "{author} - {article}".into(),
+        _ => "{date} - {author} - {article}".into(),
+    }
+}
+
+fn clean_file_name_template(template: &str) -> String {
+    let cleaned: String = template
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect();
+    cleaned
+        .trim()
+        .chars()
+        .take(MAX_FILE_NAME_TEMPLATE)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 /// Drops blank and duplicate ids. An empty list stays empty.
 /// A custom recipe saved before presets had their own size keeps the editor's custom size.
 fn print_presets(
@@ -1283,6 +1327,11 @@ fn print_presets(
         keep(&mut preset.paper, PAPER_SIZES, &defaults.paper);
         keep(&mut preset.margins, MARGINS, &defaults.margins);
         preset.name = preset_name(&preset.name);
+        preset.file_name_template = if preset.file_name_template == FILE_NAME_MISSING {
+            suggested_file_name(&preset.id)
+        } else {
+            clean_file_name_template(&preset.file_name_template)
+        };
         preset.text_size = snap_text_size(preset.text_size);
         let size_missing = preset.custom_width < 0.0 && preset.custom_height < 0.0;
         preset.custom_width = paper_inches(preset.custom_width);
@@ -1426,6 +1475,8 @@ impl Default for BrowserSettings {
             toolbar_placements: BTreeMap::new(),
             toolbar_order: Vec::new(),
             disabled_builtin_tools: Vec::new(),
+            host_bookmarks_bar: String::new(),
+            host_downloads: String::new(),
             vertical_toolbar: true,
             toolbar_side: String::new(),
             vertical_toolbar_extensions: false,
@@ -1793,7 +1844,8 @@ impl BrowserSettings {
             toolbar_hidden(&map_retired_tools(&self.hidden_toolbar_extensions));
         self.toolbar_placements = normalize_toolbar_placements(self.toolbar_placements);
         self.toolbar_order = toolbar_hidden(&map_retired_tools(&self.toolbar_order));
-        self.disabled_builtin_tools = toolbar_hidden(&map_retired_tools(&self.disabled_builtin_tools));
+        self.disabled_builtin_tools =
+            toolbar_hidden(&map_retired_tools(&self.disabled_builtin_tools));
         self.toolbar_side = normalize_toolbar_side(&self.toolbar_side, self.vertical_toolbar);
         self.vertical_toolbar = self.toolbar_side == "left" || self.toolbar_side == "right";
         self.translate_language = clean_language(&self.translate_language);
@@ -2789,6 +2841,18 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["article", "clean-page", "reader"]
         );
+        assert_eq!(
+            loaded.print_editor.presets[0].file_name_template,
+            "{date} - {author} - {article}"
+        );
+        assert_eq!(
+            loaded.print_editor.presets[1].file_name_template,
+            "{site} - {article}"
+        );
+        assert_eq!(
+            loaded.print_editor.presets[2].file_name_template,
+            "{author} - {article}"
+        );
         assert!(loaded.page_capture.full_page);
         assert_eq!(loaded.page_markdown.scope, "article");
         assert!(loaded.page_markdown.images);
@@ -2850,6 +2914,64 @@ mod tests {
         assert_eq!(presets[1].font, "original");
         assert_eq!(presets[0].custom_width, 0.0);
         assert_eq!(presets[0].custom_height, 0.0);
+        assert_eq!(
+            presets[0].file_name_template,
+            "{date} - {author} - {article}"
+        );
+    }
+
+    #[test]
+    fn an_old_print_preset_gains_a_file_name_template() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"printEditor":{"presets":[
+                {"id":"article","name":"Article"},
+                {"id":"clean-page","name":"Clean page"},
+                {"id":"reader","name":"Reader"},
+                {"id":"mine","name":"Mine"},
+                {"id":"blank","name":"Blank","fileNameTemplate":"  "},
+                {"id":"notes","name":"Notes","fileNameTemplate":"  {title} - {author} - {article_name}\n"}
+            ]}}"#,
+        )
+        .expect("settings parse");
+        let once = loaded.normalize();
+        let presets = &once.print_editor.presets;
+        assert_eq!(
+            presets[0].file_name_template,
+            "{date} - {author} - {article}"
+        );
+        assert_eq!(presets[1].file_name_template, "{site} - {article}");
+        assert_eq!(presets[2].file_name_template, "{author} - {article}");
+        assert_eq!(
+            presets[3].file_name_template,
+            "{date} - {author} - {article}"
+        );
+        assert_eq!(presets[4].file_name_template, "");
+        assert_eq!(
+            presets[5].file_name_template,
+            "{title} - {author} - {article_name}"
+        );
+        let mut long = once.clone();
+        long.print_editor.presets.push(super::PrintPreset {
+            id: "long".into(),
+            name: "Long".into(),
+            file_name_template: "a".repeat(200),
+            ..super::PrintPreset::default()
+        });
+        let capped = long.normalize();
+        assert_eq!(
+            capped
+                .print_editor
+                .presets
+                .iter()
+                .find(|preset| preset.id == "long")
+                .expect("long preset")
+                .file_name_template
+                .chars()
+                .count(),
+            160
+        );
+        let twice = once.clone().normalize();
+        assert_eq!(twice.print_editor.presets, once.print_editor.presets);
     }
 
     #[test]
@@ -3004,7 +3126,8 @@ mod tests {
         assert!(!top.vertical_toolbar);
 
         let bottom: super::BrowserSettings =
-            serde_json::from_str(r#"{"toolbarSide":"bottom","verticalToolbar":true}"#).expect("settings parse");
+            serde_json::from_str(r#"{"toolbarSide":"bottom","verticalToolbar":true}"#)
+                .expect("settings parse");
         let bottom = bottom.normalize();
         assert_eq!(bottom.toolbar_side, "bottom");
         assert!(!bottom.vertical_toolbar);

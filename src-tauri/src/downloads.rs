@@ -101,6 +101,7 @@ pub fn reload(app: &AppHandle) {
         state.next_id = next_id;
     });
     let _ = app.emit("downloads-changed", &items);
+    crate::host_extensions::note_downloads(app);
 }
 
 fn read_items(app: &AppHandle) -> Vec<DownloadItem> {
@@ -219,6 +220,7 @@ fn changed(app: &AppHandle, persist: bool) {
         );
     }
     let _ = app.emit("downloads-changed", &items);
+    crate::host_extensions::note_downloads(app);
 }
 
 fn settle_unfinished(item: &mut DownloadItem) {

@@ -5,7 +5,8 @@ import { installExtensionZip, installExtensionFolder, installExtensionFromStore,
 import { cn } from "@/lib/cn";
 import { saveBuiltinEnabled, saveToolbarPlacement } from "@/lib/toolbar-pin";
 import { toolbarSide, toolbarSidePatch } from "@/lib/toolbar-side";
-import { useExtensions, useSettings } from "@/lib/use-browser";
+import { useExtensions, useHostExtensions, useSettings } from "@/lib/use-browser";
+import { HostExtensionsSection } from "../HostExtensions/HostExtensionsSection";
 import { ExtensionInfo, ToolbarPlacement, ToolbarSide } from "@type/browser";
 import { FileArchive, FolderOpen, Puzzle } from "lucide-react";
 import { useState } from "react";
@@ -16,6 +17,7 @@ import { ExtensionsToolbarSideControl } from "../ExtensionsToolbar/ExtensionsToo
 
 export function ExtensionsPage() {
   const { extensions, error: loadError, loaded } = useExtensions();
+  const host = useHostExtensions();
   const settings = useSettings();
   const [status, setStatus] = useState<{ tone: "info" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -204,6 +206,13 @@ export function ExtensionsPage() {
             No third-party extensions installed yet. Paste a store link, or install a .zip, .crx, or unpacked folder.
           </p>
         ) : null}
+        <HostExtensionsSection
+          extensions={host.extensions}
+          loaded={host.loaded}
+          busy={busy}
+          onStatus={setStatus}
+          onBusy={setBusy}
+        />
         <ExtensionsTable
           extensions={extensions}
           loaded={loaded}

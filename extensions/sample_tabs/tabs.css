@@ -1,0 +1,46 @@
+:root {
+  color: #e0e7ff;
+  background: #172554;
+  font: 13px/1.4 "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+body:has(#tabs-popup) { width: 340px; }
+
+button, input {
+  border: 0;
+  border-radius: 10px;
+  background: #1e3a8a;
+  color: inherit;
+  font: inherit;
+}
+
+input { width: 100%; padding: 8px 10px; }
+
+button { padding: 6px 10px; cursor: pointer; }
+
+h1 { margin: 0 0 10px; font-size: 18px; }
+
+#tabs-popup, #tabs-panel { padding: 14px; }
+
+.tab, .host {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 12px;
+  background: #1e3a8a;
+}
+
+.tab.active { outline: 1px solid #93c5fd; }
+
+.row { display: flex; gap: 8px; align-items: center; }
+
+.title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.url { margin: 4px 0 0; color: #93c5fd; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.host h2 { margin: 0 0 6px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: #bfdbfe; }
+
+#tabs-error { color: #fecaca; }

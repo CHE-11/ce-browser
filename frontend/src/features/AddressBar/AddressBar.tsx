@@ -68,7 +68,8 @@ import {
 import { storeListing } from "../../lib/extension-store";
 import { accentTint } from "../../lib/accent";
 import { cn } from "../../lib/cn";
-import { reorderToolbarAt, splitToolbar } from "../../lib/toolbar-pin";
+import { useHostExtensions } from "@/lib/use-browser";
+import { hostToolbarIds, reorderToolbarAt, splitToolbar } from "../../lib/toolbar-pin";
 import { buildSuggestions, inlineCompletion, looksLikeUrl } from "../../lib/omnibox";
 import { flattenBookmarks, type WindowTabsState } from "../../lib/use-browser";
 import { focusRing } from "../../lib/focus-ring";
@@ -558,10 +559,11 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   }, [activeDownloads]);
 
   const toolbarExtensions = extensions.filter((extension) => extension.enabled);
-  const { address: addressExtensions, all: toolbarOrderIds } = splitToolbar(
-    settings,
-    toolbarExtensions.map((extension) => extension.id),
-  );
+  const hostIds = hostToolbarIds(useHostExtensions().extensions);
+  const { address: addressExtensions, all: toolbarOrderIds } = splitToolbar(settings, [
+    ...toolbarExtensions.map((extension) => extension.id),
+    ...hostIds,
+  ]);
   const moveToolbar = (from: string, dropIndex: number) => {
     if (!settings) {
       return;

@@ -128,6 +128,8 @@ export type WindowTabs = {
   agentPanel: boolean;
   /** The automations panel is docked beside the pages. */
   automationPanel: boolean;
+  /** Host extension id docked beside the pages. Empty when another panel is open or the column is closed. */
+  hostPanel: string;
 };
 
 export type RewriteRule = {
@@ -440,6 +442,7 @@ export type PopupKind =
   | "omnibox"
   | "command-palette"
   | "extension"
+  | "host"
   | "print-pdf"
   | "page-capture"
   | "webpage-markdown"
@@ -618,6 +621,48 @@ export type HistoryItem = {
   typedCount: number;
 };
 
+export type HostExtensionPage = {
+  id: string;
+  title: string;
+};
+
+export type HostPanelSide = "left" | "right";
+
+/** Side and size of a host extension's docked panel. Widths are CSS pixels. */
+export type HostPanelLayout = {
+  side: HostPanelSide;
+  resizable: boolean;
+  minWidth: number;
+  maxWidth: number;
+  defaultWidth: number;
+};
+
+export type HostExtensionSurfaces = {
+  toolbar: boolean;
+  popup: boolean;
+  panel: boolean;
+  pages: HostExtensionPage[];
+  bookmarksBar: boolean;
+  downloads: boolean;
+  contentScripts: boolean;
+  background: boolean;
+  popout: boolean;
+};
+
+/** A folder of HTML, CSS, and JavaScript loaded by the browser, not a Chrome extension. */
+export type HostExtensionInfo = {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+  icon: string | null;
+  permissions: string[];
+  surfaces: HostExtensionSurfaces;
+  /** Present when the extension has a side panel. */
+  panel: HostPanelLayout | null;
+};
+
 export type ExtensionInfo = {
   id: string;
   name: string;
@@ -745,6 +790,10 @@ export type BrowserSettings = {
   toolbarOrder: string[];
   /** Built-in tool ids the user turned off. Empty means every built-in tool stays on. */
   disabledBuiltinTools: string[];
+  /** Host extension id that replaces the bookmarks bar. Empty keeps the built-in bar. */
+  hostBookmarksBar: string;
+  /** Host extension id that replaces downloads. Empty keeps the built-in downloads UI. */
+  hostDownloads: string;
   /** Built-in tools sit on the right. Off lays that toolbar out above the bookmarks bar. */
   verticalToolbar: boolean;
   /** Edge where the tools toolbar sits. Empty until an older file is read, which uses `verticalToolbar`. */
@@ -1189,6 +1238,11 @@ export type PrintPreset = {
   /** WebView2's own header and footer on every page. */
   headerFooter: boolean;
   printBackgrounds: boolean;
+  /**
+   * Suggested PDF file name. Placeholders such as `{title}`, `{author}`, and `{article}` fill in from the page.
+   * Empty uses the page title.
+   */
+  fileNameTemplate: string;
 };
 
 export type PrintEditorSettings = {

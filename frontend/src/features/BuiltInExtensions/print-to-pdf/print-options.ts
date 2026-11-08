@@ -9,6 +9,7 @@ import {
   PrintPaper,
   PrintPreset,
 } from "@type/browser";
+import { FILE_NAME_TEMPLATES } from "./file-name";
 
 
 /** CSS pixels per inch. The preview and WebView2's PDF layout both use it. */
@@ -217,6 +218,7 @@ function articlePreset(): PrintPreset {
     margins: "normal",
     headerFooter: false,
     printBackgrounds: true,
+    fileNameTemplate: FILE_NAME_TEMPLATES.article,
   };
 }
 
@@ -230,6 +232,7 @@ export const DEFAULT_PRINT_PRESETS: PrintPreset[] = [
     mode: "full",
     removeNavigation: false,
     removeSocial: false,
+    fileNameTemplate: FILE_NAME_TEMPLATES.cleanPage,
   },
   {
     ...articlePreset(),
@@ -239,6 +242,7 @@ export const DEFAULT_PRINT_PRESETS: PrintPreset[] = [
     removeBackgrounds: true,
     font: "serif",
     printBackgrounds: false,
+    fileNameTemplate: FILE_NAME_TEMPLATES.reader,
   },
 ];
 

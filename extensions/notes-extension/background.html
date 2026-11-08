@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Notes background</title>
+  </head>
+  <body>
+    <div id="host-background-log"></div>
+    <script>
+      var log = document.getElementById("host-background-log");
+      window.ce.runtime.onMessage(function (message) {
+        var line = document.createElement("p");
+        line.id = "host-background-message";
+        line.textContent = JSON.stringify(message);
+        log.appendChild(line);
+      });
+    </script>
+  </body>
+</html>

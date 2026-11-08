@@ -1,0 +1,18 @@
+{
+  "manifestVersion": 1,
+  "id": "sample.panel",
+  "name": "Outline",
+  "version": "1.0.0",
+  "description": "A side panel that reads the headings on the active page.",
+  "permissions": ["page", "tabs"],
+  "icon": "icon.svg",
+  "toolbar": { "title": "Outline", "popup": "popup.html" },
+  "panel": {
+    "path": "panel.html",
+    "side": "right",
+    "resizable": true,
+    "minWidth": 280,
+    "maxWidth": 560,
+    "defaultWidth": 340
+  }
+}

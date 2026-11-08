@@ -1,0 +1,16 @@
+{
+  "manifestVersion": 1,
+  "id": "notes.example",
+  "name": "Notes",
+  "version": "1.0.0",
+  "description": "Example host extension with every surface.",
+  "permissions": ["tabs", "page", "bookmarks", "downloads", "desktop", "storage"],
+  "icon": "icon.svg",
+  "background": "background.html",
+  "toolbar": { "title": "Notes", "popup": "popup.html" },
+  "panel": "panel.html",
+  "pages": [{ "id": "library", "title": "Notes", "path": "library.html" }],
+  "bookmarksBar": "bar.html",
+  "downloads": "downloads.html",
+  "contentScripts": [{ "matches": ["https://*/*"], "js": ["content.js"] }]
+}

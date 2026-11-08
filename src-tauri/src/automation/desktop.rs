@@ -172,7 +172,7 @@ unsafe extern "system" fn collect(hwnd: HWND, data: LPARAM) -> BOOL {
     }
 }
 
-fn move_to(x: f64, y: f64) -> Result<(), String> {
+pub fn move_to(x: f64, y: f64) -> Result<(), String> {
     send_mouse(MOUSEEVENTF_MOVE, x, y)
 }
 

@@ -115,6 +115,9 @@ pub fn internal_url(app: &AppHandle, page: &str) -> Url {
 
 /// The address bar and saved data show `ce://<page>` instead of the app origin.
 pub fn display_url(app: &AppHandle, raw: &str) -> String {
+    if let Some(pretty) = crate::host_extensions::display_for(app, raw) {
+        return pretty;
+    }
     let Ok(url) = Url::parse(raw) else {
         return raw.to_string();
     };
@@ -145,6 +148,9 @@ pub fn resolve_input(app: &AppHandle, input: &str, search_url: &str) -> Url {
         return internal_url(app, "newtab");
     }
     if let Some(page) = text.strip_prefix(INTERNAL_SCHEME) {
+        if let Some(url) = crate::host_extensions::redirect_internal(app, page) {
+            return url;
+        }
         return internal_url(app, page);
     }
     // `?` in front always searches, even for text that looks like an address.

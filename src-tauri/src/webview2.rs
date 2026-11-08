@@ -2055,6 +2055,16 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                     Some("ce-record") => {
                         crate::automation::recorder::on_message(&message_app, id, &message);
                     }
+                    Some("ce-rpc") | Some("ce-content") => {
+                        let source = tabs::tab_page_url(&message_app, id).unwrap_or_default();
+                        crate::host_extensions::handle_message(
+                            &message_app,
+                            Some(id),
+                            &format!("tab-{id}"),
+                            &source,
+                            &json,
+                        );
+                    }
                     Some("ce-speed") => {
                         if let Some(speed) = message.get("speed").and_then(|value| value.as_f64()) {
                             let app = message_app.clone();
@@ -2541,6 +2551,7 @@ fn attach_adblock(
         sync_early_script(core, id);
         install_microphone_script(core, id);
         install_protocol_script(core, id);
+        crate::host_extensions::prepare_core(app, core, &format!("tab-{id}"));
 
         let environment = platform.environment();
         let request_app = app.clone();
@@ -3306,7 +3317,7 @@ pub const WEBVIEW_CLOAK_SCRIPT: &str = r#"(function () {
 
   function appHost(host) {
     host = String(host || "").toLowerCase();
-    return host === "tauri.localhost" || host === "localhost" || host === "127.0.0.1" || host === "::1";
+    return host === "tauri.localhost" || host === "localhost" || host === "127.0.0.1" || host === "::1" || host.endsWith(".ce-ext.localhost");
   }
   function remotePage() {
     if (appHost(location.hostname)) return false;

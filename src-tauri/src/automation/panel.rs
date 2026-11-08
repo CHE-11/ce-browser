@@ -23,9 +23,27 @@ const AGENT_MAX: f64 = 720.0;
 
 struct Drag {
     window: String,
-    /// How far the pointer sits to the right of the panel's left edge, in CSS pixels.
+    /// How far the pointer sits to the right of the edge being dragged, in CSS pixels.
     grab: Option<f64>,
+    edge: tabs::PanelEdge,
+    min: f64,
+    max: f64,
+    /// Width kept when the pointer reading is unusable.
+    fallback: f64,
 }
+
+/// Limits for one drag of the side column.
+pub struct ColumnDrag {
+    pub edge: tabs::PanelEdge,
+    pub min: f64,
+    pub max: f64,
+    /// Keep the finished width as the agent panel's saved width.
+    pub remember_agent: bool,
+    pub fallback: f64,
+}
+
+const PANEL_CLOSED: &str = "The side panel is closed.";
+const PANEL_BUSY: &str = "The side panel is already being resized.";
 
 static DRAG: Mutex<Option<Drag>> = Mutex::new(None);
 static RESIZING: AtomicBool = AtomicBool::new(false);
@@ -97,7 +115,8 @@ fn toggle_kind(
 fn panel_label(window: &str, kind: tabs::SidePanel) -> String {
     match kind {
         tabs::SidePanel::Automations => tabs::automation_panel_label(window),
-        _ => tabs::agent_panel_label(window),
+        tabs::SidePanel::Host => tabs::host_panel_label(window),
+        tabs::SidePanel::Agent | tabs::SidePanel::None => tabs::agent_panel_label(window),
     }
 }
 
@@ -112,6 +131,7 @@ fn ensure_kind(app: &AppHandle, window: &str, kind: tabs::SidePanel) -> Result<(
             &tabs::automation_panel_label(window),
             "automations-panel",
         ),
+        tabs::SidePanel::Host => Ok(()),
         tabs::SidePanel::None => Ok(()),
     }
 }
@@ -146,18 +166,44 @@ fn column_max(kind: tabs::SidePanel, geom: &Geom) -> f64 {
 
 /// Follows the left button and resizes `window`'s open panel until the button comes up.
 pub fn track_resize(app: &AppHandle, window: &str) -> Result<(), String> {
+    let max = geometry(app, window)
+        .map(|geom| column_max(tabs::side_panel(app, window), &geom))
+        .unwrap_or(AGENT_MAX);
+    match track_column(
+        app,
+        window,
+        ColumnDrag {
+            edge: tabs::PanelEdge::Right,
+            min: f64::from(settings::AGENT_PANEL_WIDTH_PX.0),
+            max,
+            remember_agent: true,
+            fallback: f64::from(settings::AGENT_PANEL_DEFAULT_WIDTH),
+        },
+    ) {
+        Ok(_) => Ok(()),
+        Err(error) if error == PANEL_CLOSED || error == PANEL_BUSY => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Follows the pointer until the left button comes up. Returns the width that was applied.
+pub fn track_column(app: &AppHandle, window: &str, drag: ColumnDrag) -> Result<f64, String> {
     if tabs::agent_panel_width(app, window) <= 0.0 {
-        return Ok(());
+        return Err(PANEL_CLOSED.into());
     }
     if RESIZING.swap(true, Ordering::AcqRel) {
-        return Ok(());
+        return Err(PANEL_BUSY.into());
     }
     let _guard = ResizeGuard;
     {
-        let mut drag = DRAG.lock().expect("agent resize");
-        *drag = Some(Drag {
+        let mut slot = DRAG.lock().expect("panel resize");
+        *slot = Some(Drag {
             window: window.to_string(),
             grab: None,
+            edge: drag.edge,
+            min: drag.min,
+            max: drag.max,
+            fallback: drag.fallback,
         });
     }
     request_frame(app);
@@ -169,17 +215,19 @@ pub fn track_resize(app: &AppHandle, window: &str) -> Result<(), String> {
     while FRAME.load(Ordering::Acquire) && started.elapsed() < Duration::from_millis(500) {
         thread::sleep(Duration::from_millis(4));
     }
-    let (sender, receiver) = mpsc::channel();
-    let finish = app.clone();
-    app.run_on_main_thread(move || {
-        remember_current(&finish);
-        let _ = sender.send(());
-    })
-    .map_err(|error| error.to_string())?;
-    receiver
-        .recv_timeout(Duration::from_secs(2))
-        .map_err(|_| "The agent panel resize did not finish.".to_string())?;
-    Ok(())
+    if drag.remember_agent {
+        let (sender, receiver) = mpsc::channel();
+        let finish = app.clone();
+        app.run_on_main_thread(move || {
+            remember_current(&finish);
+            let _ = sender.send(());
+        })
+        .map_err(|error| error.to_string())?;
+        receiver
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|_| "The panel resize did not finish.".to_string())?;
+    }
+    Ok(tabs::agent_panel_width(app, window))
 }
 
 /// Sets the open panel to `width` CSS pixels and remembers it for the next open.
@@ -238,14 +286,20 @@ fn request_frame(app: &AppHandle) {
 }
 
 fn apply_drag(app: &AppHandle) {
-    let window = {
+    let (window, edge, min, max, fallback) = {
         let Ok(drag) = DRAG.lock() else {
             return;
         };
         let Some(drag) = drag.as_ref() else {
             return;
         };
-        drag.window.clone()
+        (
+            drag.window.clone(),
+            drag.edge,
+            drag.min,
+            drag.max,
+            drag.fallback,
+        )
     };
     let Some(geom) = geometry(app, &window) else {
         return;
@@ -265,18 +319,29 @@ fn apply_drag(app: &AppHandle) {
             return;
         };
         if state.grab.is_none() {
-            let left = geom.client - geom.right - current;
-            state.grab = Some(cursor - left);
+            state.grab = Some(match edge {
+                tabs::PanelEdge::Right => {
+                    let left = geom.client - geom.right - current;
+                    cursor - left
+                }
+                tabs::PanelEdge::Left => {
+                    let panel_right = geom.left + current;
+                    cursor - panel_right
+                }
+            });
         }
         state.grab.unwrap_or(0.0)
     };
-    let next = width_beside_pointer(
+    let next = width_for_edge(
         geom.client,
         geom.left,
         geom.right,
         cursor,
         grab,
-        column_max(tabs::side_panel(app, &window), &geom),
+        min,
+        max,
+        edge,
+        fallback,
     );
     tabs::resize_agent_panel(app, &window, next);
 }
@@ -343,20 +408,63 @@ fn width_beside_pointer(
     grab: f64,
     max: f64,
 ) -> f64 {
-    let min = f64::from(settings::AGENT_PANEL_WIDTH_PX.0);
-    let max = if max.is_finite() { max } else { AGENT_MAX };
+    width_for_edge(
+        client,
+        left,
+        right,
+        cursor,
+        grab,
+        f64::from(settings::AGENT_PANEL_WIDTH_PX.0),
+        max,
+        tabs::PanelEdge::Right,
+        f64::from(settings::AGENT_PANEL_DEFAULT_WIDTH),
+    )
+}
+
+/// Width of a column docked on `edge`. `grab` is how far the pointer sits past the dragged edge.
+fn width_for_edge(
+    client: f64,
+    left: f64,
+    right: f64,
+    cursor: f64,
+    grab: f64,
+    min: f64,
+    max: f64,
+    edge: tabs::PanelEdge,
+    fallback: f64,
+) -> f64 {
+    let min = if min.is_finite() {
+        min.max(0.0)
+    } else {
+        f64::from(settings::AGENT_PANEL_WIDTH_PX.0)
+    };
+    let max = if max.is_finite() {
+        max.max(min)
+    } else {
+        AGENT_MAX.max(min)
+    };
+    let fallback = if fallback.is_finite() {
+        fallback
+    } else {
+        f64::from(settings::AGENT_PANEL_DEFAULT_WIDTH)
+    };
     if ![client, left, right, cursor, grab]
         .iter()
         .all(|value| value.is_finite())
     {
-        return f64::from(settings::AGENT_PANEL_DEFAULT_WIDTH);
+        return fallback.clamp(min, max);
     }
-    let panel_right = client - right.max(0.0);
-    let raw = panel_right - (cursor - grab);
-    let room = panel_right - left.max(0.0) - MIN_PAGE;
+    let raw = match edge {
+        tabs::PanelEdge::Right => {
+            let panel_right = client - right.max(0.0);
+            panel_right - (cursor - grab)
+        }
+        tabs::PanelEdge::Left => (cursor - grab) - left.max(0.0),
+    };
+    let room = client - right.max(0.0) - left.max(0.0) - MIN_PAGE;
     let cap = room.min(max).max(min);
     if !raw.is_finite() {
-        return f64::from(settings::AGENT_PANEL_DEFAULT_WIDTH).clamp(min, cap);
+        return fallback.clamp(min, cap);
     }
     raw.clamp(min, cap)
 }
@@ -429,6 +537,38 @@ mod tests {
         assert_eq!(
             width_beside_pointer(500.0, 0.0, 0.0, 0.0, 0.0, 250.0),
             280.0
+        );
+    }
+
+    #[test]
+    fn the_right_edge_of_a_left_panel_follows_the_pointer() {
+        assert_eq!(
+            super::width_for_edge(
+                1200.0,
+                0.0,
+                48.0,
+                400.0,
+                0.0,
+                240.0,
+                720.0,
+                crate::tabs::PanelEdge::Left,
+                360.0,
+            ),
+            400.0
+        );
+        assert_eq!(
+            super::width_for_edge(
+                1200.0,
+                80.0,
+                48.0,
+                490.0,
+                10.0,
+                240.0,
+                720.0,
+                crate::tabs::PanelEdge::Left,
+                360.0,
+            ),
+            400.0
         );
     }
 

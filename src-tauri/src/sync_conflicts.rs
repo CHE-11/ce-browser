@@ -18,6 +18,7 @@ const WATCHED: &[&str] = &[
     "history.json",
     "settings.json",
     "extensions.json",
+    "host-extensions.json",
     "profiles.json",
 ];
 
@@ -615,6 +616,7 @@ fn reload_document(app: &AppHandle, relative: &str) {
         "bookmarks.json" => bookmarks::reload(app),
         "settings.json" => settings::reload(app),
         "extensions.json" => crate::extensions::adopt_saved(app),
+        "host-extensions.json" => crate::host_extensions::adopt_saved(app),
         "profiles.json" => {
             let _ = app.emit("profiles-changed", profiles::list(app));
         }
@@ -958,6 +960,7 @@ fn label_for(path: &str) -> String {
         "history.json" => "History",
         "settings.json" => "Settings",
         "extensions.json" => "Extensions",
+        "host-extensions.json" => "Host extensions",
         "profiles.json" => "Profiles",
         other => other,
     };

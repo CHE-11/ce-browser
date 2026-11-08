@@ -67,7 +67,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { id: "settings-mcp-token", label: "MCP access token", section: "settings-mcp", keywords: "cursor mcp.json" },
   { id: "settings-translate-language", label: "Translate language", section: "settings-translate", keywords: "tools" },
   { id: "settings-translate-url", label: "Translate provider", section: "settings-translate", keywords: "tools" },
-  { id: "settings-print-presets", label: "Quick cleanup presets", section: "settings-print", keywords: "print pdf preset article reader cleanup quick font georgia cambria times segoe calibri aptos arial verdana consolas courier" },
+  { id: "settings-print-presets", label: "Quick cleanup presets", section: "settings-print", keywords: "print pdf preset article reader cleanup quick file name filename template placeholder font georgia cambria times segoe calibri aptos arial verdana consolas courier" },
   { id: "settings-print-papers", label: "PDF page sizes", section: "settings-print", keywords: "print pdf paper letter legal tabloid device iphone ipad custom" },
   { id: "settings-shopping-region", label: "Shopping region", section: "settings-shopping", keywords: "tools coupons deals" },
   { id: "settings-shopping-model", label: "Shopping model", section: "settings-shopping", keywords: "tools ai coupons deals text model" },

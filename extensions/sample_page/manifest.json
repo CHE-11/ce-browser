@@ -1,0 +1,11 @@
+{
+  "manifestVersion": 1,
+  "id": "sample.page",
+  "name": "Clips",
+  "version": "1.0.0",
+  "description": "A full page for text clips, with a popup to add one.",
+  "permissions": ["storage"],
+  "icon": "icon.svg",
+  "toolbar": { "title": "Clips", "popup": "popup.html" },
+  "pages": [{ "id": "library", "title": "Clips", "path": "library.html" }]
+}

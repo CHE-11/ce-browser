@@ -1,0 +1,12 @@
+{
+  "manifestVersion": 1,
+  "id": "sample.tasks",
+  "name": "Tasks",
+  "version": "1.0.0",
+  "description": "A small board kept in this extension's storage.",
+  "permissions": ["storage"],
+  "icon": "icon.svg",
+  "toolbar": { "title": "Tasks", "popup": "popup.html" },
+  "panel": "panel.html",
+  "pages": [{ "id": "board", "title": "Tasks", "path": "board.html" }]
+}

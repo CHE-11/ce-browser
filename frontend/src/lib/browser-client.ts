@@ -88,6 +88,8 @@ import type {
   StatusSnapshot,
   StatusText,
   ExtensionInfo,
+  HostExtensionInfo,
+  HostPanelLayout,
   OmniboxState,
   Container,
   NetworkEntry,
@@ -1391,6 +1393,46 @@ export function updateExtension(id: string) {
 
 export function onExtensionsChanged(handler: (extensions: ExtensionInfo[]) => void): Promise<UnlistenFn> {
   return listen<ExtensionInfo[]>("extensions-changed", (event) => handler(event.payload));
+}
+
+export function listHostExtensions() {
+  return invoke<HostExtensionInfo[]>("list_host_extensions");
+}
+
+export async function installHostExtensionFolder() {
+  const path = await open({ directory: true, multiple: false, title: "Choose a host extension folder" });
+  if (typeof path !== "string") {
+    return null;
+  }
+  return invoke<HostExtensionInfo>("install_host_extension_folder", { path });
+}
+
+export function setHostExtensionEnabled(id: string, enabled: boolean) {
+  return invoke<void>("set_host_extension_enabled", { id, enabled });
+}
+
+export function removeHostExtension(id: string) {
+  return invoke<void>("remove_host_extension", { id });
+}
+
+export function toggleHostPanel(id: string) {
+  return invoke<boolean>("toggle_host_panel", { id });
+}
+
+export function setHostPanelLayout(id: string, layout: HostPanelLayout) {
+  return invoke<void>("set_host_panel_layout", { id, ...layout });
+}
+
+export function openHostPopout(id: string) {
+  return invoke<void>("open_host_popout", { id });
+}
+
+export function setHostBookmarksBounds(x: number, y: number, width: number, height: number) {
+  return invoke<void>("set_host_bookmarks_bounds", { x, y, width, height });
+}
+
+export function onHostExtensionsChanged(handler: (extensions: HostExtensionInfo[]) => void): Promise<UnlistenFn> {
+  return listen<HostExtensionInfo[]>("host-extensions-changed", (event) => handler(event.payload));
 }
 
 // Settings

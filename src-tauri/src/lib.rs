@@ -21,6 +21,7 @@ mod find;
 mod hang_guard;
 mod history;
 mod history_index;
+mod host_extensions;
 mod keywords;
 mod library;
 mod media;
@@ -1079,6 +1080,79 @@ async fn set_extension_enabled(app: AppHandle, id: String, enabled: bool) -> Res
 #[tauri::command]
 async fn remove_extension(app: AppHandle, id: String) -> Result<(), String> {
     blocking(move || extensions::remove(&app, &id)).await
+}
+
+#[tauri::command]
+async fn list_host_extensions(app: AppHandle) -> Vec<host_extensions::HostExtensionInfo> {
+    host_extensions::list(&app)
+}
+
+#[tauri::command]
+async fn install_host_extension_folder(
+    app: AppHandle,
+    path: String,
+) -> Result<host_extensions::HostExtensionInfo, String> {
+    blocking(move || host_extensions::install_folder(&app, &PathBuf::from(path))).await
+}
+
+#[tauri::command]
+async fn set_host_extension_enabled(
+    app: AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    blocking(move || host_extensions::set_enabled(&app, &id, enabled)).await
+}
+
+#[tauri::command]
+async fn remove_host_extension(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(move || host_extensions::remove(&app, &id)).await
+}
+
+#[tauri::command]
+async fn toggle_host_panel(app: AppHandle, window: Window, id: String) -> Result<bool, String> {
+    let window = browser_window(&window);
+    host_extensions::toggle_panel(&app, &window, &id)
+}
+
+#[tauri::command]
+async fn set_host_panel_layout(
+    app: AppHandle,
+    id: String,
+    side: String,
+    resizable: bool,
+    min_width: u32,
+    max_width: u32,
+    default_width: u32,
+) -> Result<(), String> {
+    host_extensions::set_panel_layout(
+        &app,
+        &id,
+        &side,
+        resizable,
+        min_width,
+        max_width,
+        default_width,
+    )
+}
+
+#[tauri::command]
+async fn open_host_popout(app: AppHandle, id: String) -> Result<(), String> {
+    host_extensions::open_popout(&app, &id)
+}
+
+#[tauri::command]
+async fn set_host_bookmarks_bounds(
+    app: AppHandle,
+    window: Window,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    let window = browser_window(&window);
+    host_extensions::place_bookmarks_bar(&app, &window, x, y, width, height);
+    Ok(())
 }
 
 #[tauri::command]
@@ -2483,6 +2557,7 @@ pub fn run() {
             downloads::init(&handle);
             history::init(&handle);
             extensions::init(&handle);
+            host_extensions::init(&handle);
             tabs::init(&handle);
             peek::init(&handle);
             popup::init(&handle);
@@ -2492,6 +2567,7 @@ pub fn run() {
             tab_sleep::init(&handle);
             update::init(&handle);
             build_window(&handle)?;
+            host_extensions::start(&handle);
             system::start(&handle);
             update::start(&handle);
             prices::start(&handle);
@@ -2732,6 +2808,14 @@ pub fn run() {
             update_extension,
             set_extension_enabled,
             remove_extension,
+            list_host_extensions,
+            install_host_extension_folder,
+            set_host_extension_enabled,
+            remove_host_extension,
+            toggle_host_panel,
+            set_host_panel_layout,
+            open_host_popout,
+            set_host_bookmarks_bounds,
             open_extension_options,
             list_permissions,
             set_permission,

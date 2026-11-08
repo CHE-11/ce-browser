@@ -1,0 +1,97 @@
+:root {
+  color: #1c1917;
+  background: #f6f1e7;
+  font: 14px/1.4 Georgia, "Iowan Old Style", serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  width: 320px;
+  margin: 0;
+  padding: 14px;
+}
+
+body[data-surface="panel"],
+body[data-surface="popout"] {
+  width: auto;
+  min-height: 100vh;
+}
+
+h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+#glance-count {
+  margin: 0;
+  color: #78716c;
+  font: 12px/1.2 ui-monospace, monospace;
+}
+
+#glance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+button {
+  border: 1px solid #d6d3d1;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#glance-actions button {
+  padding: 4px 10px;
+}
+
+#glance-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+}
+
+.row.active .open {
+  background: #1c1917;
+  color: #f6f1e7;
+}
+
+.open {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.close {
+  padding: 7px 10px;
+  color: #78716c;
+}
+
+#glance-error {
+  min-height: 1em;
+  color: #9f1239;
+}

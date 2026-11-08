@@ -1,0 +1,68 @@
+:root {
+  color: #fff7ed;
+  background: #1c1917;
+  font: 13px/1.4 "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+body:has(#tasks-popup) { width: 300px; }
+
+button, input {
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  color: inherit;
+}
+
+input {
+  width: 100%;
+  padding: 8px 10px;
+  background: #292524;
+}
+
+button {
+  padding: 6px 10px;
+  background: #b45309;
+  cursor: pointer;
+}
+
+button.quiet { background: #44403c; }
+
+h1 { margin: 0; font-size: 16px; font-weight: 650; }
+
+#tasks-popup, #tasks-panel, #tasks-board { padding: 14px; }
+
+#tasks-add-form, #tasks-panel-form, #tasks-board-form {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+ul { margin: 0; padding: 0; list-style: none; }
+
+li, .card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  background: #292524;
+}
+
+.row { display: flex; gap: 6px; }
+
+#tasks-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 100vh;
+  align-content: start;
+}
+
+.column h2 { margin: 0 0 8px; font-size: 13px; color: #fdba74; }
+
+#error { color: #fda4af; }

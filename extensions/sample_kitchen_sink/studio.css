@@ -1,0 +1,46 @@
+:root {
+  color: #1e1b4b;
+  background: #eef2ff;
+  font: 13px/1.4 "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+body:has(#studio-popup) { width: 280px; }
+
+button {
+  border: 0;
+  border-radius: 8px;
+  background: #312e81;
+  color: white;
+  font: inherit;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+h1 { margin: 0 0 8px; font-size: 18px; }
+
+p { margin: 0 0 8px; }
+
+#studio-popup, #studio-panel, #studio-home, #studio-downloads, #studio-background, #studio-popout { padding: 14px; }
+
+#studio-actions { display: flex; flex-direction: column; gap: 8px; }
+
+html:has(#studio-bar),
+html:has(#studio-bar) body,
+#root:has(#studio-bar) { height: 100%; background: #312e81; }
+
+#studio-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 10px;
+  color: white;
+}
+
+#studio-bar button { background: transparent; padding: 0; }
+
+#studio-error { color: #be123c; }

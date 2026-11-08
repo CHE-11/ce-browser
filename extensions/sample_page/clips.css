@@ -1,0 +1,35 @@
+:root {
+  color: #083344;
+  background: #ecfeff;
+  font: 15px/1.5 Georgia, serif;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+body:has(#clips-popup) { width: 300px; font: 13px/1.4 "Segoe UI", sans-serif; }
+
+button, textarea {
+  border: 1px solid #a5f3fc;
+  border-radius: 8px;
+  background: white;
+  color: inherit;
+  font: inherit;
+}
+
+textarea { width: 100%; min-height: 90px; padding: 8px; }
+
+button { padding: 7px 12px; background: #0e7490; color: white; border: 0; cursor: pointer; }
+
+h1 { margin: 0 0 12px; font-weight: 500; }
+
+#clips-popup { padding: 14px; }
+
+#clips-library { max-width: 720px; margin: 0 auto; padding: 32px 20px; }
+
+article { margin-top: 16px; padding: 14px; background: white; border-radius: 12px; }
+
+article p { margin: 0; white-space: pre-wrap; }
+
+#clips-error { color: #be123c; }

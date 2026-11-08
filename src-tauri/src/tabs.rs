@@ -208,6 +208,8 @@ pub struct WindowTabs {
     pub agent_panel: bool,
     /// The automations panel is docked beside the pages.
     pub automation_panel: bool,
+    /// Host extension id docked in the side column. Empty when that column is closed or used by a built-in panel.
+    pub host_panel: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -398,6 +400,15 @@ pub enum SidePanel {
     None,
     Agent,
     Automations,
+    /// A host extension panel. The extension id lives on the window chrome.
+    Host,
+}
+
+/// Which side of the page area a host panel occupies. Built-in panels stay on the right.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelEdge {
+    Right,
+    Left,
 }
 
 struct WindowChrome {
@@ -416,6 +427,10 @@ struct WindowChrome {
     agent_panel: f64,
     /// Which panel is in the column. `None` while the column is closed.
     side: SidePanel,
+    /// Host extension shown when `side` is `Host`.
+    host_extension: String,
+    /// Side of the page area used when `side` is `Host`.
+    panel_edge: PanelEdge,
     fullscreen: bool,
     /// Toast view drawn over the bottom of the pages. Menus open and close without touching it.
     toast: Option<String>,
@@ -451,6 +466,8 @@ impl WindowChrome {
             ui_bottom: 0.0,
             agent_panel: 0.0,
             side: SidePanel::None,
+            host_extension: String::new(),
+            panel_edge: PanelEdge::Right,
             fullscreen: false,
             toast: None,
             shown: Vec::new(),
@@ -797,6 +814,11 @@ impl TabsState {
                     agent_panel: chrome.side == SidePanel::Agent && chrome.agent_panel > 0.0,
                     automation_panel: chrome.side == SidePanel::Automations
                         && chrome.agent_panel > 0.0,
+                    host_panel: if chrome.side == SidePanel::Host && chrome.agent_panel > 0.0 {
+                        chrome.host_extension.clone()
+                    } else {
+                        String::new()
+                    },
                 })
                 .collect(),
             groups: self.groups.clone(),
@@ -966,6 +988,7 @@ pub fn emit_tabs(app: &AppHandle) {
     }
     let _ = app.emit("tabs-changed", &snapshot);
     session::schedule(app);
+    crate::host_extensions::note_tabs(app);
 }
 
 /// Settings every webview shares. WebView2 refuses to create a webview whose environment
@@ -5565,10 +5588,11 @@ fn page_rect(app: &AppHandle, window_label: &str) -> (PhysicalPosition<i32>, Phy
         state
             .chrome(window_label)
             .map(|chrome| {
+                let (panel_left, panel_right) = panel_insets(chrome);
                 (
                     chrome.ui_height,
-                    chrome.ui_left,
-                    chrome.ui_right + chrome.agent_panel,
+                    chrome.ui_left + panel_left,
+                    chrome.ui_right + panel_right,
                     chrome.ui_bottom,
                     chrome.fullscreen,
                 )
@@ -5605,6 +5629,59 @@ pub fn automation_panel_label(window: &str) -> String {
     format!("{AUTOMATION_PANEL_PREFIX}{window}")
 }
 
+pub fn host_panel_label(window: &str) -> String {
+    format!("cext-panel-{window}")
+}
+
+pub fn host_panel_extension(app: &AppHandle, window: &str) -> String {
+    with_state(app, |state| {
+        state
+            .chrome(window)
+            .map(|chrome| chrome.host_extension.clone())
+            .unwrap_or_default()
+    })
+}
+
+/// Shows a host extension in the side column and remembers which one.
+pub fn open_host_panel(
+    app: &AppHandle,
+    window: &str,
+    extension_id: &str,
+    width: f64,
+    edge: PanelEdge,
+) {
+    let width = if width.is_finite() {
+        width.max(0.0)
+    } else {
+        0.0
+    };
+    with_state(app, |state| {
+        let chrome = state.chrome_mut(window)?;
+        chrome.host_extension = extension_id.to_string();
+        chrome.panel_edge = edge;
+        chrome.side = if width <= 0.0 {
+            SidePanel::None
+        } else {
+            SidePanel::Host
+        };
+        chrome.agent_panel = if width <= 0.0 { 0.0 } else { width };
+        Some(())
+    });
+    layout(app, window);
+    emit_tabs(app);
+}
+
+fn panel_insets(chrome: &WindowChrome) -> (f64, f64) {
+    if chrome.fullscreen || chrome.agent_panel <= 0.0 {
+        return (0.0, 0.0);
+    }
+    if chrome.side == SidePanel::Host && chrome.panel_edge == PanelEdge::Left {
+        (chrome.agent_panel, 0.0)
+    } else {
+        (0.0, chrome.agent_panel)
+    }
+}
+
 /// The panel column sits between the pages and the tool strip, full page-area height.
 /// The open panel is placed there. The other one, and both while closed, stay parked.
 fn place_side_panel(
@@ -5614,11 +5691,18 @@ fn place_side_panel(
     page_size: PhysicalSize<u32>,
     scale: f64,
 ) {
-    let (width, fullscreen, side) = with_state(app, |state| {
+    let (width, fullscreen, side, edge) = with_state(app, |state| {
         state
             .chrome(window)
-            .map(|chrome| (chrome.agent_panel, chrome.fullscreen, chrome.side))
-            .unwrap_or((0.0, false, SidePanel::None))
+            .map(|chrome| {
+                (
+                    chrome.agent_panel,
+                    chrome.fullscreen,
+                    chrome.side,
+                    chrome.panel_edge,
+                )
+            })
+            .unwrap_or((0.0, false, SidePanel::None, PanelEdge::Right))
     });
     let show = if width <= 0.0 || fullscreen {
         SidePanel::None
@@ -5633,6 +5717,7 @@ fn place_side_panel(
         page_size,
         scale,
         width,
+        PanelEdge::Right,
     );
     place_column(
         app,
@@ -5642,6 +5727,17 @@ fn place_side_panel(
         page_size,
         scale,
         width,
+        PanelEdge::Right,
+    );
+    place_column(
+        app,
+        &host_panel_label(window),
+        show == SidePanel::Host,
+        position,
+        page_size,
+        scale,
+        width,
+        edge,
     );
 }
 
@@ -5653,6 +5749,7 @@ fn place_column(
     page_size: PhysicalSize<u32>,
     scale: f64,
     width: f64,
+    edge: PanelEdge,
 ) {
     let Some(webview) = app.get_webview(label) else {
         return;
@@ -5661,12 +5758,13 @@ fn place_column(
         let _ = webview.set_position(parked_position());
         return;
     }
-    let width = ((width * scale).round() as u32).max(1);
-    let _ = webview.set_size(PhysicalSize::new(width, page_size.height));
-    let _ = webview.set_position(PhysicalPosition::new(
-        position.x + page_size.width as i32,
-        position.y,
-    ));
+    let width_px = ((width * scale).round() as i32).max(1);
+    let x = match edge {
+        PanelEdge::Right => position.x + page_size.width as i32,
+        PanelEdge::Left => position.x - width_px,
+    };
+    let _ = webview.set_size(PhysicalSize::new(width_px as u32, page_size.height));
+    let _ = webview.set_position(PhysicalPosition::new(x, position.y));
 }
 
 /// Width of the docked side column in CSS pixels. Zero when it is closed.
@@ -5701,6 +5799,10 @@ pub fn set_side_panel(app: &AppHandle, window: &str, kind: SidePanel, width: f64
         let kind = if width <= 0.0 { SidePanel::None } else { kind };
         if chrome.side == kind && (chrome.agent_panel - width).abs() < 0.5 {
             return None;
+        }
+        if kind != SidePanel::Host {
+            chrome.host_extension.clear();
+            chrome.panel_edge = PanelEdge::Right;
         }
         chrome.side = kind;
         chrome.agent_panel = width;

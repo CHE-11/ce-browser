@@ -3,9 +3,10 @@ import { errorText, usePageToolRequests, useToolStatus } from "../use-page-tool"
 import { IconButton } from "@/components/IconButton";
 import { openPopup, defaultDownloadDir, chooseSavePath, printTabToPdf, extractPage, printHtmlToPdf, openSavedFile } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
-import { TabInfo, BrowserSettings, PageToolRequest } from "@type/browser";
+import { TabInfo, BrowserSettings, ExtractedPage, PageToolRequest } from "@type/browser";
 import { LoaderCircle, Check, Printer } from "lucide-react";
 import { tabParams, joinPath, fileNameFor, capturable } from "../shared";
+import { fileNameFromTemplate, storedFileNameTemplate, type FileNameSource } from "./file-name";
 import { contentStateFrom, buildDocument, parsePage, renderOffscreen } from "./print-document";
 import { DEFAULT_PRINT_SETTINGS, applyPrintPreset, pdfOptions, contentBox } from "./print-options";
 
@@ -35,14 +36,30 @@ export function PrintPdfButton({ activeTab, settings }: PrintPdfButtonProps) {
 
   const run = async (request: Extract<PageToolRequest, { tool: "print-pdf" }>) => {
     const stored = settingsRef.current?.printEditor ?? DEFAULT_PRINT_SETTINGS;
-    const format = request.action === "quick" && request.presetId ? applyPrintPreset(stored, request.presetId) : stored;
+    const preset =
+      request.action === "quick" && request.presetId ? stored.presets.find((item) => item.id === request.presetId) : undefined;
+    const format = preset ? applyPrintPreset(stored, preset.id) : stored;
     const result = new URLSearchParams({ tab: String(request.tabId), title: request.title, url: request.url });
     try {
       const folder = settingsRef.current?.downloadDir || (await defaultDownloadDir());
-      const path = await chooseSavePath(joinPath(folder, fileNameFor(request.title, request.url, "pdf")), "PDF document", [
-        "pdf",
-      ]);
+      let page: ExtractedPage | null = null;
+      if (preset) {
+        setStatus("busy");
+        page = await extractPage(request.tabId);
+      }
+      const source: FileNameSource = {
+        title: page?.title || request.title,
+        url: page?.url || request.url,
+        author: page?.byline ?? "",
+        site: page?.siteName ?? "",
+        published: page?.published ?? "",
+        lang: page?.lang ?? "",
+        preset: preset?.name ?? "",
+      };
+      const name = preset ? fileNameFromTemplate(storedFileNameTemplate(preset), source) : fileNameFor(source.title, source.url, "pdf");
+      const path = await chooseSavePath(joinPath(folder, name), "PDF document", ["pdf"]);
       if (!path) {
+        setStatus("idle");
         return;
       }
       setStatus("busy");
@@ -53,13 +70,13 @@ export function PrintPdfButton({ activeTab, settings }: PrintPdfButtonProps) {
           path,
         );
       } else {
-        const page = await extractPage(request.tabId);
+        const read = page ?? (await extractPage(request.tabId));
         const state = contentStateFrom(format);
-        const built = buildDocument(parsePage(page), page, state, format);
+        const built = buildDocument(parsePage(read), read, state, format);
         const html = await renderOffscreen(built.html, state, contentBox(format).width);
         await printHtmlToPdf(
           html,
-          pdfOptions(format, page.title || request.title, page.url || request.url),
+          pdfOptions(format, read.title || request.title, read.url || request.url),
           path,
           request.tabId,
         );

@@ -1,7 +1,7 @@
 import { useRef, useState, type DragEvent } from "react";
-import { Puzzle } from "lucide-react";
+import { PanelRight, Puzzle } from "lucide-react";
 import type { BrowserSettings, ExtensionInfo, TabInfo } from "@type/browser";
-import { createTab } from "@/lib/browser-client";
+import { createTab, saveSettings } from "@/lib/browser-client";
 import { toolbarDropEdge, toolbarIndexAt } from "@/lib/toolbar-pin";
 import { IconButton } from "@/components/IconButton";
 import { ToolbarEntry } from "../ExtensionsToolbar/ExtensionsToolbar";
@@ -25,6 +25,14 @@ export function AddressBarExtensions({
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const fromIndex = dragging ? addressExtensions.indexOf(dragging) : -1;
+  const toolsOpen = settings?.showToolsToolbar !== false;
+
+  const toggleToolsToolbar = () => {
+    if (!settings) {
+      return;
+    }
+    void saveSettings({ ...settings, showToolsToolbar: !toolsOpen });
+  };
 
   const rememberDrop = (index: number) => {
     setDropIndex((current) => (current === index ? current : index));
@@ -92,6 +100,19 @@ export function AddressBarExtensions({
           onDragEnd={clearDrag}
         />
       ))}
+      <IconButton
+        id="address-secondary-toolbar"
+        label={
+          toolsOpen
+            ? "Hide secondary extensions toolbar (Ctrl+Shift+T)"
+            : "Show secondary extensions toolbar (Ctrl+Shift+T)"
+        }
+        active={toolsOpen}
+        disabled={!settings}
+        onClick={toggleToolsToolbar}
+      >
+        <PanelRight id="address-secondary-toolbar-icon" aria-hidden />
+      </IconButton>
       <IconButton
         id="address-extensions-page"
         label="Extensions"
