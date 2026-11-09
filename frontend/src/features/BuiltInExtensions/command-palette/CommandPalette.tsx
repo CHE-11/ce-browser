@@ -252,14 +252,17 @@ export function CommandPalette() {
       },
     }));
     const extensionHits: Hit[] = extensions
-      .filter((extension) => extension.enabled && extension.popup)
+      .filter((extension) => extension.enabled && (extension.popup || extension.sidePanel))
       .map((extension) => ({
         id: `extension-${extension.id}`,
-        title: extension.name,
+        title: extension.defaultTitle || extension.name,
         hint: "Extension",
         keywords: extension.description,
         group: "Extension",
         run: () => {
+          if (!extension.popup && extension.sidePanel) {
+            return openExtensionPanel(extension.id);
+          }
           if (extensionOpenAs(settings, extension.id) === "panel") {
             return openExtensionPanel(extension.id);
           }

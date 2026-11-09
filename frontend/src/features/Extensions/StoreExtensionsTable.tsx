@@ -217,8 +217,9 @@ export function StoreExtensionsTable({
             ) : null}
             {list.map((extension) => {
               const domId = `store-extension-${extension.id}`;
-              const gui = Boolean(extension.popup);
-              const panel = gui && extensionOpenAs(settings, extension.id) === "panel";
+              const hasPopup = Boolean(extension.popup);
+              const hasPanel = Boolean(extension.sidePanel);
+              const panel = (hasPopup && extensionOpenAs(settings, extension.id) === "panel") || (!hasPopup && hasPanel);
               const resizable = extensionPanelResizable(settings, extension.id);
               const source = sourceOf(extension);
               return (
@@ -257,15 +258,21 @@ export function StoreExtensionsTable({
                     </span>
                   </td>
                   <td id={`${domId}-open-as`} className="px-3 py-2.5">
-                    {gui ? (
+                    {hasPopup || hasPanel ? (
                       <div id={`${domId}-open-as-controls`} className="flex flex-col items-start gap-1.5">
                         <div id={`${domId}-open-as-row`} className="flex items-center gap-1">
-                          <OpenAs
-                            id={`${domId}-open-as-choice`}
-                            value={extensionOpenAs(settings, extension.id)}
-                            disabled={!settings || busy}
-                            onChange={(mode) => onOpenAs(extension.id, mode)}
-                          />
+                          {hasPopup ? (
+                            <OpenAs
+                              id={`${domId}-open-as-choice`}
+                              value={extensionOpenAs(settings, extension.id)}
+                              disabled={!settings || busy}
+                              onChange={(mode) => onOpenAs(extension.id, mode)}
+                            />
+                          ) : (
+                            <span id={`${domId}-open-as-side`} className="text-xs text-zinc-400">
+                              Side panel
+                            </span>
+                          )}
                           {panel ? (
                             <PanelSide
                               id={`${domId}-side`}

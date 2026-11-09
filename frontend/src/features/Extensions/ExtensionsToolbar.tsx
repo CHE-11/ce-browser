@@ -32,17 +32,23 @@ type ExtensionToolbarButtonProps = {
 export function ExtensionToolbarButton({ extension, idPrefix }: ExtensionToolbarButtonProps) {
   const settings = useSettings();
   const domId = `${idPrefix}-extension-${extension.id}`;
+  const label = extension.defaultTitle || extension.name;
   return (
     <IconButton
       id={domId}
-      label={extension.name}
-      disabled={!extension.popup}
+      label={label}
       onClick={(event) => {
-        if (extensionOpenAs(settings, extension.id) === "panel") {
+        if (extension.popup && extensionOpenAs(settings, extension.id) === "panel") {
           void openExtensionPanel(extension.id);
           return;
         }
-        void openPopup("extension", event.currentTarget, { params: `id=${extension.id}` });
+        if (extension.popup) {
+          void openPopup("extension", event.currentTarget, { params: `id=${extension.id}` });
+          return;
+        }
+        if (extension.sidePanel) {
+          void openExtensionPanel(extension.id);
+        }
       }}
     >
       <ExtensionIcon

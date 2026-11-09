@@ -20,6 +20,7 @@ export function AddressBarExtensionPinContextMenu({ extensionId }: ExtensionPinC
   const name = installed?.name ?? builtinTool(extensionId)?.name ?? "Extension";
   const place = toolbarPlacement(settings, extensionId);
   const canOpenAs = Boolean(installed?.popup);
+  const sideOnly = Boolean(installed?.sidePanel) && !installed?.popup;
   const openAs = extensionOpenAs(settings, extensionId);
 
   const setPlace = (next: ToolbarPlacement) => {
@@ -61,18 +62,24 @@ export function AddressBarExtensionPinContextMenu({ extensionId }: ExtensionPinC
           onChange={setPlace}
         />
       </div>
-      {canOpenAs ? (
+      {canOpenAs || sideOnly ? (
         <div id="extension-pin-menu-open-as-row" className="flex items-center gap-3 border-t border-zinc-800 px-3 py-2">
           <span id="extension-pin-menu-open-as-label" className="min-w-0 flex-1 truncate text-sm text-zinc-400">
             Open as
           </span>
-          <OpenAs
-            id="extension-pin-menu-open-as"
-            value={openAs}
-            disabled={!settings}
-            onChange={setOpenAs}
-          />
-          {openAs === "panel" ? (
+          {canOpenAs ? (
+            <OpenAs
+              id="extension-pin-menu-open-as"
+              value={openAs}
+              disabled={!settings}
+              onChange={setOpenAs}
+            />
+          ) : (
+            <span id="extension-pin-menu-side-only" className="text-sm text-zinc-300">
+              Side panel
+            </span>
+          )}
+          {openAs === "panel" || sideOnly ? (
             <PanelSide
               id="extension-pin-menu-side"
               side={extensionPanelSide(settings, extensionId)}

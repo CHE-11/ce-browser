@@ -1130,6 +1130,12 @@ pub fn home_url(app: &AppHandle) -> Url {
     resolve(app, &home)
 }
 
+/// Address for a new tab. An enabled extension's `chrome_url_overrides.newtab` wins.
+/// The most recently enabled override is chosen. `ce://newtab` is the fallback.
+fn fresh_tab_url(app: &AppHandle) -> Url {
+    crate::extensions::new_tab_url().unwrap_or_else(|| resolve(app, paths::NEW_TAB))
+}
+
 pub struct OpenTab {
     pub url: Url,
     pub background: bool,
@@ -1195,7 +1201,7 @@ pub fn create_tab_on(
         .filter(|text| !text.is_empty())
     {
         Some(text) => resolve(app, text),
-        None => resolve(app, paths::NEW_TAB),
+        None => fresh_tab_url(app),
     };
     open(
         app,
@@ -1409,7 +1415,7 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
     let load_app = app.clone();
     let title_app = app.clone();
     let window_app = app.clone();
-    let builder = page_builder(app, id, label, WebviewUrl::External(url))
+    let mut builder = page_builder(app, id, label, WebviewUrl::External(url))
         // Tauri's handler consumes file drops on Windows. The page needs them for its own drop zones.
         .disable_drag_drop_handler()
         .background_color(color)
@@ -1487,6 +1493,12 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
             {
                 let _ = webview.set_zoom(factor);
             }
+            if finished
+                && extension_page
+                && let Some(webview) = page_view(&load_app, id)
+            {
+                webview2::run_script(&webview, crate::host_extensions::EXTENSION_TAB_JS);
+            }
         })
         .on_document_title_changed(move |_, title| {
             let url = with_state(&title_app, |state| {
@@ -1507,6 +1519,9 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
             }
         })
         .on_new_window(move |url, features| new_window(&window_app, Some(id), url, features));
+    if extension_page {
+        builder = builder.initialization_script(crate::host_extensions::EXTENSION_TAB_JS);
+    }
     // A visible webview's first frame is white. Keep it off the page until the document has painted.
     let webview = window
         .add_child(builder, parked_position(), size)
@@ -2078,6 +2093,7 @@ fn script_window(
         .on_new_window(move |url, features| new_window(&host, None, url, features));
     if extension {
         builder = builder
+            .initialization_script(crate::host_extensions::EXTENSION_TAB_JS)
             .background_color(settings::page_color(app))
             .on_document_title_changed(|window, title| {
                 let title = title.trim();
@@ -2102,6 +2118,9 @@ fn script_window(
             }
             webview2::close_window_when_requested(app, window.label());
             if extension {
+                if let Some(webview) = app.get_webview(window.label()) {
+                    crate::host_extensions::attach_webview(app, &webview);
+                }
                 let _ = window.set_zoom(factor);
                 open_extension_popout(app, window.label(), url, width, height);
             }
@@ -5045,6 +5064,16 @@ pub fn apply_ui_zoom(app: &AppHandle, previous_percent: u32, next_percent: u32) 
     if app.try_state::<Tabs>().is_some() {
         apply_extension_tab_zoom(app, next);
         crate::popup::apply_ui_zoom(app, next);
+        crate::host_extensions::apply_ui_zoom(app, next, ratio);
+        let windows = snapshot(app)
+            .windows
+            .into_iter()
+            .map(|window| window.label)
+            .collect::<Vec<_>>();
+        for window in windows {
+            place_pages(app, &window, true);
+            crate::host_extensions::place_page_toolbars(app, &window);
+        }
     }
     apply_extension_popout_zoom(app, next, ratio);
 }
@@ -7257,7 +7286,7 @@ pub fn new_tab_in_group(app: &AppHandle, id: u32) -> Result<u32, String> {
         Some((window, workspace, local + 1))
     })
     .ok_or("That group no longer exists.")?;
-    let url = resolve(app, paths::NEW_TAB);
+    let url = fresh_tab_url(app);
     open(
         app,
         OpenTab {
@@ -7484,7 +7513,7 @@ pub fn move_tabs_to_workspace(app: &AppHandle, ids: &[u32], workspace: &str) -> 
 }
 
 pub fn create_ephemeral_tab(app: &AppHandle, window: &str) -> Result<u32, String> {
-    let url = resolve(app, paths::NEW_TAB);
+    let url = fresh_tab_url(app);
     open(
         app,
         OpenTab {

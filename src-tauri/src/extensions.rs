@@ -41,11 +41,28 @@ pub struct ExtensionInfo {
     /// Path of the toolbar popup inside the extension, e.g. `popup/index.html`.
     pub popup: Option<String>,
     pub options_page: Option<String>,
+    /// `action.default_title`, localized. Empty when the manifest does not set one.
+    pub default_title: String,
+    /// `side_panel.default_path`, or Edge's `sidebar_action.default_panel` when that is the only one.
+    pub side_panel: Option<String>,
+    /// `chrome_url_overrides.newtab`, when this package supplies one.
+    pub new_tab: Option<String>,
+    /// Commands that name a suggested shortcut.
+    pub commands: Vec<ExtensionCommand>,
     pub folder: Option<String>,
     /// `chrome` or `edge` when the package has a store key and update URL.
     pub store: Option<String>,
     /// Newer store version waiting for the user to install it.
     pub update_version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionCommand {
+    pub name: String,
+    pub description: String,
+    /// Suggested shortcut. The Windows value wins over `default` when both are set.
+    pub shortcut: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -57,9 +74,39 @@ struct ExtensionRecord {
     /// Newer store version waiting for the user. Empty when there is nothing to install.
     #[serde(default)]
     available_version: String,
+    /// Increases when the extension is installed or enabled. The highest value among enabled
+    /// extensions wins `chrome_url_overrides.newtab`.
+    #[serde(default)]
+    enabled_seq: u64,
 }
 
 static STORE_BUSY: Mutex<()> = Mutex::new(());
+
+/// Shortcuts and the new-tab override, refreshed whenever the extension list is built.
+struct ExtensionRuntime {
+    new_tab: Option<String>,
+    /// An enabled extension declares `declarativeNetRequest` or `webRequest`.
+    network: bool,
+    /// An enabled extension declares `downloads`.
+    downloads: bool,
+}
+
+/// A `commands` shortcut. WebView2 does not deliver `chrome.commands.onCommand`, so the
+/// browser keeps the chord. Parsing is tested for when that changes.
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct Chord {
+    key: u32,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+}
+
+static RUNTIME: Mutex<ExtensionRuntime> = Mutex::new(ExtensionRuntime {
+    new_tab: None,
+    network: false,
+    downloads: false,
+});
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -276,7 +323,9 @@ pub fn list(app: &AppHandle) -> Result<Vec<ExtensionInfo>, String> {
     let installed = installed(app)?;
     let records = records(app);
     let root = paths::extensions_dir(app);
-    Ok(installed
+    let mut network = false;
+    let mut downloads = false;
+    let infos = installed
         .into_iter()
         .map(|extension| {
             let record = records.iter().find(|record| record.id == extension.id);
@@ -285,6 +334,12 @@ pub fn list(app: &AppHandle) -> Result<Vec<ExtensionInfo>, String> {
                 .as_ref()
                 .map(|folder| Manifest::read(&root.join(folder)))
                 .unwrap_or_default();
+            if extension.enabled && manifest.network {
+                network = true;
+            }
+            if extension.enabled && manifest.downloads {
+                downloads = true;
+            }
             let version = manifest.version.clone().unwrap_or_default();
             let update_version = record.and_then(|record| {
                 extension_store::version_is_newer(&record.available_version, &version)
@@ -303,12 +358,18 @@ pub fn list(app: &AppHandle) -> Result<Vec<ExtensionInfo>, String> {
                 icon: manifest.icon.clone(),
                 popup: manifest.popup.clone(),
                 options_page: manifest.options_page.clone(),
+                default_title: manifest.default_title.clone().unwrap_or_default(),
+                side_panel: manifest.side_panel.clone(),
+                new_tab: manifest.new_tab.clone(),
+                commands: manifest.commands.clone(),
                 folder,
                 store: manifest.store.map(|store| store.as_str().to_string()),
                 update_version,
             }
         })
-        .collect())
+        .collect::<Vec<_>>();
+    remember_runtime(&records, &infos, network, downloads);
+    Ok(infos)
 }
 
 fn emit(app: &AppHandle) {
@@ -379,10 +440,12 @@ pub fn sync_on_startup(app: &AppHandle) -> Result<(), String> {
                     .unwrap_or_default();
                 let available_version = kept_available(&folder, &available_version);
                 records.retain(|record| record.folder != name && record.id != id);
+                let enabled_seq = next_seq(&records);
                 records.push(ExtensionRecord {
                     id,
                     folder: name,
                     available_version,
+                    enabled_seq,
                 });
                 changed = true;
             }
@@ -547,10 +610,12 @@ fn install_from(
     }
     save_records(app, |records| {
         records.retain(|record| record.id != id);
+        let enabled_seq = next_seq(records);
         records.push(ExtensionRecord {
             id: id.clone(),
             folder,
             available_version: String::new(),
+            enabled_seq,
         });
     })?;
     emit(app);
@@ -642,6 +707,14 @@ fn update_verified(
 
 pub fn set_enabled(app: &AppHandle, id: &str, enabled: bool) -> Result<(), String> {
     act_on(app, id, Some(enabled))?;
+    if enabled {
+        save_records(app, |records| {
+            let seq = next_seq(records);
+            if let Some(record) = records.iter_mut().find(|record| record.id == id) {
+                record.enabled_seq = seq;
+            }
+        })?;
+    }
     emit(app);
     crate::sync::touch();
     Ok(())
@@ -673,15 +746,125 @@ fn extension_url(id: &str, page: &str) -> Result<Url, String> {
 /// `params` is the extension id. Opens its toolbar popup page.
 pub fn popup_url(app: &AppHandle, params: &str) -> Result<Url, String> {
     let id = params.trim_start_matches("id=");
-    let record = records(app)
-        .into_iter()
-        .find(|record| record.id == id)
-        .ok_or("That extension has no toolbar popup.")?;
-    let manifest = Manifest::read(&paths::extensions_dir(app).join(record.folder));
+    let manifest = manifest_for(app, id)?;
     let popup = manifest
         .popup
         .ok_or("That extension has no toolbar popup.")?;
     extension_url(id, &popup)
+}
+
+/// Page shown when the toolbar opens this extension as a side panel.
+/// A popup stays the panel document. A side-panel-only extension uses its panel page.
+pub fn store_panel_url(app: &AppHandle, id: &str) -> Result<Url, String> {
+    let manifest = manifest_for(app, id)?;
+    if let Some(popup) = manifest.popup {
+        return extension_url(id, &popup);
+    }
+    if let Some(panel) = manifest.side_panel {
+        return extension_url(id, &panel);
+    }
+    Err("That extension has no panel page.".into())
+}
+
+/// Page `chrome.sidePanel.open` asks for. The side panel document wins over the popup.
+pub fn side_panel_url(app: &AppHandle, id: &str) -> Result<Url, String> {
+    let manifest = manifest_for(app, id)?;
+    if let Some(panel) = manifest.side_panel {
+        return extension_url(id, &panel);
+    }
+    if let Some(popup) = manifest.popup {
+        return extension_url(id, &popup);
+    }
+    Err("That extension has no panel page.".into())
+}
+
+/// New tab page from the most recently enabled extension that supplies one.
+pub fn new_tab_url() -> Option<Url> {
+    let runtime = RUNTIME.lock().unwrap_or_else(|poison| poison.into_inner());
+    let text = runtime.new_tab.clone()?;
+    Url::parse(&text).ok()
+}
+
+/// An enabled extension wants to see network requests through `declarativeNetRequest` or `webRequest`.
+pub fn extension_handles_requests() -> bool {
+    RUNTIME
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .network
+}
+
+/// An enabled extension reads downloads through `chrome.downloads`.
+pub fn extension_uses_downloads() -> bool {
+    RUNTIME
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .downloads
+}
+
+fn manifest_for(app: &AppHandle, id: &str) -> Result<Manifest, String> {
+    let record = records(app)
+        .into_iter()
+        .find(|record| record.id == id)
+        .ok_or("That extension is not installed.")?;
+    Ok(Manifest::read(
+        &paths::extensions_dir(app).join(record.folder),
+    ))
+}
+
+fn next_seq(records: &[ExtensionRecord]) -> u64 {
+    records
+        .iter()
+        .map(|record| record.enabled_seq)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+fn newer_override(current: Option<(u64, usize)>, seq: u64, index: usize) -> bool {
+    match current {
+        None => true,
+        Some((best_seq, best_index)) => (seq, index) > (best_seq, best_index),
+    }
+}
+
+fn remember_runtime(
+    records: &[ExtensionRecord],
+    infos: &[ExtensionInfo],
+    network: bool,
+    downloads: bool,
+) {
+    let mut best: Option<(u64, usize, String)> = None;
+    for info in infos {
+        if !info.enabled {
+            continue;
+        }
+        let Some(page) = info.new_tab.as_deref() else {
+            continue;
+        };
+        let index = records
+            .iter()
+            .position(|record| record.id == info.id)
+            .unwrap_or(0);
+        let seq = records
+            .iter()
+            .find(|record| record.id == info.id)
+            .map(|record| record.enabled_seq)
+            .unwrap_or(0);
+        if !newer_override(
+            best.as_ref().map(|(seq, index, _)| (*seq, *index)),
+            seq,
+            index,
+        ) {
+            continue;
+        }
+        if let Ok(url) = extension_url(&info.id, page) {
+            best = Some((seq, index, url.to_string()));
+        }
+    }
+    let mut runtime = RUNTIME.lock().unwrap_or_else(|poison| poison.into_inner());
+    runtime.new_tab = best.map(|(_, _, url)| url);
+    runtime.network = network;
+    runtime.downloads = downloads;
 }
 
 pub fn options_url(app: &AppHandle, id: &str) -> Result<Url, String> {
@@ -1036,6 +1219,7 @@ pub fn stage_incoming(profile_dir: &Path, incoming: &[IncomingExtension]) -> Res
             id: String::new(),
             folder: extension.folder.clone(),
             available_version: String::new(),
+            enabled_seq: 0,
         });
     }
     files::write_json(
@@ -1154,11 +1338,17 @@ pub fn apply_extensions(app: &AppHandle, incoming: &[IncomingExtension]) -> Resu
         {
             act_on(app, &id, Some(extension.enabled))?;
         }
+        let enabled_seq = if same {
+            known.as_ref().map(|record| record.enabled_seq).unwrap_or(0)
+        } else {
+            next_seq(&records)
+        };
         records.retain(|record| record.folder != extension.folder && record.id != id);
         records.push(ExtensionRecord {
             id,
             folder: extension.folder.clone(),
             available_version,
+            enabled_seq,
         });
         save_records(app, |saved| *saved = records.clone())?;
     }
@@ -1301,6 +1491,14 @@ struct Manifest {
     icon: Option<String>,
     popup: Option<String>,
     options_page: Option<String>,
+    default_title: Option<String>,
+    side_panel: Option<String>,
+    new_tab: Option<String>,
+    commands: Vec<ExtensionCommand>,
+    /// `declarativeNetRequest` or `webRequest` is in `permissions`.
+    network: bool,
+    /// `downloads` is in `permissions`.
+    downloads: bool,
     /// Set when the manifest has a publisher key and a Chrome or Edge update URL.
     store: Option<extension_store::Store>,
     key: Option<Vec<u8>>,
@@ -1327,6 +1525,19 @@ impl Manifest {
             .and_then(|action| action.get("default_popup"))
             .and_then(Value::as_str)
             .filter(|popup| !popup.is_empty())
+            .map(str::to_string);
+        let default_title = action
+            .and_then(|action| action.get("default_title"))
+            .and_then(Value::as_str)
+            .map(|value| localize(value, &messages))
+            .filter(|title| !title.is_empty());
+        let side_panel = page_field(json.get("side_panel"), "default_path")
+            .or_else(|| page_field(json.get("sidebar_action"), "default_panel"));
+        let new_tab = json
+            .get("chrome_url_overrides")
+            .and_then(|overrides| overrides.get("newtab"))
+            .and_then(Value::as_str)
+            .filter(|page| !page.is_empty())
             .map(str::to_string);
         let icon = action
             .and_then(|action| action.get("default_icon"))
@@ -1357,10 +1568,149 @@ impl Manifest {
             icon,
             popup,
             options_page,
+            default_title,
+            side_panel,
+            new_tab,
+            commands: command_shortcuts(json.get("commands"), &messages),
+            network: permission_list(
+                &json,
+                "permissions",
+                &[
+                    "declarativeNetRequest",
+                    "declarativeNetRequestWithHostAccess",
+                    "webRequest",
+                    "webRequestBlocking",
+                ],
+            ),
+            downloads: permission_list(&json, "permissions", &["downloads"]),
             store,
             key,
         }
     }
+}
+
+fn page_field(value: Option<&Value>, key: &str) -> Option<String> {
+    value
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_str)
+        .filter(|page| !page.is_empty())
+        .map(str::to_string)
+}
+
+fn permission_list(json: &Value, key: &str, names: &[&str]) -> bool {
+    json.get(key)
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.as_str()
+                    .is_some_and(|name| names.iter().any(|wanted| *wanted == name))
+            })
+        })
+}
+
+fn command_shortcuts(value: Option<&Value>, messages: &Value) -> Vec<ExtensionCommand> {
+    let Some(map) = value.and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    let mut commands = Vec::new();
+    for (name, spec) in map {
+        let Some(shortcut) = spec.get("suggested_key").and_then(|suggested| {
+            suggested
+                .get("windows")
+                .and_then(Value::as_str)
+                .filter(|shortcut| !shortcut.is_empty())
+                .or_else(|| suggested.get("default").and_then(Value::as_str))
+        }) else {
+            continue;
+        };
+        if shortcut.is_empty() {
+            continue;
+        }
+        let description = spec
+            .get("description")
+            .and_then(Value::as_str)
+            .map(|value| localize(value, messages))
+            .unwrap_or_default();
+        commands.push(ExtensionCommand {
+            name: name.clone(),
+            description,
+            shortcut: shortcut.to_string(),
+        });
+    }
+    commands
+}
+
+/// `Ctrl+Shift+Y` and the other Chrome `suggested_key` forms. A Mac-only modifier does not match.
+#[cfg(test)]
+fn parse_shortcut(raw: &str) -> Option<Chord> {
+    let parts: Vec<&str> = raw
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect();
+    let key_name = parts.last()?;
+    let mut ctrl = false;
+    let mut shift = false;
+    let mut alt = false;
+    for modifier in &parts[..parts.len() - 1] {
+        match modifier.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => ctrl = true,
+            "shift" => shift = true,
+            "alt" => alt = true,
+            "command" | "cmd" | "macctrl" => return None,
+            _ => return None,
+        }
+    }
+    Some(Chord {
+        key: virtual_key(key_name)?,
+        ctrl,
+        shift,
+        alt,
+    })
+}
+
+#[cfg(test)]
+fn virtual_key(name: &str) -> Option<u32> {
+    let name = name.trim();
+    let chars: Vec<char> = name.chars().collect();
+    if chars.len() == 1 {
+        let character = chars[0];
+        if character.is_ascii_alphabetic() {
+            return Some(u32::from(character.to_ascii_uppercase()));
+        }
+        if character.is_ascii_digit() {
+            return Some(u32::from(character));
+        }
+    }
+    if let Some(rest) = name.strip_prefix('F').or_else(|| name.strip_prefix('f'))
+        && !rest.is_empty()
+        && rest.chars().all(|character| character.is_ascii_digit())
+        && let Ok(number) = rest.parse::<u32>()
+        && (1..=24).contains(&number)
+    {
+        return Some(0x70 + number - 1);
+    }
+    Some(match name.to_ascii_lowercase().as_str() {
+        "comma" => 0xBC,
+        "period" => 0xBE,
+        "home" => 0x24,
+        "end" => 0x23,
+        "pageup" => 0x21,
+        "pagedown" => 0x22,
+        "space" => 0x20,
+        "insert" => 0x2D,
+        "delete" => 0x2E,
+        "up" => 0x26,
+        "down" => 0x28,
+        "left" => 0x25,
+        "right" => 0x27,
+        "tab" => 0x09,
+        "medianexttrack" => 0xB0,
+        "mediaprevtrack" => 0xB1,
+        "mediastop" => 0xB2,
+        "mediaplaypause" => 0xB3,
+        _ => return None,
+    })
 }
 
 fn locale_messages(folder: &Path, default_locale: Option<&str>) -> Value {
@@ -1438,4 +1788,75 @@ fn icon_data_url(path: &Path) -> Option<String> {
         "data:{mime};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(bytes)
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shortcut_chords_follow_the_windows_key() {
+        let chord = parse_shortcut("Ctrl+Shift+9").expect("digit chord");
+        assert!(chord.ctrl && chord.shift && !chord.alt);
+        assert_eq!(chord.key, u32::from(b'9'));
+        let letter = parse_shortcut("Alt+K").expect("letter chord");
+        assert!(letter.alt && !letter.ctrl && !letter.shift);
+        assert_eq!(letter.key, u32::from(b'K'));
+        assert!(parse_shortcut("Command+Shift+Y").is_none());
+        assert_eq!(parse_shortcut("F5").expect("function key").key, 0x74);
+    }
+
+    #[test]
+    fn the_newer_override_wins() {
+        assert!(newer_override(None, 0, 0));
+        assert!(!newer_override(Some((2, 0)), 1, 5));
+        assert!(newer_override(Some((2, 0)), 2, 1));
+        assert!(newer_override(Some((2, 1)), 3, 0));
+        assert!(!newer_override(Some((2, 1)), 2, 0));
+    }
+
+    #[test]
+    fn manifest_reads_the_surfaces_the_browser_hosts() {
+        let dir = std::env::temp_dir().join(format!("ce-ext-manifest-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("manifest.json"),
+            r#"{
+              "manifest_version": 3,
+              "name": "Sample",
+              "version": "1.0.0",
+              "action": { "default_title": "Open sample", "default_popup": "popup.html" },
+              "side_panel": { "default_path": "side.html" },
+              "sidebar_action": { "default_panel": "edge.html" },
+              "chrome_url_overrides": { "newtab": "newtab.html" },
+              "permissions": ["declarativeNetRequest", "downloads"],
+              "commands": {
+                "go": {
+                  "suggested_key": { "default": "Ctrl+Shift+Y", "windows": "Ctrl+Shift+U" },
+                  "description": "Go"
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+        let manifest = Manifest::read(&dir);
+        assert_eq!(manifest.default_title.as_deref(), Some("Open sample"));
+        assert_eq!(manifest.popup.as_deref(), Some("popup.html"));
+        assert_eq!(manifest.side_panel.as_deref(), Some("side.html"));
+        assert_eq!(manifest.new_tab.as_deref(), Some("newtab.html"));
+        assert_eq!(manifest.commands.len(), 1);
+        assert_eq!(manifest.commands[0].shortcut, "Ctrl+Shift+U");
+        assert!(manifest.network);
+        assert!(manifest.downloads);
+        fs::write(
+            dir.join("manifest.json"),
+            r#"{"manifest_version":3,"name":"Edge","version":"1","sidebar_action":{"default_panel":"edge.html"}}"#,
+        )
+        .unwrap();
+        let edge = Manifest::read(&dir);
+        assert_eq!(edge.side_panel.as_deref(), Some("edge.html"));
+        assert!(!edge.network);
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

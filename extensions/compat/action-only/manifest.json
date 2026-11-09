@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "CE Action Only",
+  "version": "1.0.0",
+  "description": "Dev fixture. Toolbar button with no popup.",
+  "action": {
+    "default_title": "Action only"
+  },
+  "permissions": ["storage"],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

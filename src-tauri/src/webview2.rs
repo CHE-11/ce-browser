@@ -2094,8 +2094,14 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                     Some("ce-record") => {
                         crate::automation::recorder::on_message(&message_app, id, &message);
                     }
-                    Some("ce-rpc") | Some("ce-content") => {
-                        let source = tabs::tab_page_url(&message_app, id).unwrap_or_default();
+                    Some("ce-rpc") | Some("ce-content") | Some("ce-chrome") => {
+                        let source = if message.get("type").and_then(|kind| kind.as_str())
+                            == Some("ce-chrome")
+                        {
+                            read_pwstr(|value| args.Source(value))
+                        } else {
+                            tabs::tab_page_url(&message_app, id).unwrap_or_default()
+                        };
                         crate::host_extensions::handle_message(
                             &message_app,
                             Some(id),
@@ -2633,8 +2639,10 @@ fn attach_adblock(
                     args.SetResponse(&response)?;
                     return Ok(());
                 }
+                let defer_blocks = crate::extensions::extension_handles_requests();
                 if let Some(hit) = crate::rewrite::find(&uri, &crate::rewrite::list(&request_app)) {
                     match hit {
+                        crate::rewrite::RewriteHit::Block if defer_blocks => {}
                         crate::rewrite::RewriteHit::Block => {
                             let response = environment.CreateWebResourceResponse(
                                 None::<&IStream>,
@@ -2673,13 +2681,15 @@ fn attach_adblock(
                     }
                 }
                 let is_document = context == COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT;
-                if crate::adblock::should_block(
-                    &request_app,
-                    id,
-                    &uri,
-                    is_document,
-                    resource_kind(context),
-                ) {
+                if !defer_blocks
+                    && crate::adblock::should_block(
+                        &request_app,
+                        id,
+                        &uri,
+                        is_document,
+                        resource_kind(context),
+                    )
+                {
                     let response = environment.CreateWebResourceResponse(
                         None::<&IStream>,
                         403,
@@ -3913,6 +3923,21 @@ fn attach_accelerators(
             &mut token,
         )
     }
+}
+
+pub fn run_script(webview: &Webview, script: &str) {
+    let script = script.to_string();
+    let _ = webview.with_webview(move |platform| {
+        let Ok(core) = core(&platform) else {
+            return;
+        };
+        let _ = unsafe {
+            core.ExecuteScript(
+                &HSTRING::from(script),
+                None::<&ICoreWebView2ExecuteScriptCompletedHandler>,
+            )
+        };
+    });
 }
 
 fn with_core(

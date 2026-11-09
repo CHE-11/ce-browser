@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "CE Compat Probe",
+  "version": "1.0.0",
+  "description": "Dev fixture. Measures which Chrome extension APIs WebView2 delivers.",
+  "action": {
+    "default_title": "Compat probe",
+    "default_popup": "popup.html"
+  },
+  "side_panel": {
+    "default_path": "side.html"
+  },
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "permissions": [
+    "activeTab",
+    "bookmarks",
+    "contextMenus",
+    "declarativeNetRequest",
+    "downloads",
+    "history",
+    "nativeMessaging",
+    "sidePanel",
+    "storage",
+    "tabs",
+    "windows"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "probe-command": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+9",
+        "windows": "Ctrl+Shift+9"
+      },
+      "description": "Record that the command arrived"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "rules",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  }
+}

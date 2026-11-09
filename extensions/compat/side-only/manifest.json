@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "CE Side Only",
+  "version": "1.0.0",
+  "description": "Dev fixture. Side panel page and no popup.",
+  "action": {
+    "default_title": "Side only"
+  },
+  "side_panel": {
+    "default_path": "side.html"
+  },
+  "permissions": ["sidePanel"]
+}

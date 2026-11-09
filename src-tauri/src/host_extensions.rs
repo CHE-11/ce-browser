@@ -812,12 +812,14 @@ pub fn page_toolbar_insets(app: &AppHandle) -> PageToolbarInsets {
         bottom: 0.0,
         left: 0.0,
     };
+    let zoom = settings::get(app).ui_zoom_factor();
     for bar in cached_toolbars(app) {
+        let thickness = bar.thickness * zoom;
         match bar.side.as_str() {
-            "top" => insets.top += bar.thickness,
-            "right" => insets.right += bar.thickness,
-            "left" => insets.left += bar.thickness,
-            _ => insets.bottom += bar.thickness,
+            "top" => insets.top += thickness,
+            "right" => insets.right += thickness,
+            "left" => insets.left += thickness,
+            _ => insets.bottom += thickness,
         }
     }
     insets
@@ -1009,6 +1011,7 @@ pub fn place_page_toolbars(app: &AppHandle, window: &str) {
             .unwrap_or(1.0)
             .max(0.01);
         let insets = page_toolbar_insets(app);
+        let zoom = settings::get(app).ui_zoom_factor();
         let top = (insets.top * scale).round() as i32;
         let right = (insets.right * scale).round() as i32;
         let bottom = (insets.bottom * scale).round() as i32;
@@ -1031,13 +1034,13 @@ pub fn place_page_toolbars(app: &AppHandle, window: &str) {
         }
         let mut y = box_y;
         for bar in tops {
-            let height = (bar.thickness * scale).round() as i32;
+            let height = (bar.thickness * zoom * scale).round() as i32;
             missing |= !place_toolbar(app, window, bar, box_x, y, box_w, height.max(1));
             y += height;
         }
         let mut cursor = box_y + box_h;
         for bar in &bottoms {
-            let height = (bar.thickness * scale).round() as i32;
+            let height = (bar.thickness * zoom * scale).round() as i32;
             cursor -= height;
             missing |= !place_toolbar(app, window, bar, box_x, cursor, box_w, height.max(1));
         }
@@ -1045,13 +1048,13 @@ pub fn place_page_toolbars(app: &AppHandle, window: &str) {
         let mid_h = (box_h - top - bottom).max(1);
         let mut x = box_x;
         for bar in lefts {
-            let width = (bar.thickness * scale).round() as i32;
+            let width = (bar.thickness * zoom * scale).round() as i32;
             missing |= !place_toolbar(app, window, bar, x, mid_y, width.max(1), mid_h);
             x += width;
         }
         let mut x = box_x + box_w;
         for bar in rights {
-            let width = (bar.thickness * scale).round() as i32;
+            let width = (bar.thickness * zoom * scale).round() as i32;
             x -= width;
             missing |= !place_toolbar(app, window, bar, x, mid_y, width.max(1), mid_h);
         }
@@ -1166,8 +1169,38 @@ fn ensure_child(app: &AppHandle, window: &str, label: &str, url: Url) -> Result<
         )
         .map_err(|error| error.to_string())?;
     attach_webview(app, &view);
+    let _ = view.set_zoom(settings::get(app).ui_zoom_factor());
     let _ = view.navigate(url);
     Ok(view)
+}
+
+/// Side panels, page toolbars, bookmark bars and host popouts follow Browser UI size.
+pub fn apply_ui_zoom(app: &AppHandle, zoom: f64, ratio: f64) {
+    for (label, webview) in app.webviews() {
+        let chrome = label.starts_with("cext-panel-")
+            || label.starts_with("cext-toolbar-")
+            || label.starts_with("cext-bar-")
+            || label.starts_with("cext-out-");
+        if !chrome {
+            continue;
+        }
+        let _ = webview.set_zoom(zoom);
+        if !label.starts_with("cext-out-") {
+            continue;
+        }
+        let Some(window) = app.get_window(&label) else {
+            continue;
+        };
+        let _ = window.set_min_size(Some(LogicalSize::new(240.0 * zoom, 180.0 * zoom)));
+        if let (Ok(size), Ok(scale)) = (window.inner_size(), window.scale_factor())
+            && scale > f64::EPSILON
+        {
+            let _ = window.set_size(LogicalSize::new(
+                size.width as f64 / scale * ratio,
+                size.height as f64 / scale * ratio,
+            ));
+        }
+    }
 }
 
 fn navigate_if_needed(view: &Webview, url: &Url) {
@@ -1190,6 +1223,38 @@ fn extension_surface_window(label: &str) -> String {
     crate::popup::owner_of(label)
 }
 
+/// Browser window that owns this extension page. Options tabs and popouts are included.
+fn surface_window(app: &AppHandle, label: &str) -> String {
+    if let Some(id) = label
+        .strip_prefix("tab-")
+        .and_then(|rest| rest.parse::<u32>().ok())
+    {
+        let snapshot = tabs::snapshot(app);
+        if let Some(tab) = snapshot.tabs.iter().find(|tab| tab.id == id) {
+            return tab.window.clone();
+        }
+    }
+    if label.starts_with("script-") {
+        return tabs::focused_window(app);
+    }
+    let owner = extension_surface_window(label);
+    let snapshot = tabs::snapshot(app);
+    if snapshot.windows.iter().any(|window| window.label == owner) {
+        return owner;
+    }
+    tabs::focused_window(app)
+}
+
+/// Stable positive id for a browser window. Chromium's current-window sentinel is negative.
+fn window_number(label: &str) -> i64 {
+    let mut hash: u32 = 2_166_136_261;
+    for byte in label.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(16_777_619);
+    }
+    i64::from((hash % 900_000) + 1)
+}
+
 /// Address Chromium reports for a page view. Store popups match logins against this, and a
 /// `ce://` tab is shown to the extension as the app URL loaded in that view.
 fn extension_page_url(app: &AppHandle, id: u32, logical: &str) -> String {
@@ -1210,7 +1275,7 @@ fn extension_page_url(app: &AppHandle, id: u32, logical: &str) -> String {
 /// Tells a store popover or panel which page tab is open, so `chrome.tabs.query` for the
 /// current window can return that page instead of the extension view.
 fn reply_extension_active_tab(app: &AppHandle, label: &str, token: i64) {
-    let window = extension_surface_window(label);
+    let window = surface_window(app, label);
     let snapshot = tabs::snapshot(app);
     let active = snapshot
         .windows
@@ -1239,6 +1304,78 @@ fn reply_extension_active_tab(app: &AppHandle, label: &str, token: i64) {
             "title": title,
         }),
     );
+}
+
+/// The browser's tabs and windows, so an extension page can answer `chrome.tabs.query`
+/// and `chrome.windows.getAll` with one window per browser window.
+fn reply_extension_tabs(app: &AppHandle, label: &str, token: i64) {
+    let snapshot = tabs::snapshot(app);
+    let current = surface_window(app, label);
+    let focused = tabs::focused_window(app);
+    let windows: Vec<Value> = snapshot
+        .windows
+        .iter()
+        .map(|window| {
+            json!({
+                "id": window_number(&window.label),
+                "focused": window.label == focused,
+            })
+        })
+        .collect();
+    let mut indexes: HashMap<String, i64> = HashMap::new();
+    let mut listed = Vec::new();
+    for tab in &snapshot.tabs {
+        let index = indexes.entry(tab.window.clone()).or_insert(0);
+        let at = *index;
+        *index += 1;
+        let active = snapshot
+            .windows
+            .iter()
+            .any(|window| window.label == tab.window && window.active_id == Some(tab.id));
+        listed.push(json!({
+            "id": tab.id,
+            "windowId": window_number(&tab.window),
+            "index": at,
+            "url": extension_page_url(app, tab.id, &tab.url),
+            "title": tab.title,
+            "active": active,
+            "pinned": tab.pinned,
+            "status": if tab.loading { "loading" } else { "complete" },
+            "audible": tab.audible,
+            "muted": tab.muted,
+            "discarded": tab.sleeping,
+        }));
+    }
+    post_label(
+        app,
+        label,
+        &json!({
+            "type": "ce-tabs",
+            "token": token,
+            "currentWindowId": window_number(&current),
+            "lastFocusedWindowId": window_number(&focused),
+            "windows": windows,
+            "tabs": listed,
+        }),
+    );
+}
+
+/// `chrome.sidePanel.open` from an extension page this browser hosts.
+fn open_called_side_panel(app: &AppHandle, label: &str) {
+    let Some(view) = app.get_webview(label) else {
+        return;
+    };
+    let Ok(current) = view.url() else {
+        return;
+    };
+    let Some(id) = chrome_extension_id(current.as_str()) else {
+        return;
+    };
+    let Ok(page) = crate::extensions::side_panel_url(app, &id) else {
+        return;
+    };
+    let window = surface_window(app, label);
+    open_store_panel(app, &window, &id, page, store_panel_edge(app, &id));
 }
 
 /// Browser controls on a panel, popover, or page toolbar. The document may be the browser's
@@ -1417,6 +1554,10 @@ pub fn handle_message(app: &AppHandle, tab_id: Option<u32>, label: &str, source:
         std::thread::spawn(move || {
             if action == "active-tab" {
                 reply_extension_active_tab(&app, &label, token);
+            } else if action == "tabs" {
+                reply_extension_tabs(&app, &label, token);
+            } else if action == "side-panel" {
+                open_called_side_panel(&app, &label);
             } else {
                 apply_chrome_action(&app, &label, &action, &side);
             }
@@ -2210,7 +2351,7 @@ pub fn toggle_store_extension_panel(
         tabs::set_side_panel(app, window, tabs::SidePanel::None, 0.0);
         return Ok(false);
     }
-    let url = crate::extensions::popup_url(app, &format!("id={id}"))?;
+    let url = crate::extensions::store_panel_url(app, id)?;
     open_store_panel(app, window, id, url, store_panel_edge(app, id));
     Ok(true)
 }
@@ -2220,7 +2361,7 @@ pub fn place_store_extension_panel(app: &AppHandle, window: &str, id: &str) -> R
     if showing_store_panel(app, window, id).is_empty() {
         return Ok(());
     }
-    let url = crate::extensions::popup_url(app, &format!("id={id}"))?;
+    let url = crate::extensions::store_panel_url(app, id)?;
     open_store_panel(app, window, id, url, store_panel_edge(app, id));
     Ok(())
 }
@@ -2544,10 +2685,11 @@ pub fn open_popout(app: &AppHandle, id: &str) -> Result<(), String> {
     } else {
         popout.title.clone()
     };
+    let factor = settings::get(app).ui_zoom_factor();
     let window = WindowBuilder::new(app, &label)
         .title(&title)
-        .inner_size(popout.width, popout.height)
-        .min_inner_size(popout.min_width, popout.min_height)
+        .inner_size(popout.width * factor, popout.height * factor)
+        .min_inner_size(popout.min_width * factor, popout.min_height * factor)
         .resizable(popout.resizable)
         .decorations(true)
         .focused(true)
@@ -3068,13 +3210,17 @@ fn content_script(app: &AppHandle) -> String {
     format!("{CONTENT_JS_START}{payload}{CONTENT_JS_END}")
 }
 
-/// Each WebView2 is its own Chromium window. A store popover or side panel therefore
-/// answers `chrome.tabs.query({ active: true, currentWindow: true })` with itself, and the
-/// extension shows no logins for the page the user is on. This asks the browser which page
-/// is open and returns that tab instead. `chrome.tabs.getCurrent` does the same: in Chrome
-/// a toolbar popup is not a tab, and Bitwarden uses whichever call returns a page first.
+/// Each WebView2 is its own Chromium window. A store popover, side panel, options page, or
+/// popout therefore answers `chrome.tabs` and `chrome.windows` with itself. This script runs
+/// only on `chrome-extension:` documents. `query({ active: true, currentWindow: true })` and
+/// `getCurrent` still return the open page, because a toolbar popup is not a tab and password
+/// managers use whichever call returns a page first. Other queries use the browser's tab strip,
+/// one window per browser window.
 pub const EXTENSION_TAB_JS: &str = r##"(function () {
   if (window.__ceExtensionTabs) return;
+  var protocol = "";
+  try { protocol = String(location.protocol || ""); } catch (error) { protocol = ""; }
+  if (protocol !== "chrome-extension:") return;
   window.__ceExtensionTabs = true;
   var pending = {};
   var next = 1;
@@ -3090,11 +3236,11 @@ pub const EXTENSION_TAB_JS: &str = r##"(function () {
     if (typeof data === "string") {
       try { data = JSON.parse(data); } catch (error) { return; }
     }
-    if (!data || data.type !== "ce-active-tab") return;
+    if (!data || (data.type !== "ce-active-tab" && data.type !== "ce-tabs")) return;
     var wait = pending[data.token];
     if (!wait) return;
     delete pending[data.token];
-    wait(data.url ? data : null);
+    wait(data);
   }
   function listen() {
     var target = window.chrome && window.chrome.webview;
@@ -3117,11 +3263,130 @@ pub const EXTENSION_TAB_JS: &str = r##"(function () {
       }, 1500);
       pending[token] = function (page) {
         clearTimeout(timer);
-        resolve(page);
+        resolve(page && page.url ? page : null);
       };
       target.postMessage(JSON.stringify({ type: "ce-chrome", action: "active-tab", token: token }));
     });
   }
+  function askSnapshot() {
+    return new Promise(function (resolve) {
+      listen();
+      var target = host();
+      if (!target) {
+        resolve(null);
+        return;
+      }
+      var token = next++;
+      var timer = setTimeout(function () {
+        delete pending[token];
+        resolve(null);
+      }, 1500);
+      pending[token] = function (data) {
+        clearTimeout(timer);
+        resolve(data && data.type === "ce-tabs" ? data : null);
+      };
+      target.postMessage(JSON.stringify({ type: "ce-chrome", action: "tabs", token: token }));
+    });
+  }
+  function settle(promise, callback, empty) {
+    if (typeof callback === "function") {
+      promise.then(function (value) { callback(value); }, function () { callback(empty); });
+      return undefined;
+    }
+    return promise;
+  }
+  function matchPattern(pattern, url) {
+    if (!pattern || !url) return false;
+    if (pattern === "<all_urls>") return /^[a-z][a-z0-9+.-]*:/i.test(url);
+    var escaped = String(pattern).replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\\\*/g, ".*");
+    try { return new RegExp("^" + escaped + "$").test(url); } catch (error) { return false; }
+  }
+  function matches(tab, info, snap) {
+    if (!info) return true;
+    if (info.active === true && !tab.active) return false;
+    if (info.active === false && tab.active) return false;
+    if (info.pinned === true && !tab.pinned) return false;
+    if (info.pinned === false && tab.pinned) return false;
+    if (info.highlighted === true && !tab.active) return false;
+    if (info.audible === true && !tab.audible) return false;
+    if (info.audible === false && tab.audible) return false;
+    if (info.muted === true && !(tab.mutedInfo && tab.mutedInfo.muted)) return false;
+    if (info.discarded === true && !tab.discarded) return false;
+    if (typeof info.index === "number" && tab.index !== info.index) return false;
+    if (info.status && tab.status !== info.status) return false;
+    if (info.title && String(tab.title || "").indexOf(info.title) === -1) return false;
+    if (info.windowType && info.windowType !== "normal") return false;
+    if (info.url) {
+      var patterns = Array.isArray(info.url) ? info.url : [info.url];
+      var url = tab.url || "";
+      var hit = false;
+      for (var i = 0; i < patterns.length; i++) if (matchPattern(patterns[i], url)) hit = true;
+      if (!hit) return false;
+    }
+    var current = snap ? snap.currentWindowId : tab.windowId;
+    var focused = snap ? snap.lastFocusedWindowId : tab.windowId;
+    var windowId = info.windowId;
+    if (window.chrome && chrome.windows && windowId === chrome.windows.WINDOW_ID_CURRENT) windowId = current;
+    if (typeof windowId === "number" && tab.windowId !== windowId) return false;
+    if (info.currentWindow === true && tab.windowId !== current) return false;
+    if (info.lastFocusedWindow === true && tab.windowId !== focused) return false;
+    return true;
+  }
+  function buildTabs(snap, chromium) {
+    var used = {};
+    return (snap.tabs || []).map(function (tab) {
+      var match = null;
+      for (var i = 0; i < chromium.length; i++) {
+        if (used[chromium[i].id]) continue;
+        if (same(chromium[i].url, tab.url)) {
+          match = chromium[i];
+          used[match.id] = true;
+          break;
+        }
+      }
+      if (match) {
+        return Object.assign({}, match, {
+          active: !!tab.active,
+          highlighted: !!tab.active,
+          windowId: tab.windowId,
+          index: tab.index,
+          pinned: !!tab.pinned,
+          title: tab.title || match.title,
+          url: tab.url || match.url,
+          status: tab.status || match.status,
+          audible: !!tab.audible,
+          discarded: !!tab.discarded,
+          mutedInfo: { muted: !!tab.muted }
+        });
+      }
+      return {
+        id: 1000000 + (tab.id || 0),
+        windowId: tab.windowId,
+        index: tab.index,
+        url: tab.url || "",
+        title: tab.title || "",
+        active: !!tab.active,
+        highlighted: !!tab.active,
+        pinned: !!tab.pinned,
+        status: tab.status || "complete",
+        audible: !!tab.audible,
+        discarded: !!tab.discarded,
+        mutedInfo: { muted: !!tab.muted },
+        incognito: false,
+        autoDiscardable: true,
+        groupId: -1
+      };
+    });
+  }
+  function model() {
+    return askSnapshot().then(function (snap) {
+      if (!snap) return null;
+      return callQuery(installedQuery, {}).then(function (chromium) {
+        return { snap: snap, tabs: buildTabs(snap, chromium || []) };
+      });
+    });
+  }
+  var installedQuery = null;
   function wantsPage(info) {
     if (!info || info.active !== true) return false;
     if (info.currentWindow === true || info.lastFocusedWindow === true) return true;
@@ -3174,14 +3439,20 @@ pub const EXTENSION_TAB_JS: &str = r##"(function () {
     if (chrome.tabs.query.__ceExtensionTabs) return true;
     listen();
     var query = chrome.tabs.query.bind(chrome.tabs);
+    installedQuery = query;
     function run(info) {
-      return callQuery(query, info).then(function (tabs) {
-        if (!wantsPage(info)) return tabs;
-        return ask().then(function (page) {
-          return pageTab(query, page).then(function (tab) {
-            return tab ? [tab] : tabs;
+      if (wantsPage(info)) {
+        return callQuery(query, info).then(function (tabs) {
+          return ask().then(function (page) {
+            return pageTab(query, page).then(function (tab) {
+              return tab ? [tab] : tabs;
+            });
           });
         });
+      }
+      return model().then(function (built) {
+        if (!built) return callQuery(query, info);
+        return built.tabs.filter(function (tab) { return matches(tab, info, built.snap); });
       });
     }
     function wrapped(info, callback) {
@@ -3204,6 +3475,116 @@ pub const EXTENSION_TAB_JS: &str = r##"(function () {
         return promise;
       };
     }
+    try {
+    var get = typeof chrome.tabs.get === "function" ? chrome.tabs.get.bind(chrome.tabs) : null;
+    chrome.tabs.get = function (tabId, callback) {
+      var promise = model().then(function (built) {
+        if (built) {
+          for (var i = 0; i < built.tabs.length; i++) {
+            if (built.tabs[i].id === tabId) return built.tabs[i];
+          }
+        }
+        if (!get) return undefined;
+        return new Promise(function (resolve) {
+          try {
+            var result = get(tabId, function (tab) { resolve(tab); });
+            if (result && typeof result.then === "function") {
+              result.then(resolve, function () { resolve(undefined); });
+            }
+          } catch (error) {
+            resolve(undefined);
+          }
+        });
+      });
+      return settle(promise, callback, undefined);
+    };
+    if (chrome.windows && !(chrome.windows.getAll && chrome.windows.getAll.__ceExtensionTabs)) {
+      function windowList(getInfo) {
+        var populate = !!(getInfo && getInfo.populate);
+        var types = getInfo && getInfo.windowTypes;
+        return model().then(function (built) {
+          if (!built) return [];
+          if (Array.isArray(types) && types.indexOf("normal") === -1) return [];
+          return (built.snap.windows || []).map(function (item) {
+            var entry = {
+              id: item.id,
+              focused: !!item.focused,
+              incognito: false,
+              type: "normal",
+              state: "normal",
+              alwaysOnTop: false
+            };
+            if (populate) {
+              entry.tabs = built.tabs.filter(function (tab) { return tab.windowId === item.id; });
+            }
+            return entry;
+          });
+        });
+      }
+      function windowOne(id, getInfo) {
+        return windowList(getInfo).then(function (windows) {
+          for (var i = 0; i < windows.length; i++) if (windows[i].id === id) return windows[i];
+          return undefined;
+        });
+      }
+      function getAll(getInfo, callback) {
+        if (typeof getInfo === "function") {
+          callback = getInfo;
+          getInfo = {};
+        }
+        return settle(windowList(getInfo || {}), callback, []);
+      }
+      getAll.__ceExtensionTabs = true;
+      chrome.windows.getAll = getAll;
+      chrome.windows.get = function (windowId, getInfo, callback) {
+        if (typeof getInfo === "function") {
+          callback = getInfo;
+          getInfo = {};
+        }
+        return settle(windowOne(windowId, getInfo || {}), callback, undefined);
+      };
+      chrome.windows.getCurrent = function (getInfo, callback) {
+        if (typeof getInfo === "function") {
+          callback = getInfo;
+          getInfo = {};
+        }
+        var promise = model().then(function (built) {
+          if (!built) return undefined;
+          return windowOne(built.snap.currentWindowId, getInfo || {});
+        });
+        return settle(promise, callback, undefined);
+      };
+      chrome.windows.getLastFocused = function (getInfo, callback) {
+        if (typeof getInfo === "function") {
+          callback = getInfo;
+          getInfo = {};
+        }
+        var promise = model().then(function (built) {
+          if (!built) return undefined;
+          return windowOne(built.snap.lastFocusedWindowId, getInfo || {});
+        });
+        return settle(promise, callback, undefined);
+      };
+    }
+    var side = chrome.sidePanel;
+    if (!(side && side.open && side.open.__ceExtensionTabs)) {
+      if (!side) {
+        try { chrome.sidePanel = {}; side = chrome.sidePanel; } catch (error) { side = null; }
+      }
+      if (side) {
+        function openSide(options, callback) {
+          var promise = new Promise(function (resolve) {
+            var target = host();
+            if (target) target.postMessage(JSON.stringify({ type: "ce-chrome", action: "side-panel" }));
+            resolve();
+          });
+          return settle(promise, callback, undefined);
+        }
+        openSide.__ceExtensionTabs = true;
+        try { side.open = openSide; } catch (error) {}
+      }
+    }
+    } catch (error) {}
     return true;
   }
   if (!install()) {

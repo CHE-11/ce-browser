@@ -322,7 +322,9 @@ fn place(
     path: PathBuf,
     tab: u32,
 ) {
-    if !worth_probing(&settings::get(app), operation) {
+    if !worth_probing(&settings::get(app), operation)
+        || crate::extensions::extension_uses_downloads()
+    {
         let _ = unsafe { args.SetResultFilePath(&HSTRING::from(path.to_string_lossy().as_ref())) };
         let _ = track(app, operation, path, tab);
         let _ = unsafe { deferral.Complete() };

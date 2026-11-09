@@ -296,8 +296,17 @@ export function ExtensionsPage() {
             </li>
           </ol>
           <p id="extensions-page-install-note" className="mt-3 text-xs text-zinc-500">
-            Extensions run in Microsoft Edge WebView2, which supports a subset of the Chrome extension APIs. Popups, content
-            scripts and autofill usually work. Features that need native messaging or browser-specific APIs may not.
+            Extensions run in Microsoft Edge WebView2. Popups, content scripts, and autofill usually work. A side panel
+            page opens in the browser's side panel, and the most recently enabled extension that replaces the new tab
+            page is used for new tabs.
+          </p>
+          <p id="extensions-page-install-limits" className="mt-2 text-xs text-zinc-500">
+            A toolbar button with no popup does not receive a click, and badge text is not shown on the icon. WebView2
+            does not report those to the browser. Extension keyboard commands are not delivered. Items an extension adds
+            to the page menu do appear. Native messaging hosts registered for Chrome or Edge are started. Extension
+            bookmark APIs use the WebView2 profile, not this browser's bookmark bar. While an enabled extension uses
+            declarativeNetRequest or webRequest, this browser's request blocking steps aside. Accelerated downloads stay
+            on one connection while an extension has the downloads permission, so chrome.downloads can see the file.
           </p>
         </section>
       </div>

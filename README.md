@@ -287,10 +287,11 @@ Cookies, logins and the WebView2 profile stay in `%LOCALAPPDATA%\com.ce.browser`
 
 ## Extensions
 
-WebView2 loads unpacked Chrome extensions but cannot install from the Chrome Web Store. To add one:
+WebView2 loads unpacked Chrome and Edge extensions. To add one:
 
-1. Download a Chromium build: a `.crx` from the Chrome Web Store (with a CRX downloader), a `.zip` from the extension's releases, or an unpacked folder that contains a `manifest.json`.
-2. Open `ce://extensions` and choose **Install .zip or .crx** (or **Load unpacked** for a folder).
-3. The extension icon appears next to the address bar. Click it to open the extension.
+1. Paste a Chrome Web Store or Edge Add-ons link on `ce://extensions`, or install a `.crx`, a `.zip`, or an unpacked folder that contains a `manifest.json`.
+2. The extension icon appears next to the address bar. Click it to open the popup, or the side panel when that is the extension's only page.
 
-The extension's files are copied into the `extensions` folder of the current profile, inside the root folder described above. WebView2 supports a subset of the Chrome extension APIs. Popups, content scripts and autofill usually work. Features that need native messaging or browser-specific APIs may not. Keyboard commands and right-click menu entries added by extensions are not available.
+The extension's files are copied into the `extensions` folder of the current profile, inside the root folder described above. WebView2 runs the extension. Popups, content scripts, and autofill usually work. This browser shows the toolbar button, hosts the popup, options page, and side panel, and tells those pages which tab is open. The most recently enabled extension that replaces the new tab page is used for new tabs. Extension items are added to the page's right-click menu. Native messaging hosts registered for Chrome or Edge are started.
+
+WebView2 does not tell the browser about a toolbar click on a button with no popup, or about badge text, so the icon stays as it was declared. Extension keyboard commands are not delivered. Extension bookmark APIs use the WebView2 profile, not this browser's bookmark bar.

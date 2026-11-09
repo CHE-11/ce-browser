@@ -1,0 +1,11 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "ce-dnr-probe",
+      "resourceTypes": ["xmlhttprequest", "script", "other", "main_frame"]
+    }
+  }
+]

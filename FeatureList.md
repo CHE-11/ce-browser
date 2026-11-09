@@ -161,11 +161,15 @@ Windows desktop browser built on Tauri 2 and WebView2. Each tab is its own page 
 
 ## Extensions
 
-- Load unpacked Chrome extensions, or install a `.zip` or `.crx`, from `ce://extensions`
+- Install from a Chrome Web Store or Edge Add-ons link, or from a `.zip`, a `.crx`, or an unpacked folder, on `ce://extensions`
 - Extension files are copied into the current profile
 - Popups, content scripts, and autofill usually work
-- Native messaging, browser-specific APIs, extension keyboard commands, and extension right-click menus are not available
-- WebView2 cannot install from the Chrome Web Store directly
+- Side panel pages open in the browser's side panel. The most recently enabled new-tab override is used for new tabs
+- Extension pages see this browser's tabs and windows. Extension items are added to the page right-click menu
+- A toolbar button with no popup does not receive a click, and badge text is not shown. WebView2 does not report those
+- Extension keyboard commands are not delivered. Native messaging hosts registered for Chrome or Edge are started
+- Extension bookmark APIs use the WebView2 profile, not this browser's bookmark bar
+- Request blocking steps aside while an enabled extension uses declarativeNetRequest or webRequest
 
 ## Internal pages
 

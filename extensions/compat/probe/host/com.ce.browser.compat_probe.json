@@ -1,0 +1,9 @@
+{
+  "name": "com.ce.browser.compat_probe",
+  "description": "Dev-only native messaging probe",
+  "path": "C:\\Users\\Connor\\Documents\\MEGA\\Repos\\ce-browser\\extensions\\compat\\probe\\host\\host.cmd",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://ogkhfmobhejkaifjlembnhoppnjkkhhm/"
+  ]
+}

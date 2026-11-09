@@ -683,6 +683,14 @@ export type HostExtensionInfo = {
 /** How a store extension with a popup opens from its toolbar button. */
 export type ExtensionOpenAs = "popover" | "panel";
 
+/** A manifest command that names a suggested shortcut. */
+export type ExtensionCommand = {
+  name: string;
+  description: string;
+  /** Suggested shortcut, such as `Ctrl+Shift+Y`. */
+  shortcut: string;
+};
+
 export type ExtensionInfo = {
   id: string;
   name: string;
@@ -692,6 +700,14 @@ export type ExtensionInfo = {
   icon: string | null;
   popup: string | null;
   optionsPage: string | null;
+  /** Toolbar tooltip from `action.default_title`. Empty uses the extension name. */
+  defaultTitle: string;
+  /** Side panel document. Edge's legacy sidebar page is used when `side_panel` is absent. */
+  sidePanel: string | null;
+  /** New tab page this package supplies. The most recently enabled one is opened. */
+  newTab: string | null;
+  /** Commands that name a suggested shortcut. WebView2 does not deliver them. */
+  commands: ExtensionCommand[];
   folder: string | null;
   /** `chrome` or `edge` when the package can be updated from that store. */
   store: "chrome" | "edge" | null;
