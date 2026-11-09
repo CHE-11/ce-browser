@@ -3731,7 +3731,6 @@ fn close_tab_inner(app: &AppHandle, id: u32) -> Result<Option<ClosedTab>, String
         });
         state.end_split_with(id);
         let tab = state.tabs.remove(index);
-        crate::webview2::forget_page_scheme(id);
         state.normalize_groups();
         let remembered = (tab.info.url != paths::NEW_TAB && !tab.info.ephemeral && !tab.shelf)
             .then(|| ClosedTab {

@@ -329,63 +329,15 @@ fn pin_profile_scheme(core: &ICoreWebView2) {
     }
 }
 
-/// Points every open profile at the Windows light or dark scheme, then matches each tab's
-/// override to that host's decision. The profile stays on auto so the browser UI is left alone.
+/// Points every open profile at the Windows scheme. `prefers-color-scheme` follows that,
+/// and the backdrop behind a remote page is painted separately.
 pub fn apply_site_color_scheme(app: &AppHandle) {
     for webview in tabs::open_surface_views(app) {
-        let label = webview.label().to_string();
-        let id = label
-            .strip_prefix("tab-")
-            .and_then(|id| id.parse::<u32>().ok());
-        let url = id
-            .and_then(|id| tabs::tab_page_url(app, id))
-            .unwrap_or_default();
-        // A blank document is not a host decision. A request already in flight is resuming a
-        // cancelled navigation, and replacing it drops that resume.
-        let want = page_host(&url).map(|_| page_keeps_light_scheme(app, &url));
-        let pending = id.is_some_and(scheme_pending);
-        let app = app.clone();
-        let _ = webview.with_webview(move |platform| {
-            let Ok(core) = core(&platform) else {
-                return;
-            };
-            pin_profile_scheme(&core);
-            if pending {
-                return;
-            }
-            if let (Some(id), Some(want)) = (id, want)
-                && !scheme_matches(id, want)
-            {
-                request_page_scheme(&app, id, &core, want, None);
+        let _ = webview.with_webview(|platform| {
+            if let Ok(core) = core(&platform) {
+                pin_profile_scheme(&core);
             }
         });
-    }
-}
-
-#[derive(Default)]
-struct SchemeHold {
-    /// Light override currently installed on this tab. False follows the profile scheme.
-    applied: bool,
-    /// Override requested and not yet confirmed.
-    pending: Option<bool>,
-}
-
-fn scheme_holds() -> &'static Mutex<HashMap<u32, SchemeHold>> {
-    static HOLDS: std::sync::OnceLock<Mutex<HashMap<u32, SchemeHold>>> = std::sync::OnceLock::new();
-    HOLDS.get_or_init(Default::default)
-}
-
-fn scheme_skips() -> &'static Mutex<HashSet<u32>> {
-    static SKIPS: std::sync::OnceLock<Mutex<HashSet<u32>>> = std::sync::OnceLock::new();
-    SKIPS.get_or_init(Default::default)
-}
-
-pub(crate) fn forget_page_scheme(id: u32) {
-    if let Ok(mut holds) = scheme_holds().lock() {
-        holds.remove(&id);
-    }
-    if let Ok(mut skips) = scheme_skips().lock() {
-        skips.remove(&id);
     }
 }
 
@@ -401,10 +353,11 @@ fn host_decisions() -> &'static Mutex<HashMap<String, HostScheme>> {
     DECISIONS.get_or_init(Default::default)
 }
 
-/// Host of an `http` or `https` URL. Other schemes have no site decision.
+/// Host of a remote `http` or `https` page. The app origin serves `ce://` pages, and other
+/// schemes have no site decision.
 fn page_host(url: &str) -> Option<String> {
     let parsed = url::Url::parse(url).ok()?;
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+    if parsed.scheme() != "http" && parsed.scheme() != "https" || is_app_origin(&parsed) {
         return None;
     }
     let host = parsed
@@ -412,6 +365,16 @@ fn page_host(url: &str) -> Option<String> {
         .trim_end_matches('.')
         .to_ascii_lowercase();
     (!host.is_empty()).then_some(host)
+}
+
+/// Vite in dev (`localhost:1420`) and `tauri.localhost` in a build. Either scheme is the
+/// same origin: HTTPS-only mode used to upgrade the build host.
+fn is_app_origin(url: &url::Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    host == "tauri.localhost" || (host == "localhost" && url.port() == Some(1420))
 }
 
 fn host_decision(url: &str) -> Option<HostScheme> {
@@ -428,14 +391,14 @@ fn remember_host(url: &str, scheme: HostScheme) {
     }
 }
 
-/// An http(s) page stays on the light scheme while Windows is dark, until its host declares
-/// that it can be rendered dark. Remembered dark hosts, and every page while Windows is light,
-/// follow the profile scheme.
+/// A remote page keeps a white backdrop while Windows is dark, until its host declares that
+/// it can be rendered dark. Remembered dark hosts, and every page while Windows is light, use
+/// the window canvas. App pages are not remote hosts.
 fn wants_light_scheme(windows_dark: bool, known: Option<HostScheme>, url: &str) -> bool {
     windows_dark && page_host(url).is_some() && known != Some(HostScheme::Dark)
 }
 
-/// Light scheme and a white canvas for this URL. The gap around a remote page uses it.
+/// White canvas for this URL. The gap around a remote page uses it.
 pub(crate) fn page_keeps_light_scheme(app: &AppHandle, url: &str) -> bool {
     wants_light_scheme(
         !crate::settings::windows_uses_light(app),
@@ -468,153 +431,6 @@ fn canvas_selector(selector: &str) -> bool {
             || part.eq_ignore_ascii_case("body")
             || part.eq_ignore_ascii_case(":root")
     })
-}
-
-/// Background tabs sit far off the window. Their navigations run there; a cancelled one does not.
-fn page_is_shown(app: &AppHandle, id: u32) -> bool {
-    let Some(webview) = tabs::page_view(app, id) else {
-        return false;
-    };
-    webview
-        .position()
-        .ok()
-        .is_some_and(|at| at.x > -1000 && at.y > -1000)
-}
-
-fn scheme_pending(id: u32) -> bool {
-    scheme_holds()
-        .lock()
-        .ok()
-        .and_then(|holds| holds.get(&id).and_then(|hold| hold.pending))
-        .is_some()
-}
-
-fn scheme_matches(id: u32, want: bool) -> bool {
-    let Ok(holds) = scheme_holds().lock() else {
-        return true;
-    };
-    match holds.get(&id) {
-        None => !want,
-        Some(hold) => hold.pending.unwrap_or(hold.applied) == want,
-    }
-}
-
-/// Installs the light override before a document is parsed, or clears it when this host
-/// follows Windows. A redirect is left alone: flipping `prefers-color-scheme` on that hop
-/// leaves images and styles pending so the load event never arrives. Returns true when
-/// this navigation was cancelled and will be started again once the override is in place.
-fn defer_page_scheme(
-    app: &AppHandle,
-    id: u32,
-    core: &ICoreWebView2,
-    args: &ICoreWebView2NavigationStartingEventArgs,
-    uri: &str,
-) -> bool {
-    if scheme_skips()
-        .lock()
-        .is_ok_and(|mut skips| skips.remove(&id))
-    {
-        return false;
-    }
-    // Cancelling the real navigation can surface `about:blank`. That hop is not a host,
-    // and clearing the override there leaves the tab on the blank page.
-    if page_host(uri).is_none() {
-        return false;
-    }
-    // A parked page never finishes a navigation that was cancelled and started again.
-    // Let it load, then the document probe reloads once the scheme is already set.
-    if !page_is_shown(app, id) {
-        return false;
-    }
-    let want = page_keeps_light_scheme(app, uri);
-    if scheme_matches(id, want) {
-        return false;
-    }
-    let redirected = read_bool(|value| unsafe { args.IsRedirected(value) });
-    if redirected {
-        return false;
-    }
-    if unsafe { args.SetCancel(true) }.is_err() {
-        request_page_scheme(app, id, core, want, None);
-        return false;
-    }
-    request_page_scheme(app, id, core, want, Some(uri.to_string()));
-    true
-}
-
-fn request_page_scheme(
-    app: &AppHandle,
-    id: u32,
-    core: &ICoreWebView2,
-    want: bool,
-    resume: Option<String>,
-) {
-    if let Ok(mut holds) = scheme_holds().lock() {
-        holds.entry(id).or_default().pending = Some(want);
-    }
-    let params = if want {
-        r#"{"features":[{"name":"prefers-color-scheme","value":"light"}]}"#
-    } else {
-        r#"{"features":[]}"#
-    };
-    let resume_app = resume.as_ref().map(|_| app.clone());
-    let resume_now = resume.clone();
-    let handler = CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, _| {
-        note_scheme_result(id, want, result.is_ok(), resume.is_some());
-        if result.is_err() {
-            eprintln!("WebView2 color scheme: {result:?}");
-        }
-        // Navigate after this callback returns. Calling it here re-enters
-        // NavigationStarting from inside the cancelled one, and Gmail's load never finishes.
-        if let (Some(uri), Some(app)) = (resume, resume_app) {
-            resume_scheme_navigation(&app, id, uri);
-        }
-        Ok(())
-    }));
-    let method = windows::core::w!("Emulation.setEmulatedMedia");
-    let params = HSTRING::from(params);
-    if let Err(error) = unsafe { core.CallDevToolsProtocolMethod(method, &params, &handler) } {
-        note_scheme_result(id, want, false, resume_now.is_some());
-        eprintln!("WebView2 color scheme: {error}");
-        if let Some(uri) = resume_now {
-            resume_scheme_navigation(app, id, uri);
-        }
-    }
-}
-
-/// Starts `uri` again after the color-scheme call has finished, outside NavigationStarting.
-fn resume_scheme_navigation(app: &AppHandle, id: u32, uri: String) {
-    let app = app.clone();
-    let queued = app.clone().run_on_main_thread(move || {
-        let Some(webview) = tabs::page_view(&app, id) else {
-            return;
-        };
-        let Ok(url) = url::Url::parse(&uri) else {
-            return;
-        };
-        let _ = webview.navigate(url);
-    });
-    if let Err(error) = queued {
-        eprintln!("WebView2 color scheme: could not resume navigation: {error}");
-    }
-}
-
-fn note_scheme_result(id: u32, want: bool, applied: bool, resume: bool) {
-    if let Ok(mut holds) = scheme_holds().lock()
-        && let Some(hold) = holds.get_mut(&id)
-        && hold.pending == Some(want)
-    {
-        hold.pending = None;
-        if applied {
-            hold.applied = want;
-        }
-    }
-    if !applied
-        && resume
-        && let Ok(mut skips) = scheme_skips().lock()
-    {
-        skips.insert(id);
-    }
 }
 
 const SCHEME_PROBE_SCRIPT: &str = r#"(function () {
@@ -666,8 +482,8 @@ const SCHEME_PROBE_SCRIPT: &str = r#"(function () {
   return { meta: meta, selectors: selectors };
 })()"#;
 
-/// Reads whether this document can be rendered dark. A host is recorded once per session.
-/// A tab still forced light reloads so the Windows scheme is set before the next parse.
+/// Reads whether this document declares a dark canvas. A host is recorded once per session.
+/// A dark host repaints the backdrop. The page keeps the Windows color scheme.
 fn probe_page_scheme(app: &AppHandle, id: u32, core: &ICoreWebView2) {
     let url = tabs::tab_page_url(app, id).unwrap_or_default();
     if page_host(&url).is_none() || host_decision(&url).is_some() {
@@ -704,23 +520,16 @@ fn settle_scheme_probe(app: &AppHandle, id: u32, probed: &str, raw: &str) {
             HostScheme::Light
         },
     );
-    let want = page_keeps_light_scheme(app, &current);
-    if scheme_matches(id, want) {
+    if !dark {
         return;
     }
     let app = app.clone();
+    let url = current;
     let queued = app.clone().run_on_main_thread(move || {
-        let Some(webview) = tabs::page_view(&app, id) else {
-            return;
-        };
-        let _ = webview.with_webview(move |platform| {
-            if let Ok(core) = core(&platform) {
-                request_page_scheme(&app, id, &core, want, Some(current));
-            }
-        });
+        tabs::paint_document_background(&app, id, &url);
     });
     if let Err(error) = queued {
-        eprintln!("WebView2 color scheme: could not apply the site scheme: {error}");
+        eprintln!("WebView2 color scheme: could not paint the page backdrop: {error}");
     }
 }
 
@@ -2912,11 +2721,6 @@ fn attach_adblock(
             &NavigationStartingEventHandler::create(Box::new(move |sender, args| {
                 if let Some(args) = args {
                     let uri = read_pwstr(|value| args.Uri(value));
-                    if let Some(core) = &sender
-                        && defer_page_scheme(&navigation_app, id, core, &args, &uri)
-                    {
-                        return Ok(());
-                    }
                     crate::page_errors::note_navigation(id, &uri);
                     tabs::navigation_started(&navigation_app, id, &uri);
                     tabs::clear_errors(&navigation_app, id);
@@ -4901,6 +4705,22 @@ mod tests {
             "https://github.com/"
         ));
         assert!(!wants_light_scheme(true, None, "ce://settings"));
+        assert!(!wants_light_scheme(
+            true,
+            None,
+            "http://localhost:1420/#/settings"
+        ));
+        assert!(!wants_light_scheme(
+            true,
+            None,
+            "http://tauri.localhost/#/settings"
+        ));
+        assert!(!wants_light_scheme(
+            true,
+            None,
+            "https://tauri.localhost/#/settings"
+        ));
+        assert!(wants_light_scheme(true, None, "http://localhost:3000/"));
         assert!(!wants_light_scheme(true, None, "file:///C:/page.html"));
         assert!(!wants_light_scheme(true, None, "not a url"));
     }

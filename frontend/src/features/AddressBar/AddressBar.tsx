@@ -11,6 +11,7 @@ import {
   Lock,
   Mic,
   Pin,
+  RefreshCw,
   RotateCw,
   Search,
   Settings,
@@ -37,6 +38,7 @@ import {
   createTab,
   exitSplit,
   installExtensionFromStore,
+  installUpdate,
   goBack,
   goForward,
   listPermissions,
@@ -71,7 +73,7 @@ import { cn } from "../../lib/cn";
 import { useHostExtensions } from "@/lib/use-browser";
 import { hostToolbarIds, reorderToolbarAt, splitToolbar } from "../../lib/toolbar-pin";
 import { buildSuggestions, inlineCompletion, looksLikeUrl } from "../../lib/omnibox";
-import { flattenBookmarks, type WindowTabsState } from "../../lib/use-browser";
+import { flattenBookmarks, useUpdateStatus, type WindowTabsState } from "../../lib/use-browser";
 import { focusRing } from "../../lib/focus-ring";
 import { useStickyAudio } from "../../lib/use-sticky-audio";
 import { IconButton } from "../../components/IconButton";
@@ -547,6 +549,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     }
   };
 
+  const update = useUpdateStatus();
   const activeDownloads = downloads.filter((item) => item.state === "inProgress");
   const progress = useMemo(() => {
     const sized = activeDownloads.filter((item) => item.totalBytes);
@@ -922,6 +925,17 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       <IconButton id="address-settings" label="Settings" onClick={() => void createTab("ce://settings")}>
         <Settings id="address-settings-icon" aria-hidden />
       </IconButton>
+      {update?.available ? (
+        <IconButton
+          id="address-update"
+          label={update.installing ? "Downloading the update…" : `Restart to update to ${update.available}`}
+          disabled={update.installing}
+          className="text-sky-300 hover:bg-sky-500/20 hover:text-sky-200"
+          onClick={() => void installUpdate()}
+        >
+          <RefreshCw id="address-update-icon" aria-hidden className={update.installing ? "animate-spin" : undefined} />
+        </IconButton>
+      ) : null}
 
       <IconButton
         id="address-menu"
