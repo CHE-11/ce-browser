@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { RotateCcw } from "lucide-react";
-import type { BrowserSettings } from "@type/browser";
+import type { BookmarksBarAlign, BrowserSettings } from "@type/browser";
 import { Button } from "@/components/Button";
 import { PageShell } from "@/components/PageShell";
+import { bookmarksBarAlign } from "@/lib/bookmarks-bar-align";
 import { CHROME, type ChromeKey } from "@/lib/chrome-metrics";
 import { saveSettings } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
@@ -11,7 +12,7 @@ import { useRoute } from "@/lib/route";
 import { useSettings } from "@/lib/use-browser";
 import { CopyStyleDialog } from "./CopyStyleDialog";
 import { StylePreview } from "./StylePreview";
-import { STYLE_SURFACES, styleSurface, type StyleControl } from "./surfaces";
+import { STYLE_SURFACES, styleSurface, type StyleChoice, type StyleControl } from "./surfaces";
 
 const SAVE_DELAY_MS = 150;
 
@@ -92,11 +93,21 @@ export function StylesPage() {
     commit({ ...draft, [key]: value });
   };
 
+  const changeAlign = (value: BookmarksBarAlign) => {
+    if (!draft) {
+      return;
+    }
+    commit({ ...draft, bookmarksBarAlign: value });
+  };
+
   const resetSurface = () => {
     if (!draft) {
       return;
     }
     const next = { ...draft };
+    for (const choice of surface.choices ?? []) {
+      next[choice.key] = choice.options[0].value;
+    }
     for (const control of surface.controls) {
       next[control.key] = CHROME[control.key];
     }
@@ -164,6 +175,14 @@ export function StylesPage() {
             ) : null}
             {draft ? (
               <div id="styles-controls-list" className="flex flex-col gap-5">
+                {(surface.choices ?? []).map((choice) => (
+                  <ChoiceControl
+                    key={choice.key}
+                    choice={choice}
+                    value={bookmarksBarAlign(draft[choice.key])}
+                    onChange={changeAlign}
+                  />
+                ))}
                 {surface.controls.map((control) => (
                   <MetricControl
                     key={control.key}
@@ -198,6 +217,49 @@ export function StylesPage() {
         }}
       />
     </PageShell>
+  );
+}
+
+function ChoiceControl({
+  choice,
+  value,
+  onChange,
+}: {
+  choice: StyleChoice;
+  value: BookmarksBarAlign;
+  onChange: (value: BookmarksBarAlign) => void;
+}) {
+  const id = `styles-choice-${choice.key}`;
+  return (
+    <div id={id}>
+      <div id={`${id}-heading`} className="mb-1">
+        <span id={`${id}-label`} className="text-sm text-zinc-100">
+          {choice.label}
+        </span>
+      </div>
+      <p id={`${id}-hint`} className="mb-2 text-xs text-zinc-500">
+        {choice.hint}
+      </p>
+      <div id={`${id}-options`} role="radiogroup" aria-label={choice.label} className="grid grid-cols-3 gap-0.5 rounded-md border border-zinc-700 p-0.5">
+        {choice.options.map((option) => (
+          <button
+            key={option.value}
+            id={`${id}-${option.value}`}
+            type="button"
+            role="radio"
+            aria-checked={value === option.value}
+            className={cn(
+              "h-8 rounded text-sm text-zinc-400 hover:text-zinc-100",
+              focusRing,
+              value === option.value && "bg-zinc-700 text-zinc-100",
+            )}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

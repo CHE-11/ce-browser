@@ -1380,6 +1380,16 @@ export function openExtensionOptions(id: string) {
   return invoke<number>("open_extension_options", { id });
 }
 
+/** Shows a store extension's popup page in the side panel. Closes that panel when it is already open. */
+export function openExtensionPanel(id: string) {
+  return invoke<boolean>("open_extension_panel", { id });
+}
+
+/** Moves an open store panel to the side saved for that extension. Does nothing when it is closed. */
+export function placeExtensionPanel(id: string) {
+  return invoke<void>("place_extension_panel", { id });
+}
+
 export function installExtensionFromStore(url: string) {
   return invoke<ExtensionInfo>("install_extension_from_store", { url });
 }

@@ -1,11 +1,13 @@
-import { PopupFrame, PopupMenu, PopupMenuItem } from "@/components/PopupFrame";
+import { OpenAs } from "@/components/OpenAs";
+import { PanelSide } from "@/components/PanelSide";
+import { PinPlacement } from "@/components/PinPlacement";
+import { PopupFrame } from "@/components/PopupFrame";
 import { builtinTool } from "@/features/BuiltInExtensions/builtin";
 import { closePopup } from "@/lib/browser-client";
+import { extensionOpenAs, extensionPanelSide, saveExtensionOpenAs, saveExtensionPanelSide } from "@/lib/extension-open";
 import { saveToolbarPlacement, toolbarPlacement } from "@/lib/toolbar-pin";
 import { useSettingsState, useExtensions } from "@/lib/use-browser";
-import type { ToolbarPlacement } from "@type/browser";
-import { Check, PanelRight, Pin, PinOff } from "lucide-react";
-
+import type { ExtensionOpenAs, HostPanelSide, ToolbarPlacement } from "@type/browser";
 
 type ExtensionPinContextMenuProps = {
   extensionId: string;
@@ -14,11 +16,11 @@ type ExtensionPinContextMenuProps = {
 export function AddressBarExtensionPinContextMenu({ extensionId }: ExtensionPinContextMenuProps) {
   const { settings, loaded: settingsLoaded } = useSettingsState();
   const { extensions, loaded: extensionsLoaded } = useExtensions();
-  const name =
-    extensions.find((extension) => extension.id === extensionId)?.name ??
-    builtinTool(extensionId)?.name ??
-    "Extension";
+  const installed = extensions.find((extension) => extension.id === extensionId);
+  const name = installed?.name ?? builtinTool(extensionId)?.name ?? "Extension";
   const place = toolbarPlacement(settings, extensionId);
+  const canOpenAs = Boolean(installed?.popup);
+  const openAs = extensionOpenAs(settings, extensionId);
 
   const setPlace = (next: ToolbarPlacement) => {
     if (!settings) {
@@ -27,34 +29,59 @@ export function AddressBarExtensionPinContextMenu({ extensionId }: ExtensionPinC
     void saveToolbarPlacement(settings, extensionId, next).finally(() => void closePopup());
   };
 
+  const setOpenAs = (mode: ExtensionOpenAs) => {
+    if (!settings) {
+      return;
+    }
+    const saved = saveExtensionOpenAs(settings, extensionId, mode);
+    if (mode === "popover") {
+      void saved.finally(() => void closePopup());
+      return;
+    }
+    void saved;
+  };
+
+  const setSide = (side: HostPanelSide) => {
+    if (!settings) {
+      return;
+    }
+    void saveExtensionPanelSide(settings, extensionId, side);
+  };
+
   return (
-    <PopupFrame id="extension-pin-menu" width={240} ready={settingsLoaded && extensionsLoaded}>
-      <PopupMenu id="extension-pin-menu-items" label={name}>
-        <PopupMenuItem
-          id="extension-pin-menu-primary"
-          icon={place.primary ? <Check /> : <Pin />}
-          label="Primary"
-          title="Show next to the address bar"
+    <PopupFrame id="extension-pin-menu" width="menu" ready={settingsLoaded && extensionsLoaded}>
+      <div id="extension-pin-menu-row" className="flex items-center gap-3 px-3 py-2">
+        <span id="extension-pin-menu-name" className="min-w-0 flex-1 truncate text-sm text-zinc-100">
+          {name}
+        </span>
+        <PinPlacement
+          id="extension-pin-menu-pin"
+          placement={place}
           disabled={!settings || !extensionId}
-          onClick={() => setPlace({ ...place, primary: !place.primary })}
+          onChange={setPlace}
         />
-        <PopupMenuItem
-          id="extension-pin-menu-secondary"
-          icon={place.secondary ? <Check /> : <PanelRight />}
-          label="Secondary"
-          title="Show on the tools toolbar"
-          disabled={!settings || !extensionId}
-          onClick={() => setPlace({ ...place, secondary: !place.secondary })}
-        />
-        <PopupMenuItem
-          id="extension-pin-menu-unpin"
-          icon={<PinOff />}
-          label="Unpinned"
-          title="Hide from both bars"
-          disabled={!settings || !extensionId || (!place.primary && !place.secondary)}
-          onClick={() => setPlace({ primary: false, secondary: false })}
-        />
-      </PopupMenu>
+      </div>
+      {canOpenAs ? (
+        <div id="extension-pin-menu-open-as-row" className="flex items-center gap-3 border-t border-zinc-800 px-3 py-2">
+          <span id="extension-pin-menu-open-as-label" className="min-w-0 flex-1 truncate text-sm text-zinc-400">
+            Open as
+          </span>
+          <OpenAs
+            id="extension-pin-menu-open-as"
+            value={openAs}
+            disabled={!settings}
+            onChange={setOpenAs}
+          />
+          {openAs === "panel" ? (
+            <PanelSide
+              id="extension-pin-menu-side"
+              side={extensionPanelSide(settings, extensionId)}
+              disabled={!settings}
+              onChange={setSide}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </PopupFrame>
   );
 }

@@ -4,8 +4,9 @@ import type { BrowserSettings, ExtensionInfo, TabInfo, ToolbarSide } from "@type
 import { ToolbarIcon } from "@features/BuiltInExtensions";
 import { builtinTool } from "@features/BuiltInExtensions/builtin";
 import { HostToolbarButton } from "@/features/Extensions/HostToolbarButton";
-import { openPopup, saveSettings } from "@/lib/browser-client";
-import { useHostExtensions } from "@/lib/use-browser";
+import { openExtensionPanel, openPopup, saveSettings } from "@/lib/browser-client";
+import { extensionOpenAs } from "@/lib/extension-open";
+import { useHostExtensions, useSettings } from "@/lib/use-browser";
 import { cn } from "@/lib/cn";
 import {
   openToolbarPinMenu,
@@ -29,15 +30,20 @@ type ExtensionToolbarButtonProps = {
 };
 
 export function ExtensionToolbarButton({ extension, idPrefix }: ExtensionToolbarButtonProps) {
+  const settings = useSettings();
   const domId = `${idPrefix}-extension-${extension.id}`;
   return (
     <IconButton
       id={domId}
       label={extension.name}
       disabled={!extension.popup}
-      onClick={(event) =>
-        void openPopup("extension", event.currentTarget, { params: `id=${extension.id}` })
-      }
+      onClick={(event) => {
+        if (extensionOpenAs(settings, extension.id) === "panel") {
+          void openExtensionPanel(extension.id);
+          return;
+        }
+        void openPopup("extension", event.currentTarget, { params: `id=${extension.id}` });
+      }}
     >
       <ExtensionIcon
         id={`${domId}-icon`}

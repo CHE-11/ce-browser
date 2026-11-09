@@ -5,12 +5,13 @@ import { FavIcon } from "@/components/FavIcon";
 import { closePopup, createTab, moveBookmark, navigate, openPopup } from "@/lib/browser-client";
 import { BOOKMARK_DROP_END, isBookmarkDrag, useBookmarkDrag } from "@/lib/bookmark-drag";
 import { BOOKMARK_SIZE, bookmarkItemStyle, bookmarkLabelStyle } from "@/lib/bookmark-size";
+import { bookmarksBarAlign, bookmarksBarAlignClass } from "@/lib/bookmarks-bar-align";
 import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { faviconKey } from "@/lib/format";
 import { BOOKMARK_DRAG_TYPE, useSiteFavicons } from "@/lib/use-browser";
-import { BookmarkTree, BookmarkNode } from "@type/browser";
+import { BookmarkTree, BookmarkNode, type BookmarksBarAlign } from "@type/browser";
 
 type BookmarksBarProps = {
   tree: BookmarkTree | null;
@@ -27,6 +28,8 @@ type BookmarksBarProps = {
   height?: number;
   /** Off hides folder icons. A folder without a title keeps its icon so it stays visible. */
   folderIcons?: boolean;
+  /** Where the folders and bookmarks sit in the bar. */
+  align?: BookmarksBarAlign | string | null;
 };
 
 /** Gap, icon and width are in `em`, so they follow the text size setting. */
@@ -196,7 +199,7 @@ export function openBookmarkLink(url: string, activeId: number | null, event?: M
   }
 }
 
-export function BookmarksBar({ tree, activeId, activePinned = false, textSize, padding, iconSize, height, folderIcons = true }: BookmarksBarProps) {
+export function BookmarksBar({ tree, activeId, activePinned = false, textSize, padding, iconSize, height, folderIcons = true, align }: BookmarksBarProps) {
   const items = tree?.bar.children ?? [];
   const icons = useSiteFavicons(items.map((node) => node.url));
   const icon = metric(iconSize, CHROME.bookmarksBarIconSize);
@@ -300,7 +303,10 @@ export function BookmarksBar({ tree, activeId, activePinned = false, textSize, p
       <div
         id="bookmarks-bar-items"
         ref={slotRef}
-        className="flex min-w-0 flex-1 items-center gap-0.5 self-stretch overflow-x-clip overflow-y-visible"
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-0.5 self-stretch overflow-x-clip overflow-y-visible",
+          bookmarksBarAlignClass(bookmarksBarAlign(align)),
+        )}
         onDragOver={drag.listProps.onDragOver}
         onDrop={dropAtVisibleEnd}
       >

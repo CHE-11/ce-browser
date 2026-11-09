@@ -866,7 +866,10 @@ fn enabled_page_toolbars(app: &AppHandle) -> Vec<CachedToolbar> {
 
 /// A toolbar that should take space around the page. A closed toolbar still resolves, so the
 /// extensions page can show it again, but it is left out of the layout.
-fn page_toolbar_for_layout(record: &HostRecord, manifest: &Manifest) -> Option<ResolvedPageToolbar> {
+fn page_toolbar_for_layout(
+    record: &HostRecord,
+    manifest: &Manifest,
+) -> Option<ResolvedPageToolbar> {
     if !record.toolbar_open {
         return None;
     }
@@ -1080,7 +1083,10 @@ fn place_toolbar(
         return false;
     };
     let _ = view.set_position(PhysicalPosition::new(x, y));
-    let _ = view.set_size(tauri::PhysicalSize::new(width.max(1) as u32, height.max(1) as u32));
+    let _ = view.set_size(tauri::PhysicalSize::new(
+        width.max(1) as u32,
+        height.max(1) as u32,
+    ));
     true
 }
 
@@ -1174,13 +1180,17 @@ fn navigate_if_needed(view: &Webview, url: &Url) {
 /// Browser controls on a panel, popover, or page toolbar. The document may be the browser's
 /// error page, which has no `window.ce`, so the webview label says which surface this is.
 fn apply_chrome_action(app: &AppHandle, label: &str, action: &str, side: &str) {
-    if label.starts_with("extpopup-") && action == "close" {
-        crate::popup::close_level(app, label);
+    if label.starts_with("extpopup-") {
+        apply_popup_chrome(app, label, action, side);
         return;
     }
     if let Some(window) = label.strip_prefix("cext-panel-") {
         let id = tabs::host_panel_extension(app, window);
         if id.is_empty() {
+            return;
+        }
+        if !state(app).iter().any(|record| record.id == id) {
+            apply_store_panel_chrome(app, window, &id, action, side);
             return;
         }
         let result = if action == "close" {
@@ -2037,6 +2047,259 @@ fn fitted_panel_width(app: &AppHandle, window: &str, wanted: f64, layout: &Resol
         return f64::from(PANEL_DEFAULT).clamp(min, cap);
     }
     wanted.clamp(min, cap)
+}
+
+/// Close, panel side, and toolbar side for a Chrome Web Store popup.
+fn apply_popup_chrome(app: &AppHandle, label: &str, action: &str, side: &str) {
+    let window = crate::popup::owner_of(label);
+    match action {
+        "close" => crate::popup::close_level(app, label),
+        "panel" => {
+            if side != "left" && side != "right" {
+                return;
+            }
+            let Some(document) = crate::popup::extension_document(app, label) else {
+                return;
+            };
+            let Some(id) = chrome_extension_id(&document) else {
+                return;
+            };
+            if showing_store_panel(app, &window, &id) == side {
+                tabs::set_side_panel(app, &window, tabs::SidePanel::None, 0.0);
+                announce_popup_chrome(app, label);
+                return;
+            }
+            remember_store_panel_side(app, &id, side);
+            let Ok(url) = Url::parse(&document) else {
+                return;
+            };
+            let edge = if side == "left" {
+                tabs::PanelEdge::Left
+            } else {
+                tabs::PanelEdge::Right
+            };
+            open_store_panel(app, &window, &id, url, edge);
+            crate::popup::close_level(app, label);
+        }
+        "toolbar" => {
+            if !matches!(side, "top" | "right" | "bottom" | "left") {
+                return;
+            }
+            let _ = settings::update(app, |settings| {
+                settings.toolbar_side = side.to_string();
+            });
+            announce_popup_chrome(app, label);
+        }
+        _ => {}
+    }
+}
+
+fn apply_store_panel_chrome(app: &AppHandle, window: &str, id: &str, action: &str, side: &str) {
+    if action == "close" {
+        tabs::set_side_panel(app, window, tabs::SidePanel::None, 0.0);
+        return;
+    }
+    if action == "resize" {
+        resize_store_panel(app, window, id);
+        return;
+    }
+    if action == "chrome" {
+        if showing_store_panel(app, window, id).is_empty() {
+            return;
+        }
+        post_store_panel_chrome(
+            app,
+            window,
+            store_panel_edge(app, id),
+            store_panel_resizable(app, id),
+        );
+        return;
+    }
+    if action != "side" || (side != "left" && side != "right") {
+        return;
+    }
+    remember_store_panel_side(app, id, side);
+    let edge = if side == "left" {
+        tabs::PanelEdge::Left
+    } else {
+        tabs::PanelEdge::Right
+    };
+    let width = store_panel_width(app, id);
+    tabs::open_host_panel(app, window, id, width, edge);
+    post_store_panel_chrome(app, window, edge, store_panel_resizable(app, id));
+}
+
+/// Opens a store extension's popup page in the side panel, or closes it when that panel is already showing.
+pub fn toggle_store_extension_panel(
+    app: &AppHandle,
+    window: &str,
+    id: &str,
+) -> Result<bool, String> {
+    if !showing_store_panel(app, window, id).is_empty() {
+        tabs::set_side_panel(app, window, tabs::SidePanel::None, 0.0);
+        return Ok(false);
+    }
+    let url = crate::extensions::popup_url(app, &format!("id={id}"))?;
+    open_store_panel(app, window, id, url, store_panel_edge(app, id));
+    Ok(true)
+}
+
+/// Moves an open store panel onto the side, width, and resize setting saved for that extension.
+pub fn place_store_extension_panel(app: &AppHandle, window: &str, id: &str) -> Result<(), String> {
+    if showing_store_panel(app, window, id).is_empty() {
+        return Ok(());
+    }
+    let url = crate::extensions::popup_url(app, &format!("id={id}"))?;
+    open_store_panel(app, window, id, url, store_panel_edge(app, id));
+    Ok(())
+}
+
+fn store_panel_edge(app: &AppHandle, id: &str) -> tabs::PanelEdge {
+    match settings::get(app)
+        .extension_panel_side
+        .get(id)
+        .map(String::as_str)
+    {
+        Some("left") => tabs::PanelEdge::Left,
+        _ => tabs::PanelEdge::Right,
+    }
+}
+
+const STORE_PANEL_DEFAULT: u32 = 380;
+
+fn store_panel_width(app: &AppHandle, id: &str) -> f64 {
+    let width = settings::get(app)
+        .extension_panel_width
+        .get(id)
+        .copied()
+        .unwrap_or(STORE_PANEL_DEFAULT);
+    f64::from(width.clamp(PANEL_MIN, PANEL_MAX))
+}
+
+fn store_panel_resizable(app: &AppHandle, id: &str) -> bool {
+    settings::get(app)
+        .extension_panel_resizable
+        .get(id)
+        .copied()
+        .unwrap_or(true)
+}
+
+fn remember_store_panel_width(app: &AppHandle, id: &str, width: u32) {
+    if id.is_empty() {
+        return;
+    }
+    let width = width.clamp(PANEL_MIN, PANEL_MAX);
+    let _ = settings::update(app, |settings| {
+        if width == STORE_PANEL_DEFAULT {
+            settings.extension_panel_width.remove(id);
+        } else {
+            settings.extension_panel_width.insert(id.to_string(), width);
+        }
+    });
+}
+
+fn resize_store_panel(app: &AppHandle, window: &str, id: &str) {
+    if showing_store_panel(app, window, id).is_empty() || !store_panel_resizable(app, id) {
+        return;
+    }
+    let Ok(width) = crate::automation::panel::track_column(
+        app,
+        window,
+        crate::automation::panel::ColumnDrag {
+            edge: store_panel_edge(app, id),
+            min: f64::from(PANEL_MIN),
+            max: f64::from(PANEL_MAX),
+            remember_agent: false,
+            fallback: store_panel_width(app, id),
+        },
+    ) else {
+        return;
+    };
+    let rounded = width
+        .round()
+        .clamp(f64::from(PANEL_MIN), f64::from(PANEL_MAX)) as u32;
+    remember_store_panel_width(app, id, rounded);
+}
+
+fn remember_store_panel_side(app: &AppHandle, id: &str, side: &str) {
+    if id.is_empty() || (side != "left" && side != "right") {
+        return;
+    }
+    let _ = settings::update(app, |settings| {
+        if side == "right" {
+            settings.extension_panel_side.remove(id);
+        } else {
+            settings
+                .extension_panel_side
+                .insert(id.to_string(), side.to_string());
+        }
+    });
+}
+
+fn open_store_panel(app: &AppHandle, window: &str, id: &str, url: Url, edge: tabs::PanelEdge) {
+    let label = tabs::host_panel_label(window);
+    let _ = ensure_child(app, window, &label, url.clone());
+    if let Some(view) = app.get_webview(&label) {
+        navigate_if_needed(&view, &url);
+    }
+    let width = store_panel_width(app, id);
+    tabs::open_host_panel(app, window, id, width, edge);
+    post_store_panel_chrome(app, window, edge, store_panel_resizable(app, id));
+}
+
+fn post_store_panel_chrome(app: &AppHandle, window: &str, edge: tabs::PanelEdge, resizable: bool) {
+    post_label(
+        app,
+        &tabs::host_panel_label(window),
+        &json!({
+            "type": "ce-panel",
+            "side": if edge == tabs::PanelEdge::Left { "left" } else { "right" },
+            "resizable": resizable,
+        }),
+    );
+}
+
+fn chrome_extension_id(url: &str) -> Option<String> {
+    let parsed = Url::parse(url).ok()?;
+    if parsed.scheme() != "chrome-extension" {
+        return None;
+    }
+    parsed
+        .host_str()
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+}
+
+fn showing_store_panel(app: &AppHandle, window: &str, id: &str) -> String {
+    if id.is_empty()
+        || tabs::side_panel(app, window) != tabs::SidePanel::Host
+        || tabs::host_panel_extension(app, window) != id
+        || tabs::agent_panel_width(app, window) <= 0.0
+    {
+        return String::new();
+    }
+    match tabs::host_panel_edge(app, window) {
+        tabs::PanelEdge::Left => "left".to_string(),
+        tabs::PanelEdge::Right => "right".to_string(),
+    }
+}
+
+/// Tells a store popup which toolbar side and panel edge are on.
+pub fn announce_popup_chrome(app: &AppHandle, label: &str) {
+    let window = crate::popup::owner_of(label);
+    let document = crate::popup::extension_document(app, label).unwrap_or_default();
+    let id = chrome_extension_id(&document).unwrap_or_default();
+    let toolbar = settings::get(app).toolbar_side;
+    let panel = showing_store_panel(app, &window, &id);
+    post_label(
+        app,
+        label,
+        &json!({
+            "type": "ce-popup-chrome",
+            "toolbar": toolbar,
+            "panel": panel,
+        }),
+    );
 }
 
 fn post_panel_chrome(app: &AppHandle, window: &str, layout: &ResolvedPanel) {
@@ -2974,6 +3237,15 @@ const TOOLBAR_CHROME_JS: &str = r##"(function () {
 
 const PANEL_HANDLE_JS: &str = r#"(function () {
   var handleId = "ce-panel-resize";
+  var seam = "rgba(14, 165, 233, 0.85)";
+  function post(message) {
+    var target = window.__ceHost && window.__ceHost.postMessage ? window.__ceHost : null;
+    if (!target) {
+      try { target = window.chrome && window.chrome.webview; } catch (error) { target = null; }
+    }
+    if (!target || !target.postMessage) return;
+    target.postMessage(JSON.stringify(message));
+  }
   function ensure() {
     var handle = document.getElementById(handleId);
     if (handle) return handle;
@@ -2981,41 +3253,60 @@ const PANEL_HANDLE_JS: &str = r#"(function () {
     handle.id = handleId;
     handle.hidden = true;
     handle.title = "Drag to resize";
+    handle.setAttribute("role", "separator");
+    handle.setAttribute("aria-orientation", "vertical");
+    handle.setAttribute("aria-label", "Resize panel");
     handle.style.position = "fixed";
     handle.style.top = "0";
     handle.style.bottom = "0";
-    handle.style.width = "6px";
+    handle.style.width = "10px";
     handle.style.zIndex = "2147483646";
     handle.style.cursor = "col-resize";
     handle.style.background = "transparent";
+    handle.style.touchAction = "none";
     var dragging = false;
     handle.addEventListener("pointerdown", function (event) {
-      if (handle.hidden || dragging) return;
-      if (!window.ce || !window.ce.ui || !window.ce.ui.resizePanel) return;
+      if (handle.hidden || dragging || event.button !== 0) return;
       dragging = true;
       event.preventDefault();
       event.stopPropagation();
+      if (handle.setPointerCapture) handle.setPointerCapture(event.pointerId);
       var done = function () { dragging = false; };
-      try {
-        var pending = window.ce.ui.resizePanel();
-        if (pending && pending.then) pending.then(done, done);
-        else done();
-      } catch (error) { done(); }
+      var ui = window.ce && window.ce.ui;
+      if (ui && ui.resizePanel) {
+        try {
+          var pending = ui.resizePanel();
+          if (pending && pending.then) pending.then(done, done);
+          else done();
+        } catch (error) { done(); }
+        return;
+      }
+      post({ type: "ce-chrome", action: "resize" });
     });
+    handle.addEventListener("pointerup", function () { dragging = false; });
+    handle.addEventListener("pointercancel", function () { dragging = false; });
     handle.addEventListener("mouseenter", function () {
-      if (!handle.hidden) handle.style.background = "rgba(14, 165, 233, 0.45)";
+      if (!handle.hidden) handle.style.background = "rgba(14, 165, 233, 0.28)";
     });
-    handle.addEventListener("mouseleave", function () { handle.style.background = "transparent"; });
+    handle.addEventListener("mouseleave", function () {
+      if (!dragging) handle.style.background = "transparent";
+    });
     (document.documentElement || document.body).appendChild(handle);
     return handle;
   }
+  var last = null;
   function apply(detail) {
+    last = detail;
+    window.__cePanelApplied = true;
     var handle = ensure();
     var side = detail && detail.side === "left" ? "left" : "right";
     var resizable = !!(detail && detail.resizable);
     handle.hidden = !resizable;
     handle.style.left = side === "left" ? "auto" : "0";
     handle.style.right = side === "left" ? "0" : "auto";
+    handle.style.boxShadow = resizable
+      ? (side === "left" ? "inset -2px 0 0 " : "inset 2px 0 0 ") + seam
+      : "none";
     if (!resizable) handle.style.background = "transparent";
   }
   function onMessage(event) {
@@ -3032,13 +3323,34 @@ const PANEL_HANDLE_JS: &str = r#"(function () {
     window.__cePanelListening = true;
     target.addEventListener("message", onMessage);
   }
+  function watch() {
+    if (window.__cePanelWatch || !window.MutationObserver) return;
+    var root = document.documentElement;
+    if (!root) return;
+    window.__cePanelWatch = true;
+    new MutationObserver(function () {
+      if (!document.getElementById(handleId) && last) apply(last);
+    }).observe(root, { childList: true });
+  }
   function pull() {
     listen();
-    if (!window.ce || !window.ce.ui || !window.ce.ui.panelChrome) {
-      setTimeout(pull, 60);
+    watch();
+    var ui = window.ce && window.ce.ui;
+    if (ui && ui.panelChrome) {
+      ui.panelChrome().then(apply).catch(function () {});
       return;
     }
-    window.ce.ui.panelChrome().then(apply).catch(function () {});
+    if (location.protocol === "chrome-extension:" && window.__cePanelListening) {
+      if (!window.__cePanelAsked) {
+        window.__cePanelAsked = true;
+        post({ type: "ce-chrome", action: "chrome" });
+        setTimeout(function () {
+          if (!window.__cePanelApplied) apply({ side: "right", resizable: true });
+        }, 400);
+      }
+      return;
+    }
+    setTimeout(pull, 60);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", pull);
   else pull();

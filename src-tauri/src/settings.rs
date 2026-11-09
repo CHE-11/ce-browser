@@ -65,7 +65,7 @@ pub const AGENT_PANEL_DEFAULT_WIDTH: u32 = 380;
 /// Height of the bookmark editor's place list, in rem.
 const LIST_HEIGHT_REM: (f32, f32) = (8.0, 36.0);
 const PALETTE_WIDTH_PX: (u32, u32) = (360, 880);
-/// Fine-tune sizes the Styles page copies from another profile. Theme, font, and zoom stay out.
+/// Fine-tune sizes and bookmarks bar alignment the Styles page copies from another profile. Theme, font, and zoom stay out.
 pub const STYLE_METRIC_KEYS: &[&str] = &[
     "tabWidth",
     "verticalTabsWidth",
@@ -82,6 +82,7 @@ pub const STYLE_METRIC_KEYS: &[&str] = &[
     "bookmarksBarPadding",
     "bookmarksBarIconSize",
     "bookmarksBarHeight",
+    "bookmarksBarAlign",
     "bookmarkFolderTextSize",
     "bookmarkFolderPadding",
     "bookmarkFolderIconSize",
@@ -340,6 +341,9 @@ pub struct BrowserSettings {
     /// Folder icons on the bookmarks bar. Off leaves folder titles only. Site favicons always show.
     #[serde(default = "default_true")]
     pub bookmarks_bar_folder_icons: bool,
+    /// Where folders and bookmarks sit on the bar: `left`, `center`, or `right`.
+    #[serde(default = "default_bookmarks_bar_align")]
+    pub bookmarks_bar_align: String,
     /// Text size of bookmarks on the bar, in rem.
     #[serde(default = "default_bar_text_size")]
     pub bookmarks_bar_text_size: f32,
@@ -440,6 +444,22 @@ pub struct BrowserSettings {
     /// Explicit address-bar and tools-toolbar pins. A missing id keeps the old default.
     #[serde(default)]
     pub toolbar_placements: BTreeMap<String, ToolbarPlacement>,
+    /// `popover` or `panel` for a store extension. A missing id opens as a popover.
+    /// An older file omits this map.
+    #[serde(default)]
+    pub extension_open_as: BTreeMap<String, String>,
+    /// `left` or `right` for a store extension's panel. A missing id docks on the right.
+    /// An older file omits this map.
+    #[serde(default)]
+    pub extension_panel_side: BTreeMap<String, String>,
+    /// CSS pixels a store extension's panel opens at. A missing id uses 380.
+    /// An older file omits this map.
+    #[serde(default)]
+    pub extension_panel_width: BTreeMap<String, u32>,
+    /// `false` turns off dragging a store extension's panel. A missing id stays resizable.
+    /// An older file omits this map.
+    #[serde(default)]
+    pub extension_panel_resizable: BTreeMap<String, bool>,
     /// Order of pinned toolbar icons. Empty keeps the built-in order, then extensions.
     #[serde(default)]
     pub toolbar_order: Vec<String>,
@@ -1472,6 +1492,7 @@ impl Default for BrowserSettings {
             download_name_template: String::new(),
             show_bookmarks_bar: true,
             bookmarks_bar_folder_icons: true,
+            bookmarks_bar_align: default_bookmarks_bar_align(),
             bookmarks_bar_text_size: default_bar_text_size(),
             bookmarks_bar_padding: default_bar_padding(),
             bookmark_folder_text_size: default_folder_text_size(),
@@ -1508,6 +1529,10 @@ impl Default for BrowserSettings {
             page_markdown: PageMarkdownSettings::default(),
             hidden_toolbar_extensions: Vec::new(),
             toolbar_placements: BTreeMap::new(),
+            extension_open_as: BTreeMap::new(),
+            extension_panel_side: BTreeMap::new(),
+            extension_panel_width: BTreeMap::new(),
+            extension_panel_resizable: BTreeMap::new(),
             toolbar_order: Vec::new(),
             disabled_builtin_tools: Vec::new(),
             dev_tools_settled: false,
@@ -1640,6 +1665,12 @@ impl BrowserSettings {
                 self.bookmark_folder_text_size = folder_text;
                 self.bookmark_folder_padding = folder_padding;
             }
+        }
+        if !matches!(
+            self.bookmarks_bar_align.as_str(),
+            "left" | "center" | "right"
+        ) {
+            self.bookmarks_bar_align = default_bookmarks_bar_align();
         }
         self.bookmarks_bar_text_size = rem_in(
             self.bookmarks_bar_text_size,
@@ -1879,6 +1910,11 @@ impl BrowserSettings {
         self.hidden_toolbar_extensions =
             toolbar_hidden(&map_retired_tools(&self.hidden_toolbar_extensions));
         self.toolbar_placements = normalize_toolbar_placements(self.toolbar_placements);
+        self.extension_open_as = normalize_extension_open_as(self.extension_open_as);
+        self.extension_panel_side = normalize_extension_panel_side(self.extension_panel_side);
+        self.extension_panel_width = normalize_extension_panel_width(self.extension_panel_width);
+        self.extension_panel_resizable =
+            normalize_extension_panel_resizable(self.extension_panel_resizable);
         self.toolbar_order = toolbar_hidden(&map_retired_tools(&self.toolbar_order));
         self.disabled_builtin_tools =
             toolbar_hidden(&map_retired_tools(&self.disabled_builtin_tools));
@@ -2072,7 +2108,11 @@ pub struct SettingsState(Mutex<BrowserSettings>);
 
 /// First read of an older file applies dev-tool defaults. A file that already settled is left as it is,
 /// including when the client omits the flag and `previous_settled` is set.
-pub(crate) fn settle_dev_tools(settings: &mut BrowserSettings, previous_settled: bool, release: bool) {
+pub(crate) fn settle_dev_tools(
+    settings: &mut BrowserSettings,
+    previous_settled: bool,
+    release: bool,
+) {
     if settings.dev_tools_settled || previous_settled {
         settings.dev_tools_settled = true;
         return;
@@ -2497,6 +2537,10 @@ fn default_bar_text_size() -> f32 {
     0.75
 }
 
+fn default_bookmarks_bar_align() -> String {
+    "left".into()
+}
+
 fn default_bar_padding() -> f32 {
     0.5
 }
@@ -2789,6 +2833,72 @@ fn normalize_toolbar_side(side: &str, vertical_toolbar: bool) -> String {
     }
 }
 
+fn extension_setting_id(id: &str) -> Option<&str> {
+    let id = id.trim();
+    if id.is_empty() || id.len() > 128 || id.chars().any(char::is_whitespace) {
+        None
+    } else {
+        Some(id)
+    }
+}
+
+/// 240–720 CSS pixels. 380 is the width a missing id already used, so it is not stored.
+fn normalize_extension_panel_width(widths: BTreeMap<String, u32>) -> BTreeMap<String, u32> {
+    let mut next = BTreeMap::new();
+    for (id, width) in widths {
+        let Some(id) = extension_setting_id(&id) else {
+            continue;
+        };
+        let width = width.clamp(240, 720);
+        if width != 380 {
+            next.insert(id.to_string(), width);
+        }
+    }
+    next
+}
+
+/// Only `false` is stored. A missing id stays resizable.
+fn normalize_extension_panel_resizable(flags: BTreeMap<String, bool>) -> BTreeMap<String, bool> {
+    let mut next = BTreeMap::new();
+    for (id, resizable) in flags {
+        let Some(id) = extension_setting_id(&id) else {
+            continue;
+        };
+        if !resizable {
+            next.insert(id.to_string(), false);
+        }
+    }
+    next
+}
+
+fn normalize_extension_panel_side(sides: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let mut next = BTreeMap::new();
+    for (id, side) in sides {
+        let id = id.trim();
+        if id.is_empty() || id.len() > 128 || id.chars().any(char::is_whitespace) {
+            continue;
+        }
+        if side == "left" || side == "right" {
+            next.insert(id.to_string(), side);
+        }
+    }
+    next
+}
+
+fn normalize_extension_open_as(open_as: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let mut next = BTreeMap::new();
+    for (id, mode) in open_as {
+        let id = id.trim();
+        if id.is_empty() || id.len() > 128 || id.chars().any(char::is_whitespace) {
+            continue;
+        }
+        if mode == "popover" || mode == "panel" {
+            next.insert(id.to_string(), mode);
+        }
+    }
+    next
+}
+
 fn normalize_toolbar_placements(
     placements: BTreeMap<String, ToolbarPlacement>,
 ) -> BTreeMap<String, ToolbarPlacement> {
@@ -2922,6 +3032,10 @@ mod tests {
         assert!(loaded.page_markdown.header);
         assert!(loaded.hidden_toolbar_extensions.is_empty());
         assert!(loaded.toolbar_placements.is_empty());
+        assert!(loaded.extension_open_as.is_empty());
+        assert!(loaded.extension_panel_side.is_empty());
+        assert!(loaded.extension_panel_width.is_empty());
+        assert!(loaded.extension_panel_resizable.is_empty());
     }
 
     #[test]
@@ -3272,6 +3386,14 @@ mod tests {
         assert_eq!(older.bookmarks_bar_menu_text_size, 0.875);
         assert_eq!(older.bookmarks_bar_menu_padding, 0.625);
         assert!(older.bookmarks_bar_folder_icons);
+        assert_eq!(older.bookmarks_bar_align, "left");
+
+        let center: super::BrowserSettings =
+            serde_json::from_str(r#"{"bookmarksBarAlign":"center"}"#).expect("settings parse");
+        assert_eq!(center.normalize().bookmarks_bar_align, "center");
+        let unknown: super::BrowserSettings =
+            serde_json::from_str(r#"{"bookmarksBarAlign":"justify"}"#).expect("settings parse");
+        assert_eq!(unknown.normalize().bookmarks_bar_align, "left");
 
         let no_icons: super::BrowserSettings =
             serde_json::from_str(r#"{"bookmarksBarFolderIcons":false}"#).expect("settings parse");
@@ -3507,6 +3629,62 @@ mod tests {
     }
 
     #[test]
+    fn an_older_file_opens_store_extensions_as_popovers() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"extensionOpenAs":{"bitwarden":"panel","bad":"window"," ok":"panel"}}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(
+            loaded
+                .extension_open_as
+                .get("bitwarden")
+                .map(String::as_str),
+            Some("panel")
+        );
+        assert!(loaded.extension_open_as.get("bad").is_none());
+        assert!(loaded.extension_open_as.get("ok").is_none());
+    }
+
+    #[test]
+    fn an_older_file_docks_store_panels_on_the_right() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"extensionPanelSide":{"bitwarden":"left","bad":"top"," ok":"left"}}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(
+            loaded
+                .extension_panel_side
+                .get("bitwarden")
+                .map(String::as_str),
+            Some("left")
+        );
+        assert!(loaded.extension_panel_side.get("bad").is_none());
+        assert!(loaded.extension_panel_side.get("ok").is_none());
+    }
+
+    #[test]
+    fn store_panel_width_clamps_and_a_missing_id_stays_resizable() {
+        let loaded: super::BrowserSettings = serde_json::from_str(
+            r#"{"extensionPanelWidth":{"bitwarden":80,"wide":900,"defaulted":380},"extensionPanelResizable":{"bitwarden":false,"wide":true,"bad id":false}}"#,
+        )
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(
+            loaded.extension_panel_width.get("bitwarden").copied(),
+            Some(240)
+        );
+        assert_eq!(loaded.extension_panel_width.get("wide").copied(), Some(720));
+        assert!(loaded.extension_panel_width.get("defaulted").is_none());
+        assert_eq!(
+            loaded.extension_panel_resizable.get("bitwarden").copied(),
+            Some(false)
+        );
+        assert!(loaded.extension_panel_resizable.get("wide").is_none());
+        assert!(loaded.extension_panel_resizable.get("bad id").is_none());
+    }
+
     fn toolbar_placements_keep_a_pin_on_both_bars() {
         let loaded: super::BrowserSettings = serde_json::from_str(
             r#"{"toolbarPlacements":{" price ":{"primary":true,"secondary":true},"print-pdf":{"primary":true}," ":{"primary":true}}}"#,

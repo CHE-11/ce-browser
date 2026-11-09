@@ -368,6 +368,7 @@ export function pdfOptions(settings: PrintEditorSettings, title: string, url: st
     headerFooter: settings.headerFooter,
     pageNumbers: settings.showPageNumbers,
     pageNumberLocation: settings.pageNumberLocation,
+    textSize: settings.textSize,
     scale: 1,
     title,
     url,

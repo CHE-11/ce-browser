@@ -10,6 +10,7 @@ import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
 import { TAB_SIZE, tabItemStyle } from "@/lib/tab-size";
 import { useSettings } from "@/lib/use-browser";
 import { hoverTab, leaveTab } from "@/lib/tab-hover";
+import { useTabUnderPointer } from "@/lib/tab-pointer";
 import { useStickyAudio } from "@/lib/use-sticky-audio";
 import { groupColorClasses } from "@/lib/tab-rows";
 import { TabInfo } from "@type/browser";
@@ -75,6 +76,8 @@ export function TabItem({
   const accent = settings?.siteAccent && tab.accent && !tab.pinned ? tab.accent : null;
   const pinBorder = (settings?.pinTabBorder ?? true) && tab.pinned ? tab.accent : null;
   const domId = `tab-${tab.id}`;
+  const underPointer = useTabUnderPointer();
+  const closeShown = underPointer.tabId === tab.id;
   const alert = tabProblemTitle(tab, heavy);
   const accentFill = accent && active ? accentTint(accent, 0.28) : undefined;
   const chromeTab = !vertical && active;
@@ -128,6 +131,7 @@ export function TabItem({
   return (
     <div
       id={domId}
+      data-tab-id={tab.id}
       role="tab"
       aria-selected={selected}
       aria-label={`${tab.title || tab.url}${tab.sleeping ? ", asleep" : ""}${tab.audible ? ", playing sound" : ""}${tab.automated ? ", automated" : ""}${alert ? `, ${alert}` : ""}`}
@@ -284,8 +288,11 @@ export function TabItem({
             title={grouped ? "Close selected tabs (Ctrl+W)" : "Close tab (Ctrl+W)"}
             aria-label={grouped ? "Close selected tabs" : `Close ${tab.title}`}
             className={cn(
-              "pointer-events-none -ml-2 inline-flex h-[var(--tab-close)] w-0 min-w-0 shrink-0 items-center justify-center overflow-hidden rounded p-0 text-zinc-400 opacity-0 transition-[width,opacity,margin] duration-100 hover:bg-zinc-700 hover:text-zinc-100",
-              "group-hover:pointer-events-auto group-hover:ml-0 group-hover:w-[var(--tab-close)] group-hover:overflow-visible group-hover:opacity-100",
+              "inline-flex h-[var(--tab-close)] shrink-0 items-center justify-center rounded p-0 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100",
+              closeShown
+                ? "pointer-events-auto ml-0 w-[var(--tab-close)] overflow-visible opacity-100"
+                : "pointer-events-none -ml-2 w-0 min-w-0 overflow-hidden opacity-0",
+              !(closeShown && underPointer.instant) && "transition-[width,opacity,margin] duration-[50ms] ease-out",
               "focus-visible:pointer-events-auto focus-visible:ml-0 focus-visible:w-[var(--tab-close)] focus-visible:overflow-visible focus-visible:opacity-100",
               focusRing,
             )}

@@ -323,6 +323,47 @@ pub fn ensure_pool(app: &AppHandle, window: &str) {
     }
 }
 
+/// The reusable extension popup was closed by `window.close()`, which destroys its webview.
+/// Build it again so the toolbar dropdown can open.
+fn repair_extension_window(app: &AppHandle, window: &str) -> Result<(), String> {
+    let label = ext_label(window);
+    if app.get_webview(&label).is_some() {
+        return Ok(());
+    }
+    if let Some(popup) = app.get_window(&label) {
+        let _ = popup.destroy();
+    }
+    with(app, |state| {
+        if let Some(stack) = state.stacks.get_mut(window) {
+            if stack.ext.as_deref() == Some(label.as_str()) {
+                stack.ext = None;
+            }
+            stack.building.retain(|item| item != &label);
+            stack.levels.retain(|level| level.label != label);
+        }
+    });
+    ensure_pool(app, window);
+    if app.get_webview(&label).is_some() {
+        Ok(())
+    } else {
+        Err("The extension popup is missing.".into())
+    }
+}
+
+/// The extension page this popup is showing, when it has one.
+pub fn extension_document(app: &AppHandle, label: &str) -> Option<String> {
+    let window = owner_of(label);
+    with(app, |state| {
+        state
+            .stacks
+            .get(&window)?
+            .levels
+            .iter()
+            .find(|level| level.label == label)
+            .and_then(|level| level.ext_url.clone())
+    })
+}
+
 fn finish_building(
     app: &AppHandle,
     window: &str,
@@ -440,17 +481,35 @@ fn create_app_window(app: &AppHandle, window: &str, label: &str) -> Result<(), S
 }
 
 const POPUP_CHROME_JS: &str = r##"(function () {
+  // window.close() would destroy this reusable webview. Park the dropdown instead.
+  window.close = function () { post("close"); };
   if (window.__cePopupChrome) return;
   if (String(location.href || "").indexOf("about:blank") === 0) return;
   window.__cePopupChrome = true;
+  // Store dropdowns stay bare. Left, right, and close belong on the side panel.
+  if (String(location.href || "").indexOf("chrome-extension:") === 0) return;
   var style = document.createElement("style");
   style.id = "ce-popup-chrome-style";
   style.textContent = [
-    "#ce-popup-chrome{position:fixed;top:6px;right:6px;z-index:2147483647;user-select:none}",
-    "#ce-popup-chrome-close{width:22px;height:22px;border:0;border-radius:6px;padding:0;margin:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;background:rgba(24,24,27,.94);border:1px solid #3f3f46;color:#a1a1aa;box-shadow:0 1px 2px rgba(0,0,0,.4)}",
-    "#ce-popup-chrome-close:hover{background:#27272a;color:#fafafa}"
+    "#ce-popup-chrome{position:fixed;top:6px;right:6px;z-index:2147483647;display:flex;align-items:center;gap:4px;padding:2px;border-radius:8px;background:rgba(24,24,27,.94);border:1px solid #3f3f46;box-shadow:0 1px 2px rgba(0,0,0,.4);user-select:none}",
+    "#ce-popup-chrome button{width:22px;height:22px;border:0;border-radius:6px;padding:0;margin:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;background:transparent;color:#a1a1aa}",
+    "#ce-popup-chrome button:hover{background:#27272a;color:#fafafa}"
   ].join("");
   function stop(event) { event.stopPropagation(); }
+  function hostOf() {
+    var host = window.__ceHost && window.__ceHost.postMessage ? window.__ceHost : null;
+    if (!host) {
+      try { host = window.chrome && window.chrome.webview; } catch (error) { host = null; }
+    }
+    return host && host.postMessage ? host : null;
+  }
+  function post(action, side) {
+    var host = hostOf();
+    if (!host) return;
+    var message = { type: "ce-chrome", action: action };
+    if (side) message.side = side;
+    host.postMessage(JSON.stringify(message));
+  }
   function mount() {
     if (document.getElementById("ce-popup-chrome")) return;
     (document.head || document.documentElement).appendChild(style);
@@ -465,11 +524,7 @@ const POPUP_CHROME_JS: &str = r##"(function () {
     close.title = "Close";
     close.setAttribute("aria-label", "Close");
     close.innerHTML = '<svg id="ce-popup-chrome-close-icon" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"></path></svg>';
-    close.addEventListener("click", function () {
-      var host = window.__ceHost && window.__ceHost.postMessage ? window.__ceHost : (window.chrome && window.chrome.webview);
-      if (!host || !host.postMessage) return;
-      host.postMessage(JSON.stringify({ type: "ce-chrome", action: "close" }));
-    });
+    close.addEventListener("click", function () { post("close"); });
     root.appendChild(close);
     (document.documentElement || document.body).appendChild(root);
   }
@@ -520,6 +575,7 @@ fn create_ext_window(app: &AppHandle, window: &str, label: &str) -> Result<(), S
                 let factor = settings::get(&load_app).ui_zoom_factor();
                 let _ = webview.set_zoom(factor);
                 measure_extension(&load_app, &load_window, &webview, token, factor);
+                crate::host_extensions::announce_popup_chrome(&load_app, &label);
             }
         })
         .on_new_window(move |url, features| {
@@ -709,6 +765,9 @@ fn open_at(
         .flatten();
     let extension =
         request.kind == "extension" || request.kind == "host" || host_downloads.is_some();
+    if extension {
+        repair_extension_window(app, window)?;
+    }
     let ext_url = if request.kind == "host" {
         Some(crate::host_extensions::popup_url(app, &request.params)?)
     } else if let Some(url) = host_downloads {

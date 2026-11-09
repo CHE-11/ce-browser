@@ -17,7 +17,10 @@ use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, Window, WindowEvent};
+use tauri::webview::{Color, NewWindowResponse};
+use tauri::window::WindowBuilder;
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, Window, WindowEvent};
+use url::Url;
 use windows::Win32::Foundation::{CloseHandle, HWND, POINT};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
@@ -27,7 +30,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::PWSTR;
 
-use crate::{files, paths, popup, profiles, tabs};
+use crate::{devtools, files, hang_guard, paths, popup, profiles, tabs, webview2};
 
 pub use hud::{contains_point as hud_contains_point, follow};
 pub use webviews::DebugWebview;
@@ -607,7 +610,86 @@ fn open_devtools(app: &AppHandle, label: &str) -> Result<(), String> {
     let webview = app
         .get_webview(label)
         .ok_or_else(|| format!("No webview is labelled {label}."))?;
+    let url = webview.url().map(|url| url.to_string()).unwrap_or_default();
+    // OpenDevToolsWindow returns success and opens nothing for a chrome-extension document.
+    // Those pages, and the popout that hosts one, use the same inspector the tab dock loads.
+    if url.starts_with("chrome-extension:")
+        || label.starts_with("script-")
+        || label.starts_with("extpopup-")
+    {
+        return open_extension_devtools(app, label);
+    }
     webview.open_devtools();
+    Ok(())
+}
+
+/// A top-level inspector for a page `OpenDevToolsWindow` will not show.
+fn open_extension_devtools(app: &AppHandle, label: &str) -> Result<(), String> {
+    if hang_guard::on_main_thread() {
+        return Err("DevTools is opened off the main thread.".into());
+    }
+    if let Some(window) = app.get_window(label) {
+        let _ = window.unminimize();
+        let _ = window.show();
+    }
+    let webview = app
+        .get_webview(label)
+        .ok_or_else(|| format!("No webview is labelled {label}."))?;
+    let url = devtools::inspector_for(&webview, &paths::profile_dir(app))?;
+    let inspect = format!("inspect-{label}");
+    let parsed = Url::parse(&url).map_err(|error| error.to_string())?;
+    if let Some(existing) = app.get_webview(&inspect) {
+        existing
+            .navigate(parsed)
+            .map_err(|error| error.to_string())?;
+        if let Some(window) = app.get_window(&inspect) {
+            let _ = window.unminimize();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        return Ok(());
+    }
+    let mut host = WindowBuilder::new(app, &inspect)
+        .title(format!("DevTools — {label}"))
+        .inner_size(1100.0, 740.0)
+        .min_inner_size(480.0, 320.0)
+        .decorations(true)
+        .resizable(true)
+        .focused(true);
+    if let Some(window) = app.get_window(label)
+        && let (Ok(origin), Ok(size), Ok(scale)) = (
+            window.outer_position(),
+            window.outer_size(),
+            window.scale_factor(),
+        )
+        && scale > f64::EPSILON
+        && origin.x > -10_000
+        && origin.y > -10_000
+    {
+        host = host.position(
+            origin.x as f64 / scale + size.width as f64 / scale + 12.0,
+            origin.y as f64 / scale,
+        );
+    }
+    let window = host.build().map_err(|error| error.to_string())?;
+    let builder = tabs::base_builder(app, &inspect, WebviewUrl::External(parsed))
+        .initialization_script(devtools::PREFER_ELEMENTS_SCRIPT)
+        .auto_resize()
+        .disable_drag_drop_handler()
+        .background_color(Color(24, 24, 27, 255))
+        .devtools(true)
+        .on_new_window(|_url, _features| NewWindowResponse::Deny);
+    let size = window.inner_size().map_err(|error| error.to_string())?;
+    let view = match window.add_child(builder, PhysicalPosition::new(0, 0), size) {
+        Ok(view) => view,
+        Err(error) => {
+            let _ = window.close();
+            return Err(error.to_string());
+        }
+    };
+    webview2::attach_devtools_hooks(app, &view);
+    let _ = window.show();
+    let _ = window.set_focus();
     Ok(())
 }
 

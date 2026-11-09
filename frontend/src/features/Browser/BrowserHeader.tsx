@@ -76,6 +76,7 @@ export function BrowserHeader({
           iconSize={settings?.bookmarksBarIconSize}
           height={settings?.bookmarksBarHeight}
           folderIcons={settings?.bookmarksBarFolderIcons ?? true}
+          align={settings?.bookmarksBarAlign}
         />
       ) : null}
       {findToken !== null && activeTab ? (

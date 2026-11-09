@@ -1,4 +1,4 @@
-import { ExtensionIcon } from "@/components/ExtensionIcon";
+import { ExtensionIcon, isComponentExtension } from "@/components/ExtensionIcon";
 import { IconButton } from "@/components/IconButton";
 import { PinPlacement } from "@/components/PinPlacement";
 import { PopupFrame } from "@/components/PopupFrame";
@@ -42,7 +42,8 @@ export function AddressBarExtensionPopover() {
 
   const needle = query.trim().toLowerCase();
   const matches = (name: string) => needle === "" || name.toLowerCase().includes(needle);
-  const installed = extensions.filter((extension) => matches(extension.name));
+  const installed = extensions.filter((extension) => !isComponentExtension(extension.id, extension.name) && matches(extension.name));
+  const components = extensions.filter((extension) => isComponentExtension(extension.id, extension.name) && matches(extension.name));
   const hosts = host.extensions.filter((extension) => matches(extension.name));
   const builtins = BUILTIN_TOOLS.filter((tool) => matches(tool.name));
   const ready = loaded && host.loaded && settingsLoaded;
@@ -95,6 +96,30 @@ export function AddressBarExtensionPopover() {
       fail(saveSettings({ ...settings, verticalToolbarLabels }));
     }
   };
+
+  const renderInstalled = (extension: ExtensionInfo) => (
+    <InstalledRow
+      key={extension.id}
+      extension={extension}
+      settings={settings}
+      busy={busy}
+      onPlacement={setPlacement}
+      onEnabled={(enabled) => fail(setExtensionEnabled(extension.id, enabled))}
+      onOptions={() => {
+        fail(openExtensionOptions(extension.id));
+        void closePopup();
+      }}
+      onRemove={() => setPending({ kind: "installed", id: extension.id, name: extension.name })}
+      onUpdate={() => {
+        setBusy(true);
+        setStatus(null);
+        void updateExtension(extension.id)
+          .then((next) => setStatus({ tone: "info", text: `Updated ${next.name} ${next.version}.` }))
+          .catch((reason: unknown) => setStatus({ tone: "error", text: String(reason) }))
+          .finally(() => setBusy(false));
+      }}
+    />
+  );
 
   return (
     <PopupFrame
@@ -184,29 +209,7 @@ export function AddressBarExtensionPopover() {
           {installed.length === 0 ? (
             <Empty id="address-extension-popover-installed-empty" text={needle ? "No matching extensions." : "No third-party extensions installed."} />
           ) : (
-            installed.map((extension) => (
-              <InstalledRow
-                key={extension.id}
-                extension={extension}
-                settings={settings}
-                busy={busy}
-                onPlacement={setPlacement}
-                onEnabled={(enabled) => fail(setExtensionEnabled(extension.id, enabled))}
-                onOptions={() => {
-                  fail(openExtensionOptions(extension.id));
-                  void closePopup();
-                }}
-                onRemove={() => setPending({ kind: "installed", id: extension.id, name: extension.name })}
-                onUpdate={() => {
-                  setBusy(true);
-                  setStatus(null);
-                  void updateExtension(extension.id)
-                    .then((next) => setStatus({ tone: "info", text: `Updated ${next.name} ${next.version}.` }))
-                    .catch((reason: unknown) => setStatus({ tone: "error", text: String(reason) }))
-                    .finally(() => setBusy(false));
-                }}
-              />
-            ))
+            installed.map(renderInstalled)
           )}
         </Section>
 
@@ -231,12 +234,15 @@ export function AddressBarExtensionPopover() {
         ) : null}
 
         <Section id="address-extension-popover-builtin" title="Built-in">
-          {builtins.length === 0 ? (
-            <Empty id="address-extension-popover-builtin-empty" text="No matching built-in tools." />
+          {components.length === 0 && builtins.length === 0 ? (
+            <Empty id="address-extension-popover-builtin-empty" text="No matching built-in extensions." />
           ) : (
-            builtins.map((tool) => (
-              <BuiltinRow key={tool.id} tool={tool} settings={settings} onPlacement={setPlacement} onEnabled={(enabled) => settings && fail(saveBuiltinEnabled(settings, tool.id, enabled))} />
-            ))
+            <>
+              {components.map(renderInstalled)}
+              {builtins.map((tool) => (
+                <BuiltinRow key={tool.id} tool={tool} settings={settings} onPlacement={setPlacement} onEnabled={(enabled) => settings && fail(saveBuiltinEnabled(settings, tool.id, enabled))} />
+              ))}
+            </>
           )}
         </Section>
       </div>

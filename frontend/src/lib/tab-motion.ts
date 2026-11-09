@@ -1,6 +1,7 @@
 import { useLayoutEffect, useReducer, useRef } from "react";
 import { flushSync } from "react-dom";
 import type { TabGroup, TabInfo, SplitView } from "@type/browser";
+import { markTabTransition, refreshTabUnderPointer } from "./tab-pointer";
 
 type TabLayoutSource = {
   tabs: TabInfo[];
@@ -35,6 +36,7 @@ export function useTabMotion<T extends TabLayoutSource>(snapshot: T, paused: boo
   const shown = useRef({ key, snapshot });
   const latest = useRef(snapshot);
   const pending = useRef(false);
+  const motion = useRef(0);
   const [, rerender] = useReducer((count: number) => count + 1, 0);
   latest.current = snapshot;
   const changed = key !== shown.current.key;
@@ -47,18 +49,33 @@ export function useTabMotion<T extends TabLayoutSource>(snapshot: T, paused: boo
     }
     if (!animate) {
       shown.current = { key, snapshot };
+      refreshTabUnderPointer();
       return;
     }
     if (pending.current) {
       return;
     }
     pending.current = true;
-    document.startViewTransition(() => {
+    const ticket = ++motion.current;
+    markTabTransition(true);
+    const transition = document.startViewTransition(() => {
       flushSync(() => {
         pending.current = false;
         shown.current = { key: layoutKey(latest.current), snapshot: latest.current };
         rerender();
       });
+      // Capture the close button on the tab that now sits under the pointer,
+      // before the slide starts, so it is visible when the tab arrives.
+      flushSync(() => {
+        refreshTabUnderPointer();
+      });
+    });
+    void transition.finished.finally(() => {
+      if (ticket !== motion.current) {
+        return;
+      }
+      markTabTransition(false);
+      refreshTabUnderPointer();
     });
   });
 

@@ -32,12 +32,13 @@ pub struct DebugWebview {
 }
 
 pub fn kind_of(label: &str) -> &'static str {
-    const PREFIXES: [(&str, &str); 9] = [
+    const PREFIXES: [(&str, &str); 10] = [
         ("ui-", "ui"),
         ("tab-", "tab"),
         ("popup-", "popup"),
         ("extpopup-", "extpopup"),
         ("devtools-", "devtools"),
+        ("inspect-", "devtools"),
         ("agent-", "agent"),
         ("peek-", "peek"),
         ("script-", "script"),

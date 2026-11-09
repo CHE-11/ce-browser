@@ -3,6 +3,7 @@ import type { BrowserSettings } from "@type/browser";
 import { IconButton } from "@/components/IconButton";
 import { Menu, MenuItem } from "@/components/Menu";
 import { bookmarkEditorFrameStyle, bookmarkItemStyle } from "@/lib/bookmark-size";
+import { bookmarksBarAlign, bookmarksBarAlignClass } from "@/lib/bookmarks-bar-align";
 import {
   CHROME,
   chromeVarStyle,
@@ -128,7 +129,10 @@ function BookmarksBarPreview({ settings }: { settings: BrowserSettings }) {
     { id: "maps", label: "Maps", folder: false },
   ];
   return (
-    <div id="styles-preview-bookmarks-bar" className={cn(frameClass, "flex items-center gap-1 bg-zinc-900 px-2 py-1")}>
+    <div
+      id="styles-preview-bookmarks-bar"
+      className={cn(frameClass, "flex w-full items-center gap-1 bg-zinc-900 px-2 py-1", bookmarksBarAlignClass(bookmarksBarAlign(settings.bookmarksBarAlign)))}
+    >
       {items.map((item) => (
         <div id={`styles-preview-bookmark-${item.id}`} key={item.id} className="inline-flex items-center gap-[0.5em] rounded-md text-zinc-300" style={style}>
           {item.folder ? (

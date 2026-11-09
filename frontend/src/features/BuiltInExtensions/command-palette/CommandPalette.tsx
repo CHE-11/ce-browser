@@ -10,6 +10,7 @@ import {
   groupBySite,
   navigate,
   openDevtools,
+  openExtensionPanel,
   openPopup,
   openReader,
   restoreClosed,
@@ -26,6 +27,7 @@ import {
 import { PopupFrame } from "@/components/PopupFrame";
 import { CHROME, metric, paletteHintClass, paletteInputClass, paletteRowClass } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
+import { extensionOpenAs } from "@/lib/extension-open";
 import { flattenBookmarks, useBookmarks, useExtensions, useHistory, useRecentlyClosed, useSettings, useTabs } from "@/lib/use-browser";
 import { BUILTIN_TOOLS } from "@features/BuiltInExtensions/builtin";
 import { builtinToolEnabled } from "@/lib/toolbar-pin";
@@ -257,7 +259,12 @@ export function CommandPalette() {
         hint: "Extension",
         keywords: extension.description,
         group: "Extension",
-        run: () => openHere("extension", `id=${extension.id}`),
+        run: () => {
+          if (extensionOpenAs(settings, extension.id) === "panel") {
+            return openExtensionPanel(extension.id);
+          }
+          return openHere("extension", `id=${extension.id}`);
+        },
       }));
     const pages: Hit[] = [
       ...flattenBookmarks(bookmarks).map((bookmark) => ({

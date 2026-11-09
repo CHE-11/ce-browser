@@ -45,6 +45,8 @@ pub struct PdfOptions {
     pub page_numbers: bool,
     /// `left`, `center`, or `right`.
     pub page_number_location: String,
+    /// Text size percent from the print settings. Page numbers are 85% of the body size this scales.
+    pub text_size: f64,
     pub scale: f64,
     pub title: String,
     pub url: String,
@@ -61,6 +63,7 @@ impl Default for PdfOptions {
             header_footer: false,
             page_numbers: false,
             page_number_location: "right".into(),
+            text_size: 100.0,
             scale: 1.0,
             title: String::new(),
             url: String::new(),
@@ -70,16 +73,22 @@ impl Default for PdfOptions {
 
 impl PdfOptions {
     fn layout(&self) -> webview2::PdfLayout {
+        let margin = self.margin.clamp(0.0, 3.0);
         webview2::PdfLayout {
             page_width: self.page_width.clamp(1.0, 50.0),
             page_height: self.page_height.clamp(1.0, 50.0),
             landscape: self.landscape,
-            margin: self.margin.clamp(0.0, 3.0),
+            margin,
             backgrounds: self.backgrounds,
             header_footer: self.header_footer,
             page_numbers: self.page_numbers,
             header_template: page_number_header(self.header_footer),
-            footer_template: page_number_footer(self.header_footer, &self.page_number_location),
+            footer_template: page_number_footer(
+                self.header_footer,
+                &self.page_number_location,
+                margin,
+                self.text_size,
+            ),
             title: self.title.clone(),
             url: self.url.clone(),
             scale: if self.scale > 0.0 { self.scale } else { 1.0 },
@@ -97,27 +106,63 @@ pub fn page_number_header(header_footer: bool) -> String {
     }
 }
 
+/// Article body in the print document (`17px`, then the text-size percent).
+const PRINT_BODY_FONT_PX: u32 = 17;
+/// Page numbers are 85% of the body size. Stored as hundredths so the product stays exact.
+const PAGE_NUMBER_RATIO_HUNDREDTHS: u32 = 85;
+/// The footer spans the full sheet. Numbers sit at least this far from the paper edge,
+/// and further in when the body margin is wider, so they line up with the text.
+const PAGE_NUMBER_INSET_MIN_IN: f64 = 0.5;
+
+/// `17px * textSize% * 0.85`, as a CSS pixel length such as `14.45px`.
+fn page_number_font_px(text_size: f64) -> String {
+    let percent = if text_size <= 0.0 {
+        100
+    } else {
+        text_size.clamp(70.0, 150.0).round() as u32
+    };
+    let hundredths = (PRINT_BODY_FONT_PX * percent * PAGE_NUMBER_RATIO_HUNDREDTHS + 50) / 100;
+    format!("{}.{:02}px", hundredths / 100, hundredths % 100)
+}
+
+fn page_number_inset(margin_in: f64) -> f64 {
+    margin_in.max(PAGE_NUMBER_INSET_MIN_IN)
+}
+
+fn css_num(value: f64) -> String {
+    format!("{value:.2}")
+}
+
 /// `current/total` at `location`. With headers on, the page URL keeps the opposite side.
-pub fn page_number_footer(header_footer: bool, location: &str) -> String {
+pub fn page_number_footer(
+    header_footer: bool,
+    location: &str,
+    margin_in: f64,
+    text_size: f64,
+) -> String {
     let align = match location {
         "left" => "left",
         "center" => "center",
         _ => "right",
     };
-    let number = r#"<span class="pageNumber"></span>/<span class="totalPages"></span>"#;
+    let font = page_number_font_px(text_size);
+    let inset = css_num(page_number_inset(margin_in));
+    let number = format!(
+        r#"<span style="font-size:{font}"><span class="pageNumber"></span>/<span class="totalPages"></span></span>"#
+    );
     if !header_footer {
         return format!(
-            r#"<div style="font-size:9px;width:100%;text-align:{align};color:#444;padding:0 8px;">{number}</div>"#
+            r#"<div style="width:100%;text-align:{align};color:#444;padding:0 {inset}in;">{number}</div>"#
         );
     }
-    let url = r#"<span class="url"></span>"#;
+    let url = r#"<span class="url" style="font-size:9px"></span>"#;
     let (left, center, right) = match align {
-        "left" => (number, "", url),
-        "center" => (url, number, ""),
-        _ => (url, "", number),
+        "left" => (number.as_str(), "", url),
+        "center" => (url, number.as_str(), ""),
+        _ => (url, "", number.as_str()),
     };
     format!(
-        r#"<table style="font-size:9px;width:100%;color:#444;"><tr><td style="width:33%;text-align:left;">{left}</td><td style="width:34%;text-align:center;">{center}</td><td style="width:33%;text-align:right;">{right}</td></tr></table>"#
+        r#"<table style="width:100%;color:#444;border-spacing:0;"><tr><td style="width:33%;text-align:left;padding-left:{inset}in;">{left}</td><td style="width:34%;text-align:center;">{center}</td><td style="width:33%;text-align:right;padding-right:{inset}in;">{right}</td></tr></table>"#
     )
 }
 
@@ -412,19 +457,32 @@ mod tests {
 
     #[test]
     fn page_numbers_are_current_over_total_at_the_chosen_side() {
-        let right = page_number_footer(false, "right");
+        let right = page_number_footer(false, "right", 0.5, 100.0);
         assert!(right.contains(r#"text-align:right"#));
-        assert!(right.contains(r#"<span class="pageNumber"></span>/<span class="totalPages"></span>"#));
+        assert!(right.contains(r#"font-size:14.45px"#));
+        assert!(right.contains(r#"padding:0 0.50in"#));
+        assert!(
+            right.contains(r#"<span class="pageNumber"></span>/<span class="totalPages"></span>"#)
+        );
         assert!(!right.contains("url"));
 
-        let center = page_number_footer(false, "center");
+        let center = page_number_footer(false, "center", 0.25, 0.0);
         assert!(center.contains(r#"text-align:center"#));
+        assert!(center.contains(r#"padding:0 0.50in"#));
+        assert!(center.contains(r#"font-size:14.45px"#));
 
-        let left = page_number_footer(false, "nope");
+        let wide = page_number_footer(false, "left", 1.0, 150.0);
+        assert!(wide.contains(r#"text-align:left"#));
+        assert!(wide.contains(r#"padding:0 1.00in"#));
+        assert!(wide.contains(r#"font-size:21.68px"#));
+
+        let left = page_number_footer(false, "nope", 0.5, 100.0);
         assert!(left.contains(r#"text-align:right"#));
 
-        let with_url = page_number_footer(true, "left");
+        let with_url = page_number_footer(true, "left", 0.5, 100.0);
         assert!(with_url.contains(r#"text-align:left"#));
+        assert!(with_url.contains(r#"padding-left:0.50in"#));
+        assert!(with_url.contains(r#"padding-right:0.50in"#));
         assert!(with_url.find(r#"pageNumber"#).unwrap() < with_url.find(r#"class="url""#).unwrap());
         let header = page_number_header(false);
         assert!(!header.contains("title"));

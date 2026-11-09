@@ -172,7 +172,7 @@ function SortHeader({
   );
 }
 
-export function ExtensionsTable({
+export function BuiltInExtensionsTable({
   extensions,
   loaded,
   settings,
@@ -198,7 +198,16 @@ export function ExtensionsTable({
   const list = sortedRows(rows(loaded ? extensions : [], settings), sort);
 
   return (
-    <div id="extensions-table-wrap" className="overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-900">
+    <section id="builtin-extensions" className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900">
+      <div id="builtin-extensions-heading" className="border-b border-zinc-800 p-4">
+        <h2 id="builtin-extensions-title" className="text-sm font-semibold">
+          Built-in extensions
+        </h2>
+        <p id="builtin-extensions-hint" className="mt-1 text-xs text-zinc-400">
+          Tools that ship with the browser.
+        </p>
+      </div>
+      <div id="extensions-table-wrap" className="overflow-x-auto">
       <table id="extensions-table" className="w-full min-w-[52rem] table-fixed border-collapse text-left text-sm">
         <thead id="extensions-table-head">
           <tr id="extensions-table-head-row" className="border-b border-zinc-800 text-xs text-zinc-500">
@@ -338,6 +347,7 @@ export function ExtensionsTable({
           setPending(null);
         }}
       />
-    </div>
+      </div>
+    </section>
   );
 }

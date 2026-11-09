@@ -1116,6 +1116,18 @@ async fn toggle_host_panel(app: AppHandle, window: Window, id: String) -> Result
 }
 
 #[tauri::command]
+async fn open_extension_panel(app: AppHandle, window: Window, id: String) -> Result<bool, String> {
+    let window = browser_window(&window);
+    host_extensions::toggle_store_extension_panel(&app, &window, &id)
+}
+
+#[tauri::command]
+async fn place_extension_panel(app: AppHandle, window: Window, id: String) -> Result<(), String> {
+    let window = browser_window(&window);
+    host_extensions::place_store_extension_panel(&app, &window, &id)
+}
+
+#[tauri::command]
 async fn set_host_panel_layout(app: AppHandle, id: String, side: String) -> Result<(), String> {
     host_extensions::set_panel_layout(&app, &id, &side)
 }
@@ -2809,6 +2821,8 @@ pub fn run() {
             set_host_extension_enabled,
             remove_host_extension,
             toggle_host_panel,
+            open_extension_panel,
+            place_extension_panel,
             set_host_panel_layout,
             set_host_page_toolbar_side,
             set_host_page_toolbar_open,

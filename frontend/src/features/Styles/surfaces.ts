@@ -1,5 +1,7 @@
+import { BOOKMARKS_BAR_ALIGN_OPTIONS } from "@/lib/bookmarks-bar-align";
 import { CHROME_LIMITS, type ChromeKey } from "@/lib/chrome-metrics";
 import { TAB_SIZE } from "@/lib/tab-size";
+import type { BookmarksBarAlign } from "@type/browser";
 
 export type StyleControl = {
   key: ChromeKey;
@@ -11,11 +13,19 @@ export type StyleControl = {
   step: number;
 };
 
+export type StyleChoice = {
+  key: "bookmarksBarAlign";
+  label: string;
+  hint: string;
+  options: { value: BookmarksBarAlign; label: string }[];
+};
+
 export type StyleSurface = {
   id: string;
   label: string;
   hint: string;
   controls: StyleControl[];
+  choices?: StyleChoice[];
 };
 
 const TEXT = "In rem. 1rem is the browser's base text size.";
@@ -65,6 +75,14 @@ export const STYLE_SURFACES: StyleSurface[] = [
     id: "bookmarks-bar",
     label: "Bookmarks bar",
     hint: "Links and folders on the bar under the address field.",
+    choices: [
+      {
+        key: "bookmarksBarAlign",
+        label: "Alignment",
+        hint: "Where folders and bookmarks sit on the bar.",
+        options: BOOKMARKS_BAR_ALIGN_OPTIONS,
+      },
+    ],
     controls: [
       rem("bookmarksBarTextSize", "Text", TEXT, text),
       rem("bookmarksBarPadding", "Padding", SIDE, pad),

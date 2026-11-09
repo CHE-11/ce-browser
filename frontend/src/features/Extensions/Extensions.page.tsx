@@ -1,18 +1,21 @@
 import { Button } from "@/components/Button";
+import { isComponentExtension } from "@/components/ExtensionIcon";
 import { PageShell } from "@/components/PageShell";
 import { Toggle } from "@/components/Toggle";
 import { installExtensionZip, installExtensionFolder, installExtensionFromStore, checkExtensionUpdates, updateExtension, setExtensionEnabled, openExtensionOptions, removeExtension, saveSettings } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
+import { saveExtensionOpenAs, saveExtensionPanelResizable, saveExtensionPanelSide, saveExtensionPanelWidth } from "@/lib/extension-open";
 import { saveBuiltinEnabled, saveToolbarPlacement } from "@/lib/toolbar-pin";
 import { toolbarSide, toolbarSidePatch } from "@/lib/toolbar-side";
 import { useExtensions, useHostExtensions, useSettings } from "@/lib/use-browser";
-import { ExtensionInfo, ToolbarPlacement, ToolbarSide } from "@type/browser";
+import { ExtensionInfo, ExtensionOpenAs, HostPanelSide, ToolbarPlacement, ToolbarSide } from "@type/browser";
 import { FileArchive, FolderOpen, Puzzle } from "lucide-react";
 import { useState } from "react";
 import { builtinTool } from "../BuiltInExtensions/builtin";
-import { ExtensionsTable } from "./ExtensionsTable";
+import { BuiltInExtensionsTable } from "./BuiltInExtensionsTable";
 import { ExtensionsToolbarSideControl } from "./ExtensionsToolbarSideControl";
 import { HostExtensionsSection } from "./HostExtensionsSection";
+import { StoreExtensionsTable } from "./StoreExtensionsTable";
 
 
 export function ExtensionsPage() {
@@ -74,6 +77,9 @@ export function ExtensionsPage() {
     action.catch((reason: unknown) => setStatus({ tone: "error", text: String(reason) }));
   };
 
+  const storeExtensions = extensions.filter((extension) => !isComponentExtension(extension.id, extension.name));
+  const componentExtensions = extensions.filter((extension) => isComponentExtension(extension.id, extension.name));
+
   const setPlacement = (id: string, placement: ToolbarPlacement) => {
     if (settings) {
       act(saveToolbarPlacement(settings, id, placement));
@@ -83,6 +89,30 @@ export function ExtensionsPage() {
   const setToolbarLabels = (verticalToolbarLabels: boolean) => {
     if (settings) {
       act(saveSettings({ ...settings, verticalToolbarLabels }));
+    }
+  };
+
+  const setOpenAs = (id: string, mode: ExtensionOpenAs) => {
+    if (settings) {
+      act(saveExtensionOpenAs(settings, id, mode));
+    }
+  };
+
+  const setPanelSide = (id: string, side: HostPanelSide) => {
+    if (settings) {
+      act(saveExtensionPanelSide(settings, id, side));
+    }
+  };
+
+  const setPanelWidth = (id: string, width: number) => {
+    if (settings) {
+      act(saveExtensionPanelWidth(settings, id, width));
+    }
+  };
+
+  const setPanelResizable = (id: string, resizable: boolean) => {
+    if (settings) {
+      act(saveExtensionPanelResizable(settings, id, resizable));
     }
   };
 
@@ -206,6 +236,21 @@ export function ExtensionsPage() {
             No third-party extensions installed yet. Paste a store link, or install a .zip, .crx, or unpacked folder.
           </p>
         ) : null}
+        <StoreExtensionsTable
+          extensions={storeExtensions}
+          loaded={loaded}
+          settings={settings}
+          busy={busy}
+          onPlacement={setPlacement}
+          onOpenAs={setOpenAs}
+          onPanelSide={setPanelSide}
+          onPanelWidth={setPanelWidth}
+          onPanelResizable={setPanelResizable}
+          onEnabled={(id, enabled) => act(setExtensionEnabled(id, enabled))}
+          onOptions={(id) => act(openExtensionOptions(id))}
+          onRemove={(id) => act(removeExtension(id))}
+          onUpdate={(id) => void install(() => updateExtension(id), "Updated")}
+        />
         <HostExtensionsSection
           extensions={host.extensions}
           loaded={host.loaded}
@@ -213,8 +258,8 @@ export function ExtensionsPage() {
           onStatus={setStatus}
           onBusy={setBusy}
         />
-        <ExtensionsTable
-          extensions={extensions}
+        <BuiltInExtensionsTable
+          extensions={componentExtensions}
           loaded={loaded}
           settings={settings}
           busy={busy}

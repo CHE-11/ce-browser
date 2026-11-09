@@ -63,7 +63,7 @@ body {
   padding: 0;
   color: #1a1a1a;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  font-size: calc(17px * var(--ce-text-scale, 1));
+  font-size: calc(17px * var(--ce-text-scale, 1)); /* page numbers are 85% of this; see page_number_font_px */
   line-height: 1.62;
   word-wrap: break-word;
   overflow-wrap: break-word;

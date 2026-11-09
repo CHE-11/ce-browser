@@ -646,6 +646,7 @@ const COPY_PARTS: &[PartSpec] = &[
         settings: &[
             "showBookmarksBar",
             "bookmarksBarFolderIcons",
+            "bookmarksBarAlign",
             "bookmarksBarTextSize",
             "bookmarksBarPadding",
             "bookmarkFolderTextSize",

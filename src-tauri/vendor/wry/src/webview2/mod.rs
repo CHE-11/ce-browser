@@ -516,19 +516,25 @@ impl InnerWebView {
 
     // Navigation
     if let Some(mut url) = attributes.url {
-      if let Some((protocol, _)) = url.split_once("://") {
-        if custom_protocols.contains(protocol) {
-          // WebView2 supports non-standard protocols only on Windows 10+, so we have to use this workaround
-          // See https://github.com/MicrosoftEdge/WebView2Feedback/issues/73
-          url = custom_protocol_workaround::apply_uri_work_around(&url, http_or_https, protocol)
+      // Keep in sync with `PENDING_NEW_WINDOW` in src-tauri/src/tabs.rs. A webview handed to
+      // NewWindowRequested must not be navigated first. An earlier Navigate leaves
+      // chrome-extension documents with no DevTools target, and CallDevToolsProtocolMethod
+      // then fails with ERROR_INVALID_STATE.
+      if url != "about:blank#ce-new-window" {
+        if let Some((protocol, _)) = url.split_once("://") {
+          if custom_protocols.contains(protocol) {
+            // WebView2 supports non-standard protocols only on Windows 10+, so we have to use this workaround
+            // See https://github.com/MicrosoftEdge/WebView2Feedback/issues/73
+            url = custom_protocol_workaround::apply_uri_work_around(&url, http_or_https, protocol)
+          }
         }
-      }
 
-      if let Some(headers) = attributes.headers {
-        load_url_with_headers(&webview, env, &url, headers)?;
-      } else {
-        let url = HSTRING::from(url);
-        unsafe { webview.Navigate(&url)? };
+        if let Some(headers) = attributes.headers {
+          load_url_with_headers(&webview, env, &url, headers)?;
+        } else {
+          let url = HSTRING::from(url);
+          unsafe { webview.Navigate(&url)? };
+        }
       }
     } else if let Some(html) = attributes.html {
       let html = HSTRING::from(html);
@@ -909,6 +915,14 @@ impl InnerWebView {
           args.TryGetWebMessageAsString(&mut js)?;
           take_pwstr(js)
         };
+
+        // WebView2 has one postMessage channel. Page scripts share it for host
+        // messages such as `{"type":"ce-theme"}`. Those are not invokes. Passing
+        // them through makes Tauri evaluate
+        // `console.error("JSON error: missing field `cmd`")` in the page.
+        if !is_tauri_invoke(&js) {
+          return Ok(());
+        }
 
         #[cfg(feature = "tracing")]
         let _span = tracing::info_span!(parent: None, "wry::ipc::handle").entered();
@@ -1856,4 +1870,47 @@ fn is_windows_7() -> bool {
   let v = windows_version::OsVersion::current();
   // windows 7 is 6.1
   v.major == 6 && v.minor == 1
+}
+
+/// Tauri serializes invokes as `{"cmd":...}` with `cmd` first.
+/// Host messages on the same channel (`{"type":"ce-theme"}`) must not be parsed as invokes.
+fn is_tauri_invoke(body: &str) -> bool {
+  let bytes = body.trim_start().as_bytes();
+  if bytes.first() != Some(&b'{') {
+    return false;
+  }
+  let mut index = 1;
+  while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+    index += 1;
+  }
+  const KEY: &[u8] = b"\"cmd\"";
+  if bytes.get(index..index + KEY.len()) != Some(KEY) {
+    return false;
+  }
+  index += KEY.len();
+  while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+    index += 1;
+  }
+  bytes.get(index) == Some(&b':')
+}
+
+#[cfg(test)]
+mod invoke_shape_tests {
+  use super::is_tauri_invoke;
+
+  #[test]
+  fn an_invoke_starts_with_cmd() {
+    assert!(is_tauri_invoke(
+      r#"{"cmd":"get_settings","callback":1,"error":2,"payload":{}}"#
+    ));
+    assert!(is_tauri_invoke(r#"  {"cmd" : "x"}"#));
+  }
+
+  #[test]
+  fn a_host_message_is_not_an_invoke() {
+    assert!(!is_tauri_invoke(r#"{"type":"ce-theme","color":"#ffffff"}"#));
+    assert!(!is_tauri_invoke(r#"{"type":"ce-error"}"#));
+    assert!(!is_tauri_invoke(r#"{"message":{"cmd":"nested"}}"#));
+    assert!(!is_tauri_invoke("not json"));
+  }
 }

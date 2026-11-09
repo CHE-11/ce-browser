@@ -679,6 +679,9 @@ export type HostExtensionInfo = {
   pageToolbar: HostPageToolbar | null;
 };
 
+/** How a store extension with a popup opens from its toolbar button. */
+export type ExtensionOpenAs = "popover" | "panel";
+
 export type ExtensionInfo = {
   id: string;
   name: string;
@@ -720,6 +723,9 @@ export type FileHandler = {
 /** Edge of the window where the tools toolbar sits. */
 export type ToolbarSide = "top" | "right" | "bottom" | "left";
 
+/** Where folders and bookmarks sit on the bookmarks bar. */
+export type BookmarksBarAlign = "left" | "center" | "right";
+
 /** Where a tool or extension is shown. Both can be set. Both clear means unpinned. */
 export type ToolbarPlacement = {
   /** Shown next to the address bar. */
@@ -745,6 +751,8 @@ export type BrowserSettings = {
   showBookmarksBar: boolean;
   /** Folder icons on the bookmarks bar. Off leaves folder titles only. Site favicons always show. */
   bookmarksBarFolderIcons: boolean;
+  /** Where folders and bookmarks sit on the bookmarks bar. */
+  bookmarksBarAlign: BookmarksBarAlign;
   /** Text size of bookmarks on the bar, in rem. */
   bookmarksBarTextSize: number;
   /** Side padding of bookmarks on the bar, in rem. Top and bottom get half. */
@@ -802,6 +810,26 @@ export type BrowserSettings = {
   hiddenToolbarExtensions: string[];
   /** Explicit pins. A missing id keeps the old default: built-in tools on the tools toolbar, extensions on the address bar. */
   toolbarPlacements: Record<string, ToolbarPlacement>;
+  /**
+   * How a store extension opens. A missing id opens as a popover.
+   * An older file omits this map.
+   */
+  extensionOpenAs: Record<string, ExtensionOpenAs>;
+  /**
+   * Which edge a store extension's panel uses. A missing id docks on the right.
+   * An older file omits this map.
+   */
+  extensionPanelSide: Record<string, HostPanelSide>;
+  /**
+   * CSS pixels a store extension's panel opens at. A missing id uses 380.
+   * An older file omits this map.
+   */
+  extensionPanelWidth: Record<string, number>;
+  /**
+   * `false` turns off dragging a store extension's panel. A missing id stays resizable.
+   * An older file omits this map.
+   */
+  extensionPanelResizable: Record<string, boolean>;
   /** Order of pinned toolbar icons. Empty keeps the built-in order, then extensions. */
   toolbarOrder: string[];
   /** Built-in tool ids the user turned off. Empty means every built-in tool stays on. */
@@ -1548,6 +1576,8 @@ export type PdfOptions = {
   pageNumbers: boolean;
   /** Where the page number sits. Used when `pageNumbers` is on. */
   pageNumberLocation: PrintPageNumberLocation;
+  /** Text size percent. Page numbers are 85% of the body size this scales. */
+  textSize: number;
   scale: number;
   title: string;
   url: string;

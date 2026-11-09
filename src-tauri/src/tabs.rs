@@ -22,6 +22,9 @@ const DEFAULT_UI_HEIGHT: f64 = 84.0;
 /// Extension popouts (`chrome.windows.create`) often arrive with no size, or with the narrow
 /// toolbar width. A wider frame fits the vault UI.
 const EXTENSION_POPOUT_WIDTH: f64 = 480.0;
+/// Keep in sync with the unnavigated-window check in `vendor/wry`. WebView2 rejects DevTools
+/// on a document that was navigated before `SetNewWindow`.
+const PENDING_NEW_WINDOW: &str = "about:blank#ce-new-window";
 const EXTENSION_POPOUT_HEIGHT: f64 = 680.0;
 /// Restored pinned tabs wait this long, so the selected page loads first.
 const PIN_LOAD_DELAY: Duration = Duration::from_millis(1500);
@@ -1404,6 +1407,17 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
             let finished = matches!(payload.event(), PageLoadEvent::Finished);
             let loading = matches!(payload.event(), PageLoadEvent::Started);
             let url = paths::display_url(&load_app, payload.url().as_str());
+            // A cancelled navigation reports the blank document. Keep the address the
+            // tab was opened with until the real page arrives.
+            let blank_report = url.to_ascii_lowercase().starts_with("about:")
+                && with_state(&load_app, |state| {
+                    state.tab_mut(id).is_some_and(|tab| {
+                        tab.info.url.starts_with("http://") || tab.info.url.starts_with("https://")
+                    })
+                });
+            if blank_report {
+                return;
+            }
             let extension_page = is_extension_url(&url);
             let new_tab_page = url == paths::NEW_TAB;
             let fresh = with_state(&load_app, |state| {
@@ -1844,9 +1858,10 @@ const ZOOM_WHEEL_SCRIPT: &str = r#"(function () {
   }
 })();"#;
 
-/// Shift+click on a web link asks the browser for a peek. `page_hooks` reads the message.
-/// The click itself is left alone: WebView2 also raises a new-window request for it, and
-/// cancelling the click here drops that request when the message never arrives.
+/// Shift+click on a web link asks the browser for a peek. Ctrl+Shift+click asks for a
+/// background tab. `page_hooks` reads both messages. The peek click is left alone: WebView2
+/// also raises a new-window request for it, and cancelling the click drops that request when
+/// the message never arrives. Ctrl+Shift cancels the click so the current page stays put.
 const PEEK_CLICK_SCRIPT: &str = r#"(function () {
   if (!/^https?:$/.test(location.protocol)) return;
   function linkHref(event) {
@@ -1862,13 +1877,80 @@ const PEEK_CLICK_SCRIPT: &str = r#"(function () {
     return "";
   }
   document.addEventListener("click", function (event) {
-    if (!event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.button !== 0) return;
+    if (event.button !== 0 || event.altKey || event.metaKey) return;
     var href = linkHref(event);
     var host = window.__ceHost || (window.chrome && window.chrome.webview);
     if (!href || !host) return;
+    if (event.ctrlKey && event.shiftKey) {
+      event.preventDefault();
+      host.postMessage({ type: "ce-background-tab", url: href });
+      return;
+    }
+    if (!event.shiftKey || event.ctrlKey) return;
     host.postMessage({ type: "ce-peek", url: href });
   }, true);
 })();"#;
+
+/// How long the page message and the new-window request for one Ctrl+Shift+click count as
+/// the same open.
+const BACKGROUND_LINK_FOR: Duration = Duration::from_millis(500);
+
+/// The click that already opened a background tab, so the other delivery does not open a second.
+static BACKGROUND_LINK: Mutex<Option<(u32, String, Instant)>> = Mutex::new(None);
+
+/// Ctrl+Shift+click on a link. Shift alone is a peek. Ctrl alone keeps the new tab in front.
+pub fn link_click_background(shift: bool, ctrl: bool, alt: bool) -> bool {
+    ctrl && shift && !alt
+}
+
+/// First caller for this click opens the background tab. The page message and the new-window
+/// request both arrive, and the second one must not open another tab.
+pub fn claim_background_link(opener: u32, raw: &str) -> bool {
+    let Some(url) = http_link(raw) else {
+        return false;
+    };
+    let mut slot = BACKGROUND_LINK.lock().expect("background link");
+    if let Some((id, previous, at)) = slot.as_ref()
+        && *id == opener
+        && previous == &url
+        && at.elapsed() < BACKGROUND_LINK_FOR
+    {
+        return false;
+    }
+    *slot = Some((opener, url, Instant::now()));
+    true
+}
+
+fn background_link_taken(opener: u32, raw: &str) -> bool {
+    let Some(url) = http_link(raw) else {
+        return false;
+    };
+    let slot = BACKGROUND_LINK.lock().expect("background link");
+    matches!(
+        slot.as_ref(),
+        Some((id, previous, at))
+            if *id == opener && previous == &url && at.elapsed() < BACKGROUND_LINK_FOR
+    )
+}
+
+fn http_link(raw: &str) -> Option<String> {
+    let url = Url::parse(raw).ok()?;
+    matches!(url.scheme(), "http" | "https").then(|| url.to_string())
+}
+
+/// Ctrl+Shift+click on a link in tab `opener`. The new tab stays behind the current page.
+pub fn open_background_link(app: &AppHandle, opener: u32, raw: &str) {
+    if !claim_background_link(opener, raw) {
+        return;
+    }
+    let Some(url) = http_link(raw).and_then(|url| Url::parse(&url).ok()) else {
+        return;
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = open_beside(&app, opener, url, true);
+    });
+}
 
 /// Paints app pages before their CSS loads. The app stylesheet comes later and overrides this.
 pub fn page_background_script(app: &AppHandle) -> String {
@@ -1919,8 +2001,9 @@ pub fn new_window(
 /// environment. Letting WebView2 build the default popup freezes this process and leaves
 /// a window with no title bar, because every page view here is a child of the browser window.
 ///
-/// The window starts at `about:blank` and is handed to `SetNewWindow` before anything navigates
-/// it. WebView2 commits the popout. Navigating or resizing from that callback never returns, so
+/// The window is created without a navigation and handed to `SetNewWindow`. WebView2 commits
+/// the popout as that webview's first document. Navigating first leaves a `chrome-extension:`
+/// page with no DevTools target. Navigating or resizing from the callback never returns, so
 /// the follow-up runs on a later turn of the main thread.
 fn script_window(
     app: &AppHandle,
@@ -1937,7 +2020,7 @@ fn script_window(
     }) else {
         return NewWindowResponse::Deny;
     };
-    let Ok(blank) = Url::parse("about:blank") else {
+    let Ok(blank) = Url::parse(PENDING_NEW_WINDOW) else {
         return NewWindowResponse::Deny;
     };
     let factor = if extension {
@@ -1969,6 +2052,7 @@ fn script_window(
         .shadow(true)
         .focused(true)
         .browser_extensions_enabled(true)
+        .devtools(true)
         .with_environment(environment)
         .on_new_window(move |url, features| new_window(&host, None, url, features));
     if extension {
@@ -1976,7 +2060,10 @@ fn script_window(
             .background_color(settings::page_color(app))
             .on_document_title_changed(|window, title| {
                 let title = title.trim();
-                if title.is_empty() || title.eq_ignore_ascii_case("about:blank") {
+                if title.is_empty()
+                    || title.eq_ignore_ascii_case("about:blank")
+                    || title.starts_with("about:blank#")
+                {
                     return;
                 }
                 let _ = window.set_title(title);
@@ -2101,6 +2188,18 @@ fn blank_tab(
         });
         return NewWindowResponse::Deny;
     }
+    // Ctrl+Shift+click opens behind the current page. The page message may already have
+    // opened that tab, and this request must not open a second one in front.
+    let background = link_click_background(shift, ctrl, alt);
+    if let Some(id) = opener {
+        if background {
+            if !claim_background_link(id, url.as_str()) {
+                return NewWindowResponse::Deny;
+            }
+        } else if background_link_taken(id, url.as_str()) {
+            return NewWindowResponse::Deny;
+        }
+    }
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let (window, index, workspace, group) = match opener {
@@ -2135,6 +2234,7 @@ fn blank_tab(
                 window,
                 workspace,
                 group,
+                background,
                 ..OpenTab::new(url)
             },
         ) && let Some(opener) = opener
@@ -5610,8 +5710,8 @@ fn page_rect(app: &AppHandle, window_label: &str) -> (PhysicalPosition<i32>, Phy
     let left = (((ui_left + bars.left) * scale).round() as u32).min(size.width.saturating_sub(1));
     let right = (((ui_right + bars.right) * scale).round() as u32)
         .min(size.width.saturating_sub(left).saturating_sub(1));
-    let bottom = (((ui_bottom + bars.bottom) * scale).round() as u32)
-        .min(size.height.saturating_sub(top));
+    let bottom =
+        (((ui_bottom + bars.bottom) * scale).round() as u32).min(size.height.saturating_sub(top));
     (
         PhysicalPosition::new(left as i32, top as i32),
         PhysicalSize::new(size.width - left - right, size.height - top - bottom),
@@ -5631,9 +5731,7 @@ pub fn automation_panel_label(window: &str) -> String {
 
 pub fn is_fullscreen(app: &AppHandle, window: &str) -> bool {
     with_state(app, |state| {
-        state
-            .chrome(window)
-            .is_some_and(|chrome| chrome.fullscreen)
+        state.chrome(window).is_some_and(|chrome| chrome.fullscreen)
     })
 }
 
@@ -5647,6 +5745,15 @@ pub fn host_panel_extension(app: &AppHandle, window: &str) -> String {
             .chrome(window)
             .map(|chrome| chrome.host_extension.clone())
             .unwrap_or_default()
+    })
+}
+
+pub fn host_panel_edge(app: &AppHandle, window: &str) -> PanelEdge {
+    with_state(app, |state| {
+        state
+            .chrome(window)
+            .map(|chrome| chrome.panel_edge)
+            .unwrap_or(PanelEdge::Right)
     })
 }
 
@@ -5993,7 +6100,8 @@ pub fn open_surface_views(app: &AppHandle) -> Vec<Webview> {
         .collect()
 }
 
-/// The gap around a document. Remote pages follow Windows. App pages use the theme.
+/// The gap around a document. A remote page stays white until its host declares a dark
+/// color scheme. App pages use the theme.
 pub fn paint_document_background(app: &AppHandle, id: u32, url: &str) {
     let Some(webview) = page_view(app, id) else {
         return;
@@ -6003,7 +6111,7 @@ pub fn paint_document_background(app: &AppHandle, id: u32, url: &str) {
 
 fn document_color(app: &AppHandle, url: &str) -> Color {
     if remote_document(app, url) {
-        if crate::webview2::page_keeps_light_scheme(url) {
+        if crate::webview2::page_keeps_light_scheme(app, url) {
             Color(0xff, 0xff, 0xff, 255)
         } else {
             settings::site_canvas(app)
@@ -7572,6 +7680,20 @@ pub fn try_tab_url(app: &AppHandle, id: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ctrl_shift_click_opens_one_background_tab() {
+        assert!(link_click_background(true, true, false));
+        assert!(!link_click_background(true, false, false));
+        assert!(!link_click_background(false, true, false));
+        assert!(!link_click_background(true, true, true));
+        let url = "https://example.com/ctrl-shift-background";
+        assert!(claim_background_link(4242, url));
+        assert!(!claim_background_link(4242, url));
+        assert!(background_link_taken(4242, url));
+        assert!(!background_link_taken(4242, "https://example.com/other"));
+        assert!(!claim_background_link(4242, "not a url"));
+    }
 
     #[test]
     fn debugging_port_is_fixed_and_local() {

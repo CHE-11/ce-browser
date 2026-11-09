@@ -329,12 +329,34 @@ fn pin_profile_scheme(core: &ICoreWebView2) {
     }
 }
 
-/// Points every open profile at the Windows light or dark scheme.
+/// Points every open profile at the Windows light or dark scheme, then matches each tab's
+/// override to that host's decision. The profile stays on auto so the browser UI is left alone.
 pub fn apply_site_color_scheme(app: &AppHandle) {
     for webview in tabs::open_surface_views(app) {
-        let _ = webview.with_webview(|platform| {
-            if let Ok(core) = core(&platform) {
-                pin_profile_scheme(&core);
+        let label = webview.label().to_string();
+        let id = label
+            .strip_prefix("tab-")
+            .and_then(|id| id.parse::<u32>().ok());
+        let url = id
+            .and_then(|id| tabs::tab_page_url(app, id))
+            .unwrap_or_default();
+        // A blank document is not a host decision. A request already in flight is resuming a
+        // cancelled navigation, and replacing it drops that resume.
+        let want = page_host(&url).map(|_| page_keeps_light_scheme(app, &url));
+        let pending = id.is_some_and(scheme_pending);
+        let app = app.clone();
+        let _ = webview.with_webview(move |platform| {
+            let Ok(core) = core(&platform) else {
+                return;
+            };
+            pin_profile_scheme(&core);
+            if pending {
+                return;
+            }
+            if let (Some(id), Some(want)) = (id, want)
+                && !scheme_matches(id, want)
+            {
+                request_page_scheme(&app, id, &core, want, None);
             }
         });
     }
@@ -367,35 +389,104 @@ pub(crate) fn forget_page_scheme(id: u32) {
     }
 }
 
-fn same_site(host: &str, name: &str) -> bool {
-    host == name
-        || host
-            .strip_suffix(name)
-            .is_some_and(|prefix| prefix.ends_with('.'))
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HostScheme {
+    Light,
+    Dark,
 }
 
-/// Gmail paints only part of a page for `prefers-color-scheme: dark`: the header stays light
-/// while the body and headings switch. Those pages stay on the light scheme. Gmail's own theme
-/// still applies. Every other site follows Windows.
-pub(crate) fn page_keeps_light_scheme(url: &str) -> bool {
-    let Ok(parsed) = url::Url::parse(url) else {
-        return false;
-    };
+fn host_decisions() -> &'static Mutex<HashMap<String, HostScheme>> {
+    static DECISIONS: std::sync::OnceLock<Mutex<HashMap<String, HostScheme>>> =
+        std::sync::OnceLock::new();
+    DECISIONS.get_or_init(Default::default)
+}
+
+/// Host of an `http` or `https` URL. Other schemes have no site decision.
+fn page_host(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return false;
+        return None;
     }
     let host = parsed
-        .host_str()
-        .unwrap_or("")
+        .host_str()?
         .trim_end_matches('.')
         .to_ascii_lowercase();
-    if same_site(&host, "mail.google.com") || same_site(&host, "gmail.com") {
-        return true;
+    (!host.is_empty()).then_some(host)
+}
+
+fn host_decision(url: &str) -> Option<HostScheme> {
+    let host = page_host(url)?;
+    host_decisions().lock().ok()?.get(&host).copied()
+}
+
+fn remember_host(url: &str, scheme: HostScheme) {
+    let Some(host) = page_host(url) else {
+        return;
+    };
+    if let Ok(mut decisions) = host_decisions().lock() {
+        decisions.insert(host, scheme);
     }
-    let gmail_page = parsed
-        .path_segments()
-        .is_some_and(|mut segments| segments.any(|segment| segment.eq_ignore_ascii_case("gmail")));
-    gmail_page && (same_site(&host, "workspace.google.com") || same_site(&host, "google.com"))
+}
+
+/// An http(s) page stays on the light scheme while Windows is dark, until its host declares
+/// that it can be rendered dark. Remembered dark hosts, and every page while Windows is light,
+/// follow the profile scheme.
+fn wants_light_scheme(windows_dark: bool, known: Option<HostScheme>, url: &str) -> bool {
+    windows_dark && page_host(url).is_some() && known != Some(HostScheme::Dark)
+}
+
+/// Light scheme and a white canvas for this URL. The gap around a remote page uses it.
+pub(crate) fn page_keeps_light_scheme(app: &AppHandle, url: &str) -> bool {
+    wants_light_scheme(
+        !crate::settings::windows_uses_light(app),
+        host_decision(url),
+        url,
+    )
+}
+
+/// `selectors` come from rules whose `color-scheme` value already contains `dark`.
+fn declares_dark_scheme<'a>(meta: &str, selectors: impl IntoIterator<Item = &'a str>) -> bool {
+    scheme_has_dark_token(meta)
+        || selectors
+            .into_iter()
+            .any(|selector| canvas_selector(selector))
+}
+
+fn scheme_has_dark_token(value: &str) -> bool {
+    value
+        .split_whitespace()
+        .any(|token| token.eq_ignore_ascii_case("dark"))
+}
+
+/// `html`, `body`, or `:root`, including one item of a selector list. A class or attribute
+/// on that element is the site's own theme toggle, not a statement that the page supports
+/// the user's dark scheme.
+fn canvas_selector(selector: &str) -> bool {
+    selector.split(',').any(|part| {
+        let part = part.trim();
+        part.eq_ignore_ascii_case("html")
+            || part.eq_ignore_ascii_case("body")
+            || part.eq_ignore_ascii_case(":root")
+    })
+}
+
+/// Background tabs sit far off the window. Their navigations run there; a cancelled one does not.
+fn page_is_shown(app: &AppHandle, id: u32) -> bool {
+    let Some(webview) = tabs::page_view(app, id) else {
+        return false;
+    };
+    webview
+        .position()
+        .ok()
+        .is_some_and(|at| at.x > -1000 && at.y > -1000)
+}
+
+fn scheme_pending(id: u32) -> bool {
+    scheme_holds()
+        .lock()
+        .ok()
+        .and_then(|holds| holds.get(&id).and_then(|hold| hold.pending))
+        .is_some()
 }
 
 fn scheme_matches(id: u32, want: bool) -> bool {
@@ -408,11 +499,10 @@ fn scheme_matches(id: u32, want: bool) -> bool {
     }
 }
 
-/// Installs the light override before a Gmail document is parsed, and clears it for every
-/// other page. A redirect is left alone: Gmail bounces through accounts.google.com, and
-/// flipping `prefers-color-scheme` on that hop leaves images and styles pending so the load
-/// event never arrives. Returns true when this navigation was cancelled and will be started
-/// again once the override is in place.
+/// Installs the light override before a document is parsed, or clears it when this host
+/// follows Windows. A redirect is left alone: flipping `prefers-color-scheme` on that hop
+/// leaves images and styles pending so the load event never arrives. Returns true when
+/// this navigation was cancelled and will be started again once the override is in place.
 fn defer_page_scheme(
     app: &AppHandle,
     id: u32,
@@ -426,7 +516,17 @@ fn defer_page_scheme(
     {
         return false;
     }
-    let want = page_keeps_light_scheme(uri);
+    // Cancelling the real navigation can surface `about:blank`. That hop is not a host,
+    // and clearing the override there leaves the tab on the blank page.
+    if page_host(uri).is_none() {
+        return false;
+    }
+    // A parked page never finishes a navigation that was cancelled and started again.
+    // Let it load, then the document probe reloads once the scheme is already set.
+    if !page_is_shown(app, id) {
+        return false;
+    }
+    let want = page_keeps_light_scheme(app, uri);
     if scheme_matches(id, want) {
         return false;
     }
@@ -515,6 +615,129 @@ fn note_scheme_result(id: u32, want: bool, applied: bool, resume: bool) {
     {
         skips.insert(id);
     }
+}
+
+const SCHEME_PROBE_SCRIPT: &str = r#"(function () {
+  var meta = "";
+  var tags = document.getElementsByTagName("meta");
+  for (var i = 0; i < tags.length; i++) {
+    var name = tags[i].getAttribute("name") || "";
+    if (name.toLowerCase() === "color-scheme") {
+      meta = tags[i].getAttribute("content") || "";
+      break;
+    }
+  }
+  var selectors = [];
+  function darkValue(value) {
+    return /(^|\s)dark(\s|$)/i.test(value || "");
+  }
+  function inline(el, name) {
+    if (!el || !el.style) return;
+    if (darkValue(el.style.getPropertyValue("color-scheme"))) selectors.push(name);
+  }
+  inline(document.documentElement, "html");
+  inline(document.body, "body");
+  function visit(rules) {
+    if (!rules || selectors.length > 64) return;
+    for (var i = 0; i < rules.length; i++) {
+      var rule = rules[i];
+      if (rule.selectorText && rule.style) {
+        var value = "";
+        try { value = rule.style.getPropertyValue("color-scheme"); } catch (e) {}
+        if (darkValue(value)) selectors.push(rule.selectorText);
+      }
+      if (rule.styleSheet) {
+        try { visit(rule.styleSheet.cssRules); } catch (e) {}
+      } else if (rule.cssRules) {
+        visit(rule.cssRules);
+      }
+      if (selectors.length > 64) return;
+    }
+  }
+  function visitSheet(sheet) {
+    if (!sheet) return;
+    try { visit(sheet.cssRules); } catch (e) {}
+  }
+  var sheets = document.styleSheets;
+  for (var s = 0; s < sheets.length; s++) visitSheet(sheets[s]);
+  if (document.adoptedStyleSheets) {
+    for (var a = 0; a < document.adoptedStyleSheets.length; a++) visitSheet(document.adoptedStyleSheets[a]);
+  }
+  return { meta: meta, selectors: selectors };
+})()"#;
+
+/// Reads whether this document can be rendered dark. A host is recorded once per session.
+/// A tab still forced light reloads so the Windows scheme is set before the next parse.
+fn probe_page_scheme(app: &AppHandle, id: u32, core: &ICoreWebView2) {
+    let url = tabs::tab_page_url(app, id).unwrap_or_default();
+    if page_host(&url).is_none() || host_decision(&url).is_some() {
+        return;
+    }
+    let app = app.clone();
+    let probed = url;
+    let handler = ExecuteScriptCompletedHandler::create(Box::new(move |result, value| {
+        if result.is_ok() {
+            settle_scheme_probe(&app, id, &probed, &value);
+        }
+        Ok(())
+    }));
+    let script = HSTRING::from(SCHEME_PROBE_SCRIPT);
+    if let Err(error) = unsafe { core.ExecuteScript(&script, &handler) } {
+        eprintln!("WebView2 color scheme: could not read the page scheme: {error}");
+    }
+}
+
+fn settle_scheme_probe(app: &AppHandle, id: u32, probed: &str, raw: &str) {
+    let Some((meta, selectors)) = parse_scheme_probe(raw) else {
+        return;
+    };
+    let current = tabs::tab_page_url(app, id).unwrap_or_default();
+    if page_host(&current) != page_host(probed) || host_decision(&current).is_some() {
+        return;
+    }
+    let dark = declares_dark_scheme(&meta, selectors.iter().map(String::as_str));
+    remember_host(
+        &current,
+        if dark {
+            HostScheme::Dark
+        } else {
+            HostScheme::Light
+        },
+    );
+    let want = page_keeps_light_scheme(app, &current);
+    if scheme_matches(id, want) {
+        return;
+    }
+    let app = app.clone();
+    let queued = app.clone().run_on_main_thread(move || {
+        let Some(webview) = tabs::page_view(&app, id) else {
+            return;
+        };
+        let _ = webview.with_webview(move |platform| {
+            if let Ok(core) = core(&platform) {
+                request_page_scheme(&app, id, &core, want, Some(current));
+            }
+        });
+    });
+    if let Err(error) = queued {
+        eprintln!("WebView2 color scheme: could not apply the site scheme: {error}");
+    }
+}
+
+fn parse_scheme_probe(raw: &str) -> Option<(String, Vec<String>)> {
+    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let value = match value {
+        serde_json::Value::String(inner) => serde_json::from_str(&inner).ok()?,
+        other => other,
+    };
+    let meta = value.get("meta")?.as_str()?.to_string();
+    let selectors = value
+        .get("selectors")?
+        .as_array()?
+        .iter()
+        .filter_map(|item| item.as_str().map(str::to_string))
+        .collect();
+    Some((meta, selectors))
 }
 
 pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview, window: &str) {
@@ -1964,6 +2187,11 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                             });
                         }
                     }
+                    Some("ce-background-tab") => {
+                        if let Some(url) = message.get("url").and_then(|url| url.as_str()) {
+                            tabs::open_background_link(&message_app, id, url);
+                        }
+                    }
                     Some("ce-notify") => {
                         let title = message
                             .get("title")
@@ -2280,7 +2508,7 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
         if let Ok(core2) = core.cast::<ICoreWebView2_2>() {
             let dom_app = app.clone();
             core2.add_DOMContentLoaded(
-                &DOMContentLoadedEventHandler::create(Box::new(move |_, _| {
+                &DOMContentLoadedEventHandler::create(Box::new(move |sender, _| {
                     tabs::set_progress(&dom_app, id, 70);
                     // Gmail's document is ready here, but its load event can stay pending
                     // (splash images and a late stylesheet). Show the page instead of
@@ -2292,6 +2520,9 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
                             std::thread::sleep(Duration::from_secs(3));
                             tabs::release_settled_page(&app, id, &url);
                         });
+                    }
+                    if let Some(core) = sender {
+                        probe_page_scheme(&dom_app, id, &core);
                     }
                     Ok(())
                 })),
@@ -4629,7 +4860,9 @@ pub fn js_heap_used(webview: &Webview) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{WheelBand, page_keeps_light_scheme, wheel_band, wheel_steps};
+    use super::{
+        HostScheme, WheelBand, declares_dark_scheme, wants_light_scheme, wheel_band, wheel_steps,
+    };
 
     #[test]
     fn a_device_sized_page_is_kept() {
@@ -4654,21 +4887,39 @@ mod tests {
     }
 
     #[test]
-    fn gmail_stays_on_the_light_scheme() {
-        assert!(page_keeps_light_scheme("https://mail.google.com/mail/u/0/"));
-        assert!(page_keeps_light_scheme(
-            "https://workspace.google.com/intl/en-US/gmail/"
+    fn a_new_site_stays_light_only_while_windows_is_dark() {
+        assert!(wants_light_scheme(true, None, "https://www.kohls.com/"));
+        assert!(wants_light_scheme(
+            true,
+            Some(HostScheme::Light),
+            "https://example.com/page"
         ));
-        assert!(page_keeps_light_scheme(
-            "https://www.google.com/gmail/about/"
+        assert!(!wants_light_scheme(false, None, "https://www.kohls.com/"));
+        assert!(!wants_light_scheme(
+            true,
+            Some(HostScheme::Dark),
+            "https://github.com/"
         ));
-        assert!(!page_keeps_light_scheme("https://workspace.google.com/"));
-        assert!(!page_keeps_light_scheme(
-            "https://www.google.com/search?q=gmail"
-        ));
-        assert!(!page_keeps_light_scheme("https://accounts.google.com/"));
-        assert!(!page_keeps_light_scheme("https://example.com/gmail"));
-        assert!(!page_keeps_light_scheme("not a url"));
+        assert!(!wants_light_scheme(true, None, "ce://settings"));
+        assert!(!wants_light_scheme(true, None, "file:///C:/page.html"));
+        assert!(!wants_light_scheme(true, None, "not a url"));
+    }
+
+    #[test]
+    fn a_page_opts_into_dark_from_the_canvas_scheme() {
+        assert!(declares_dark_scheme("light dark", None::<&str>));
+        assert!(declares_dark_scheme("dark light", None::<&str>));
+        assert!(declares_dark_scheme("Dark", None::<&str>));
+        assert!(!declares_dark_scheme("light", None::<&str>));
+        assert!(!declares_dark_scheme("only", None::<&str>));
+        assert!(!declares_dark_scheme("", None::<&str>));
+        assert!(declares_dark_scheme("", [":root"]));
+        assert!(declares_dark_scheme("", ["html"]));
+        assert!(declares_dark_scheme("", ["body"]));
+        assert!(declares_dark_scheme("", ["HTML, .card"]));
+        assert!(!declares_dark_scheme("", ["html.dark"]));
+        assert!(!declares_dark_scheme("", ["body:hover"]));
+        assert!(!declares_dark_scheme("", [".theme-dark"]));
     }
 
     #[test]

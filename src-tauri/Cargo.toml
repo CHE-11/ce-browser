@@ -1,6 +1,6 @@
 [package]
 name = "ce-browser"
-version = "0.1.70"
+version = "0.1.71"
 description = "Tabbed WebView2 browser"
 authors = ["you"]
 edition = "2024"
@@ -73,6 +73,9 @@ strip = true
 
 # Wry's WebView2 IPC bridge installs a permanent global named `ipc`. Google Sheets
 # declares that same name, so the spreadsheet fails to parse until the property is
-# configurable. `vendor/wry` is wry 0.55.1 with that one change.
+# configurable. `vendor/wry` is wry 0.55.1 with that change. It also skips the
+# first navigation for `about:blank#ce-new-window` so a NewWindowRequested target
+# can commit its own document, and it leaves non-invoke postMessage traffic out
+# of Tauri's IPC parser so pages do not log `missing field cmd`.
 [patch.crates-io]
 wry = { path = "vendor/wry" }
