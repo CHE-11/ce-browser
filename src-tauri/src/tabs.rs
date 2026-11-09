@@ -296,7 +296,7 @@ pub fn group_color_owned(raw: &str) -> String {
 
 struct Tab {
     info: TabInfo,
-    /// Loaded when the page view is created: restored tabs wait until they are selected.
+    /// Loaded when the page view is created. A restored tab holds this until its view is built.
     pending_url: Option<Url>,
     webview: Option<String>,
     /// The first navigation finished, so the webview can cover the page without a white frame.
@@ -1136,7 +1136,9 @@ pub struct OpenTab {
     pub index: Option<usize>,
     pub pinned: bool,
     pub title: Option<String>,
-    /// Restored tabs keep their entry but create the page view on first activation.
+    /// Keep the tab entry and build its page view later. Session restore uses this so the window
+    /// opens before every page view exists. The selected tab is activated at once. The others
+    /// load in the background.
     pub lazy: bool,
     /// Window that owns the new tab. Empty uses the focused browser window.
     pub window: String,
@@ -1466,13 +1468,18 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
             let active = lock(&load_app).active_of(&owner) == Some(id);
             // The new page view takes focus as soon as it starts loading. Take it back
             // for the new tab page then, instead of waiting until the document finishes.
-            // A background tab gives it back to the menu that opened the tab.
+            // A background tab is parked off screen, so focus returns to the menu that
+            // opened it, or to the tab the user is looking at.
             if active && new_tab_page && fresh && (loading || finished) {
                 focus_active(&load_app, &owner);
             } else if first && active {
                 focus_active(&load_app, &owner);
             } else if !active && (loading || first) {
-                crate::popup::refocus(&load_app, &owner);
+                if crate::popup::kind(&load_app, &owner).is_some() {
+                    crate::popup::refocus(&load_app, &owner);
+                } else {
+                    focus_active(&load_app, &owner);
+                }
             }
             // A reload restores the profile's per-site zoom. Extension pages stay on Browser UI size.
             if let Some(factor) = extension_zoom
@@ -4684,20 +4691,46 @@ pub fn wake_pinned(app: &AppHandle) {
     }
 }
 
-/// Restored pinned tabs start without a page view so the window opens at once. They load here in
-/// the background, one at a time, after the selected page has had its turn.
-fn load_pinned_later(app: &AppHandle) {
+/// Restored tabs start without a page view so the window opens at once. After the selected page
+/// has had its turn, the others load in the background, one at a time, and stay unfocused.
+/// Tabs in the current workspace go first.
+fn load_restored_later(app: &AppHandle, ids: Vec<u32>) {
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(PIN_LOAD_DELAY);
-        let mut tried = Vec::new();
-        loop {
+        let pending = with_state(&app, |state| {
+            let workspace = state.workspace_of(WINDOW);
+            let mut here = Vec::new();
+            let mut elsewhere = Vec::new();
+            for id in ids {
+                let Some(index) = state.index_of(id) else {
+                    continue;
+                };
+                let tab = &state.tabs[index];
+                if tab.webview.is_some() || tab.shelf {
+                    continue;
+                }
+                if tab.info.workspace == workspace {
+                    here.push(id);
+                } else {
+                    elsewhere.push(id);
+                }
+            }
+            here.extend(elsewhere);
+            here
+        });
+        for id in pending {
             wait_for_quiet(&app);
-            let Some(id) = with_state(&app, |state| state.unloaded_pin(&tried)) else {
-                return;
-            };
-            tried.push(id);
-            if ready_pinned(&app, id) {
+            let still = with_state(&app, |state| {
+                state
+                    .index_of(id)
+                    .is_some_and(|index| state.tabs[index].webview.is_none())
+            });
+            if !still {
+                continue;
+            }
+            // Leave menus open. This tab is not being selected.
+            if open_page_view(&app, id, false).is_ok() {
                 emit_tabs(&app);
             }
             std::thread::sleep(PIN_LOAD_GAP);
@@ -6473,7 +6506,7 @@ pub fn restore(app: &AppHandle, restored: RestoreState) -> Result<(), String> {
         Some(id) => activate(app, id),
         None => create_tab(app, None, false, None).map(|_| ()),
     };
-    load_pinned_later(app);
+    load_restored_later(app, ids);
     shown
 }
 
