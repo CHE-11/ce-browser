@@ -14,6 +14,7 @@ import {
   Shield,
   ShoppingCart,
   SlidersHorizontal,
+  SquareTerminal,
   TableProperties,
   Workflow,
   type LucideIcon,
@@ -26,6 +27,8 @@ export type BuiltinTool = {
   icon: LucideIcon;
   /** Defaults to the address bar. Other tools default to the tools toolbar. */
   address?: boolean;
+  /** Developer tool. It is listed with the other built-in tools and runs in dev and release builds. */
+  dev?: boolean;
 };
 
 /** Tools that ship on the address bar. Their ids are stored when they are unpinned. */
@@ -132,6 +135,13 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Extract data",
     description: "Turn lists and tables on a page into a dataset you can export.",
     icon: TableProperties,
+  },
+  {
+    id: "debug-hud",
+    name: "Debug HUD",
+    description: "IPC, logs, webviews and browser state in a window beside the page.",
+    icon: SquareTerminal,
+    dev: true,
   },
 ];
 

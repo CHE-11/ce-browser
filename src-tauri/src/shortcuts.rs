@@ -248,7 +248,7 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             Ok(())
         }
         Action::DebugHud => {
-            if !crate::debug::enabled() {
+            if !crate::debug::hud_enabled() {
                 return Ok(());
             }
             crate::debug::toggle_hud(app, &window).map(|_| ())
@@ -305,7 +305,7 @@ fn category_of(action: &str) -> &'static str {
         | "toggle-bookmarks-bar"
         | "toggle-tools" => "Address bar and bookmarks",
         "reload" | "reload-key" | "back" | "forward" | "find" | "zoom-in" | "zoom-in-shift"
-        | "zoom-out" | "zoom-reset" | "devtools" | "inspect" => "Page",
+        | "zoom-out" | "zoom-reset" | "devtools" | "inspect" | "debug-hud" => "Page",
         _ => "Browser",
     }
 }
@@ -702,9 +702,7 @@ pub fn defaults() -> Vec<ShortcutBinding> {
             "",
         ));
     }
-    if crate::debug::enabled() {
-        rows.push(bind("debug-hud", "Toggle debug HUD", "ctrl+shift+f12"));
-    }
+    rows.push(bind("debug-hud", "Toggle debug HUD", "ctrl+shift+f12"));
     rows
 }
 

@@ -4,6 +4,7 @@ import {
   activateTab,
   clearSiteCache,
   closePopup,
+  debugToggleHud,
   createEphemeralTab,
   createTab,
   groupBySite,
@@ -228,22 +229,26 @@ export function CommandPalette() {
       group: "Setting",
       run: () => openSetting(snapshot.windowTabs, entry.id),
     }));
-    const tools: Hit[] = active
-      ? BUILTIN_TOOLS.filter((tool) => builtinToolEnabled(settings, tool.id)).map((tool) => ({
-          id: `tool-${tool.id}`,
-          title: tool.name,
-          hint: tool.description,
-          group: "Tool",
-          run: () => {
-            if (tool.id === "clear-cache") {
-              return clearSiteCache(active.id);
-            }
-            const params =
-              tool.id === "page-controls" ? `${tabParams(active)}&host=${encodeURIComponent(siteKey(active.url))}` : tabParams(active);
-            return openHere(tool.id as PopupKind, params);
-          },
-        }))
-      : [];
+    const tools: Hit[] = BUILTIN_TOOLS.filter((tool) => builtinToolEnabled(settings, tool.id) && (active || tool.dev)).map((tool) => ({
+      id: `tool-${tool.id}`,
+      title: tool.name,
+      hint: tool.description,
+      group: "Tool" as const,
+      run: () => {
+        if (tool.id === "debug-hud") {
+          return debugToggleHud();
+        }
+        if (!active) {
+          return;
+        }
+        if (tool.id === "clear-cache") {
+          return clearSiteCache(active.id);
+        }
+        const params =
+          tool.id === "page-controls" ? `${tabParams(active)}&host=${encodeURIComponent(siteKey(active.url))}` : tabParams(active);
+        return openHere(tool.id as PopupKind, params);
+      },
+    }));
     const extensionHits: Hit[] = extensions
       .filter((extension) => extension.enabled && extension.popup)
       .map((extension) => ({

@@ -2059,7 +2059,7 @@ export function datasetToBoard(id: string) {
   return invoke<number>("dataset_to_board", { id });
 }
 
-// Debug HUD. The backend refuses these outside a dev build.
+// Debug HUD. The backend refuses these while the Debug HUD extension is off.
 
 /** Shows or hides this window's debug HUD. Resolves to whether it is now shown. */
 export function debugToggleHud() {

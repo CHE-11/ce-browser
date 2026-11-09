@@ -16,6 +16,7 @@ import { AutomationsButton } from "./automation/AutomationsButton";
 import { ExtractButton } from "./automation/ExtractButton";
 import { RecordFlowButton } from "./automation/RecordFlowButton";
 import { BoardsButton } from "./boards/popover/BoardsButton";
+import { DebugHudButton } from "./debug-hud/DebugHudButton";
 
 /** One pinned built-in tool. Unknown ids render nothing. */
 export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab: TabInfo | undefined; settings: BrowserSettings | null }) {
@@ -54,6 +55,8 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <RecordFlowButton activeTab={activeTab} />;
     case "extract":
       return <ExtractButton activeTab={activeTab} />;
+    case "debug-hud":
+      return <DebugHudButton />;
     default:
       return null;
   }

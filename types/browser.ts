@@ -806,6 +806,11 @@ export type BrowserSettings = {
   toolbarOrder: string[];
   /** Built-in tool ids the user turned off. Empty means every built-in tool stays on. */
   disabledBuiltinTools: string[];
+  /**
+   * True after dev-tool defaults have been applied.
+   * An older file omits this. A dev build leaves Debug HUD on. A release build turns it off until it is enabled.
+   */
+  devToolsSettled: boolean;
   /** Host extension id that replaces the bookmarks bar. Empty keeps the built-in bar. */
   hostBookmarksBar: string;
   /** Host extension id that replaces downloads. Empty keeps the built-in downloads UI. */

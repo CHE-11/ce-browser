@@ -43,12 +43,14 @@ import { cn } from "../../lib/cn";
 import { focusRing } from "../../lib/focus-ring";
 import { useEffect, useState } from "react";
 import type { ExternalBrowser } from "../../../../types/browser";
-import { useTabs, useUpdateStatus } from "../../lib/use-browser";
+import { builtinToolEnabled } from "../../lib/toolbar-pin";
+import { useSettings, useTabs, useUpdateStatus } from "../../lib/use-browser";
 import { IconButton } from "../../components/IconButton";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "../../components/PopupFrame";
 
 export function AddressBarEllipsisMenu() {
   const snapshot = useTabs();
+  const settings = useSettings();
   const update = useUpdateStatus();
   const active = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const [browsers, setBrowsers] = useState<ExternalBrowser[]>([]);
@@ -187,7 +189,7 @@ export function AddressBarEllipsisMenu() {
             }
           })}
         />
-        {import.meta.env.DEV ? (
+        {settings && builtinToolEnabled(settings, "debug-hud") ? (
           <PopupMenuItem
             id="app-menu-debug-hud"
             icon={<SquareTerminal />}

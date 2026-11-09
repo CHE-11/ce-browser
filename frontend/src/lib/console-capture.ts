@@ -1,28 +1,16 @@
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { DebugConsoleEntry, DebugConsoleLevel } from "@type/browser";
 import { debugRecordConsole } from "./browser-client";
+import { debugCaptureEligible, debugCaptureOn } from "./debug-capture";
 
 /**
- * In a dev build, copies this webview's console errors and warnings and its uncaught errors into
- * the backend log, where the debug HUD and passage read them. Imported for its side effect.
+ * While the Debug HUD extension is on, copies this webview's console errors and warnings and its
+ * uncaught errors into the backend log, where the HUD and passage read them. Imported for its side effect.
  */
 
 const FLUSH_MS = 250;
 /** Entries kept while the backend is slow to take them. Older ones are dropped. */
 const QUEUE_LIMIT = 200;
 const TEXT_LIMIT = 4000;
-
-function currentLabel() {
-  try {
-    return getCurrentWebview().label;
-  } catch {
-    return "";
-  }
-}
-
-const label = import.meta.env.DEV ? currentLabel() : "";
-/** The HUD does not record itself, or its own failures would fill the feed. */
-const capturing = import.meta.env.DEV && label !== "" && !label.startsWith("debug-");
 
 let queue: DebugConsoleEntry[] = [];
 let flushTimer = 0;
@@ -51,6 +39,9 @@ function describe(value: unknown): string {
 }
 
 function record(level: DebugConsoleLevel, parts: unknown[], source = "") {
+  if (!debugCaptureOn()) {
+    return;
+  }
   const text = parts.map(describe).join(" ");
   queue.push({
     level,
@@ -86,6 +77,6 @@ function install() {
   });
 }
 
-if (capturing) {
+if (debugCaptureEligible) {
   install();
 }

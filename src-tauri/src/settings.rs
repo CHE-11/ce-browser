@@ -446,6 +446,10 @@ pub struct BrowserSettings {
     /// Built-in tool ids the user turned off. An older file omits this, so every built-in tool stays on.
     #[serde(default)]
     pub disabled_builtin_tools: Vec<String>,
+    /// True after dev-tool defaults have been applied. An older file omits this.
+    /// A dev build leaves Debug HUD on. A release build turns it off until the user enables it.
+    #[serde(default)]
+    pub dev_tools_settled: bool,
     /// Host extension that replaces the bookmarks bar. Empty keeps the built-in bar.
     #[serde(default)]
     pub host_bookmarks_bar: String,
@@ -1506,6 +1510,7 @@ impl Default for BrowserSettings {
             toolbar_placements: BTreeMap::new(),
             toolbar_order: Vec::new(),
             disabled_builtin_tools: Vec::new(),
+            dev_tools_settled: false,
             host_bookmarks_bar: String::new(),
             host_downloads: String::new(),
             vertical_toolbar: true,
@@ -2065,6 +2070,26 @@ impl BrowserSettings {
 
 pub struct SettingsState(Mutex<BrowserSettings>);
 
+/// First read of an older file applies dev-tool defaults. A file that already settled is left as it is,
+/// including when the client omits the flag and `previous_settled` is set.
+pub(crate) fn settle_dev_tools(settings: &mut BrowserSettings, previous_settled: bool, release: bool) {
+    if settings.dev_tools_settled || previous_settled {
+        settings.dev_tools_settled = true;
+        return;
+    }
+    if release
+        && !settings
+            .disabled_builtin_tools
+            .iter()
+            .any(|id| id == crate::debug::DEBUG_HUD_ID)
+    {
+        settings
+            .disabled_builtin_tools
+            .push(crate::debug::DEBUG_HUD_ID.to_string());
+    }
+    settings.dev_tools_settled = true;
+}
+
 pub fn init(app: &AppHandle) {
     let path = paths::data_file(app, FILE);
     let mut loaded: BrowserSettings = crate::sync_conflicts::read_json(app, &path);
@@ -2074,6 +2099,7 @@ pub fn init(app: &AppHandle) {
         .map(|key| key.trim().to_string())
         .filter(|key| !key.is_empty());
     loaded = loaded.normalize();
+    settle_dev_tools(&mut loaded, false, !tauri::is_dev());
     if let Some(key) = legacy_key {
         let provider = loaded.ai_provider.clone();
         if crate::secrets::store_key(app, &provider, &key).is_ok() {
@@ -2083,6 +2109,7 @@ pub fn init(app: &AppHandle) {
     loaded.pinned_tabs = canonicalize_pins(app, &loaded);
     apply_shared_sync_folder(&mut loaded);
     crate::adblock::configure(&loaded.adblock);
+    crate::debug::apply_tool(app, &loaded.disabled_builtin_tools);
     app.manage(SettingsState(Mutex::new(loaded)));
     crate::sync_conflicts::note(app, &paths::data_file(app, FILE));
 }
@@ -2339,11 +2366,13 @@ pub fn reload(app: &AppHandle) {
     let (previous_page_zoom, previous_ui_zoom) = {
         let state = app.state::<SettingsState>();
         let mut guard = state.0.lock().expect("settings lock");
+        settle_dev_tools(&mut loaded, guard.dev_tools_settled, !tauri::is_dev());
         let previous_page_zoom = guard.page_zoom;
         let previous_ui_zoom = guard.ui_zoom;
         *guard = loaded.clone();
         (previous_page_zoom, previous_ui_zoom)
     };
+    crate::debug::apply_tool(app, &loaded.disabled_builtin_tools);
     if loaded.page_zoom != previous_page_zoom {
         crate::tabs::apply_default_page_zoom(app, previous_page_zoom, loaded.page_zoom);
     }
@@ -2406,11 +2435,13 @@ pub fn store(
         }
         let previous_page_zoom = guard.page_zoom;
         let previous_ui_zoom = guard.ui_zoom;
+        settle_dev_tools(&mut settings, guard.dev_tools_settled, !tauri::is_dev());
         crate::sync_conflicts::store(app, &paths::data_file(app, FILE), &settings)?;
         crate::adblock::configure(&settings.adblock);
         *guard = settings.clone();
         (settings, previous_page_zoom, previous_ui_zoom)
     };
+    crate::debug::apply_tool(app, &saved.disabled_builtin_tools);
     if saved.page_zoom != previous_page_zoom {
         crate::tabs::apply_default_page_zoom(app, previous_page_zoom, saved.page_zoom);
     }
@@ -3167,6 +3198,36 @@ mod tests {
         assert!(loaded.show_tools_toolbar);
         assert_eq!(loaded.toolbar_side, "right");
         assert!(loaded.disabled_builtin_tools.is_empty());
+    }
+
+    #[test]
+    fn an_older_release_file_turns_debug_hud_off_once() {
+        let mut older = super::BrowserSettings::default();
+        assert!(!older.dev_tools_settled);
+        super::settle_dev_tools(&mut older, false, true);
+        assert!(older.dev_tools_settled);
+        assert_eq!(older.disabled_builtin_tools, vec!["debug-hud".to_string()]);
+
+        older.disabled_builtin_tools.clear();
+        let enabled = older.clone();
+        super::settle_dev_tools(&mut older, true, true);
+        assert_eq!(older, enabled);
+
+        let mut current = enabled.clone();
+        super::settle_dev_tools(&mut current, false, true);
+        assert_eq!(current, enabled);
+    }
+
+    #[test]
+    fn a_dev_build_leaves_debug_hud_on() {
+        let mut older = super::BrowserSettings::default();
+        super::settle_dev_tools(&mut older, false, false);
+        assert!(older.dev_tools_settled);
+        assert!(older.disabled_builtin_tools.is_empty());
+        let again = older.clone();
+        let mut older = older;
+        super::settle_dev_tools(&mut older, false, false);
+        assert_eq!(older, again);
     }
 
     #[test]

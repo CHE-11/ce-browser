@@ -104,6 +104,16 @@ pub fn toggle(app: &AppHandle, window: &str) -> Result<bool, String> {
     Ok(true)
 }
 
+/// Hides every HUD. Used when the extension is turned off.
+pub fn hide_all(app: &AppHandle) {
+    for label in labels(app) {
+        set_visible(&label, false);
+        if let Some(hud) = app.get_window(&label) {
+            let _ = hud.hide();
+        }
+    }
+}
+
 fn set_visible(label: &str, visible: bool) {
     places().entry(label.to_string()).or_default().visible = visible;
 }

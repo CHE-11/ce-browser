@@ -1,11 +1,11 @@
 import { invoke as tauriInvoke, type InvokeArgs, type InvokeOptions } from "@tauri-apps/api/core";
 import { listen as tauriListen, type EventCallback, type EventName, type Options, type UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { DebugIpcRecord } from "@type/browser";
+import { debugCaptureLabel, debugCaptureOn } from "./debug-capture";
 
 /**
- * `invoke` and `listen` for `browser-client.ts`. In a dev build every call and every event this
- * webview receives is sent to the debug HUD. In a release build these are Tauri's own functions.
+ * `invoke` and `listen` for `browser-client.ts`. While the Debug HUD extension is on, every call
+ * and every event this webview receives is sent to the HUD. That includes a release build.
  */
 
 const PREVIEW_LIMIT = 2048;
@@ -14,18 +14,6 @@ const FLUSH_MS = 200;
 const QUEUE_LIMIT = 500;
 /** One event delivered to several listeners in this webview is recorded once. */
 const SAME_EVENT_MS = 20;
-
-function currentLabel() {
-  try {
-    return getCurrentWebview().label;
-  } catch {
-    return "";
-  }
-}
-
-const label = import.meta.env.DEV ? currentLabel() : "";
-/** The HUD does not record itself, or its own refreshes would fill the feed. */
-const recording = import.meta.env.DEV && label !== "" && !label.startsWith("debug-");
 
 let queue: DebugIpcRecord[] = [];
 let flushTimer = 0;
@@ -41,7 +29,7 @@ function flush() {
 }
 
 function record(entry: Omit<DebugIpcRecord, "id" | "webview">) {
-  queue.push({ ...entry, id: 0, webview: label });
+  queue.push({ ...entry, id: 0, webview: debugCaptureLabel });
   if (queue.length > QUEUE_LIMIT) {
     queue.splice(0, queue.length - QUEUE_LIMIT);
   }
@@ -79,7 +67,7 @@ function errorText(reason: unknown) {
 }
 
 export function invoke<T>(cmd: string, args?: InvokeArgs, options?: InvokeOptions): Promise<T> {
-  if (!recording || cmd.startsWith("debug_")) {
+  if (!debugCaptureOn() || cmd.startsWith("debug_")) {
     return tauriInvoke<T>(cmd, args, options);
   }
   const startedAt = Date.now();
@@ -139,7 +127,7 @@ function recordEvent(name: string, payload: unknown) {
 }
 
 export function listen<T>(event: EventName, handler: EventCallback<T>, options?: Options): Promise<UnlistenFn> {
-  if (!recording) {
+  if (!debugCaptureOn()) {
     return tauriListen<T>(event, handler, options);
   }
   return tauriListen<T>(

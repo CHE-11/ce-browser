@@ -8,6 +8,7 @@ use std::fs::File;
 use std::io::{PipeReader, Read, Write};
 use std::mem::ManuallyDrop;
 use std::os::windows::io::{FromRawHandle, IntoRawHandle, RawHandle};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::System::Console::{
@@ -19,9 +20,15 @@ const MAX_LINE: usize = 16 * 1024;
 /// Longer prefixes are part of the message, not an area name.
 const MAX_AREA: usize = 40;
 
-/// Call before anything prints. Does nothing in a release build.
+static STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Call before anything prints. A dev build always captures. A release build captures once the
+/// Debug HUD extension is on. A second call does nothing.
 pub fn capture() {
-    if !super::enabled() {
+    if !(super::hud_enabled() || tauri::is_dev()) {
+        return;
+    }
+    if STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
     tee(STD_OUTPUT_HANDLE, "stdout");

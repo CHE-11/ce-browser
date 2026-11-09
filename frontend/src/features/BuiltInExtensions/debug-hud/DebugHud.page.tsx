@@ -28,7 +28,7 @@ function isHeight(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > HEADER_HEIGHT;
 }
 
-/** The dev-only debug HUD. It runs in its own window, `debug-<browser window>`. */
+/** The debug HUD. It runs in its own window, `debug-<browser window>`, in dev and release builds. */
 export function DebugHudPage() {
   const [panel, setPanel] = useStoredState<HudPanel>("debug-hud-panel", "ipc", isPanel);
   const [stateView, setStateView] = useStoredState("debug-hud-state-view", "tabs", isStateView);

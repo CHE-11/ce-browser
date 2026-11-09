@@ -1852,7 +1852,9 @@ fn save_print_settings(
 /// Settings as a new profile gets them, so the settings page can mark changed values.
 #[tauri::command]
 fn default_settings() -> BrowserSettings {
-    BrowserSettings::default().normalize()
+    let mut settings = BrowserSettings::default().normalize();
+    settings::settle_dev_tools(&mut settings, false, !tauri::is_dev());
+    settings
 }
 
 #[tauri::command]

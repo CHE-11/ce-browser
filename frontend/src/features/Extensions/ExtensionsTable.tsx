@@ -43,6 +43,7 @@ function flagTitle(key: string) {
   if (key === "edge") return "Edge Add-ons";
   if (key === "sideloaded") return "Installed from a file or unpacked folder";
   if (key === "component") return "Ships with WebView2";
+  if (key === "dev") return "Developer tool. It runs in dev builds and in release builds.";
   return "";
 }
 
@@ -53,6 +54,7 @@ const FLAG = {
   edge: "bg-teal-950 text-teal-200 ring-teal-800",
   sideloaded: "bg-zinc-800 text-zinc-200 ring-zinc-600",
   component: "bg-violet-950 text-violet-200 ring-violet-800",
+  dev: "bg-fuchsia-950 text-fuchsia-200 ring-fuchsia-800",
 };
 
 function installedFlags(extension: ExtensionInfo): SourceFlag[] {
@@ -113,7 +115,10 @@ function rows(extensions: ExtensionInfo[], settings: BrowserSettings | null): Ta
     version: null,
     icon: null,
     builtinIcon: tool.icon,
-    flags: [{ key: "builtin", label: "Built-in", className: FLAG.builtin }],
+    flags: [
+      { key: "builtin", label: "Built-in", className: FLAG.builtin },
+      ...(tool.dev ? [{ key: "dev", label: "Dev tool", className: FLAG.dev }] : []),
+    ],
     builtin: true,
     enabled: builtinToolEnabled(settings, tool.id),
     optionsPage: null,

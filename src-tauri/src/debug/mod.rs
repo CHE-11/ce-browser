@@ -1,8 +1,8 @@
-//! Dev-only debug HUD: an IPC and event feed, a webview inspector, a state viewer and the
-//! backend log.
+//! Debug HUD: an IPC and event feed, a webview inspector, a state viewer and the backend log.
 //!
-//! Nothing here runs in a release build. The commands stay registered there and refuse, the
-//! HUD window is never built and stdout and stderr are left alone.
+//! It is a built-in extension, so it runs in a dev build and in a release build when that
+//! extension is on. Passage stays dev-only. The commands stay registered either way and refuse
+//! while the extension is off.
 
 mod hud;
 mod outline;
@@ -12,6 +12,7 @@ mod webviews;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -37,15 +38,35 @@ const RING_SIZE: usize = 2000;
 const FLUSH_EVERY: Duration = Duration::from_millis(150);
 const FEED_EVENT: &str = "debug-feed";
 
-pub fn enabled() -> bool {
-    tauri::is_dev()
+/// Keep in sync with the Debug HUD id in `frontend/src/features/BuiltInExtensions/builtin.ts`.
+pub const DEBUG_HUD_ID: &str = "debug-hud";
+
+static HUD_ON: AtomicBool = AtomicBool::new(false);
+
+/// The Debug HUD extension is on. Settings apply this during startup: on in a dev build, off in a release build until it is enabled.
+pub fn hud_enabled() -> bool {
+    HUD_ON.load(Ordering::Relaxed)
+}
+
+/// Applies the extension toggle. Turning it on starts the log capture. Turning it off hides the HUD.
+pub fn apply_tool(app: &AppHandle, disabled_builtin_tools: &[String]) {
+    let on = !disabled_builtin_tools.iter().any(|id| id == DEBUG_HUD_ID);
+    let was = HUD_ON.swap(on, Ordering::Relaxed);
+    if on {
+        stderr::capture();
+        return;
+    }
+    if was {
+        hud::hide_all(app);
+        outline::clear(app);
+    }
 }
 
 pub fn require() -> Result<(), String> {
-    if enabled() {
+    if hud_enabled() {
         Ok(())
     } else {
-        Err("Debug tools are only available in dev builds.".into())
+        Err("Debug HUD is turned off. Enable it on the Extensions page.".into())
     }
 }
 
@@ -230,10 +251,12 @@ fn now_ms() -> f64 {
 }
 
 pub fn init(app: &AppHandle) {
-    if !enabled() || APP.set(app.clone()).is_err() {
+    if APP.set(app.clone()).is_err() {
         return;
     }
-    passage::start(app);
+    if tauri::is_dev() {
+        passage::start(app);
+    }
     let app = app.clone();
     let _ = std::thread::Builder::new()
         .name("debug-feed".into())
@@ -376,9 +399,9 @@ fn held_popups() -> MutexGuard<'static, Vec<String>> {
 }
 
 /// Focus moving to the HUD or to a WebView2 DevTools window does not dismiss a popup, so
-/// the popup can be inspected. Dev builds only.
+/// the popup can be inspected. Only while the Debug HUD extension is on.
 pub fn keeps_popups_open(app: &AppHandle, hwnd: isize) -> bool {
-    enabled() && (hud::is_hud_hwnd(app, hwnd) || is_webview_devtools(hwnd))
+    hud_enabled() && (hud::is_hud_hwnd(app, hwnd) || is_webview_devtools(hwnd))
 }
 
 pub fn hold_popups(window: &str) {
