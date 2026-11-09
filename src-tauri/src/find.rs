@@ -143,7 +143,19 @@ const FINDER_JS: &str = r#"(function (query, options) {
     selection.addRange(current);
   }
   var target = current.startContainer.parentElement;
-  if (target) target.scrollIntoView({ block: "center", inline: "nearest" });
+  if (target) reveal(target);
+  function reveal(element) {
+    // A page's own smooth scrolling makes each next match crawl into view.
+    var saved = [];
+    var node = element;
+    while (node && node.style) {
+      saved.push(node, node.style.scrollBehavior);
+      node.style.scrollBehavior = "auto";
+      node = node.parentElement;
+    }
+    element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+    for (var n = 0; n < saved.length; n += 2) saved[n].style.scrollBehavior = saved[n + 1];
+  }
   return { count: count, index: state.index };
 })"#;
 

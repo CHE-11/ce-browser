@@ -24,6 +24,7 @@ export function BrowserPage() {
   const sidebarRef = useRef<HTMLElement>(null);
   const toolbarRef = useRef<HTMLElement>(null);
   const [findToken, setFindToken] = useState<number | null>(null);
+  const [findAllToken, setFindAllToken] = useState(0);
 
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const vertical = settings?.tabLayout === "vertical";
@@ -85,6 +86,10 @@ export function BrowserPage() {
       switch (command) {
         case "find":
           setFindToken((token) => (token ?? 0) + 1);
+          break;
+        case "find-all":
+          setFindToken((token) => (token ?? 0) + 1);
+          setFindAllToken((token) => token + 1);
           break;
         case "palette":
           centered("command-palette", 52);
@@ -157,6 +162,7 @@ export function BrowserPage() {
         showToolsToolbar={showTools && toolSide === "top"}
         toolbarRef={toolSide === "top" ? toolbarRef : undefined}
         findToken={findToken}
+        findAllToken={findAllToken}
         activeTab={activeTab}
         onCloseFind={() => setFindToken(null)}
       />

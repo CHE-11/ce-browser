@@ -21,6 +21,7 @@ import { toolbarSidePatch } from "@/lib/toolbar-side";
 import { ExtensionIcon } from "@/components/ExtensionIcon";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
+import { ExtensionsToolbarScrollbar } from "./ExtensionsToolbarScrollbar";
 import { ExtensionsToolbarSideControl } from "./ExtensionsToolbarSideControl";
 
 
@@ -187,6 +188,7 @@ export const ExtensionsToolbar = forwardRef<HTMLElement, ExtensionsToolbarProps>
     }
   };
   const draggingRef = useRef<string | null>(null);
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const fromIndex = dragging ? tools.indexOf(dragging) : -1;
@@ -238,12 +240,12 @@ export const ExtensionsToolbar = forwardRef<HTMLElement, ExtensionsToolbarProps>
       data-layout={vertical ? "vertical" : "horizontal"}
       data-side={side}
       className={cn(
-        "chrome-tool-strip flex shrink-0 bg-zinc-950",
+        "chrome-tool-strip relative flex shrink-0 bg-zinc-950",
         side === "right" && "h-full min-h-0 flex-col overflow-hidden border-l border-zinc-800",
         side === "left" && "h-full min-h-0 flex-col overflow-hidden border-r border-zinc-800",
         (side === "top" || side === "bottom") &&
           cn(
-            "chrome-tool-strip-horizontal grid w-full grid-cols-[minmax(0,1fr)_minmax(0,max-content)_minmax(0,1fr)] items-center border-zinc-800",
+            "chrome-tool-strip-horizontal grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center overflow-hidden border-zinc-800",
             side === "top" ? "border-b" : "border-t",
             labels && "chrome-tool-strip-labeled",
           ),
@@ -253,7 +255,9 @@ export const ExtensionsToolbar = forwardRef<HTMLElement, ExtensionsToolbarProps>
         id="tools-toolbar-dock"
         className={cn(
           "flex shrink-0 items-center justify-center gap-1",
-          vertical ? "w-full flex-col border-b border-zinc-800 py-1" : "flex-row justify-self-start px-1",
+          vertical
+            ? "w-full flex-col border-b border-zinc-800 py-1"
+            : "z-10 flex-row justify-self-start self-stretch bg-zinc-950 px-1",
         )}
       >
         <ExtensionsToolbarSideControl
@@ -274,9 +278,12 @@ export const ExtensionsToolbar = forwardRef<HTMLElement, ExtensionsToolbarProps>
       </div>
       <div
         id="tools-toolbar-items"
+        ref={setScroller}
         className={cn(
-          "flex min-h-0 min-w-0 items-center",
-          vertical ? "flex-1 flex-col overflow-x-hidden overflow-y-auto py-1" : "min-w-0 flex-row justify-center gap-4 overflow-x-auto overflow-y-hidden px-1",
+          "no-scrollbar flex min-h-0 min-w-0 items-center",
+          vertical
+            ? "flex-1 flex-col overflow-x-hidden overflow-y-auto py-1"
+            : "min-w-0 flex-row gap-4 self-stretch overflow-x-auto overflow-y-hidden px-1 [justify-content:safe_center]",
           labels && vertical && "gap-1",
         )}
         onDragEnter={trackDrag}
@@ -317,8 +324,10 @@ export const ExtensionsToolbar = forwardRef<HTMLElement, ExtensionsToolbarProps>
       <div
         id="tools-toolbar-labels"
         className={cn(
-          "flex shrink-0 items-center gap-1 border-zinc-800",
-          vertical ? "flex-col border-t px-1 py-1.5" : "justify-self-end px-2",
+          "flex shrink-0 gap-1 border-zinc-800",
+          vertical
+            ? "flex-col items-center border-t px-1 py-1.5"
+            : "z-10 items-end justify-self-end self-stretch bg-zinc-950 px-2 pb-0.5",
         )}
       >
         <span id="tools-toolbar-labels-caption" className="text-[9px] leading-none text-zinc-500">
@@ -334,6 +343,7 @@ export const ExtensionsToolbar = forwardRef<HTMLElement, ExtensionsToolbarProps>
           onChange={(verticalToolbarLabels) => settings && void saveSettings({ ...settings, verticalToolbarLabels })}
         />
       </div>
+      <ExtensionsToolbarScrollbar scroller={scroller} axis={vertical ? "y" : "x"} items={tools.join("\0")} />
     </aside>
   );
 });

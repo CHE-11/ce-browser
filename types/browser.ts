@@ -420,6 +420,7 @@ export type BrowserCommand =
   | "focus-address"
   | "new-tab"
   | "find"
+  | "find-all"
   | "bookmark"
   | "downloads"
   | "palette"

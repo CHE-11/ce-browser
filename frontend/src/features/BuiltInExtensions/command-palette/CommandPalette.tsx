@@ -165,6 +165,7 @@ export function CommandPalette() {
       { id: "rewrites", title: "Request rules", hint: "ce://rewrites", group: "Action", run: () => createTab("ce://rewrites") },
       { id: "storage", title: "Site storage", hint: "ce://storage", group: "Action", run: () => createTab("ce://storage") },
       { id: "find", title: "Find in page", hint: "Ctrl+F", group: "Action", run: () => sendUiCommand("find") },
+      { id: "find-all", title: "Find in all tabs", hint: "Ctrl+Shift+F", group: "Action", run: () => sendUiCommand("find-all") },
       { id: "agent-panel", title: "Agent", hint: "Ctrl+Shift+Y", group: "Action", keywords: "ai automate browser task", run: () => toggleAgentPanel(true) },
       { id: "automations-panel", title: "Automations panel", hint: "Beside the page", group: "Action", keywords: "flows record macros", run: () => toggleAutomationPanel(true) },
       { id: "automations", title: "Automations", hint: "ce://automations", group: "Action", keywords: "flows macros schedule datasets rpa", run: () => createTab("ce://automations") },

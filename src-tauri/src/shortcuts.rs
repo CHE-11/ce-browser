@@ -33,6 +33,7 @@ pub enum Action {
     ToggleTools,
     Downloads,
     Find,
+    FindAll,
     ZoomIn,
     ZoomOut,
     ZoomReset,
@@ -174,6 +175,11 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             tabs::send_command(app, &window, "find");
             Ok(())
         }
+        Action::FindAll => {
+            popup::close_all(app, &window, false);
+            tabs::send_command(app, &window, "find-all");
+            Ok(())
+        }
         Action::ToggleBookmarksBar => settings::update(app, |settings| {
             settings.show_bookmarks_bar = !settings.show_bookmarks_bar
         })
@@ -304,7 +310,7 @@ fn category_of(action: &str) -> &'static str {
         | "bookmark"
         | "toggle-bookmarks-bar"
         | "toggle-tools" => "Address bar and bookmarks",
-        "reload" | "reload-key" | "back" | "forward" | "find" | "zoom-in" | "zoom-in-shift"
+        "reload" | "reload-key" | "back" | "forward" | "find" | "find-all" | "zoom-in" | "zoom-in-shift"
         | "zoom-out" | "zoom-reset" | "devtools" | "inspect" | "debug-hud" => "Page",
         _ => "Browser",
     }
@@ -580,6 +586,7 @@ fn action_from(action: &str) -> Option<Action> {
         "toggle-tools" => Action::ToggleTools,
         "downloads" => Action::Downloads,
         "find" => Action::Find,
+        "find-all" => Action::FindAll,
         "zoom-in" | "zoom-in-shift" => Action::ZoomIn,
         "zoom-out" => Action::ZoomOut,
         "zoom-reset" => Action::ZoomReset,
@@ -668,6 +675,7 @@ pub fn defaults() -> Vec<ShortcutBinding> {
         bind("toggle-tools", "Show or hide tools", "ctrl+shift+t"),
         bind("downloads", "Downloads", "ctrl+j"),
         bind("find", "Find in page", "ctrl+f"),
+        bind("find-all", "Find in all tabs", "ctrl+shift+f"),
         bind("zoom-in", "Zoom in", "ctrl+plus"),
         bind("zoom-out", "Zoom out", "ctrl+minus"),
         bind("zoom-reset", "Reset zoom", "ctrl+0"),
@@ -708,7 +716,7 @@ pub fn defaults() -> Vec<ShortcutBinding> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ShortcutBinding, ShortcutFile, chord_token, effective, normalize_saved};
+    use super::{Action, ShortcutBinding, ShortcutFile, action_from, chord_token, effective, normalize_saved};
 
     #[test]
     fn slash_and_brackets_have_names() {
@@ -819,6 +827,19 @@ mod tests {
                 |row| row.action == "command-palette" && row.keys == vec!["ctrl+k".to_string()]
             )
         );
+    }
+
+    #[test]
+    fn find_in_all_tabs_defaults_to_ctrl_shift_f() {
+        let rows = effective(&[]);
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.action == "find-all")
+                .expect("find all")
+                .keys,
+            vec!["ctrl+shift+f".to_string()]
+        );
+        assert_eq!(action_from("find-all"), Some(Action::FindAll));
     }
 
     #[test]

@@ -9,21 +9,50 @@ type FindBarProps = {
   tabId: number;
   /** Bumped each time Ctrl+F is pressed so the input refocuses. */
   focusToken: number;
+  /** Bumped by Ctrl+Shift+F. Opens Find in all tabs when the field has a query. */
+  openAllToken: number;
   onClose: () => void;
 };
 
-export function FindBar({ tabId, focusToken, onClose }: FindBarProps) {
+export function FindBar({ tabId, focusToken, openAllToken, onClose }: FindBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [wholeWord, setWholeWord] = useState(false);
   const [result, setResult] = useState<FindResult | null>(null);
   const request = useRef(0);
+  const optionsRef = useRef({ query, caseSensitive, wholeWord });
+  const seenAll = useRef(openAllToken);
+  optionsRef.current = { query, caseSensitive, wholeWord };
+
+  const openAllTabs = (anchor: HTMLElement) => {
+    const current = optionsRef.current;
+    if (!current.query) {
+      return;
+    }
+    const params = new URLSearchParams({
+      query: current.query,
+      case: current.caseSensitive ? "1" : "0",
+      word: current.wholeWord ? "1" : "0",
+    });
+    void openPopup("find-all", anchor, { params: params.toString() });
+  };
 
   useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
   }, [focusToken]);
+
+  useEffect(() => {
+    if (seenAll.current === openAllToken) {
+      return;
+    }
+    seenAll.current = openAllToken;
+    const button = document.getElementById("find-bar-all-tabs");
+    if (button instanceof HTMLElement) {
+      openAllTabs(button);
+    }
+  }, [openAllToken]);
 
   useEffect(() => {
     setResult(null);
@@ -120,12 +149,9 @@ export function FindBar({ tabId, focusToken, onClose }: FindBarProps) {
       </IconButton>
       <IconButton
         id="find-bar-all-tabs"
-        label="Find in all tabs"
+        label="Find in all tabs (Ctrl+Shift+F)"
         disabled={!query}
-        onClick={(event) => {
-          const params = new URLSearchParams({ query, case: caseSensitive ? "1" : "0", word: wholeWord ? "1" : "0" });
-          void openPopup("find-all", event.currentTarget, { params: params.toString() });
-        }}
+        onClick={(event) => openAllTabs(event.currentTarget)}
       >
         <Layers id="find-bar-all-tabs-icon" aria-hidden />
       </IconButton>

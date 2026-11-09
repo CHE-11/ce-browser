@@ -25,6 +25,8 @@ type BrowserHeaderProps = {
   showToolsToolbar: boolean;
   toolbarRef?: RefObject<HTMLElement | null>;
   findToken: number | null;
+  /** Bumped by Ctrl+Shift+F. The find bar opens Find in all tabs when it has a query. */
+  findAllToken: number;
   activeTab: TabInfo | undefined;
   onCloseFind: () => void;
 };
@@ -42,6 +44,7 @@ export function BrowserHeader({
   showToolsToolbar,
   toolbarRef,
   findToken,
+  findAllToken,
   activeTab,
   onCloseFind,
 }: BrowserHeaderProps) {
@@ -80,7 +83,7 @@ export function BrowserHeader({
         />
       ) : null}
       {findToken !== null && activeTab ? (
-        <FindBar tabId={activeTab.id} focusToken={findToken} onClose={onCloseFind} />
+        <FindBar tabId={activeTab.id} focusToken={findToken} openAllToken={findAllToken} onClose={onCloseFind} />
       ) : null}
       <SyncToast />
     </div>
