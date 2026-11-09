@@ -1306,8 +1306,45 @@ fn reply_extension_active_tab(app: &AppHandle, label: &str, token: i64) {
     );
 }
 
+/// Screen DIP. `chrome.windows` left, top, width and height have to be integers.
+/// A fractional or missing value makes `windows.create` throw, so a popout never opens.
+fn dip_px(physical: i32, scale: f64) -> i64 {
+    if scale <= f64::EPSILON {
+        return i64::from(physical);
+    }
+    (f64::from(physical) / scale).round() as i64
+}
+
+/// Outer frame of a browser window, in the units `chrome.windows` uses.
+fn window_frame(app: &AppHandle, label: &str) -> Option<Value> {
+    let window = app.get_window(label)?;
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let origin = window.outer_position().ok()?;
+    let size = window.outer_size().ok()?;
+    let state = if window.is_minimized().unwrap_or(false) {
+        "minimized"
+    } else if tabs::is_fullscreen(app, label) {
+        "fullscreen"
+    } else if window.is_maximized().unwrap_or(false) {
+        "maximized"
+    } else {
+        "normal"
+    };
+    let width = dip_px(size.width as i32, scale).max(1);
+    let height = dip_px(size.height as i32, scale).max(1);
+    Some(json!({
+        "left": dip_px(origin.x, scale),
+        "top": dip_px(origin.y, scale),
+        "width": width,
+        "height": height,
+        "state": state,
+    }))
+}
+
 /// The browser's tabs and windows, so an extension page can answer `chrome.tabs.query`
-/// and `chrome.windows.getAll` with one window per browser window.
+/// and `chrome.windows.getAll` with one window per browser window. Bounds are included
+/// because a toolbar popout, such as Bitwarden's, positions `chrome.windows.create`
+/// from `getCurrent`.
 fn reply_extension_tabs(app: &AppHandle, label: &str, token: i64) {
     let snapshot = tabs::snapshot(app);
     let current = surface_window(app, label);
@@ -1316,10 +1353,18 @@ fn reply_extension_tabs(app: &AppHandle, label: &str, token: i64) {
         .windows
         .iter()
         .map(|window| {
-            json!({
+            let mut entry = json!({
                 "id": window_number(&window.label),
                 "focused": window.label == focused,
-            })
+            });
+            if let Some(frame) = window_frame(app, &window.label)
+                && let (Some(entry), Some(frame)) = (entry.as_object_mut(), frame.as_object())
+            {
+                for (key, value) in frame {
+                    entry.insert(key.clone(), value.clone());
+                }
+            }
+            entry
         })
         .collect();
     let mut indexes: HashMap<String, i64> = HashMap::new();
@@ -3511,9 +3556,12 @@ pub const EXTENSION_TAB_JS: &str = r##"(function () {
               focused: !!item.focused,
               incognito: false,
               type: "normal",
-              state: "normal",
+              state: item.state || "normal",
               alwaysOnTop: false
             };
+            ["left", "top", "width", "height"].forEach(function (key) {
+              if (typeof item[key] === "number" && isFinite(item[key])) entry[key] = Math.round(item[key]);
+            });
             if (populate) {
               entry.tabs = built.tabs.filter(function (tab) { return tab.windowId === item.id; });
             }
@@ -3565,6 +3613,26 @@ pub const EXTENSION_TAB_JS: &str = r##"(function () {
         });
         return settle(promise, callback, undefined);
       };
+      if (typeof chrome.windows.create === "function" && !chrome.windows.create.__ceExtensionTabs) {
+        var nativeCreate = chrome.windows.create.bind(chrome.windows);
+        function createWindow(createData, callback) {
+          if (typeof createData === "function") {
+            callback = createData;
+            createData = {};
+          }
+          var data = Object.assign({}, createData || {});
+          ["left", "top", "width", "height"].forEach(function (key) {
+            if (data[key] == null) return;
+            var value = Number(data[key]);
+            if (!isFinite(value)) delete data[key];
+            else data[key] = Math.round(value);
+          });
+          if (typeof callback === "function") return nativeCreate(data, callback);
+          return nativeCreate(data);
+        }
+        createWindow.__ceExtensionTabs = true;
+        try { chrome.windows.create = createWindow; } catch (error) {}
+      }
     }
     var side = chrome.sidePanel;
     if (!(side && side.open && side.open.__ceExtensionTabs)) {
@@ -4191,6 +4259,14 @@ mod tests {
         assert_eq!(detail.side, "left");
         assert!(detail.resizable);
         assert_eq!(detail.min_width, 200);
+    }
+
+    #[test]
+    fn window_bounds_are_whole_screen_pixels() {
+        assert_eq!(super::dip_px(200, 1.0), 200);
+        assert_eq!(super::dip_px(150, 1.25), 120);
+        assert_eq!(super::dip_px(-11, 1.25), -9);
+        assert_eq!(super::dip_px(384, 0.0), 384);
     }
 
     #[test]

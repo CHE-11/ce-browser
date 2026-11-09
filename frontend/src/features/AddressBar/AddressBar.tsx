@@ -81,6 +81,7 @@ import { IconButton } from "../../components/IconButton";
 import { LoadBar } from "../../components/LoadBar";
 import { WindowControls } from "../../components/WindowControls";
 import { AddressBarExtensions } from "./AddressBarExtensions";
+import { ProfileSwitcherButton } from "./ProfileSwitcherButton";
 
 type AddressBarProps = {
   snapshot: WindowTabsState;
@@ -1115,6 +1116,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         </IconButton>
       </div>
 
+      <ProfileSwitcherButton />
       <IconButton id="address-settings" label="Settings" onClick={() => void createTab("ce://settings")}>
         <Settings id="address-settings-icon" aria-hidden />
       </IconButton>
