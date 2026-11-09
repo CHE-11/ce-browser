@@ -10,6 +10,10 @@ import { AgentPanelPage } from "./features/BuiltInExtensions/agent/AgentPanel.pa
 import { AutomationsPage } from "./features/BuiltInExtensions/automation/Automations.page";
 import { AutomationsPanelPage } from "./features/BuiltInExtensions/automation/AutomationsPanel.page";
 import { CaptureEditorPage } from "./features/BuiltInExtensions/capture-editor/CaptureEditor.page";
+import { RecordingCamera } from "./features/BuiltInExtensions/recording/RecordingCamera";
+import { RecordingControls } from "./features/BuiltInExtensions/recording/RecordingControls";
+import { RecordingDraw } from "./features/BuiltInExtensions/recording/RecordingDraw";
+import { RecordingsPage } from "./features/BuiltInExtensions/recording/Recordings.page";
 import { BrowserPage } from "./features/Browser/Browser.page";
 import { DownloadsPage } from "./features/Downloads/Downloads.page";
 import { FilesPage } from "./features/BuiltInExtensions/files/Files.page";
@@ -95,6 +99,14 @@ function App() {
       return <StoragePage params={route.params} />;
     case "capture-editor":
       return <CaptureEditorPage />;
+    case "recordings":
+      return <RecordingsPage params={route.params} />;
+    case "recording-controls":
+      return <RecordingControls />;
+    case "recording-camera":
+      return <RecordingCamera />;
+    case "recording-draw":
+      return <RecordingDraw />;
     case "boards":
       return <BoardsPage params={route.params} />;
     case "whats-new":

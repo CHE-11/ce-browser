@@ -41,6 +41,7 @@ mod prices;
 mod print;
 mod print_images;
 mod privacy;
+mod recording;
 mod profile_archive;
 mod profile_icons;
 mod profiles;
@@ -680,6 +681,154 @@ async fn start_recording(
 async fn stop_recording() -> Result<(), String> {
     capture::stop_recording();
     Ok(())
+}
+
+#[tauri::command]
+async fn list_recording_targets(app: AppHandle, window: String) -> Result<Vec<recording::RecordingTarget>, String> {
+    let skip = app
+        .get_window(&window)
+        .and_then(|window| window.hwnd().ok())
+        .map(|hwnd| hwnd.0 as isize)
+        .unwrap_or(0);
+    Ok(recording::list_targets(skip))
+}
+
+#[tauri::command]
+async fn start_screen_recording(
+    app: AppHandle,
+    request: recording::StartRequest,
+) -> Result<recording::ScreenRecordingStatus, String> {
+    recording::start(&app, request)
+}
+
+#[tauri::command]
+async fn pause_screen_recording() -> Result<recording::ScreenRecordingStatus, String> {
+    recording::pause()
+}
+
+#[tauri::command]
+async fn resume_screen_recording() -> Result<recording::ScreenRecordingStatus, String> {
+    recording::resume()
+}
+
+#[tauri::command]
+async fn stop_screen_recording() -> Result<recording::RecordingEntry, String> {
+    recording::stop()
+}
+
+#[tauri::command]
+async fn screen_recording_status() -> Result<recording::ScreenRecordingStatus, String> {
+    Ok(recording::status())
+}
+
+#[tauri::command]
+async fn set_recording_mic_muted(muted: bool) -> Result<recording::ScreenRecordingStatus, String> {
+    recording::set_mic_muted(muted)
+}
+
+#[tauri::command]
+async fn set_recording_camera(app: AppHandle, on: bool) -> Result<recording::ScreenRecordingStatus, String> {
+    recording::set_camera(&app, on)
+}
+
+#[tauri::command]
+async fn set_recording_camera_corner(app: AppHandle, corner: String) -> Result<(), String> {
+    recording::set_camera_corner(&app, &corner)
+}
+
+#[tauri::command]
+async fn set_recording_cursor(mode: String) -> Result<(), String> {
+    recording::set_cursor(&mode)
+}
+
+#[tauri::command]
+async fn set_recording_focus(mode: String) -> Result<(), String> {
+    recording::set_focus(&mode)
+}
+
+#[tauri::command]
+async fn set_recording_controls_mode(app: AppHandle, mode: String) -> Result<(), String> {
+    recording::set_controls_mode(&app, &mode)
+}
+
+#[tauri::command]
+async fn set_recording_drawing(app: AppHandle, on: bool) -> Result<recording::ScreenRecordingStatus, String> {
+    recording::set_drawing(&app, on)
+}
+
+#[tauri::command]
+async fn set_recording_style(app: AppHandle, tool: String, color: String) -> Result<recording::ScreenRecordingStatus, String> {
+    recording::set_style(&app, tool, color)
+}
+
+#[tauri::command]
+async fn add_recording_stroke(stroke: recording::Stroke) -> Result<(), String> {
+    recording::add_stroke(stroke)
+}
+
+#[tauri::command]
+async fn set_recording_draft(stroke: Option<recording::Stroke>) -> Result<(), String> {
+    recording::set_draft(stroke)
+}
+
+#[tauri::command]
+async fn undo_recording_stroke(app: AppHandle) -> Result<(), String> {
+    recording::undo_stroke(&app)
+}
+
+#[tauri::command]
+async fn clear_recording_strokes(app: AppHandle) -> Result<(), String> {
+    recording::clear_strokes(&app)
+}
+
+#[tauri::command]
+async fn erase_recording_strokes(points: Vec<recording::StrokePoint>) -> Result<(), String> {
+    recording::erase(points)
+}
+
+#[tauri::command]
+async fn append_recording_camera(bytes: Vec<u8>) -> Result<(), String> {
+    recording::append_camera(&bytes)
+}
+
+#[tauri::command]
+async fn list_recordings(app: AppHandle) -> Result<Vec<recording::RecordingEntry>, String> {
+    Ok(recording::library_list(&app))
+}
+
+#[tauri::command]
+async fn update_recording(app: AppHandle, patch: recording::RecordingUpdate) -> Result<recording::RecordingEntry, String> {
+    recording::library_update(&app, patch)
+}
+
+#[tauri::command]
+async fn delete_recording(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(move || recording::library_delete(&app, &id)).await
+}
+
+#[tauri::command]
+async fn export_recording(app: AppHandle, id: String, path: String) -> Result<String, String> {
+    blocking(move || recording::library_export(&app, &id, &PathBuf::from(path))).await
+}
+
+#[tauri::command]
+async fn recording_media_url(app: AppHandle, id: String, kind: String) -> Result<String, String> {
+    recording::media_url(&app, &id, &kind)
+}
+
+#[tauri::command]
+async fn begin_recording_export(path: String) -> Result<(), String> {
+    recording::begin_export(&PathBuf::from(path))
+}
+
+#[tauri::command]
+async fn append_recording_export(bytes: Vec<u8>) -> Result<(), String> {
+    recording::append_export(&bytes)
+}
+
+#[tauri::command]
+async fn finish_recording_export() -> Result<(), String> {
+    recording::finish_export()
 }
 
 #[tauri::command]
@@ -2762,6 +2911,34 @@ pub fn run() {
             copy_edited_png,
             start_recording,
             stop_recording,
+            list_recording_targets,
+            start_screen_recording,
+            pause_screen_recording,
+            resume_screen_recording,
+            stop_screen_recording,
+            screen_recording_status,
+            set_recording_mic_muted,
+            set_recording_camera,
+            set_recording_camera_corner,
+            set_recording_cursor,
+            set_recording_focus,
+            set_recording_controls_mode,
+            set_recording_drawing,
+            set_recording_style,
+            add_recording_stroke,
+            set_recording_draft,
+            undo_recording_stroke,
+            clear_recording_strokes,
+            erase_recording_strokes,
+            append_recording_camera,
+            list_recordings,
+            update_recording,
+            delete_recording,
+            export_recording,
+            recording_media_url,
+            begin_recording_export,
+            append_recording_export,
+            finish_recording_export,
             list_media,
             set_all_media_muted,
             control_media,

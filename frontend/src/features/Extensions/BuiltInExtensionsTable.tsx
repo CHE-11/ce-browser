@@ -1,6 +1,4 @@
-import { Button } from "@/components/Button";
 import { ExtensionIcon, isComponentExtension } from "@/components/ExtensionIcon";
-import { RemoveExtensionDialog } from "./RemoveExtensionDialog";
 import { PinPlacement } from "@/components/PinPlacement";
 import { Skeleton } from "@/components/Skeleton";
 import { Toggle } from "@/components/Toggle";
@@ -8,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { builtinToolEnabled, toolbarPlacement } from "@/lib/toolbar-pin";
 import type { BrowserSettings, ExtensionInfo, ToolbarPlacement } from "@type/browser";
-import { ChevronDown, ChevronUp, Settings2, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
 import { BUILTIN_TOOLS } from "../BuiltInExtensions/builtin";
 
@@ -28,8 +26,6 @@ type TableRow = {
   flags: SourceFlag[];
   builtin: boolean;
   enabled: boolean;
-  optionsPage: string | null;
-  updateVersion: string | null;
 };
 
 type SortColumn = "name" | "source" | "enabled";
@@ -121,8 +117,6 @@ function rows(extensions: ExtensionInfo[], settings: BrowserSettings | null): Ta
     ],
     builtin: true,
     enabled: builtinToolEnabled(settings, tool.id),
-    optionsPage: null,
-    updateVersion: null,
   }));
   const installed: TableRow[] = extensions.map((extension) => ({
     id: extension.id,
@@ -134,8 +128,6 @@ function rows(extensions: ExtensionInfo[], settings: BrowserSettings | null): Ta
     flags: installedFlags(extension),
     builtin: false,
     enabled: extension.enabled,
-    optionsPage: extension.optionsPage,
-    updateVersion: extension.updateVersion,
   }));
   return [...installed, ...builtin];
 }
@@ -176,25 +168,16 @@ export function BuiltInExtensionsTable({
   extensions,
   loaded,
   settings,
-  busy,
   onPlacement,
   onEnabled,
-  onOptions,
-  onRemove,
-  onUpdate,
 }: {
   extensions: ExtensionInfo[];
   loaded: boolean;
   settings: BrowserSettings | null;
-  busy: boolean;
   onPlacement: (id: string, placement: ToolbarPlacement) => void;
   onEnabled: (id: string, enabled: boolean) => void;
-  onOptions: (id: string) => void;
-  onRemove: (id: string) => void;
-  onUpdate: (id: string) => void;
 }) {
   const [sort, setSort] = useState<Sort | null>(null);
-  const [pending, setPending] = useState<{ id: string; name: string } | null>(null);
   const list = sortedRows(rows(loaded ? extensions : [], settings), sort);
 
   return (
@@ -216,9 +199,6 @@ export function BuiltInExtensionsTable({
             <th id="extensions-table-placement" className="w-28 px-3 py-2 font-medium">
               Placement
             </th>
-            <th id="extensions-table-actions" className="w-[80px] px-1 py-2 font-medium">
-              Actions
-            </th>
             <SortHeader id="extensions-table-enabled" label="Enabled" column="enabled" sort={sort} onSort={(column) => setSort((current) => nextSort(current, column))} className="w-28" />
           </tr>
         </thead>
@@ -226,7 +206,7 @@ export function BuiltInExtensionsTable({
           {!loaded
             ? [0, 1, 2].map((index) => (
                 <tr id={`extensions-table-loading-${index}`} key={`loading-${index}`} className="border-t border-zinc-800">
-                  <td id={`extensions-table-loading-${index}-cell`} colSpan={5} className="px-3 py-2">
+                  <td id={`extensions-table-loading-${index}-cell`} colSpan={4} className="px-3 py-2">
                     <Skeleton id={`extensions-table-loading-${index}-bar`} className="h-10 rounded-md" />
                   </td>
                 </tr>
@@ -292,34 +272,6 @@ export function BuiltInExtensionsTable({
                     onChange={(placement) => onPlacement(row.id, placement)}
                   />
                 </td>
-                <td id={`${domId}-actions`} className="w-[80px] px-1 py-2.5 align-middle">
-                  <div id={`${domId}-action-row`} className="flex flex-wrap items-center gap-1">
-                    {row.updateVersion ? (
-                      <Button id={`${domId}-update`} size="sm" variant="primary" disabled={busy} onClick={() => onUpdate(row.id)}>
-                        Update to {row.updateVersion}
-                      </Button>
-                    ) : null}
-                    {row.optionsPage ? (
-                      <Button id={`${domId}-options`} size="sm" variant="ghost" onClick={() => onOptions(row.id)}>
-                        <Settings2 id={`${domId}-options-icon`} className="size-3.5" aria-hidden />
-                        Options
-                      </Button>
-                    ) : null}
-                    {!row.builtin ? (
-                      <Button
-                        id={`${domId}-remove`}
-                        size="sm"
-                        variant="destructive"
-                        className="size-7 px-0"
-                        aria-label="Remove"
-                        title="Remove"
-                        onClick={() => setPending({ id: row.id, name: row.name })}
-                      >
-                        <Trash2 id={`${domId}-remove-icon`} className="size-3.5" aria-hidden />
-                      </Button>
-                    ) : null}
-                  </div>
-                </td>
                 <td id={`${domId}-enabled`} className="px-3 py-2.5 align-middle">
                   <Toggle
                     id={`${domId}-toggle`}
@@ -334,19 +286,6 @@ export function BuiltInExtensionsTable({
           })}
         </tbody>
       </table>
-      <RemoveExtensionDialog
-        id="extensions-table-remove-dialog"
-        name={pending?.name ?? null}
-        open={pending !== null}
-        onCancel={() => setPending(null)}
-        onConfirm={() => {
-          if (!pending) {
-            return;
-          }
-          onRemove(pending.id);
-          setPending(null);
-        }}
-      />
       </div>
     </section>
   );

@@ -6,6 +6,7 @@ import {
   Eraser,
   FileText,
   ImageDown,
+  Video,
   KeyRound,
   Languages,
   Layers,
@@ -44,6 +45,12 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Save as PNG",
     description: "Save or copy the page as an image.",
     icon: ImageDown,
+  },
+  {
+    id: "recording",
+    name: "Recording",
+    description: "Record a tab, window, or screen.",
+    icon: Video,
   },
   {
     id: "webpage-markdown",

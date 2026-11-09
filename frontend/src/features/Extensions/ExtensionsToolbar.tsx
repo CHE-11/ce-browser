@@ -327,7 +327,7 @@ export const ExtensionsToolbar = forwardRef<HTMLElement, ExtensionsToolbarProps>
           "flex shrink-0 gap-1 border-zinc-800",
           vertical
             ? "flex-col items-center border-t px-1 py-1.5"
-            : "z-10 items-end justify-self-end self-stretch bg-zinc-950 px-2 pb-0.5",
+            : "z-10 items-center justify-self-end self-stretch bg-zinc-950 px-2",
         )}
       >
         <span id="tools-toolbar-labels-caption" className="text-[9px] leading-none text-zinc-500">

@@ -29,6 +29,7 @@ import { MediaGrid } from "../BuiltInExtensions/media/MediaGrid";
 import { MediaHub } from "../BuiltInExtensions/media/MediaHub";
 import { NetworkPopover } from "../BuiltInExtensions/network/NetworkPopover";
 import { PageCapturePopover } from "../BuiltInExtensions/page-capture/PageCapturePopover";
+import { RecordingPopover } from "../BuiltInExtensions/recording/RecordingPopover";
 import { PageControlsPopover } from "../BuiltInExtensions/page-controls/PageControlsPopover";
 import { PasswordPopover } from "../BuiltInExtensions/password/Password";
 import { PrintPdfPopover } from "../BuiltInExtensions/print-to-pdf/PrintPdfPopover";
@@ -188,6 +189,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <PrintPdfPopover params={params} />;
     case "page-capture":
       return <PageCapturePopover params={params} />;
+    case "recording":
+      return <RecordingPopover params={params} />;
     case "webpage-markdown":
       return <WebpageMarkdownPopover params={params} />;
     case "boards":

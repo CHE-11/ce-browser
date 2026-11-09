@@ -262,7 +262,6 @@ export function ExtensionsPage() {
           extensions={componentExtensions}
           loaded={loaded}
           settings={settings}
-          busy={busy}
           onPlacement={setPlacement}
           onEnabled={(id, enabled) => {
             if (builtinTool(id)) {
@@ -273,9 +272,6 @@ export function ExtensionsPage() {
             }
             act(setExtensionEnabled(id, enabled));
           }}
-          onOptions={(id) => act(openExtensionOptions(id))}
-          onRemove={(id) => act(removeExtension(id))}
-          onUpdate={(id) => void install(() => updateExtension(id), "Updated")}
         />
 
         <section id="extensions-page-install" className="rounded-lg border border-zinc-800 bg-zinc-900/60 p-5">

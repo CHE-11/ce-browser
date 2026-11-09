@@ -696,6 +696,25 @@ fn hwnd_of(value: isize) -> HWND {
     HWND(value as *mut std::ffi::c_void)
 }
 
+/// The webview host window. Recording captures this, so the picture is the page itself.
+pub fn host_hwnd(webview: &Webview) -> std::result::Result<isize, String> {
+    let (tx, rx) = mpsc::channel();
+    let posted = webview.with_webview(move |platform| {
+        let mut hwnd = HWND(std::ptr::null_mut());
+        let ok = unsafe { platform.controller().ParentWindow(&mut hwnd) }.is_ok() && !hwnd.0.is_null();
+        let _ = tx.send(if ok { hwnd.0 as isize } else { 0 });
+    });
+    if posted.is_err() {
+        return Err("This page is not loaded yet.".into());
+    }
+    let hwnd = rx.recv_timeout(Duration::from_secs(2)).unwrap_or(0);
+    if hwnd == 0 {
+        Err("This page is not loaded yet.".into())
+    } else {
+        Ok(hwnd)
+    }
+}
+
 fn attach_zoom_wheel(platform: &PlatformWebview, app: AppHandle, kind: ZoomKind) {
     let mut hwnd = HWND(std::ptr::null_mut());
     if unsafe { platform.controller().ParentWindow(&mut hwnd) }.is_err() || hwnd.0.is_null() {
@@ -1774,6 +1793,31 @@ pub fn attach_page_hooks(app: &AppHandle, webview: &Webview, id: u32) {
         if let Err(error) = page_hooks(&app, &platform, id) {
             eprintln!("WebView2 hooks for tab {id}: {error}");
         }
+    });
+}
+
+/// The recording bubble already asked for the camera. Its window is too small for the permission
+/// prompt, so the choice made in the recording popover is the grant.
+pub fn allow_camera(webview: &Webview) {
+    let _ = webview.with_webview(|platform| {
+        let Ok(core) = core(&platform) else {
+            return;
+        };
+        let mut token = 0i64;
+        let handler = PermissionRequestedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+            let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
+            let _ = unsafe { args.PermissionKind(&mut kind) };
+            if kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA || kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE {
+                hide_default_permission_ui(&args);
+                let _ = unsafe { args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW) };
+                save_permission_choice(&args, true);
+            }
+            Ok(())
+        }));
+        let _ = unsafe { core.add_PermissionRequested(&handler, &mut token) };
     });
 }
 

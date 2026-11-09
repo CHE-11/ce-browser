@@ -69,7 +69,16 @@ import type {
   PageCaptureResult,
   PageMedia,
   MediaElement,
+  RecordingCameraCorner,
+  RecordingCursor,
+  RecordingFocus,
   RecordingStatus,
+  RecordingSource,
+  RecordingStroke,
+  RecordingTargetInfo,
+  ScreenRecording,
+  ScreenRecordingStatus,
+  CameraLayout,
   PageRules,
   PageTechnologies,
   PageToolRequest,
@@ -1065,6 +1074,143 @@ export function stopRecording() {
 
 export function onRecordingStatus(handler: (status: RecordingStatus) => void): Promise<UnlistenFn> {
   return listen<RecordingStatus>("recording-status", (event) => handler(event.payload));
+}
+
+export function listRecordingTargets(window: string) {
+  return invoke<RecordingTargetInfo[]>("list_recording_targets", { window });
+}
+
+export function startScreenRecording(request: {
+  source: RecordingSource;
+  target: string;
+  window: string;
+  tabId: number;
+  title: string;
+  microphone: boolean;
+  systemAudio: boolean;
+  camera: boolean;
+  countdown: boolean;
+  microphoneDeviceId?: string;
+  resolution?: string;
+  cameraCorner?: string;
+  cursor?: string;
+  focus?: string;
+}) {
+  return invoke<ScreenRecordingStatus>("start_screen_recording", { request });
+}
+
+export function pauseScreenRecording() {
+  return invoke<ScreenRecordingStatus>("pause_screen_recording");
+}
+
+export function resumeScreenRecording() {
+  return invoke<ScreenRecordingStatus>("resume_screen_recording");
+}
+
+export function stopScreenRecording() {
+  return invoke<ScreenRecording>("stop_screen_recording");
+}
+
+export function screenRecordingStatus() {
+  return invoke<ScreenRecordingStatus>("screen_recording_status");
+}
+
+export function onScreenRecording(handler: (status: ScreenRecordingStatus) => void): Promise<UnlistenFn> {
+  return listen<ScreenRecordingStatus>("screen-recording", (event) => handler(event.payload));
+}
+
+export function setRecordingMicMuted(muted: boolean) {
+  return invoke<ScreenRecordingStatus>("set_recording_mic_muted", { muted });
+}
+
+export function setRecordingCamera(on: boolean) {
+  return invoke<ScreenRecordingStatus>("set_recording_camera", { on });
+}
+
+export function setRecordingCameraCorner(corner: RecordingCameraCorner) {
+  return invoke<void>("set_recording_camera_corner", { corner });
+}
+
+export function setRecordingCursor(mode: RecordingCursor) {
+  return invoke<void>("set_recording_cursor", { mode });
+}
+
+export function setRecordingFocus(mode: RecordingFocus) {
+  return invoke<void>("set_recording_focus", { mode });
+}
+
+export function setRecordingControlsMode(mode: "hidden" | "pill" | "settings" | "tools") {
+  return invoke<void>("set_recording_controls_mode", { mode });
+}
+
+export function setRecordingDrawing(on: boolean) {
+  return invoke<ScreenRecordingStatus>("set_recording_drawing", { on });
+}
+
+export function setRecordingStyle(tool: string, color: string) {
+  return invoke<ScreenRecordingStatus>("set_recording_style", { tool, color });
+}
+
+export function addRecordingStroke(stroke: RecordingStroke) {
+  return invoke<void>("add_recording_stroke", { stroke });
+}
+
+export function setRecordingDraft(stroke: RecordingStroke | null) {
+  return invoke<void>("set_recording_draft", { stroke });
+}
+
+export function undoRecordingStroke() {
+  return invoke<void>("undo_recording_stroke");
+}
+
+export function clearRecordingStrokes() {
+  return invoke<void>("clear_recording_strokes");
+}
+
+export function eraseRecordingStrokes(points: { x: number; y: number }[]) {
+  return invoke<void>("erase_recording_strokes", { points });
+}
+
+export function appendRecordingCamera(bytes: number[]) {
+  return invoke<void>("append_recording_camera", { bytes });
+}
+
+export function listRecordings() {
+  return invoke<ScreenRecording[]>("list_recordings");
+}
+
+export function updateRecording(patch: {
+  id: string;
+  title?: string;
+  trimStartMs?: number;
+  trimEndMs?: number;
+  camera?: CameraLayout;
+}) {
+  return invoke<ScreenRecording>("update_recording", { patch });
+}
+
+export function deleteRecording(id: string) {
+  return invoke<void>("delete_recording", { id });
+}
+
+export function exportRecording(id: string, path: string) {
+  return invoke<string>("export_recording", { id, path });
+}
+
+export function recordingMediaUrl(id: string, kind: "video" | "camera") {
+  return invoke<string>("recording_media_url", { id, kind });
+}
+
+export function beginRecordingExport(path: string) {
+  return invoke<void>("begin_recording_export", { path });
+}
+
+export function appendRecordingExport(bytes: number[]) {
+  return invoke<void>("append_recording_export", { bytes });
+}
+
+export function finishRecordingExport() {
+  return invoke<void>("finish_recording_export");
 }
 
 export function listMedia() {

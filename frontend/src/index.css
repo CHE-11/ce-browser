@@ -491,6 +491,12 @@ html[data-backdrop] #browser {
   background: transparent !important;
 }
 
+html[data-recording-clear],
+html[data-recording-clear] body,
+html[data-recording-clear] #root {
+  background: transparent !important;
+}
+
 html[data-backdrop] #browser .bg-zinc-950 {
   background-color: color-mix(in oklab, var(--app-zinc-950) 45%, transparent);
 }

@@ -435,6 +435,9 @@ pub struct BrowserSettings {
     /// Last choices in the Page to PNG popover.
     #[serde(default)]
     pub page_capture: PageCaptureSettings,
+    /// Last choices in the Recording popover.
+    #[serde(default)]
+    pub recording: RecordingSettings,
     /// Last choices in the Webpage to Markdown popover.
     #[serde(default)]
     pub page_markdown: PageMarkdownSettings,
@@ -1447,6 +1450,60 @@ impl Default for PageCaptureSettings {
     }
 }
 
+/// Last choices in the Recording popover. An older settings file omits this and keeps these.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RecordingSettings {
+    pub microphone: bool,
+    pub system_audio: bool,
+    pub camera: bool,
+    pub countdown: bool,
+    /// `720`, `1080`, `1440`, or `native`.
+    pub resolution: String,
+    /// `bottom-left`, `bottom-right`, `top-left`, or `top-right`.
+    pub camera_corner: String,
+    /// `system`, `hidden`, or `circle`.
+    pub cursor: String,
+    /// `off`, `1.5`, or `2`.
+    pub focus: String,
+}
+
+impl Default for RecordingSettings {
+    fn default() -> Self {
+        Self {
+            microphone: true,
+            system_audio: true,
+            camera: false,
+            countdown: true,
+            resolution: "1440".into(),
+            camera_corner: "bottom-left".into(),
+            cursor: "system".into(),
+            focus: "off".into(),
+        }
+    }
+}
+
+impl RecordingSettings {
+    fn normalize(mut self) -> Self {
+        if !matches!(self.resolution.as_str(), "720" | "1080" | "1440" | "native") {
+            self.resolution = "1440".into();
+        }
+        if !matches!(
+            self.camera_corner.as_str(),
+            "bottom-left" | "bottom-right" | "top-left" | "top-right"
+        ) {
+            self.camera_corner = "bottom-left".into();
+        }
+        if !matches!(self.cursor.as_str(), "system" | "hidden" | "circle") {
+            self.cursor = "system".into();
+        }
+        if !matches!(self.focus.as_str(), "off" | "1.5" | "2") {
+            self.focus = "off".into();
+        }
+        self
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PageMarkdownSettings {
@@ -1526,6 +1583,7 @@ impl Default for BrowserSettings {
             sync_history_revision: 0,
             print_editor: PrintEditorSettings::default(),
             page_capture: PageCaptureSettings::default(),
+            recording: RecordingSettings::default(),
             page_markdown: PageMarkdownSettings::default(),
             hidden_toolbar_extensions: Vec::new(),
             toolbar_placements: BTreeMap::new(),
@@ -1907,6 +1965,7 @@ impl BrowserSettings {
         self.page_zoom = snap_page_zoom(self.page_zoom);
         self.print_editor = self.print_editor.normalize();
         self.page_markdown = self.page_markdown.normalize();
+        self.recording = self.recording.normalize();
         self.hidden_toolbar_extensions =
             toolbar_hidden(&map_retired_tools(&self.hidden_toolbar_extensions));
         self.toolbar_placements = normalize_toolbar_placements(self.toolbar_placements);
@@ -3026,6 +3085,12 @@ mod tests {
             "{author} - {article}"
         );
         assert!(loaded.page_capture.full_page);
+        assert!(loaded.recording.microphone);
+        assert!(loaded.recording.system_audio);
+        assert!(!loaded.recording.camera);
+        assert!(loaded.recording.countdown);
+        assert_eq!(loaded.recording.cursor, "system");
+        assert_eq!(loaded.recording.focus, "off");
         assert_eq!(loaded.page_markdown.scope, "article");
         assert!(loaded.page_markdown.images);
         assert!(loaded.page_markdown.links);

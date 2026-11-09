@@ -448,6 +448,7 @@ export type PopupKind =
   | "host"
   | "print-pdf"
   | "page-capture"
+  | "recording"
   | "webpage-markdown"
   | "media-hub"
   | "media-grid"
@@ -822,6 +823,8 @@ export type BrowserSettings = {
   printEditor: PrintEditorSettings;
   /** Last choices in the Page to PNG popover. */
   pageCapture: PageCaptureSettings;
+  /** Last choices in the Recording popover. */
+  recording: RecordingSettings;
   /** Last choices in the Webpage to Markdown popover. */
   pageMarkdown: PageMarkdownSettings;
   /** Extension ids left off the toolbars. Empty means every enabled extension stays pinned. */
@@ -1361,6 +1364,32 @@ export type PageCaptureSettings = {
   loadLazy: boolean;
 };
 
+/** Last choices in the Recording popover. An older settings file omits this. */
+export type RecordingResolution = "720" | "1080" | "1440" | "native";
+
+export type RecordingCameraCorner = "bottom-left" | "bottom-right" | "top-left" | "top-right";
+
+/** `system` keeps the pointer Windows draws. `hidden` leaves it out. `circle` draws a ring instead. */
+export type RecordingCursor = "system" | "hidden" | "circle";
+
+/** `off` keeps the whole picture. `1.5` and `2` zoom toward the pointer. */
+export type RecordingFocus = "off" | "1.5" | "2";
+
+export type RecordingSettings = {
+  microphone: boolean;
+  systemAudio: boolean;
+  camera: boolean;
+  countdown: boolean;
+  /** Long side of the picture: 720p, 1080p, 1440p, or the screen's own size. */
+  resolution: RecordingResolution;
+  /** Where the camera bubble sits on the recording. */
+  cameraCorner: RecordingCameraCorner;
+  /** How the pointer is drawn into the video. */
+  cursor: RecordingCursor;
+  /** Zoom that follows the pointer. */
+  focus: RecordingFocus;
+};
+
 /** `article` keeps the main content. `page` keeps the whole document. */
 export type MarkdownScope = "article" | "page";
 
@@ -1370,6 +1399,68 @@ export type PageMarkdownSettings = {
   links: boolean;
   /** Title and source URL above the content. */
   header: boolean;
+};
+
+export type RecordingSource = "tab" | "browser" | "window" | "display";
+
+export type RecordingTargetInfo = {
+  id: string;
+  kind: string;
+  label: string;
+};
+
+export type CameraLayout = {
+  /** Left edge, as a fraction of the frame width. */
+  x: number;
+  /** Top edge, as a fraction of the frame height. */
+  y: number;
+  /** Bubble width, as a fraction of the frame width. */
+  size: number;
+};
+
+export type ScreenRecordingStatus = {
+  phase: "idle" | "countdown" | "recording" | "paused" | "error" | string;
+  elapsedMs: number;
+  countdown: number;
+  id: string;
+  error: string | null;
+  path: string | null;
+  camera: boolean;
+  microphone: boolean;
+  micMuted: boolean;
+  /** Microphone loudness from 0 to 1. */
+  micLevel: number;
+  drawing: boolean;
+  strokes: number;
+  tool: string;
+  color: string;
+  ownerWindow: string;
+};
+
+export type ScreenRecording = {
+  id: string;
+  title: string;
+  createdAt: number;
+  durationMs: number;
+  source: string;
+  sourceLabel: string;
+  width: number;
+  height: number;
+  videoPath: string;
+  cameraPath: string;
+  camera: CameraLayout;
+  trimStartMs: number;
+  trimEndMs: number;
+  hasMic: boolean;
+  hasSystemAudio: boolean;
+};
+
+export type RecordingStroke = {
+  tool: "pen" | "arrow" | "rectangle" | "highlighter" | string;
+  color: string;
+  width: number;
+  points: { x: number; y: number }[];
+  draft?: boolean;
 };
 
 export type RecordingStatus = {
