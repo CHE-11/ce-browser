@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, LayoutGrid, Plus } from "lucide-react";
 import { createEphemeralTab, createTab, openPopup } from "@/lib/browser-client";
+import { beginNewTabTyping, cancelNewTabTyping } from "@/lib/new-tab-typing";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { useTabDrag } from "@/lib/tab-drag";
@@ -114,7 +115,8 @@ export function TabStrip({ snapshot }: TabStripProps) {
         {...drag.containerProps}
         onDoubleClick={(event) => {
           if (event.target === event.currentTarget) {
-            void createTab();
+            beginNewTabTyping();
+            void createTab().catch(() => cancelNewTabTyping());
           }
         }}
       >
@@ -128,7 +130,10 @@ export function TabStrip({ snapshot }: TabStripProps) {
             "mb-1 ml-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
             focusRing,
           )}
-          onClick={() => void createTab()}
+          onClick={() => {
+            beginNewTabTyping();
+            void createTab().catch(() => cancelNewTabTyping());
+          }}
           onContextMenu={(event) => {
             event.preventDefault();
             void createEphemeralTab();

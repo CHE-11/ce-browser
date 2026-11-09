@@ -418,6 +418,7 @@ export type PeekInfo = {
 
 export type BrowserCommand =
   | "focus-address"
+  | "new-tab"
   | "find"
   | "bookmark"
   | "downloads"

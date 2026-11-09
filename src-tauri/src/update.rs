@@ -10,7 +10,7 @@ use url::form_urlencoded;
 use crate::{paths, settings, tabs};
 
 const FIRST_CHECK: Duration = Duration::from_secs(20); // Check after 20 seconds
-const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60); // Check every day
+const CHECK_EVERY: Duration = Duration::from_secs(60 * 60); // Check every hour
 const EXE_FILE: &str = "last-exe.txt";
 /// Releases live on GitHub next to the `latest.json` the updater reads.
 const RELEASES_API: &str = "https://api.github.com/repos/CHE-11/ce-browser/releases/tags/v";

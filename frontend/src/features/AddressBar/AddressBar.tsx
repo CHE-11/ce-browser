@@ -75,6 +75,7 @@ import { hostToolbarIds, reorderToolbarAt, splitToolbar } from "../../lib/toolba
 import { buildSuggestions, inlineCompletion, looksLikeUrl } from "../../lib/omnibox";
 import { flattenBookmarks, useUpdateStatus, type WindowTabsState } from "../../lib/use-browser";
 import { focusRing } from "../../lib/focus-ring";
+import { registerNewTabTyping } from "../../lib/new-tab-typing";
 import { useStickyAudio } from "../../lib/use-sticky-audio";
 import { IconButton } from "../../components/IconButton";
 import { LoadBar } from "../../components/LoadBar";
@@ -186,6 +187,18 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const blurTimer = useRef<number | null>(null);
   /** What the user typed. Anything after it in `text` is an inline completion. */
   const typedRef = useRef("");
+  const textRef = useRef(text);
+  textRef.current = text;
+  const editingStateRef = useRef(editing);
+  editingStateRef.current = editing;
+  /** The new tab was requested, and keystrokes belong to it before that tab is active. */
+  const armRef = useRef(false);
+  /** Keystrokes that miss the field still count, until the new page view stops taking focus. */
+  const redirectKeys = useRef(false);
+  const redirectStamp = useRef(0);
+  const pendingNav = useRef<string | null>(null);
+  const restoreRef = useRef<{ text: string; editing: boolean } | null>(null);
+  const dismissRef = useRef<() => void>(() => {});
   const completionRange = useRef<[number, number] | null>(null);
   const [selectionTick, setSelectionTick] = useState(0);
 
@@ -263,14 +276,112 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   }, []);
 
   useLayoutEffect(() => {
-    if (activeRef.current?.url === "ce://newtab") {
-      setText("");
+    const tab = activeRef.current;
+    const input = inputRef.current;
+    if (tab?.url === "ce://newtab") {
+      const keep = (armRef.current || redirectKeys.current) && typedRef.current !== "";
       setEditing(true);
-      inputRef.current?.focus();
+      if (!keep) {
+        typedRef.current = "";
+        setText("");
+      }
+      if (blurTimer.current !== null) {
+        window.clearTimeout(blurTimer.current);
+        blurTimer.current = null;
+      }
+      input?.focus();
+      const queued = pendingNav.current;
+      pendingNav.current = null;
+      armRef.current = false;
+      restoreRef.current = null;
+      if (queued) {
+        redirectKeys.current = false;
+        typedRef.current = "";
+        setText(queued);
+        setEditing(false);
+        input?.blur();
+        void navigate(tab.id, queued);
+      }
       return;
     }
-    setEditing(false);
+    if (!armRef.current) {
+      setEditing(false);
+    }
   }, [activeId]);
+
+  useEffect(() => {
+    if (activeRef.current?.url !== "ce://newtab") {
+      return;
+    }
+    const stamp = redirectStamp.current;
+    const timer = window.setTimeout(() => {
+      if (redirectStamp.current === stamp) {
+        redirectKeys.current = false;
+      }
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [activeId]);
+
+  const beginNewTab = (force: boolean) => {
+    const input = inputRef.current;
+    if (!force && (armRef.current || redirectKeys.current)) {
+      input?.focus();
+      return;
+    }
+    armRef.current = true;
+    redirectKeys.current = true;
+    redirectStamp.current += 1;
+    pendingNav.current = null;
+    restoreRef.current = { text: textRef.current, editing: editingStateRef.current };
+    typedRef.current = "";
+    if (blurTimer.current !== null) {
+      window.clearTimeout(blurTimer.current);
+      blurTimer.current = null;
+    }
+    if (input) {
+      input.value = "";
+      input.focus();
+      input.setSelectionRange(0, 0);
+    }
+    setText("");
+    setEditing(true);
+    dismissRef.current();
+  };
+
+  const cancelNewTab = () => {
+    if (!armRef.current && !redirectKeys.current && pendingNav.current === null) {
+      return;
+    }
+    const queued = pendingNav.current;
+    pendingNav.current = null;
+    const restore = restoreRef.current;
+    armRef.current = false;
+    redirectKeys.current = false;
+    restoreRef.current = null;
+    if (queued && activeRef.current) {
+      void navigate(activeRef.current.id, queued);
+      return;
+    }
+    if (typedRef.current === "" && restore) {
+      setText(restore.text);
+      setEditing(restore.editing);
+      if (!restore.editing) {
+        inputRef.current?.blur();
+      }
+    }
+  };
+
+  const beginNewTabRef = useRef(beginNewTab);
+  const cancelNewTabRef = useRef(cancelNewTab);
+  beginNewTabRef.current = beginNewTab;
+  cancelNewTabRef.current = cancelNewTab;
+
+  useEffect(() => {
+    return registerNewTabTyping({
+      begin: (force) => beginNewTabRef.current(force),
+      cancel: () => cancelNewTabRef.current(),
+    });
+  }, []);
 
   const wasEditingRef = useRef(false);
   useLayoutEffect(() => {
@@ -296,6 +407,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     suggestEpoch.current += 1;
     hideOmnibox();
   }, [hideOmnibox]);
+  dismissRef.current = dismissSuggestions;
 
   const showOmnibox = useCallback((state: OmniboxState) => {
     omniboxRef.current = state;
@@ -341,6 +453,19 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         setEditing(true);
         dismissSuggestions();
         window.setTimeout(() => inputRef.current?.select(), 0);
+        return;
+      }
+      if ((armRef.current || redirectKeys.current) && activeRef.current?.url !== "ce://newtab") {
+        if (target.kind === "tab" && target.tabId !== undefined) {
+          armRef.current = false;
+          redirectKeys.current = false;
+          pendingNav.current = null;
+          finishEditing();
+          void activateTab(target.tabId);
+          return;
+        }
+        pendingNav.current = target.url;
+        dismissSuggestions();
         return;
       }
       finishEditing();
@@ -400,15 +525,24 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         }
       }),
       onBrowserCommand((command) => {
+        if (command === "new-tab") {
+          beginNewTabRef.current(false);
+          return;
+        }
         if (command === "focus-address") {
           const input = inputRef.current;
           if (!input) {
             return;
           }
-          const typing = document.activeElement === input && input.value !== addressText(activeRef.current);
+          const resting = addressText(activeRef.current);
+          const inProgress =
+            input.value !== resting && (document.activeElement === input || redirectKeys.current || armRef.current);
           input.focus();
-          if (!typing) {
+          if (!inProgress) {
             input.select();
+          }
+          if (activeRef.current?.url === "ce://newtab") {
+            redirectKeys.current = false;
           }
         } else if (command === "bookmark" && starRef.current) {
           openBookmarkEditor(starRef.current);
@@ -504,6 +638,59 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       showOmnibox({ suggestions: [row, ...withoutSearch].slice(0, 8), selected: 0 });
     });
   };
+  const changeRef = useRef(onChange);
+  changeRef.current = onChange;
+
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (!redirectKeys.current) {
+        return;
+      }
+      const input = inputRef.current;
+      if (!input || document.activeElement === input || event.isComposing) {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("input, textarea, [contenteditable='true']")) {
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        input.focus();
+        const { suggestions, selected } = omniboxRef.current;
+        pickRef.current(suggestions[selected] ?? null, event.altKey);
+        return;
+      }
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        event.stopPropagation();
+        input.focus();
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? start;
+        const next =
+          start === end
+            ? input.value.slice(0, Math.max(0, start - 1)) + input.value.slice(end)
+            : input.value.slice(0, start) + input.value.slice(end);
+        changeRef.current(next, false);
+        return;
+      }
+      if (event.key.length !== 1) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      input.focus();
+      const start = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? start;
+      changeRef.current(input.value.slice(0, start) + event.key + input.value.slice(end), true);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   const moveSelection = (delta: number) => {
     const { suggestions, selected } = omniboxRef.current;
@@ -747,9 +934,15 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
               blurTimer.current = null;
             }
             setEditing(true);
-            event.currentTarget.select();
+            const input = event.currentTarget;
+            if (input.value === addressText(activeRef.current)) {
+              input.select();
+            }
           }}
           onBlur={() => {
+            if (armRef.current || redirectKeys.current) {
+              return;
+            }
             blurTimer.current = window.setTimeout(() => {
               blurTimer.current = null;
               clearAddressSelection(inputRef.current);

@@ -28,6 +28,8 @@ const PENDING_NEW_WINDOW: &str = "about:blank#ce-new-window";
 const EXTENSION_POPOUT_HEIGHT: f64 = 680.0;
 /// Restored pinned tabs wait this long, so the selected page loads first.
 const PIN_LOAD_DELAY: Duration = Duration::from_millis(1500);
+/// Building a page view blocks the main thread. A new tab's address bar gets the keyboard first.
+const NEW_TAB_VIEW_DELAY: Duration = Duration::from_millis(50);
 /// Gap between two restored pinned tabs starting to load.
 const PIN_LOAD_GAP: Duration = Duration::from_millis(750);
 /// Longest wait for a loading page before the next restored pinned tab starts anyway.
@@ -1323,7 +1325,19 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
         crate::system::claim_file(id);
     }
     let is_active = lock(app).active_of(&window) == Some(id);
-    if is_active {
+    if is_active && display == paths::NEW_TAB {
+        // The address bar has to accept a key before this returns to the UI.
+        // The page view is built on a later turn because creating it blocks the main thread.
+        emit_tabs(app);
+        send_command(app, &window, "new-tab");
+        let later = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(NEW_TAB_VIEW_DELAY);
+            if let Err(error) = activate(&later, id) {
+                eprintln!("new tab: {error}");
+            }
+        });
+    } else if is_active {
         activate(app, id)?;
     } else {
         if !tab.lazy {

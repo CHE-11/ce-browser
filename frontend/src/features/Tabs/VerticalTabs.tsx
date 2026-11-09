@@ -2,6 +2,7 @@ import { forwardRef, useEffect, useMemo, useRef, useState, type PointerEvent } f
 import { LayoutGrid, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import type { BrowserSettings } from "../../../../types/browser";
 import { createEphemeralTab, createTab, saveSettings, zoomTab } from "../../lib/browser-client";
+import { beginNewTabTyping, cancelNewTabTyping } from "../../lib/new-tab-typing";
 import { cn } from "../../lib/cn";
 import { focusRing } from "../../lib/focus-ring";
 import { useTabDrag } from "../../lib/tab-drag";
@@ -138,7 +139,10 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
           aria-label="New tab"
           className={cn("inline-flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100", focusRing)}
           title="New tab (Ctrl+T). Right-click for an ephemeral tab."
-          onClick={() => void createTab()}
+          onClick={() => {
+            beginNewTabTyping();
+            void createTab().catch(() => cancelNewTabTyping());
+          }}
           onContextMenu={(event) => {
             event.preventDefault();
             void createEphemeralTab();
@@ -163,7 +167,8 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
         {...drag.containerProps}
         onDoubleClick={(event) => {
           if (event.target === event.currentTarget) {
-            void createTab();
+            beginNewTabTyping();
+            void createTab().catch(() => cancelNewTabTyping());
           }
         }}
       >
