@@ -1147,9 +1147,14 @@ fn ensure_child(app: &AppHandle, window: &str, label: &str, url: Url) -> Result<
         .background_color(Color(r, g, b, 255))
         .focused(false);
     if label.starts_with("cext-panel-") {
+        // A store panel is a child webview, so WebView2 denies `chrome.windows.create` unless
+        // this handler builds the popout. That is the button that opens the extension's window.
+        let host = app.clone();
         builder = builder
+            .initialization_script(EXTENSION_TAB_JS)
             .initialization_script(PANEL_HANDLE_JS)
-            .initialization_script(PANEL_CHROME_JS);
+            .initialization_script(PANEL_CHROME_JS)
+            .on_new_window(move |url, features| tabs::new_window(&host, None, url, features));
     } else if label.starts_with("cext-toolbar-") {
         builder = builder.initialization_script(TOOLBAR_CHROME_JS);
     }
@@ -1175,6 +1180,65 @@ fn navigate_if_needed(view: &Webview, url: &Url) {
     if failed || !same {
         let _ = view.navigate(url.clone());
     }
+}
+
+/// The browser window a store popover or side panel belongs to.
+fn extension_surface_window(label: &str) -> String {
+    if let Some(window) = label.strip_prefix("cext-panel-") {
+        return window.to_string();
+    }
+    crate::popup::owner_of(label)
+}
+
+/// Address Chromium reports for a page view. Store popups match logins against this, and a
+/// `ce://` tab is shown to the extension as the app URL loaded in that view.
+fn extension_page_url(app: &AppHandle, id: u32, logical: &str) -> String {
+    let Some(view) = app.get_webview(&format!("tab-{id}")) else {
+        return logical.to_string();
+    };
+    let Ok(url) = view.url() else {
+        return logical.to_string();
+    };
+    let text = url.to_string();
+    if text.starts_with("http://") || text.starts_with("https://") || text.starts_with("file:") {
+        text
+    } else {
+        logical.to_string()
+    }
+}
+
+/// Tells a store popover or panel which page tab is open, so `chrome.tabs.query` for the
+/// current window can return that page instead of the extension view.
+fn reply_extension_active_tab(app: &AppHandle, label: &str, token: i64) {
+    let window = extension_surface_window(label);
+    let snapshot = tabs::snapshot(app);
+    let active = snapshot
+        .windows
+        .iter()
+        .find(|item| item.label == window)
+        .and_then(|item| item.active_id);
+    let Some(id) = active else {
+        post_label(
+            app,
+            label,
+            &json!({ "type": "ce-active-tab", "token": token }),
+        );
+        return;
+    };
+    let tab = snapshot.tabs.iter().find(|tab| tab.id == id);
+    let logical = tab.map(|tab| tab.url.clone()).unwrap_or_default();
+    let title = tab.map(|tab| tab.title.clone()).unwrap_or_default();
+    let url = extension_page_url(app, id, &logical);
+    post_label(
+        app,
+        label,
+        &json!({
+            "type": "ce-active-tab",
+            "token": token,
+            "url": url,
+            "title": title,
+        }),
+    );
 }
 
 /// Browser controls on a panel, popover, or page toolbar. The document may be the browser's
@@ -1347,9 +1411,16 @@ pub fn handle_message(app: &AppHandle, tab_id: Option<u32>, label: &str, source:
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
+        let token = message.get("token").and_then(Value::as_i64).unwrap_or(0);
         let app = app.clone();
         let label = label.to_string();
-        std::thread::spawn(move || apply_chrome_action(&app, &label, &action, &side));
+        std::thread::spawn(move || {
+            if action == "active-tab" {
+                reply_extension_active_tab(&app, &label, token);
+            } else {
+                apply_chrome_action(&app, &label, &action, &side);
+            }
+        });
         return;
     }
     if kind != "ce-rpc" && kind != "ce-content" {
@@ -2997,6 +3068,153 @@ fn content_script(app: &AppHandle) -> String {
     format!("{CONTENT_JS_START}{payload}{CONTENT_JS_END}")
 }
 
+/// Each WebView2 is its own Chromium window. A store popover or side panel therefore
+/// answers `chrome.tabs.query({ active: true, currentWindow: true })` with itself, and the
+/// extension shows no logins for the page the user is on. This asks the browser which page
+/// is open and returns that tab instead. `chrome.tabs.getCurrent` does the same: in Chrome
+/// a toolbar popup is not a tab, and Bitwarden uses whichever call returns a page first.
+pub const EXTENSION_TAB_JS: &str = r##"(function () {
+  if (window.__ceExtensionTabs) return;
+  window.__ceExtensionTabs = true;
+  var pending = {};
+  var next = 1;
+  function host() {
+    var target = window.__ceHost && window.__ceHost.postMessage ? window.__ceHost : null;
+    if (!target) {
+      try { target = window.chrome && window.chrome.webview; } catch (error) { target = null; }
+    }
+    return target && target.postMessage ? target : null;
+  }
+  function onMessage(event) {
+    var data = event && event.data !== undefined ? event.data : event;
+    if (typeof data === "string") {
+      try { data = JSON.parse(data); } catch (error) { return; }
+    }
+    if (!data || data.type !== "ce-active-tab") return;
+    var wait = pending[data.token];
+    if (!wait) return;
+    delete pending[data.token];
+    wait(data.url ? data : null);
+  }
+  function listen() {
+    var target = window.chrome && window.chrome.webview;
+    if (!target || !target.addEventListener || window.__ceExtensionTabsListening) return;
+    window.__ceExtensionTabsListening = true;
+    target.addEventListener("message", onMessage);
+  }
+  function ask() {
+    return new Promise(function (resolve) {
+      listen();
+      var target = host();
+      if (!target) {
+        resolve(null);
+        return;
+      }
+      var token = next++;
+      var timer = setTimeout(function () {
+        delete pending[token];
+        resolve(null);
+      }, 1500);
+      pending[token] = function (page) {
+        clearTimeout(timer);
+        resolve(page);
+      };
+      target.postMessage(JSON.stringify({ type: "ce-chrome", action: "active-tab", token: token }));
+    });
+  }
+  function wantsPage(info) {
+    if (!info || info.active !== true) return false;
+    if (info.currentWindow === true || info.lastFocusedWindow === true) return true;
+    var currentId = window.chrome && chrome.windows && chrome.windows.WINDOW_ID_CURRENT;
+    return info.windowId === currentId;
+  }
+  function same(left, right) {
+    if (!left || !right) return false;
+    if (left === right) return true;
+    try {
+      var a = new URL(left);
+      var b = new URL(right);
+      var path = function (value) { return value.pathname.replace(/\/+$/, "") || "/"; };
+      return a.origin === b.origin && path(a) === path(b) && a.search === b.search && a.hash === b.hash;
+    } catch (error) {
+      return false;
+    }
+  }
+  function callQuery(query, info) {
+    return new Promise(function (resolve) {
+      var settled = false;
+      function finish(tabs) {
+        if (settled) return;
+        settled = true;
+        resolve(tabs || []);
+      }
+      var result;
+      try {
+        result = query(info, function (tabs) { finish(tabs); });
+      } catch (error) {
+        finish([]);
+        return;
+      }
+      if (result && typeof result.then === "function") {
+        result.then(function (tabs) { finish(tabs); }, function () { finish([]); });
+      }
+    });
+  }
+  function pageTab(query, page) {
+    if (!page || !page.url) return Promise.resolve(null);
+    return callQuery(query, {}).then(function (all) {
+      for (var i = 0; i < all.length; i++) {
+        if (same(all[i].url, page.url)) return Object.assign({}, all[i], { active: true });
+      }
+      return null;
+    });
+  }
+  function install() {
+    if (!window.chrome || !chrome.tabs || typeof chrome.tabs.query !== "function") return false;
+    if (chrome.tabs.query.__ceExtensionTabs) return true;
+    listen();
+    var query = chrome.tabs.query.bind(chrome.tabs);
+    function run(info) {
+      return callQuery(query, info).then(function (tabs) {
+        if (!wantsPage(info)) return tabs;
+        return ask().then(function (page) {
+          return pageTab(query, page).then(function (tab) {
+            return tab ? [tab] : tabs;
+          });
+        });
+      });
+    }
+    function wrapped(info, callback) {
+      var promise = run(info || {});
+      if (typeof callback === "function") {
+        promise.then(function (tabs) { callback(tabs); }, function () { callback([]); });
+        return undefined;
+      }
+      return promise;
+    }
+    wrapped.__ceExtensionTabs = true;
+    try { chrome.tabs.query = wrapped; } catch (error) { return false; }
+    if (typeof chrome.tabs.getCurrent === "function") {
+      chrome.tabs.getCurrent = function (callback) {
+        var promise = ask().then(function (page) { return pageTab(query, page); });
+        if (typeof callback === "function") {
+          promise.then(function (tab) { callback(tab || undefined); }, function () { callback(undefined); });
+          return undefined;
+        }
+        return promise;
+      };
+    }
+    return true;
+  }
+  if (!install()) {
+    var timer = setInterval(function () {
+      if (install()) clearInterval(timer);
+    }, 0);
+    setTimeout(function () { clearInterval(timer); }, 5000);
+  }
+})();
+"##;
+
 const PANEL_CHROME_JS: &str = r##"(function () {
   if (window.__cePanelChrome) return;
   window.__cePanelChrome = true;
@@ -3546,6 +3764,16 @@ const CONTENT_JS_END: &str = r#";
 #[cfg(test)]
 mod tests {
     use super::{grants_cover, safe_relative, valid_id};
+
+    #[test]
+    fn a_store_panel_belongs_to_its_browser_window() {
+        assert_eq!(super::extension_surface_window("cext-panel-main"), "main");
+        assert_eq!(
+            super::extension_surface_window("cext-panel-main-2"),
+            "main-2"
+        );
+        assert_eq!(super::extension_surface_window("extpopup-main"), "main");
+    }
 
     #[test]
     fn ids_stay_inside_the_host_label() {

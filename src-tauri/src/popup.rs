@@ -552,6 +552,7 @@ fn create_ext_window(app: &AppHandle, window: &str, label: &str) -> Result<(), S
         .disable_drag_drop_handler()
         .background_color(surface)
         .focused(false)
+        .initialization_script(crate::host_extensions::EXTENSION_TAB_JS)
         .initialization_script(POPUP_CHROME_JS)
         .on_page_load(move |webview, payload| {
             if !matches!(payload.event(), PageLoadEvent::Finished) {
