@@ -12,7 +12,7 @@ export const CHROME_LIMITS = {
   optionalHeight: { min: 0, max: 4 },
   menuWidth: { min: 160, max: 480 },
   panelWidth: { min: 240, max: 720 },
-  listHeight: { min: 8, max: 36 },
+  listHeight: { min: 8, max: 64 },
   paletteWidth: { min: 360, max: 880 },
   verticalTabs: { min: 160, max: 400 },
 } as const;

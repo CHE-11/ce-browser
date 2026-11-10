@@ -3,10 +3,11 @@ import { PopupFrame } from "@/components/PopupFrame";
 import { bookmarkEditorFrameStyle } from "@/lib/bookmark-size";
 import { findBookmark, addBookmark, updateBookmark, moveBookmark, closePopup, deleteBookmark, saveSettings } from "@/lib/browser-client";
 import { CHROME, CHROME_LIMITS, metric } from "@/lib/chrome-metrics";
-import { findBookmarkParent, useBookmarksState, useSettings } from "@/lib/use-browser";
+import { findBookmarkParent, findFolder, useBookmarksState, useSettings } from "@/lib/use-browser";
 import { BookmarkNode } from "@type/browser";
-import { useEffect, useRef, useState } from "react";
-import { BookmarkPlace, BookmarkPlacePicker } from "./BookmarkPlacePicker";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { BookmarkEditorCompose, BookmarkEditorComposeDialog, BookmarkEditorContextMenu, type BookmarkEditorMenuTarget } from "./BookmarkEditorContextMenu";
+import { BookmarkPlace, BookmarkPlacePicker } from "./BookmarkEditorPlacePicker";
 
 type BookmarkEditorProps = {
   url: string;
@@ -30,8 +31,13 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
   const [name, setName] = useState(title);
   const [place, setPlace] = useState<BookmarkPlace | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; target: BookmarkEditorMenuTarget } | null>(null);
+  const [compose, setCompose] = useState<BookmarkEditorCompose | null>(null);
+  const [expandRequest, setExpandRequest] = useState<{ id: string; token: number } | null>(null);
   const started = useRef(false);
   const placeKnown = useRef(false);
+  const seenBookmark = useRef(false);
+  const expandToken = useRef(0);
   const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -78,6 +84,58 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
     setDragHeight(null);
   }, [savedHeight]);
 
+  useEffect(() => {
+    if (!bookmark || !tree) {
+      return;
+    }
+    if (findFolder(tree, bookmark.id)) {
+      seenBookmark.current = true;
+      return;
+    }
+    if (!seenBookmark.current) {
+      return;
+    }
+    seenBookmark.current = false;
+    setBookmark(null);
+    setMenu(null);
+    setCompose(null);
+    setError("That bookmark was removed.");
+  }, [tree, bookmark]);
+
+  useEffect(() => {
+    if (!tree || !place || findFolder(tree, place.parentId)) {
+      return;
+    }
+    const still = bookmark ? findBookmarkParent(tree, bookmark.id) : null;
+    const next = still ?? { parentId: "bar", index: 0 };
+    if (next.parentId === place.parentId && next.index === place.index) {
+      return;
+    }
+    setPlace(next);
+  }, [tree, place, bookmark]);
+
+  useEffect(() => {
+    if (!menu?.target.node || !tree) {
+      return;
+    }
+    if (!findFolder(tree, menu.target.node.id)) {
+      setMenu(null);
+    }
+  }, [tree, menu]);
+
+  useEffect(() => {
+    if (!menu) {
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [menu]);
+
   const onListHeight = (height: number, done: boolean) => {
     const next = Math.min(CHROME_LIMITS.listHeight.max, Math.max(CHROME_LIMITS.listHeight.min, height));
     setDragHeight(next);
@@ -109,6 +167,84 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
       await deleteBookmark(bookmark.id);
     }
     await closePopup();
+  };
+
+  const reveal = (parentId: string) => {
+    expandToken.current += 1;
+    setExpandRequest({ id: parentId, token: expandToken.current });
+  };
+
+  const shiftForInsert = (parentId: string, index: number) => {
+    setPlace((current) => {
+      if (!current || current.parentId !== parentId || index > current.index) {
+        return current;
+      }
+      return { parentId, index: current.index + 1 };
+    });
+    reveal(parentId);
+  };
+
+  const shiftForDelete = (parentId: string, index: number) => {
+    setPlace((current) => {
+      if (!current || current.parentId !== parentId || index >= current.index) {
+        return current;
+      }
+      return { parentId, index: current.index - 1 };
+    });
+  };
+
+  const onRowMenu = (event: MouseEvent, node: BookmarkNode, parentId: string | null, index: number) => {
+    setCompose(null);
+    setMenu({ x: event.clientX, y: event.clientY, target: { node, parentId, index } });
+  };
+
+  const onBlankMenu = (event: MouseEvent) => {
+    if (!place) {
+      return;
+    }
+    setCompose(null);
+    setMenu({
+      x: event.clientX,
+      y: event.clientY,
+      target: { node: null, parentId: place.parentId, index: place.index },
+    });
+  };
+
+  const addDivider = async (parentId: string, index: number) => {
+    try {
+      await addBookmark(parentId, "", null, index, true);
+      shiftForInsert(parentId, index);
+      setError(null);
+    } catch (reason) {
+      setError(String(reason));
+    }
+  };
+
+  const removeNode = async (node: BookmarkNode, parentId: string, index: number) => {
+    try {
+      await deleteBookmark(node.id);
+      shiftForDelete(parentId, index);
+      setError(null);
+    } catch (reason) {
+      setError(String(reason));
+    }
+  };
+
+  const saveCompose = async (title: string, link: string) => {
+    if (!compose) {
+      return;
+    }
+    if (compose.kind === "rename") {
+      await updateBookmark(compose.node.id, title, compose.node.url ? link : null);
+    } else if (compose.kind === "add-folder") {
+      await addBookmark(compose.parentId, title, null, compose.index);
+      shiftForInsert(compose.parentId, compose.index);
+    } else {
+      await addBookmark(compose.parentId, title, link, compose.index);
+      shiftForInsert(compose.parentId, compose.index);
+    }
+    setCompose(null);
+    setError(null);
   };
 
   return (
@@ -158,6 +294,9 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
               listHeight={listHeight}
               onChange={setPlace}
               onListHeight={onListHeight}
+              onRowMenu={onRowMenu}
+              onBlankMenu={onBlankMenu}
+              expandRequest={expandRequest}
             />
           ) : (
             <p id="bookmark-editor-place-loading" className="text-[0.85em] text-zinc-500">
@@ -179,6 +318,29 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
           </Button>
         </div>
       </form>
+      {menu && bookmark ? (
+        <BookmarkEditorContextMenu
+          x={menu.x}
+          y={menu.y}
+          target={menu.target}
+          bookmarkId={bookmark.id}
+          tree={tree}
+          onClose={() => setMenu(null)}
+          onAddBookmark={(parentId, index) => setCompose({ kind: "add-link", parentId, index })}
+          onAddFolder={(parentId, index) => setCompose({ kind: "add-folder", parentId, index })}
+          onAddDivider={(parentId, index) => void addDivider(parentId, index)}
+          onRename={(node) => setCompose({ kind: "rename", node })}
+          onDelete={(node, parentId, index) => void removeNode(node, parentId, index)}
+        />
+      ) : null}
+      {compose ? (
+        <BookmarkEditorComposeDialog
+          key={compose.kind === "rename" ? `rename-${compose.node.id}` : `${compose.kind}-${compose.parentId}-${compose.index}`}
+          compose={compose}
+          onClose={() => setCompose(null)}
+          onSave={saveCompose}
+        />
+      ) : null}
     </PopupFrame>
   );
 }

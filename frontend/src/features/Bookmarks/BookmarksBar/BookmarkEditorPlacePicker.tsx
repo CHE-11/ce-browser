@@ -28,6 +28,12 @@ type BookmarkPlacePickerProps = {
   onChange: (place: BookmarkPlace) => void;
   /** `done` is true when the drag ends or the height is reset. */
   onListHeight: (height: number, done: boolean) => void;
+  /** Right-click on a folder, bookmark, or divider. */
+  onRowMenu: (event: MouseEvent, node: BookmarkNode, parentId: string | null, index: number) => void;
+  /** Right-click on empty space in the list. */
+  onBlankMenu: (event: MouseEvent) => void;
+  /** Open this folder after something was added inside it. `token` changes on every add. */
+  expandRequest?: { id: string; token: number } | null;
 };
 
 type PlaceContextValue = {
@@ -45,6 +51,7 @@ type PlaceContextValue = {
   onToggle: (id: string) => void;
   onOpen: (id: string) => void;
   onChange: (place: BookmarkPlace) => void;
+  onRowMenu: (event: MouseEvent, node: BookmarkNode, parentId: string | null, index: number) => void;
 };
 
 const PlaceContext = createContext<PlaceContextValue | null>(null);
@@ -78,6 +85,18 @@ function placedStyle(depth: number, rowStyle: CSSProperties): CSSProperties {
 
 function keepFocus(event: MouseEvent) {
   event.preventDefault();
+}
+
+function showRowMenu(
+  event: MouseEvent,
+  onRowMenu: (event: MouseEvent, node: BookmarkNode, parentId: string | null, index: number) => void,
+  node: BookmarkNode,
+  parentId: string | null,
+  index: number,
+) {
+  event.preventDefault();
+  event.stopPropagation();
+  onRowMenu(event, node, parentId, index);
 }
 
 function textHit(node: BookmarkNode, needle: string) {
@@ -263,8 +282,8 @@ function PlaceGap({ id, depth, label, onChoose }: { id: string; depth: number; l
   );
 }
 
-function LinkRow({ node, depth }: { node: BookmarkNode; depth: number }) {
-  const { icons, rowStyle, iconSize } = usePlace();
+function LinkRow({ node, depth, parentId, index }: { node: BookmarkNode; depth: number; parentId: string; index: number }) {
+  const { icons, rowStyle, iconSize, onRowMenu } = usePlace();
   const label = node.title || node.url || "Bookmark";
   return (
     <div
@@ -272,6 +291,7 @@ function LinkRow({ node, depth }: { node: BookmarkNode; depth: number }) {
       title={node.url ? `${label} — ${node.url}` : label}
       className="flex w-full min-w-0 items-center gap-[0.5em] rounded-md text-left text-zinc-200"
       style={placedStyle(depth, rowStyle)}
+      onContextMenu={(event) => showRowMenu(event, onRowMenu, node, parentId, index)}
     >
       <FavIcon id={`bookmark-place-${node.id}-icon`} url={node.url ?? ""} src={iconSrc(icons, node.url)} style={{ width: `${iconSize}rem`, height: `${iconSize}rem` }} />
       <span id={`bookmark-place-${node.id}-title`} className="truncate">
@@ -281,21 +301,22 @@ function LinkRow({ node, depth }: { node: BookmarkNode; depth: number }) {
   );
 }
 
-function DividerRow({ node, depth }: { node: BookmarkNode; depth: number }) {
-  const { rowStyle } = usePlace();
+function DividerRow({ node, depth, parentId, index }: { node: BookmarkNode; depth: number; parentId: string; index: number }) {
+  const { rowStyle, onRowMenu } = usePlace();
   return (
     <div
       id={`bookmark-place-${node.id}`}
       title="Divider"
       className="flex w-full items-center rounded-md"
       style={placedStyle(depth, rowStyle)}
+      onContextMenu={(event) => showRowMenu(event, onRowMenu, node, parentId, index)}
     >
       <span id={`bookmark-place-${node.id}-rule`} className="h-px w-full bg-zinc-700" />
     </div>
   );
 }
 
-function PlaceFolder({ node, depth }: { node: BookmarkNode; depth: number }) {
+function PlaceFolder({ node, depth, parentId, index }: { node: BookmarkNode; depth: number; parentId: string | null; index: number }) {
   const picker = usePlace();
   const open = picker.expanded.has(node.id);
   const children = node.children ?? [];
@@ -305,32 +326,32 @@ function PlaceFolder({ node, depth }: { node: BookmarkNode; depth: number }) {
   let previewPlaced = false;
 
   if (open) {
-    for (let index = 0; index < children.length; index++) {
-      const child = children[index];
-      if (selectedHere && index === picker.place.index) {
+    for (let childIndex = 0; childIndex < children.length; childIndex++) {
+      const child = children[childIndex];
+      if (selectedHere && childIndex === picker.place.index) {
         items.push(<Preview key="bookmark-place-preview" depth={childDepth} />);
         previewPlaced = true;
       }
       if (!shown(child, picker.needle, picker.bookmarkId, picker.place.parentId)) {
         continue;
       }
-      if (!selectedHere || index !== picker.place.index) {
+      if (!selectedHere || childIndex !== picker.place.index) {
         items.push(
           <PlaceGap
             key={`gap-${child.id}`}
             id={`bookmark-place-gap-${node.id}-${child.id}`}
             depth={childDepth}
             label={gapLabel(child)}
-            onChoose={() => picker.onChange({ parentId: node.id, index })}
+            onChoose={() => picker.onChange({ parentId: node.id, index: childIndex })}
           />,
         );
       }
       if (isFolder(child)) {
-        items.push(<PlaceFolder key={child.id} node={child} depth={childDepth} />);
+        items.push(<PlaceFolder key={child.id} node={child} depth={childDepth} parentId={node.id} index={childIndex} />);
       } else if (child.separator) {
-        items.push(<DividerRow key={child.id} node={child} depth={childDepth} />);
+        items.push(<DividerRow key={child.id} node={child} depth={childDepth} parentId={node.id} index={childIndex} />);
       } else {
-        items.push(<LinkRow key={child.id} node={child} depth={childDepth} />);
+        items.push(<LinkRow key={child.id} node={child} depth={childDepth} parentId={node.id} index={childIndex} />);
       }
     }
     const chooseEnd = () => picker.onChange({ parentId: node.id, index: children.length });
@@ -366,7 +387,11 @@ function PlaceFolder({ node, depth }: { node: BookmarkNode; depth: number }) {
   }
 
   return (
-    <div id={`bookmark-place-branch-${node.id}`} className="min-w-0">
+    <div
+      id={`bookmark-place-branch-${node.id}`}
+      className="min-w-0"
+      onContextMenu={(event) => showRowMenu(event, picker.onRowMenu, node, parentId, index)}
+    >
       <div id={`bookmark-place-folder-${node.id}`} className="flex min-w-0 items-center" style={indent(depth)}>
         <button
           id={`bookmark-place-toggle-${node.id}`}
@@ -427,6 +452,9 @@ export function BookmarkPlacePicker({
   listHeight,
   onChange,
   onListHeight,
+  onRowMenu,
+  onBlankMenu,
+  expandRequest,
 }: BookmarkPlacePickerProps) {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
@@ -481,6 +509,20 @@ export function BookmarkPlacePicker({
     previewRef.current?.scrollIntoView({ block: "nearest" });
   }, [place.parentId, place.index]);
 
+  useEffect(() => {
+    if (!expandRequest) {
+      return;
+    }
+    setExpanded((current) => {
+      if (current.has(expandRequest.id)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(expandRequest.id);
+      return next;
+    });
+  }, [expandRequest]);
+
   const toggleFolder = (id: string) => {
     setExpanded((current) => {
       const next = new Set(current);
@@ -519,6 +561,7 @@ export function BookmarkPlacePicker({
     onToggle: toggleFolder,
     onOpen: openFolder,
     onChange,
+    onRowMenu,
   };
   const roots = tree ? [tree.bar, tree.other] : [];
   const visibleRoots = roots.filter((root) => shown(root, needle, bookmarkId, place.parentId));
@@ -545,6 +588,15 @@ export function BookmarkPlacePicker({
             aria-label="Bookmark place"
             className="overflow-x-hidden overflow-y-auto rounded-md border border-zinc-700 bg-zinc-950 p-1"
             style={{ height: `${listHeight}rem` }}
+            onContextMenu={(event) => {
+              const target = event.target;
+              if (target instanceof Element && target.closest("[id^='bookmark-place-branch-']")) {
+                return;
+              }
+              event.preventDefault();
+              event.stopPropagation();
+              onBlankMenu(event);
+            }}
           >
             {needle && !matched ? (
               <p id="bookmark-place-no-matches" className="px-[0.6em] py-[0.35em] text-[0.85em] text-zinc-500">
@@ -552,7 +604,7 @@ export function BookmarkPlacePicker({
               </p>
             ) : null}
             {visibleRoots.map((root) => (
-              <PlaceFolder key={root.id} node={root} depth={0} />
+              <PlaceFolder key={root.id} node={root} depth={0} parentId={null} index={0} />
             ))}
           </div>
           <div

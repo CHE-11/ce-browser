@@ -1447,10 +1447,15 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
                 state.tab_mut(id).is_some_and(|tab| !tab.painted)
             });
             let first = finished && fresh;
-            let extension_zoom =
-                (finished && extension_page).then(|| settings::get(&load_app).ui_zoom_factor());
+            // Computed before the tab URL changes, so a cross-site load picks the new page's zoom.
+            let opening_zoom = page_zoom_for(&load_app, &url);
             update(&load_app, id, |tab| {
                 if tab.info.url != url {
+                    if let Some(zoom) =
+                        zoom_for_navigation(&tab.info.url, &url, tab.info.zoom, opening_zoom)
+                    {
+                        tab.info.zoom = zoom;
+                    }
                     tab.title_ready = false;
                 }
                 tab.info.loading = loading;
@@ -1460,8 +1465,8 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
                     tab.blank = false;
                     tab.blank_next = false;
                 }
-                if let Some(factor) = extension_zoom {
-                    tab.info.zoom = factor;
+                if finished && extension_page {
+                    tab.info.zoom = opening_zoom;
                 }
             });
             let owner = with_state(&load_app, |state| state.tab_window(id))
@@ -1488,11 +1493,19 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
                     focus_active(&load_app, &owner);
                 }
             }
-            // A reload restores the profile's per-site zoom. Extension pages stay on Browser UI size.
-            if let Some(factor) = extension_zoom
-                && let Some(webview) = page_view(&load_app, id)
-            {
-                let _ = webview.set_zoom(factor);
+            // WebView2 returns a page to 100% when its document loads. Setting the factor
+            // before that load does not stick. The value on the tab is the default page
+            // zoom, the site's remembered zoom, or a Ctrl +/- change. Extension pages use
+            // Browser UI size, which was written onto the tab above.
+            if loading || finished {
+                let factor = with_state(&load_app, |state| {
+                    state.index_of(id).map(|index| state.tabs[index].info.zoom)
+                });
+                if let Some(factor) = factor
+                    && let Some(webview) = page_view(&load_app, id)
+                {
+                    let _ = webview.set_zoom(factor);
+                }
             }
             if finished
                 && extension_page
@@ -1554,6 +1567,23 @@ fn page_zoom_for(app: &AppHandle, url: &str) -> f64 {
     } else {
         crate::page_rules::zoom_for(app, url)
             .unwrap_or_else(|| settings::get(app).page_zoom_factor())
+    }
+}
+
+/// Zoom to put on a tab when `previous` navigates to `next`. `None` keeps `current`.
+/// `opening` is the zoom a fresh load of `next` would use.
+fn zoom_for_navigation(previous: &str, next: &str, current: f64, opening: f64) -> Option<f64> {
+    if previous == next {
+        return None;
+    }
+    let was_internal = previous.starts_with(paths::INTERNAL_SCHEME);
+    let now_internal = next.starts_with(paths::INTERNAL_SCHEME);
+    let site_changed = settings::sleep_site_key(previous) != settings::sleep_site_key(next);
+    match (was_internal, now_internal) {
+        (_, true) if !was_internal => Some(1.0),
+        (true, false) => Some(opening),
+        (false, false) if site_changed && (current - opening).abs() > 0.001 => Some(opening),
+        _ => None,
     }
 }
 
@@ -3225,7 +3255,6 @@ pub fn show_permission_prompt(app: &AppHandle, id: u32, params: &str) -> Result<
 pub fn update_url(app: &AppHandle, id: u32, raw: &str) {
     let url = paths::display_url(app, raw);
     let opening_zoom = page_zoom_for(app, &url);
-    let new_site = settings::sleep_site_key(&url);
     let change = with_state(app, |state| {
         let Some(tab) = state.tab_mut(id) else {
             return None;
@@ -3233,21 +3262,11 @@ pub fn update_url(app: &AppHandle, id: u32, raw: &str) {
         if tab.info.url == url {
             return Some((false, None));
         }
-        let was_internal = tab.info.url.starts_with(paths::INTERNAL_SCHEME);
-        let now_internal = url.starts_with(paths::INTERNAL_SCHEME);
-        let site_changed = settings::sleep_site_key(&tab.info.url) != new_site;
         let loading = tab.info.loading;
+        // A different site opens at its own zoom. Moving around one site keeps Ctrl +/- changes.
+        let zoom = zoom_for_navigation(&tab.info.url, &url, tab.info.zoom, opening_zoom);
         tab.title_ready = false;
         tab.info.url = url.clone();
-        // A different site opens at its own zoom. Moving around one site keeps Ctrl +/- changes.
-        let zoom = match (was_internal, now_internal) {
-            (_, true) if !was_internal => Some(1.0),
-            (true, false) => Some(opening_zoom),
-            (false, false) if site_changed && (tab.info.zoom - opening_zoom).abs() > 0.001 => {
-                Some(opening_zoom)
-            }
-            _ => None,
-        };
         if let Some(zoom) = zoom {
             tab.info.zoom = zoom;
         }
@@ -7797,6 +7816,38 @@ pub fn try_tab_url(app: &AppHandle, id: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_zoom_follows_the_site_and_stays_for_one_site() {
+        assert_eq!(
+            zoom_for_navigation("https://a.example/one", "https://a.example/two", 0.75, 0.75),
+            None
+        );
+        assert_eq!(
+            zoom_for_navigation("https://a.example/one", "https://a.example/two", 0.9, 0.75),
+            None
+        );
+        assert_eq!(
+            zoom_for_navigation("https://a.example/", "https://b.example/", 0.9, 0.75),
+            Some(0.75)
+        );
+        assert_eq!(
+            zoom_for_navigation("https://a.example/", "https://b.example/", 0.75, 0.75),
+            None
+        );
+        assert_eq!(
+            zoom_for_navigation("ce://newtab", "https://a.example/", 1.0, 0.75),
+            Some(0.75)
+        );
+        assert_eq!(
+            zoom_for_navigation("https://a.example/", "ce://settings", 0.75, 1.0),
+            Some(1.0)
+        );
+        assert_eq!(
+            zoom_for_navigation("https://a.example/", "https://a.example/", 0.75, 0.5),
+            None
+        );
+    }
 
     #[test]
     fn ctrl_shift_click_opens_one_background_tab() {

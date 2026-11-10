@@ -63,7 +63,7 @@ const PANEL_WIDTH_PX: (u32, u32) = (240, 720);
 pub const AGENT_PANEL_WIDTH_PX: (u32, u32) = (280, 8192);
 pub const AGENT_PANEL_DEFAULT_WIDTH: u32 = 380;
 /// Height of the bookmark editor's place list, in rem.
-const LIST_HEIGHT_REM: (f32, f32) = (8.0, 36.0);
+const LIST_HEIGHT_REM: (f32, f32) = (8.0, 64.0);
 const PALETTE_WIDTH_PX: (u32, u32) = (360, 880);
 /// Fine-tune sizes and bookmarks bar alignment the Styles page copies from another profile. Theme, font, and zoom stay out.
 pub const STYLE_METRIC_KEYS: &[&str] = &[
