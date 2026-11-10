@@ -113,10 +113,7 @@ pub fn note_page_download(tab: u32, url: &str) {
 }
 
 pub fn forget_page_download(tab: u32) {
-    PAGE_DOWNLOADS
-        .lock()
-        .expect("page downloads")
-        .remove(&tab);
+    PAGE_DOWNLOADS.lock().expect("page downloads").remove(&tab);
     SETTLED_ABORTS.lock().expect("settled aborts").remove(&tab);
 }
 
@@ -1477,7 +1474,11 @@ mod tests {
             Some(start),
             start + Duration::from_secs(4)
         ));
-        assert!(download_owns_abort(download_at, None, start + Duration::from_millis(80)));
+        assert!(download_owns_abort(
+            download_at,
+            None,
+            start + Duration::from_millis(80)
+        ));
     }
 
     #[test]

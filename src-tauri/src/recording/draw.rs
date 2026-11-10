@@ -32,7 +32,9 @@ pub fn sanitize(mut stroke: Stroke) -> Option<Stroke> {
         stroke.color = "#ef4444".into();
     }
     stroke.points.truncate(4_000);
-    stroke.points.retain(|point| point.x.is_finite() && point.y.is_finite());
+    stroke
+        .points
+        .retain(|point| point.x.is_finite() && point.y.is_finite());
     if stroke.points.is_empty() {
         None
     } else {
@@ -78,18 +80,48 @@ pub fn touches(stroke: &Stroke, point: StrokePoint, radius: f32) -> bool {
             let Some(last) = stroke.points.last().copied() else {
                 return false;
             };
-            edge(first, StrokePoint { x: last.x, y: first.y })
-                || edge(StrokePoint { x: last.x, y: first.y }, last)
-                || edge(last, StrokePoint { x: first.x, y: last.y })
-                || edge(StrokePoint { x: first.x, y: last.y }, first)
+            edge(
+                first,
+                StrokePoint {
+                    x: last.x,
+                    y: first.y,
+                },
+            ) || edge(
+                StrokePoint {
+                    x: last.x,
+                    y: first.y,
+                },
+                last,
+            ) || edge(
+                last,
+                StrokePoint {
+                    x: first.x,
+                    y: last.y,
+                },
+            ) || edge(
+                StrokePoint {
+                    x: first.x,
+                    y: last.y,
+                },
+                first,
+            )
         }
         "arrow" => {
-            let (Some(first), Some(last)) = (stroke.points.first().copied(), stroke.points.last().copied()) else {
+            let (Some(first), Some(last)) = (
+                stroke.points.first().copied(),
+                stroke.points.last().copied(),
+            ) else {
                 return false;
             };
             edge(first, last)
         }
-        _ => stroke.points.windows(2).any(|pair| edge(pair[0], pair[1])) || stroke.points.iter().any(|sample| near_segment(point, *sample, *sample, radius)),
+        _ => {
+            stroke.points.windows(2).any(|pair| edge(pair[0], pair[1]))
+                || stroke
+                    .points
+                    .iter()
+                    .any(|sample| near_segment(point, *sample, *sample, radius))
+        }
     }
 }
 
@@ -114,10 +146,18 @@ pub fn paint(frame: &mut [u8], width: u32, height: u32, strokes: &[Stroke]) {
         return;
     }
     for stroke in strokes {
-        let alpha = if stroke.tool == "highlighter" { 110 } else { 255 };
+        let alpha = if stroke.tool == "highlighter" {
+            110
+        } else {
+            255
+        };
         let color = color_of(&stroke.color, alpha);
         let radius = ((stroke.width * width as f32).clamp(2.0, 72.0) / 2.0).round() as i32;
-        let radius = if stroke.tool == "highlighter" { radius.max(6) } else { radius.max(1) };
+        let radius = if stroke.tool == "highlighter" {
+            radius.max(6)
+        } else {
+            radius.max(1)
+        };
         match stroke.tool.as_str() {
             "eraser" => {}
             "rectangle" => {
@@ -145,7 +185,15 @@ pub fn paint(frame: &mut [u8], width: u32, height: u32, strokes: &[Stroke]) {
             _ => {
                 if stroke.points.len() == 1 {
                     let point = stroke.points[0];
-                    stamp(frame, width, height, px(point.x, width), px(point.y, height), radius, color);
+                    stamp(
+                        frame,
+                        width,
+                        height,
+                        px(point.x, width),
+                        px(point.y, height),
+                        radius,
+                        color,
+                    );
                 }
                 for pair in stroke.points.windows(2) {
                     line(
@@ -171,7 +219,9 @@ fn px(value: f32, span: u32) -> i32 {
 
 fn color_of(text: &str, alpha: u8) -> [u8; 4] {
     let hex = text.trim().trim_start_matches('#');
-    let channel = |index: usize| u8::from_str_radix(hex.get(index..index + 2).unwrap_or("00"), 16).unwrap_or(0);
+    let channel = |index: usize| {
+        u8::from_str_radix(hex.get(index..index + 2).unwrap_or("00"), 16).unwrap_or(0)
+    };
     if hex.len() == 6 {
         [channel(4), channel(2), channel(0), alpha]
     } else {
@@ -216,7 +266,17 @@ fn stamp(frame: &mut [u8], width: u32, height: u32, cx: i32, cy: i32, radius: i3
     }
 }
 
-fn line(frame: &mut [u8], width: u32, height: u32, x0: i32, y0: i32, x1: i32, y1: i32, radius: i32, color: [u8; 4]) {
+fn line(
+    frame: &mut [u8],
+    width: u32,
+    height: u32,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    radius: i32,
+    color: [u8; 4],
+) {
     let steps = (x1 - x0).abs().max((y1 - y0).abs()).max(1);
     for step in 0..=steps {
         let t = step as f32 / steps as f32;
@@ -226,7 +286,17 @@ fn line(frame: &mut [u8], width: u32, height: u32, x0: i32, y0: i32, x1: i32, y1
     }
 }
 
-fn arrow_head(frame: &mut [u8], width: u32, height: u32, x0: i32, y0: i32, x1: i32, y1: i32, radius: i32, color: [u8; 4]) {
+fn arrow_head(
+    frame: &mut [u8],
+    width: u32,
+    height: u32,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    radius: i32,
+    color: [u8; 4],
+) {
     let angle = ((y1 - y0) as f32).atan2((x1 - x0) as f32);
     let length = (radius * 6).max(12) as f32;
     for turn in [-0.45_f32, 0.45] {

@@ -701,7 +701,8 @@ pub fn host_hwnd(webview: &Webview) -> std::result::Result<isize, String> {
     let (tx, rx) = mpsc::channel();
     let posted = webview.with_webview(move |platform| {
         let mut hwnd = HWND(std::ptr::null_mut());
-        let ok = unsafe { platform.controller().ParentWindow(&mut hwnd) }.is_ok() && !hwnd.0.is_null();
+        let ok =
+            unsafe { platform.controller().ParentWindow(&mut hwnd) }.is_ok() && !hwnd.0.is_null();
         let _ = tx.send(if ok { hwnd.0 as isize } else { 0 });
     });
     if posted.is_err() {
@@ -1810,7 +1811,9 @@ pub fn allow_camera(webview: &Webview) {
             };
             let mut kind = COREWEBVIEW2_PERMISSION_KIND::default();
             let _ = unsafe { args.PermissionKind(&mut kind) };
-            if kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA || kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE {
+            if kind == COREWEBVIEW2_PERMISSION_KIND_CAMERA
+                || kind == COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
+            {
                 hide_default_permission_ui(&args);
                 let _ = unsafe { args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW) };
                 save_permission_choice(&args, true);
@@ -4040,7 +4043,11 @@ fn attach_accelerators(
                         }
                     }
                 }
-                if (key == 0x2E || key == 0x08) && !key_down(VK_CONTROL) && !key_down(VK_MENU) && crate::present::delete_is_useful() {
+                if (key == 0x2E || key == 0x08)
+                    && !key_down(VK_CONTROL)
+                    && !key_down(VK_MENU)
+                    && crate::present::delete_is_useful()
+                {
                     args.SetHandled(true)?;
                     crate::present::on_delete(&app);
                     return Ok(());

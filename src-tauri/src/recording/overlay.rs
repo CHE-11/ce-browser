@@ -1,18 +1,21 @@
 //! The control bar, camera bubble, and draw layer. Each is its own always-on-top window, and
 //! each is left out of screen capture so a recording of the desktop does not film the controls.
 
-use std::sync::atomic::{AtomicIsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicIsize, Ordering};
 
 use tauri::window::WindowBuilder;
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, Window};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_ESCAPE, VK_MENU};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, VK_CONTROL, VK_ESCAPE, VK_MENU,
+};
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, EnumChildWindows, GetWindowRect, HC_ACTION, HHOOK, HTTRANSPARENT, HWND_TOPMOST, IsWindowVisible,
-    KBDLLHOOKSTRUCT, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowDisplayAffinity, SetWindowPos,
-    SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_NCHITTEST, WDA_EXCLUDEFROMCAPTURE,
+    CallNextHookEx, EnumChildWindows, GetWindowRect, HC_ACTION, HHOOK, HTTRANSPARENT, HWND_TOPMOST,
+    IsWindowVisible, KBDLLHOOKSTRUCT, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SetWindowDisplayAffinity, SetWindowPos, SetWindowsHookExW, UnhookWindowsHookEx,
+    WDA_EXCLUDEFROMCAPTURE, WH_KEYBOARD_LL, WM_KEYDOWN, WM_NCHITTEST,
 };
 use windows::core::BOOL;
 
@@ -94,7 +97,10 @@ pub fn move_camera(app: &AppHandle, target: &Target, corner: &str) -> Result<(),
     let size = 200i32;
     let margin = 24i32;
     let (x, y) = match corner {
-        "bottom-right" => (rect.x + rect.width - size - margin, rect.y + rect.height - size - margin),
+        "bottom-right" => (
+            rect.x + rect.width - size - margin,
+            rect.y + rect.height - size - margin,
+        ),
         "top-left" => (rect.x + margin, rect.y + margin),
         "top-right" => (rect.x + rect.width - size - margin, rect.y + margin),
         _ => (rect.x + margin, rect.y + rect.height - size - margin),
@@ -116,14 +122,22 @@ pub fn show_draw(app: &AppHandle, target: &Target) {
         return;
     };
     let app = app.clone();
-    let _ = app.clone().run_on_main_thread(move || show_draw_at(&app, &rect));
+    let _ = app
+        .clone()
+        .run_on_main_thread(move || show_draw_at(&app, &rect));
 }
 
 fn show_draw_at(app: &AppHandle, rect: &ScreenRect) {
     let Some(window) = app.get_window(DRAW) else {
         return;
     };
-    place_window(&window, rect.x, rect.y, rect.width.max(1) as u32, rect.height.max(1) as u32);
+    place_window(
+        &window,
+        rect.x,
+        rect.y,
+        rect.width.max(1) as u32,
+        rect.height.max(1) as u32,
+    );
     let _ = window.show();
     exclude(&window);
     pass_clicks(&window);
@@ -137,7 +151,10 @@ pub fn hide_draw(app: &AppHandle) {
 }
 
 pub fn follow_draw(app: &AppHandle, target: &Target) {
-    if app.get_window(DRAW).is_some_and(|window| window.is_visible().unwrap_or(false)) {
+    if app
+        .get_window(DRAW)
+        .is_some_and(|window| window.is_visible().unwrap_or(false))
+    {
         show_draw(app, target);
     }
 }
@@ -182,7 +199,13 @@ fn place(app: &AppHandle, target: &Target, rect: Option<&ScreenRect>, camera: bo
         let _ = show_camera(app, target);
     }
     if let Some(window) = app.get_window(DRAW) {
-        place_window(&window, rect.x, rect.y, rect.width.max(1) as u32, rect.height.max(1) as u32);
+        place_window(
+            &window,
+            rect.x,
+            rect.y,
+            rect.width.max(1) as u32,
+            rect.height.max(1) as u32,
+        );
         exclude(&window);
     }
 }
@@ -251,8 +274,24 @@ fn above(front: &Window, back: &Window) {
         return;
     };
     unsafe {
-        let _ = SetWindowPos(front_hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        let _ = SetWindowPos(back_hwnd, Some(front_hwnd), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        let _ = SetWindowPos(
+            front_hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
+        let _ = SetWindowPos(
+            back_hwnd,
+            Some(front_hwnd),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
     }
 }
 
@@ -280,7 +319,14 @@ unsafe extern "system" fn pass_child(child: HWND, _: LPARAM) -> BOOL {
     BOOL(1)
 }
 
-unsafe extern "system" fn draw_hit_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
+unsafe extern "system" fn draw_hit_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _: usize,
+    _: usize,
+) -> LRESULT {
     if message == WM_NCHITTEST && over_chrome(hit_point(lparam)) {
         return LRESULT(HTTRANSPARENT as isize);
     }
@@ -325,7 +371,8 @@ fn arm_escape(app: &AppHandle) {
     if ESCAPE_HOOK.load(Ordering::Acquire) != 0 {
         return;
     }
-    let Ok(installed) = (unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(escape_proc), None, 0) }) else {
+    let Ok(installed) = (unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(escape_proc), None, 0) })
+    else {
         return;
     };
     ESCAPE_HOOK.store(installed.0 as isize, Ordering::Release);
@@ -343,7 +390,9 @@ fn disarm_escape() {
 unsafe extern "system" fn escape_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 && wparam.0 as u32 == WM_KEYDOWN && lparam.0 != 0 {
         let info = unsafe { &*(lparam.0 as *const KBDLLHOOKSTRUCT) };
-        let modified = unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) < 0 || GetAsyncKeyState(VK_MENU.0 as i32) < 0 };
+        let modified = unsafe {
+            GetAsyncKeyState(VK_CONTROL.0 as i32) < 0 || GetAsyncKeyState(VK_MENU.0 as i32) < 0
+        };
         if info.vkCode == VK_ESCAPE.0 as u32 && !modified {
             if let Some(app) = ESCAPE_APP.lock().ok().and_then(|slot| slot.clone()) {
                 tauri::async_runtime::spawn(async move {

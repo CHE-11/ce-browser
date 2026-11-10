@@ -13,8 +13,8 @@ use tiny_http::{Header, Method, Request, Response, Server, StatusCode};
 
 use crate::files;
 
-use super::encode;
 use super::CameraLayout;
+use super::encode;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -81,7 +81,10 @@ pub fn root(app: &AppHandle) -> PathBuf {
 pub fn new_id() -> String {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let millis = SystemTime::now().duration_since(UNIX_EPOCH).map(|time| time.as_millis()).unwrap_or(0);
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|time| time.as_millis())
+        .unwrap_or(0);
     format!("{millis:x}{n:x}")
 }
 
@@ -100,7 +103,14 @@ pub fn camera_file(dir: &Path) -> PathBuf {
 }
 
 pub fn list(app: &AppHandle) -> Vec<RecordingEntry> {
-    load(app).items.into_iter().filter(|item| Path::new(&item.video_path).is_file() || file_in(app, &item.id, "video.mp4").is_some_and(|path| path.is_file())).collect()
+    load(app)
+        .items
+        .into_iter()
+        .filter(|item| {
+            Path::new(&item.video_path).is_file()
+                || file_in(app, &item.id, "video.mp4").is_some_and(|path| path.is_file())
+        })
+        .collect()
 }
 
 pub fn insert(app: &AppHandle, entry: RecordingEntry) {
@@ -147,7 +157,12 @@ pub fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
     mutate(app, |catalog| {
         if let Some(index) = catalog.items.iter().position(|item| item.id == id) {
             let item = catalog.items.remove(index);
-            folder = Some(PathBuf::from(item.video_path).parent().map(Path::to_path_buf).unwrap_or_else(|| root(app).join(id)));
+            folder = Some(
+                PathBuf::from(item.video_path)
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| root(app).join(id)),
+            );
         }
     });
     if let Some(folder) = folder {
@@ -163,12 +178,19 @@ pub fn export(app: &AppHandle, id: &str, dest: &Path) -> Result<String, String> 
     if !dest.is_absolute() {
         return Err("Choose a full file path.".into());
     }
-    let item = list(app).into_iter().find(|item| item.id == id).ok_or("That recording is no longer here.")?;
+    let item = list(app)
+        .into_iter()
+        .find(|item| item.id == id)
+        .ok_or("That recording is no longer here.")?;
     let src = PathBuf::from(&item.video_path);
     if !src.is_file() {
         return Err("The video file is missing.".into());
     }
-    let end = if item.trim_end_ms == 0 { item.duration_ms } else { item.trim_end_ms };
+    let end = if item.trim_end_ms == 0 {
+        item.duration_ms
+    } else {
+        item.trim_end_ms
+    };
     encode::export_video(&src, dest, item.trim_start_ms, end, item.duration_ms)?;
     Ok(dest.to_string_lossy().into_owned())
 }
@@ -194,9 +216,11 @@ pub fn begin_export(path: &Path) -> Result<(), String> {
         return Err("Choose a full file path.".into());
     }
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| format!("Couldn't export the recording. {error}"))?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Couldn't export the recording. {error}"))?;
     }
-    let file = File::create(path).map_err(|error| format!("Couldn't export the recording. {error}"))?;
+    let file =
+        File::create(path).map_err(|error| format!("Couldn't export the recording. {error}"))?;
     *EXPORT.lock().expect("export") = Some(file);
     Ok(())
 }
@@ -205,7 +229,8 @@ pub fn append_export(bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
     let mut guard = EXPORT.lock().expect("export");
     let file = guard.as_mut().ok_or("Start an export first.")?;
-    file.write_all(bytes).map_err(|error| format!("Couldn't export the recording. {error}"))
+    file.write_all(bytes)
+        .map_err(|error| format!("Couldn't export the recording. {error}"))
 }
 
 pub fn finish_export() -> Result<(), String> {
@@ -243,8 +268,13 @@ fn ensure_server(app: &AppHandle) -> Result<u16, String> {
     if let Some(port) = *slot {
         return Ok(port);
     }
-    let server = Server::http("127.0.0.1:0").map_err(|error| format!("Couldn't play the recording. {error}"))?;
-    let port = server.server_addr().to_ip().map(|addr| addr.port()).unwrap_or(0);
+    let server = Server::http("127.0.0.1:0")
+        .map_err(|error| format!("Couldn't play the recording. {error}"))?;
+    let port = server
+        .server_addr()
+        .to_ip()
+        .map(|addr| addr.port())
+        .unwrap_or(0);
     if port == 0 {
         return Err("Couldn't play the recording.".into());
     }
@@ -288,7 +318,11 @@ fn respond(app: &AppHandle, request: Request) {
         return;
     };
     let length = meta.len();
-    let content = if name.ends_with(".webm") { "video/webm" } else { "video/mp4" };
+    let content = if name.ends_with(".webm") {
+        "video/webm"
+    } else {
+        "video/mp4"
+    };
     if let Some((start, end)) = range_of(header(&request, "Range").as_deref(), length) {
         let mut file = file;
         if file.seek(SeekFrom::Start(start)).is_err() {
@@ -304,7 +338,10 @@ fn respond(app: &AppHandle, request: Request) {
             .with_status_code(StatusCode(206))
             .with_header(header_line("Content-Type", content))
             .with_header(header_line("Accept-Ranges", "bytes"))
-            .with_header(header_line("Content-Range", &format!("bytes {start}-{end}/{length}")));
+            .with_header(header_line(
+                "Content-Range",
+                &format!("bytes {start}-{end}/{length}"),
+            ));
         let _ = request.respond(cors(response));
         return;
     }
@@ -340,8 +377,16 @@ fn range_of(header: Option<&str>, length: u64) -> Option<(u64, u64)> {
         return None;
     }
     let (start, end) = value.split_once('-')?;
-    let start = if start.is_empty() { 0 } else { start.parse().ok()? };
-    let end = if end.is_empty() { length - 1 } else { end.parse::<u64>().ok()?.min(length - 1) };
+    let start = if start.is_empty() {
+        0
+    } else {
+        start.parse().ok()?
+    };
+    let end = if end.is_empty() {
+        length - 1
+    } else {
+        end.parse::<u64>().ok()?.min(length - 1)
+    };
     (start <= end && start < length).then_some((start, end))
 }
 
@@ -361,7 +406,10 @@ fn cors<R: std::io::Read>(response: Response<R>) -> Response<R> {
     response
         .with_header(header_line("Access-Control-Allow-Origin", "*"))
         .with_header(header_line("Access-Control-Allow-Headers", "Range"))
-        .with_header(header_line("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length"))
+        .with_header(header_line(
+            "Access-Control-Expose-Headers",
+            "Content-Range, Accept-Ranges, Content-Length",
+        ))
 }
 
 #[cfg(test)]
@@ -370,7 +418,8 @@ mod tests {
 
     #[test]
     fn an_older_catalog_keeps_missing_fields() {
-        let catalog: Catalog = serde_json::from_str(r#"{"items":[{"id":"ab","title":"Hi"}]}"#).expect("catalog");
+        let catalog: Catalog =
+            serde_json::from_str(r#"{"items":[{"id":"ab","title":"Hi"}]}"#).expect("catalog");
         let item = &catalog.items[0];
         assert_eq!(item.title, "Hi");
         assert_eq!(item.trim_start_ms, 0);

@@ -12,7 +12,7 @@ mod targets;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -43,7 +43,11 @@ pub struct CameraLayout {
 
 impl Default for CameraLayout {
     fn default() -> Self {
-        Self { x: 0.04, y: 0.62, size: 0.18 }
+        Self {
+            x: 0.04,
+            y: 0.62,
+            size: 0.18,
+        }
     }
 }
 
@@ -52,7 +56,11 @@ impl CameraLayout {
         Self {
             x: self.x.clamp(-0.25, 1.0),
             y: self.y.clamp(-0.25, 1.0),
-            size: if self.size == 0.0 { 0.18 } else { self.size.clamp(0.08, 0.5) },
+            size: if self.size == 0.0 {
+                0.18
+            } else {
+                self.size.clamp(0.08, 0.5)
+            },
         }
     }
 }
@@ -180,7 +188,10 @@ pub fn output_size(width: u32, height: u32, max_long: u32) -> (u32, u32) {
         (width.max(2), height.max(2))
     } else {
         let scale = f64::from(max_long) / f64::from(long);
-        ((f64::from(width) * scale).round() as u32, (f64::from(height) * scale).round() as u32)
+        (
+            (f64::from(width) * scale).round() as u32,
+            (f64::from(height) * scale).round() as u32,
+        )
     };
     w = (w.max(2) / 2) * 2;
     h = (h.max(2) / 2) * 2;
@@ -215,7 +226,11 @@ pub fn start(app: &AppHandle, request: StartRequest) -> Result<ScreenRecordingSt
         cursor: AtomicU8::new(cursor_code(&request.cursor)),
         elapsed_ms: AtomicU64::new(0),
         countdown: AtomicU64::new(if request.countdown { 3 } else { 0 }),
-        phase: AtomicU8::new(if request.countdown { COUNTDOWN } else { RECORDING }),
+        phase: AtomicU8::new(if request.countdown {
+            COUNTDOWN
+        } else {
+            RECORDING
+        }),
         strokes: Mutex::new(Vec::new()),
         tool: Mutex::new("pen".into()),
         color: Mutex::new("#ef4444".into()),
@@ -226,7 +241,11 @@ pub fn start(app: &AppHandle, request: StartRequest) -> Result<ScreenRecordingSt
         id: id.clone(),
         dir,
         owner_window: request.window.clone(),
-        title: if request.title.trim().is_empty() { target.label.clone() } else { request.title.trim().to_string() },
+        title: if request.title.trim().is_empty() {
+            target.label.clone()
+        } else {
+            request.title.trim().to_string()
+        },
         microphone: request.microphone,
         system_audio: request.system_audio,
         source: request.source.clone(),
@@ -239,7 +258,9 @@ pub fn start(app: &AppHandle, request: StartRequest) -> Result<ScreenRecordingSt
     if request.camera {
         let _ = overlay::move_camera(app, &target, &request.camera_corner);
     }
-    *SESSION.lock().expect("recording") = Some(Live { control: control.clone() });
+    *SESSION.lock().expect("recording") = Some(Live {
+        control: control.clone(),
+    });
     let worker = app.clone();
     let device = request.microphone_device_id.clone();
     let countdown = request.countdown;
@@ -247,7 +268,11 @@ pub fn start(app: &AppHandle, request: StartRequest) -> Result<ScreenRecordingSt
         .name("recording".into())
         .spawn(move || run(worker, control, countdown, device))
     {
-        let dir = SESSION.lock().expect("recording").as_ref().map(|live| live.control.dir.clone());
+        let dir = SESSION
+            .lock()
+            .expect("recording")
+            .as_ref()
+            .map(|live| live.control.dir.clone());
         *SESSION.lock().expect("recording") = None;
         overlay::close(app);
         if let Some(dir) = dir {
@@ -348,7 +373,11 @@ pub fn set_drawing(app: &AppHandle, on: bool) -> Result<ScreenRecordingStatus, S
     Ok(status)
 }
 
-pub fn set_style(app: &AppHandle, tool: String, color: String) -> Result<ScreenRecordingStatus, String> {
+pub fn set_style(
+    app: &AppHandle,
+    tool: String,
+    color: String,
+) -> Result<ScreenRecordingStatus, String> {
     with_control(|control| {
         let tool = match tool.as_str() {
             "arrow" | "rectangle" | "highlighter" | "eraser" | "pen" => tool,
@@ -370,7 +399,12 @@ pub fn erase(points: Vec<draw::StrokePoint>) -> Result<(), String> {
     }
     with_control(|control| {
         let mut strokes = control.strokes.lock().expect("strokes");
-        strokes.retain(|stroke| !stroke.draft && !points.iter().any(|point| draw::touches(stroke, *point, 0.02)));
+        strokes.retain(|stroke| {
+            !stroke.draft
+                && !points
+                    .iter()
+                    .any(|point| draw::touches(stroke, *point, 0.02))
+        });
     })?;
     Ok(())
 }
@@ -418,7 +452,11 @@ pub fn clear_strokes(app: &AppHandle) -> Result<(), String> {
 pub fn undo_stroke(app: &AppHandle) -> Result<(), String> {
     with_control(|control| {
         let mut strokes = control.strokes.lock().expect("strokes");
-        let draft = strokes.last().is_some_and(|item| item.draft).then(|| strokes.pop()).flatten();
+        let draft = strokes
+            .last()
+            .is_some_and(|item| item.draft)
+            .then(|| strokes.pop())
+            .flatten();
         strokes.pop();
         if let Some(draft) = draft {
             strokes.push(draft);
@@ -437,7 +475,8 @@ pub fn append_camera(bytes: &[u8]) -> Result<(), String> {
         .append(true)
         .open(&path)
         .map_err(|error| format!("Couldn't save the camera. {error}"))?;
-    file.write_all(bytes).map_err(|error| format!("Couldn't save the camera. {error}"))?;
+    file.write_all(bytes)
+        .map_err(|error| format!("Couldn't save the camera. {error}"))?;
     Ok(())
 }
 
@@ -506,7 +545,13 @@ fn snapshot(control: &Control) -> ScreenRecordingStatus {
         mic_muted: control.mic_muted.load(Ordering::Relaxed),
         mic_level: control.mic_level.load(Ordering::Relaxed) as f32 / 1000.0,
         drawing: control.drawing.load(Ordering::Relaxed),
-        strokes: control.strokes.lock().expect("strokes").iter().filter(|stroke| !stroke.draft).count() as u32,
+        strokes: control
+            .strokes
+            .lock()
+            .expect("strokes")
+            .iter()
+            .filter(|stroke| !stroke.draft)
+            .count() as u32,
         tool: control.tool.lock().expect("tool").clone(),
         color: control.color.lock().expect("color").clone(),
         owner_window: control.owner_window.clone(),
@@ -609,36 +654,41 @@ fn run(app: AppHandle, control: Arc<Control>, countdown: bool, device_id: String
         fail(&app, &control, error);
         return;
     }
-    let latest = Arc::new(Mutex::new(LatestFrame { bytes: Vec::new(), seq: 0 }));
+    let latest = Arc::new(Mutex::new(LatestFrame {
+        bytes: Vec::new(),
+        seq: 0,
+    }));
     let capture_latest = latest.clone();
     let capture_control = control.clone();
     let capture_stop = Arc::new(AtomicBool::new(false));
     let capture_flag = capture_stop.clone();
-    let capture = thread::Builder::new().name("recording-capture".into()).spawn(move || {
-        let mut carry = Vec::new();
-        let mut shown = capture_control.cursor.load(Ordering::Relaxed) == CURSOR_SYSTEM;
-        while !capture_control.stop.load(Ordering::Relaxed)
-            && !capture_flag.load(Ordering::Relaxed)
-            && targets::alive(&capture_control.target)
-        {
-            let show_system = capture_control.cursor.load(Ordering::Relaxed) == CURSOR_SYSTEM;
-            if show_system != shown {
-                grabber.set_cursor_visible(show_system);
-                shown = show_system;
-            }
-            match grabber.poll_new() {
-                Ok(Some(frame)) => {
-                    carry.clear();
-                    carry.extend_from_slice(frame);
-                    let mut slot = capture_latest.lock().expect("frame");
-                    std::mem::swap(&mut slot.bytes, &mut carry);
-                    slot.seq = slot.seq.wrapping_add(1);
+    let capture = thread::Builder::new()
+        .name("recording-capture".into())
+        .spawn(move || {
+            let mut carry = Vec::new();
+            let mut shown = capture_control.cursor.load(Ordering::Relaxed) == CURSOR_SYSTEM;
+            while !capture_control.stop.load(Ordering::Relaxed)
+                && !capture_flag.load(Ordering::Relaxed)
+                && targets::alive(&capture_control.target)
+            {
+                let show_system = capture_control.cursor.load(Ordering::Relaxed) == CURSOR_SYSTEM;
+                if show_system != shown {
+                    grabber.set_cursor_visible(show_system);
+                    shown = show_system;
                 }
-                Ok(None) => thread::sleep(Duration::from_millis(1)),
-                Err(_) => thread::sleep(Duration::from_millis(4)),
+                match grabber.poll_new() {
+                    Ok(Some(frame)) => {
+                        carry.clear();
+                        carry.extend_from_slice(frame);
+                        let mut slot = capture_latest.lock().expect("frame");
+                        std::mem::swap(&mut slot.bytes, &mut carry);
+                        slot.seq = slot.seq.wrapping_add(1);
+                    }
+                    Ok(None) => thread::sleep(Duration::from_millis(1)),
+                    Err(_) => thread::sleep(Duration::from_millis(4)),
+                }
             }
-        }
-    });
+        });
     let Ok(capture) = capture else {
         fail(&app, &control, "Couldn't read the screen.".into());
         return;
@@ -681,7 +731,9 @@ fn run(app: AppHandle, control: Arc<Control>, countdown: bool, device_id: String
                 pause_began = Some(Instant::now());
             }
             audio.discard();
-            control.mic_level.store(audio.mic_level(), Ordering::Relaxed);
+            control
+                .mic_level
+                .store(audio.mic_level(), Ordering::Relaxed);
             control.phase.store(PAUSED, Ordering::Relaxed);
             if last_emit.elapsed() > Duration::from_millis(200) {
                 publish(&app, &control);
@@ -703,7 +755,9 @@ fn run(app: AppHandle, control: Arc<Control>, countdown: bool, device_id: String
                 publish(&app, &control);
                 last_emit = Instant::now();
             }
-            thread::sleep(Duration::from_nanos(wait.saturating_mul(100).min(33_000_000)));
+            thread::sleep(Duration::from_nanos(
+                wait.saturating_mul(100).min(33_000_000),
+            ));
             continue;
         }
         let fresh = {
@@ -729,7 +783,9 @@ fn run(app: AppHandle, control: Arc<Control>, countdown: bool, device_id: String
         let pcm = audio.pull(samples, !control.mic_muted.load(Ordering::Relaxed));
         let _ = writer.audio(&pcm, last_pts);
         last_pts = elapsed_hns;
-        control.mic_level.store(audio.mic_level(), Ordering::Relaxed);
+        control
+            .mic_level
+            .store(audio.mic_level(), Ordering::Relaxed);
         if last_emit.elapsed() > Duration::from_millis(200) {
             publish(&app, &control);
             last_emit = Instant::now();
@@ -750,7 +806,13 @@ fn run(app: AppHandle, control: Arc<Control>, countdown: bool, device_id: String
     let elapsed = note_time(paused_for, pause_began);
     let saved = writer.finish();
     if saved.is_err() || elapsed < 40 {
-        fail(&app, &control, saved.err().unwrap_or_else(|| "The recording has no frames.".into()));
+        fail(
+            &app,
+            &control,
+            saved
+                .err()
+                .unwrap_or_else(|| "The recording has no frames.".into()),
+        );
         return;
     }
     if let Some(layout) = overlay::camera_layout(&app, &control.target) {
@@ -762,11 +824,17 @@ fn run(app: AppHandle, control: Arc<Control>, countdown: bool, device_id: String
     control.phase.store(IDLE, Ordering::Relaxed);
     publish(&app, &control);
     thread::sleep(Duration::from_millis(450));
-    let camera_path = camera_path.is_file().then(|| camera_path.to_string_lossy().into_owned()).unwrap_or_default();
+    let camera_path = camera_path
+        .is_file()
+        .then(|| camera_path.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let entry = library::RecordingEntry {
         id: control.id.clone(),
         title: control.title.clone(),
-        created_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|time| time.as_millis() as u64).unwrap_or(0),
+        created_at: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|time| time.as_millis() as u64)
+            .unwrap_or(0),
         duration_ms: elapsed,
         source: control.source.clone(),
         source_label: control.target.label.clone(),
@@ -811,7 +879,13 @@ fn present(frame: &[u8], width: u32, height: u32, control: &Control) -> Vec<u8> 
     if control.cursor.load(Ordering::Relaxed) == CURSOR_CIRCLE {
         if let Some((x, y)) = targets::cursor_in_frame(&control.target, width, height) {
             if (0.0..width as f32).contains(&x) && (0.0..height as f32).contains(&y) {
-                draw::cursor_mark(&mut frame, width, height, x.round() as i32, y.round() as i32);
+                draw::cursor_mark(
+                    &mut frame,
+                    width,
+                    height,
+                    x.round() as i32,
+                    y.round() as i32,
+                );
             }
         }
     }
@@ -826,7 +900,9 @@ fn wait_countdown(app: &AppHandle, control: &Arc<Control>, audio: &audio::Mix) -
             if control.stop.load(Ordering::Relaxed) {
                 return false;
             }
-            control.mic_level.store(audio.mic_level(), Ordering::Relaxed);
+            control
+                .mic_level
+                .store(audio.mic_level(), Ordering::Relaxed);
             publish(app, control);
             thread::sleep(Duration::from_millis(100));
         }
@@ -874,7 +950,10 @@ mod tests {
 
 fn clear_session(control: &Arc<Control>) {
     let mut session = SESSION.lock().expect("recording");
-    if session.as_ref().is_some_and(|live| Arc::ptr_eq(&live.control, control)) {
+    if session
+        .as_ref()
+        .is_some_and(|live| Arc::ptr_eq(&live.control, control))
+    {
         *session = None;
     }
 }

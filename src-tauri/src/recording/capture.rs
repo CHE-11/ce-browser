@@ -3,24 +3,28 @@
 //! Frames stay on this thread. The encoder keeps the capture's own pixels, up to a 2560 long
 //! side, so a window resize does not change the file halfway through.
 
+use windows::Graphics::Capture::{
+    Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
+};
+use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
+use windows::Graphics::DirectX::DirectXPixelFormat;
+use windows::Win32::Foundation::{HMODULE, HWND};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_WARP;
 use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
-    D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device,
-    ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
+    D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
 use windows::Win32::Graphics::Gdi::HMONITOR;
-use windows::Win32::System::WinRT::Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess};
+use windows::Win32::System::WinRT::Direct3D11::{
+    CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess,
+};
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::core::{Interface, factory};
-use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession};
-use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
-use windows::Graphics::DirectX::DirectXPixelFormat;
-use windows::Win32::Foundation::{HMODULE, HWND};
 
 use super::{Target, output_size};
 
@@ -77,7 +81,9 @@ impl Grabber {
             return Ok(None);
         };
         let max_long = self.max_long;
-        let (width, height) = *self.output.get_or_insert_with(|| output_size(source_w, source_h, max_long));
+        let (width, height) = *self
+            .output
+            .get_or_insert_with(|| output_size(source_w, source_h, max_long));
         self.last = if source_w == width && source_h == height {
             pixels
         } else if source_w.abs_diff(width) <= 1 && source_h.abs_diff(height) <= 1 {
@@ -119,14 +125,22 @@ impl Grabber {
         unsafe { texture.GetDesc(&mut desc) };
         let (width, height) = (desc.Width.max(1), desc.Height.max(1));
         self.ensure_staging(width, height)?;
-        let staging = self.staging.as_ref().ok_or("The capture buffer is missing.")?;
+        let staging = self
+            .staging
+            .as_ref()
+            .ok_or("The capture buffer is missing.")?;
         unsafe {
             self.context.CopyResource(staging, &texture);
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             self.context
                 .Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
                 .map_err(text)?;
-            let packed = pack_rows(mapped.pData as *const u8, mapped.RowPitch as usize, width, height);
+            let packed = pack_rows(
+                mapped.pData as *const u8,
+                mapped.RowPitch as usize,
+                width,
+                height,
+            );
             self.context.Unmap(staging, 0);
             let _ = frame.Close();
             Ok(Some((width, height, packed)))
@@ -143,7 +157,10 @@ impl Grabber {
             MipLevels: 1,
             ArraySize: 1,
             Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
             Usage: D3D11_USAGE_STAGING,
             BindFlags: 0,
             CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
@@ -169,7 +186,8 @@ impl Drop for Grabber {
 }
 
 fn capture_item(target: &super::Target) -> Result<GraphicsCaptureItem, String> {
-    let interop: IGraphicsCaptureItemInterop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(text)?;
+    let interop: IGraphicsCaptureItemInterop =
+        factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>().map_err(text)?;
     unsafe {
         if target.monitor != 0 {
             let monitor = HMONITOR(target.monitor as *mut core::ffi::c_void);
@@ -259,7 +277,8 @@ fn scale_bilinear(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
     }
     let sample = |x: u32, y: u32| -> [u8; 4] {
         let index = ((y * sw + x) * 4) as usize;
-        src.get(index..index + 4).map_or([0; 4], |pixel| pixel.try_into().unwrap_or([0; 4]))
+        src.get(index..index + 4)
+            .map_or([0; 4], |pixel| pixel.try_into().unwrap_or([0; 4]))
     };
     for y in 0..dh {
         let fy = (f64::from(y) + 0.5) * f64::from(sh) / f64::from(dh) - 0.5;
@@ -279,7 +298,8 @@ fn scale_bilinear(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
             for channel in 0..4 {
                 let top = f64::from(p00[channel]) * (1.0 - tx) + f64::from(p10[channel]) * tx;
                 let bottom = f64::from(p01[channel]) * (1.0 - tx) + f64::from(p11[channel]) * tx;
-                dst[to + channel] = (top * (1.0 - ty) + bottom * ty).round().clamp(0.0, 255.0) as u8;
+                dst[to + channel] =
+                    (top * (1.0 - ty) + bottom * ty).round().clamp(0.0, 255.0) as u8;
             }
         }
     }

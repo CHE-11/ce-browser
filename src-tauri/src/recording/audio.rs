@@ -12,7 +12,9 @@ use windows::Win32::Media::Audio::{
     AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_LOOPBACK, IAudioCaptureClient, IAudioClient,
     IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, WAVEFORMATEX, eCapture, eConsole, eRender,
 };
-use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree};
+use windows::Win32::System::Com::{
+    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+};
 use windows::core::HSTRING;
 
 const RATE: u32 = 48_000;
@@ -34,17 +36,38 @@ impl Mix {
         let mic_level = Arc::new(AtomicU32::new(0));
         let system_level = Arc::new(AtomicU32::new(0));
         if microphone {
-            spawn(stop.clone(), mic.clone(), device_id.to_string(), false, Some(mic_level.clone()));
+            spawn(
+                stop.clone(),
+                mic.clone(),
+                device_id.to_string(),
+                false,
+                Some(mic_level.clone()),
+            );
         }
         if system {
-            spawn(stop.clone(), system_queue.clone(), String::new(), true, Some(system_level.clone()));
+            spawn(
+                stop.clone(),
+                system_queue.clone(),
+                String::new(),
+                true,
+                Some(system_level.clone()),
+            );
         }
-        Self { stop, mic, system: system_queue, mic_level, system_level }
+        Self {
+            stop,
+            mic,
+            system: system_queue,
+            mic_level,
+            system_level,
+        }
     }
 
     /// Louder of the microphone and system audio, from 0 to 1000.
     pub fn mic_level(&self) -> u32 {
-        self.mic_level.load(Ordering::Relaxed).max(self.system_level.load(Ordering::Relaxed)).min(1000)
+        self.mic_level
+            .load(Ordering::Relaxed)
+            .max(self.system_level.load(Ordering::Relaxed))
+            .min(1000)
     }
 
     /// `frames` is the number of stereo frames. Mute drops the microphone without letting it pile up.
@@ -74,7 +97,11 @@ fn spawn(
     level: Option<Arc<AtomicU32>>,
 ) {
     thread::Builder::new()
-        .name(if loopback { "recording-loopback".into() } else { "recording-mic".into() })
+        .name(if loopback {
+            "recording-loopback".into()
+        } else {
+            "recording-mic".into()
+        })
         .spawn(move || capture_loop(stop, queue, device_id, loopback, level))
         .ok();
 }
@@ -106,7 +133,9 @@ fn capture_loop(
 }
 
 fn note_level(level: &AtomicU32, samples: &[f32]) {
-    let peak = samples.iter().fold(0.0f32, |loudest, sample| loudest.max(sample.abs()));
+    let peak = samples
+        .iter()
+        .fold(0.0f32, |loudest, sample| loudest.max(sample.abs()));
     let previous = level.load(Ordering::Relaxed) as f32 / 1000.0;
     // Speech sits well below full scale, so the meter is opened up until it clips at 1.
     let next = (peak * 5.0).clamp(0.0, 1.0).max(previous * 0.72);
@@ -183,7 +212,13 @@ impl Capture {
                 } else if self.block > 0 {
                     let bytes = (frames as usize).saturating_mul(self.block as usize);
                     let slice = std::slice::from_raw_parts(data, bytes);
-                    decode(slice, self.channels, self.bits, self.float_samples, &mut decoded);
+                    decode(
+                        slice,
+                        self.channels,
+                        self.bits,
+                        self.float_samples,
+                        &mut decoded,
+                    );
                 }
                 self.capture.ReleaseBuffer(frames).ok()?;
             }
@@ -203,7 +238,8 @@ impl Drop for Capture {
 fn open(device_id: &str, loopback: bool) -> Result<Capture, String> {
     unsafe {
         let enumerator: IMMDeviceEnumerator =
-            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|error| error.to_string())?;
+            CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
+                .map_err(|error| error.to_string())?;
         let device = if !loopback && !device_id.is_empty() {
             enumerator
                 .GetDevice(&HSTRING::from(device_id))
@@ -224,20 +260,34 @@ fn open(device_id: &str, loopback: bool) -> Result<Capture, String> {
 
 fn open_device(device: &IMMDevice, loopback: bool) -> Result<Capture, String> {
     unsafe {
-        let client: IAudioClient = device.Activate(CLSCTX_ALL, None).map_err(|error| error.to_string())?;
+        let client: IAudioClient = device
+            .Activate(CLSCTX_ALL, None)
+            .map_err(|error| error.to_string())?;
         let format = client.GetMixFormat().map_err(|error| error.to_string())?;
         let channels = read_u16(format, 2).max(1);
         let rate = read_u32(format, 4).max(1);
         let block = read_u16(format, 12);
         let bits = read_u16(format, 14);
         let float_samples = float_format(format);
-        let flags = if loopback { AUDCLNT_STREAMFLAGS_LOOPBACK } else { 0 };
+        let flags = if loopback {
+            AUDCLNT_STREAMFLAGS_LOOPBACK
+        } else {
+            0
+        };
         let init = client.Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 1_000_000, 0, format, None);
         CoTaskMemFree(Some(format as *const core::ffi::c_void));
         init.map_err(|error| error.to_string())?;
         let capture = client.GetService().map_err(|error| error.to_string())?;
         client.Start().map_err(|error| error.to_string())?;
-        Ok(Capture { client, capture, channels, rate, bits, block, float_samples })
+        Ok(Capture {
+            client,
+            capture,
+            channels,
+            rate,
+            bits,
+            block,
+            float_samples,
+        })
     }
 }
 

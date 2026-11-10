@@ -3,12 +3,14 @@
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
-use windows::core::BOOL;
-use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO};
-use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GWL_EXSTYLE, GetCursorPos, GetWindowLongPtrW, GetWindowRect, GetWindowTextW, IsWindow, IsWindowVisible,
-    WS_EX_TOOLWINDOW,
+use windows::Win32::Graphics::Gdi::{
+    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFO,
 };
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GWL_EXSTYLE, GetCursorPos, GetWindowLongPtrW, GetWindowRect, GetWindowTextW,
+    IsWindow, IsWindowVisible, WS_EX_TOOLWINDOW,
+};
+use windows::core::BOOL;
 
 use crate::tabs;
 
@@ -42,8 +44,16 @@ pub struct ScreenRect {
 pub fn list(skip_hwnd: isize) -> Vec<RecordingTarget> {
     let mut found: Vec<RecordingTarget> = Vec::new();
     unsafe {
-        let _ = EnumWindows(Some(enum_window), LPARAM(&mut found as *mut Vec<RecordingTarget> as isize));
-        let _ = EnumDisplayMonitors(None, None, Some(enum_monitor), LPARAM(&mut found as *mut Vec<RecordingTarget> as isize));
+        let _ = EnumWindows(
+            Some(enum_window),
+            LPARAM(&mut found as *mut Vec<RecordingTarget> as isize),
+        );
+        let _ = EnumDisplayMonitors(
+            None,
+            None,
+            Some(enum_monitor),
+            LPARAM(&mut found as *mut Vec<RecordingTarget> as isize),
+        );
     }
     found.retain(|target| target.kind != "window" || target.id != skip_hwnd.to_string());
     found
@@ -52,7 +62,8 @@ pub fn list(skip_hwnd: isize) -> Vec<RecordingTarget> {
 pub fn resolve(app: &AppHandle, request: &StartRequest) -> Result<Target, String> {
     match request.source.as_str() {
         "tab" => {
-            let webview = tabs::page_view(app, request.tab_id).ok_or("This page is not loaded yet.")?;
+            let webview =
+                tabs::page_view(app, request.tab_id).ok_or("This page is not loaded yet.")?;
             let hwnd = crate::webview2::host_hwnd(&webview)?;
             Ok(Target {
                 kind: "tab".into(),
@@ -62,8 +73,14 @@ pub fn resolve(app: &AppHandle, request: &StartRequest) -> Result<Target, String
             })
         }
         "browser" => {
-            let label = if request.window.is_empty() { tabs::WINDOW.to_string() } else { request.window.clone() };
-            let window = app.get_window(&label).ok_or("The browser window is missing.")?;
+            let label = if request.window.is_empty() {
+                tabs::WINDOW.to_string()
+            } else {
+                request.window.clone()
+            };
+            let window = app
+                .get_window(&label)
+                .ok_or("The browser window is missing.")?;
             let hwnd = window.hwnd().map_err(|error| error.to_string())?;
             Ok(Target {
                 kind: "browser".into(),
@@ -73,8 +90,13 @@ pub fn resolve(app: &AppHandle, request: &StartRequest) -> Result<Target, String
             })
         }
         "window" => {
-            let hwnd = request.target.parse::<isize>().map_err(|_| "Choose a window to record.".to_string())?;
-            if hwnd == 0 || !unsafe { IsWindow(Some(HWND(hwnd as *mut core::ffi::c_void))).as_bool() } {
+            let hwnd = request
+                .target
+                .parse::<isize>()
+                .map_err(|_| "Choose a window to record.".to_string())?;
+            if hwnd == 0
+                || !unsafe { IsWindow(Some(HWND(hwnd as *mut core::ffi::c_void))).as_bool() }
+            {
                 return Err("That window is no longer open.".into());
             }
             Ok(Target {
@@ -85,7 +107,10 @@ pub fn resolve(app: &AppHandle, request: &StartRequest) -> Result<Target, String
             })
         }
         "display" => {
-            let monitor = request.target.parse::<isize>().map_err(|_| "Choose a screen to record.".to_string())?;
+            let monitor = request
+                .target
+                .parse::<isize>()
+                .map_err(|_| "Choose a screen to record.".to_string())?;
             if monitor == 0 {
                 return Err("Choose a screen to record.".into());
             }
@@ -118,7 +143,12 @@ pub fn screen_rect(target: &Target) -> Option<ScreenRect> {
     if width < 40 || height < 40 {
         return None;
     }
-    Some(ScreenRect { x: rect.left, y: rect.top, width, height })
+    Some(ScreenRect {
+        x: rect.left,
+        y: rect.top,
+        width,
+        height,
+    })
 }
 
 /// Pointer position in the frame, in pixels. It can sit outside the picture.
@@ -138,7 +168,8 @@ pub fn alive(target: &Target) -> bool {
     if target.monitor != 0 {
         return monitor_rect(target.monitor).is_some();
     }
-    target.hwnd != 0 && unsafe { IsWindow(Some(HWND(target.hwnd as *mut core::ffi::c_void))).as_bool() }
+    target.hwnd != 0
+        && unsafe { IsWindow(Some(HWND(target.hwnd as *mut core::ffi::c_void))).as_bool() }
 }
 
 unsafe extern "system" fn enum_window(hwnd: HWND, data: LPARAM) -> BOOL {
@@ -171,7 +202,12 @@ unsafe extern "system" fn enum_window(hwnd: HWND, data: LPARAM) -> BOOL {
     BOOL(1)
 }
 
-unsafe extern "system" fn enum_monitor(monitor: HMONITOR, _: HDC, _: *mut RECT, data: LPARAM) -> BOOL {
+unsafe extern "system" fn enum_monitor(
+    monitor: HMONITOR,
+    _: HDC,
+    _: *mut RECT,
+    data: LPARAM,
+) -> BOOL {
     let found = unsafe { &mut *(data.0 as *mut Vec<RecordingTarget>) };
     let label = monitor_label(monitor.0 as isize).unwrap_or_else(|| "Screen".into());
     found.push(RecordingTarget {
@@ -188,7 +224,9 @@ fn window_title(hwnd: isize) -> Option<String> {
     if length <= 0 {
         return None;
     }
-    let title = String::from_utf16_lossy(&buffer[..length as usize]).trim().to_string();
+    let title = String::from_utf16_lossy(&buffer[..length as usize])
+        .trim()
+        .to_string();
     (!title.is_empty()).then_some(title)
 }
 
@@ -205,17 +243,28 @@ fn monitor_rect(monitor: isize) -> Option<ScreenRect> {
         cbSize: std::mem::size_of::<MONITORINFO>() as u32,
         ..MONITORINFO::default()
     };
-    let ok = unsafe { GetMonitorInfoW(HMONITOR(monitor as *mut core::ffi::c_void), &mut info).as_bool() };
+    let ok = unsafe {
+        GetMonitorInfoW(HMONITOR(monitor as *mut core::ffi::c_void), &mut info).as_bool()
+    };
     if !ok {
         return None;
     }
     let rect = info.rcMonitor;
     let width = rect.right.saturating_sub(rect.left);
     let height = rect.bottom.saturating_sub(rect.top);
-    (width > 0 && height > 0).then_some(ScreenRect { x: rect.left, y: rect.top, width, height })
+    (width > 0 && height > 0).then_some(ScreenRect {
+        x: rect.left,
+        y: rect.top,
+        width,
+        height,
+    })
 }
 
 fn fallback(title: &str, default: &str) -> String {
     let title = title.trim();
-    if title.is_empty() { default.into() } else { title.to_string() }
+    if title.is_empty() {
+        default.into()
+    } else {
+        title.to_string()
+    }
 }

@@ -14,21 +14,24 @@ use serde::{Deserialize, Serialize};
 use tauri::window::WindowBuilder;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, Window};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_BACK, VK_DELETE, VK_ESCAPE, VK_MENU};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    GetAsyncKeyState, VK_BACK, VK_DELETE, VK_ESCAPE, VK_MENU,
+};
 use windows::Win32::UI::Magnification::{
-    MAGTRANSFORM, MW_FILTERMODE_EXCLUDE, MagInitialize, MagSetWindowFilterList, MagSetWindowSource, MagSetWindowTransform, MagUninitialize,
-    WC_MAGNIFIER,
+    MAGTRANSFORM, MW_FILTERMODE_EXCLUDE, MagInitialize, MagSetWindowFilterList, MagSetWindowSource,
+    MagSetWindowTransform, MagUninitialize, WC_MAGNIFIER,
 };
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, EnumChildWindows, GA_ROOT, GetAncestor, GetCursorPos, GetForegroundWindow,
-    GetParent, GetWindowLongPtrW, GetWindowRect, GWL_EXSTYLE, HC_ACTION, HHOOK, HTCLIENT, HTTRANSPARENT, HWND_TOPMOST, IsWindow,
-    IsWindowVisible, KBDLLHOOKSTRUCT, LWA_ALPHA,
-    RegisterClassExW, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_HIDE, SW_SHOWNA, SetCursor, SetLayeredWindowAttributes, SetWindowPos, SetWindowsHookExW,
-    SetWindowLongPtrW, ShowWindow, UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_NCHITTEST, WM_SETCURSOR, WNDCLASSEXW, WS_CHILD,
-    WS_CLIPCHILDREN,
-    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP, WS_VISIBLE,
+    CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, EnumChildWindows, GA_ROOT,
+    GWL_EXSTYLE, GetAncestor, GetCursorPos, GetForegroundWindow, GetParent, GetWindowLongPtrW,
+    GetWindowRect, HC_ACTION, HHOOK, HTCLIENT, HTTRANSPARENT, HWND_TOPMOST, IsWindow,
+    IsWindowVisible, KBDLLHOOKSTRUCT, LWA_ALPHA, RegisterClassExW, SW_HIDE, SW_SHOWNA,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetCursor,
+    SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, SetWindowsHookExW, ShowWindow,
+    UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_NCHITTEST, WM_SETCURSOR, WNDCLASSEXW,
+    WS_CHILD, WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    WS_EX_TRANSPARENT, WS_POPUP, WS_VISIBLE,
 };
 use windows::core::{BOOL, w};
 
@@ -156,14 +159,22 @@ pub fn toggle(app: &AppHandle) -> Result<PresentState, String> {
 }
 
 pub fn state() -> PresentState {
-    snapshot(&SESSION.lock().unwrap_or_else(|poisoned| poisoned.into_inner()))
+    snapshot(
+        &SESSION
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    )
 }
 
 pub fn set_tool(app: &AppHandle, tool: &str) -> Result<PresentState, String> {
     let tool = known_tool(tool)?;
     mutate(app, |live| {
         if live.tool == tool && (tool == "spotlight" || tool == "cursor" || tool == "zoom") {
-            let locked = if tool == "zoom" { live.zoom.take() } else { live.spotlight.take() };
+            let locked = if tool == "zoom" {
+                live.zoom.take()
+            } else {
+                live.spotlight.take()
+            };
             if live.placing || locked.is_some() {
                 live.placing = false;
             } else {
@@ -192,7 +203,8 @@ pub fn escape_is_useful() -> bool {
     let Ok(slot) = SESSION.try_lock() else {
         return true;
     };
-    slot.as_ref().is_some_and(|live| live.tool != "cursor" || live.cursor != "crosshair" || live.placing)
+    slot.as_ref()
+        .is_some_and(|live| live.tool != "cursor" || live.cursor != "crosshair" || live.placing)
 }
 
 pub fn on_delete(app: &AppHandle) {
@@ -267,7 +279,11 @@ pub fn set_hold_escape(hold: bool) {
 }
 
 /// Stores a dragged spotlight or zoom rectangle. `None` ends the drag without a new lock.
-pub fn finish_place(app: &AppHandle, kind: &str, rect: Option<PresentRect>) -> Result<PresentState, String> {
+pub fn finish_place(
+    app: &AppHandle,
+    kind: &str,
+    rect: Option<PresentRect>,
+) -> Result<PresentState, String> {
     let kind = kind.to_string();
     if kind != "spotlight" && kind != "zoom" {
         return Err("Present can lock a spotlight or a zoom.".into());
@@ -290,7 +306,9 @@ pub fn clear_marks(app: &AppHandle) -> Result<PresentState, String> {
 }
 
 fn mutate(app: &AppHandle, change: impl FnOnce(&mut LiveSession)) -> Result<PresentState, String> {
-    let mut slot = SESSION.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut slot = SESSION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let Some(live) = slot.as_mut() else {
         return Err("Present is off.".into());
     };
@@ -312,7 +330,10 @@ pub fn close(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn on_main<R: Send + 'static>(app: &AppHandle, task: impl FnOnce(&AppHandle) -> R + Send + 'static) -> Result<R, String> {
+fn on_main<R: Send + 'static>(
+    app: &AppHandle,
+    task: impl FnOnce(&AppHandle) -> R + Send + 'static,
+) -> Result<R, String> {
     let (tx, rx) = mpsc::channel();
     let queued = app.clone();
     let inside = queued.clone();
@@ -326,7 +347,9 @@ fn on_main<R: Send + 'static>(app: &AppHandle, task: impl FnOnce(&AppHandle) -> 
 
 fn open_main(app: &AppHandle) -> Result<(), String> {
     close_main(app);
-    let owner = app.get_window(tabs::WINDOW).ok_or("The browser window is missing.")?;
+    let owner = app
+        .get_window(tabs::WINDOW)
+        .ok_or("The browser window is missing.")?;
     LIVE.store(true, Ordering::Release);
     let opened = (|| {
         open_page(app, &owner, STAGE, "present")?;
@@ -343,7 +366,9 @@ fn open_main(app: &AppHandle) -> Result<(), String> {
         arm_escape(app);
         let generation = GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
         start_pump(app.clone(), generation);
-        let mut slot = SESSION.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut slot = SESSION
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *slot = Some(LiveSession {
             tool: "spotlight".into(),
             cursor: "dot".into(),
@@ -393,7 +418,9 @@ fn close_main(app: &AppHandle) {
             let _ = window.close();
         }
     }
-    let mut slot = SESSION.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut slot = SESSION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let was = slot.take().is_some();
     drop(slot);
     if was {
@@ -409,7 +436,9 @@ fn start_pump(app: AppHandle, generation: u64) {
                 let inside = queued.clone();
                 let posted = queued.run_on_main_thread(move || {
                     POSTED.store(false, Ordering::Release);
-                    if LIVE.load(Ordering::Acquire) && GENERATION.load(Ordering::Relaxed) == generation {
+                    if LIVE.load(Ordering::Acquire)
+                        && GENERATION.load(Ordering::Relaxed) == generation
+                    {
                         sync(&inside);
                     }
                 });
@@ -417,7 +446,11 @@ fn start_pump(app: AppHandle, generation: u64) {
                     POSTED.store(false, Ordering::Release);
                 }
             }
-            let wait = if FAST_POINTER.load(Ordering::Relaxed) { 8 } else { 32 };
+            let wait = if FAST_POINTER.load(Ordering::Relaxed) {
+                8
+            } else {
+                32
+            };
             thread::sleep(Duration::from_millis(wait));
         }
     });
@@ -456,9 +489,14 @@ fn sync(app: &AppHandle) {
             blank_cursor_tree(&owner);
         }
     }
-    let scale = app.get_window(STAGE).and_then(|window| window.scale_factor().ok()).unwrap_or(1.0);
+    let scale = app
+        .get_window(STAGE)
+        .and_then(|window| window.scale_factor().ok())
+        .unwrap_or(1.0);
     let mut pointer = pointer_at(&box_, scale);
-    let slot = SESSION.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let slot = SESSION
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let Some(live) = slot.as_ref() else {
         return;
     };
@@ -540,10 +578,21 @@ fn apply_layout(app: &AppHandle) {
         return;
     };
     if let Ok(mut last) = LAST_LAYOUT.lock() {
-        *last = Some(ScreenBox { x: box_.x, y: box_.y, width: box_.width, height: box_.height });
+        *last = Some(ScreenBox {
+            x: box_.x,
+            y: box_.y,
+            width: box_.width,
+            height: box_.height,
+        });
     }
     if let Some(stage) = app.get_window(STAGE) {
-        place_window(&stage, box_.x, box_.y, box_.width as u32, box_.height as u32);
+        place_window(
+            &stage,
+            box_.x,
+            box_.y,
+            box_.width as u32,
+            box_.height as u32,
+        );
         pass_clicks(&stage);
     }
     if let Some(controls) = app.get_window(CONTROLS) {
@@ -564,13 +613,25 @@ fn apply_layout(app: &AppHandle) {
 }
 
 fn layout_changed(box_: &ScreenBox) -> bool {
-    let mut last = LAST_LAYOUT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut last = LAST_LAYOUT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let changed = match last.as_ref() {
-        Some(prev) => prev.x != box_.x || prev.y != box_.y || prev.width != box_.width || prev.height != box_.height,
+        Some(prev) => {
+            prev.x != box_.x
+                || prev.y != box_.y
+                || prev.width != box_.width
+                || prev.height != box_.height
+        }
         None => true,
     };
     if changed {
-        *last = Some(ScreenBox { x: box_.x, y: box_.y, width: box_.width, height: box_.height });
+        *last = Some(ScreenBox {
+            x: box_.x,
+            y: box_.y,
+            width: box_.width,
+            height: box_.height,
+        });
     }
     changed
 }
@@ -580,9 +641,17 @@ fn pointer_at(box_: &ScreenBox, scale: f64) -> PresentPointer {
     let read = unsafe { GetCursorPos(&mut point) }.is_ok();
     let scale = if scale < 0.5 { 1.0 } else { scale };
     if !read {
-        return PresentPointer { x: 0.0, y: 0.0, inside: false, lens: None };
+        return PresentPointer {
+            x: 0.0,
+            y: 0.0,
+            inside: false,
+            lens: None,
+        };
     }
-    let inside = point.x >= box_.x && point.y >= box_.y && point.x < box_.x + box_.width && point.y < box_.y + box_.height;
+    let inside = point.x >= box_.x
+        && point.y >= box_.y
+        && point.x < box_.x + box_.width
+        && point.y < box_.y + box_.height;
     PresentPointer {
         x: (point.x - box_.x) as f64 / scale,
         y: (point.y - box_.y) as f64 / scale,
@@ -591,7 +660,14 @@ fn pointer_at(box_: &ScreenBox, scale: f64) -> PresentPointer {
     }
 }
 
-fn place_lens(app: &AppHandle, box_: &ScreenBox, scale: f64, pointer: PresentPointer, tool: &str, lock: Option<PresentRect>) -> Option<PresentRect> {
+fn place_lens(
+    app: &AppHandle,
+    box_: &ScreenBox,
+    scale: f64,
+    pointer: PresentPointer,
+    tool: &str,
+    lock: Option<PresentRect>,
+) -> Option<PresentRect> {
     let hwnd = LENS_HWND.load(Ordering::Relaxed);
     let mag = MAG_HWND.load(Ordering::Relaxed);
     if hwnd == 0 || mag == 0 || !MAG_READY.load(Ordering::Relaxed) {
@@ -622,8 +698,26 @@ fn place_lens(app: &AppHandle, box_: &ScreenBox, scale: f64, pointer: PresentPoi
             };
             let aim_x = box_.x + (pointer.x * scale) as i32;
             let aim_y = box_.y + (pointer.y * scale) as i32;
-            let (sx, sy, sw, sh) = zoom_source(glass.x, glass.y, glass.width, glass.height, aim_x, aim_y, ZOOM, (box_.x, box_.y, box_.width, box_.height));
-            Some((glass, ZOOM, ScreenBox { x: sx, y: sy, width: sw, height: sh }))
+            let (sx, sy, sw, sh) = zoom_source(
+                glass.x,
+                glass.y,
+                glass.width,
+                glass.height,
+                aim_x,
+                aim_y,
+                ZOOM,
+                (box_.x, box_.y, box_.width, box_.height),
+            );
+            Some((
+                glass,
+                ZOOM,
+                ScreenBox {
+                    x: sx,
+                    y: sy,
+                    width: sw,
+                    height: sh,
+                },
+            ))
         }
         None => None,
     };
@@ -648,7 +742,15 @@ fn place_lens(app: &AppHandle, box_: &ScreenBox, scale: f64, pointer: PresentPoi
             SWP_NOACTIVATE | SWP_SHOWWINDOW,
         );
         let _ = ShowWindow(host, SW_SHOWNA);
-        let _ = SetWindowPos(glass, None, 0, 0, lens.width - inset * 2, lens.height - inset * 2, SWP_NOACTIVATE | SWP_NOMOVE);
+        let _ = SetWindowPos(
+            glass,
+            None,
+            0,
+            0,
+            lens.width - inset * 2,
+            lens.height - inset * 2,
+            SWP_NOACTIVATE | SWP_NOMOVE,
+        );
     }
     let mut transform = MAGTRANSFORM { v: [0.0; 9] };
     transform.v[0] = zoom;
@@ -658,7 +760,12 @@ fn place_lens(app: &AppHandle, box_: &ScreenBox, scale: f64, pointer: PresentPoi
         let _ = MagSetWindowTransform(glass, &mut transform);
         let _ = MagSetWindowSource(
             glass,
-            RECT { left: source.x, top: source.y, right: source.x + source.width, bottom: source.y + source.height },
+            RECT {
+                left: source.x,
+                top: source.y,
+                right: source.x + source.width,
+                bottom: source.y + source.height,
+            },
         );
     }
     exclude_overlay(glass, app);
@@ -692,7 +799,11 @@ fn exclude_overlay(glass: HWND, app: &AppHandle) {
         if let Some(hwnd) = app.get_window(label).and_then(|window| window.hwnd().ok()) {
             list.push(hwnd);
             unsafe {
-                let _ = EnumChildWindows(Some(hwnd), Some(collect_filter_child), LPARAM(&mut list as *mut Vec<HWND> as isize));
+                let _ = EnumChildWindows(
+                    Some(hwnd),
+                    Some(collect_filter_child),
+                    LPARAM(&mut list as *mut Vec<HWND> as isize),
+                );
             }
         }
     }
@@ -700,7 +811,12 @@ fn exclude_overlay(glass: HWND, app: &AppHandle) {
         return;
     }
     unsafe {
-        let _ = MagSetWindowFilterList(glass, MW_FILTERMODE_EXCLUDE, list.len() as i32, list.as_mut_ptr());
+        let _ = MagSetWindowFilterList(
+            glass,
+            MW_FILTERMODE_EXCLUDE,
+            list.len() as i32,
+            list.as_mut_ptr(),
+        );
     }
 }
 
@@ -724,21 +840,44 @@ fn hide_lens() {
 }
 
 /// Screen rectangle magnified into `lens`, centered on `aim` and kept inside `bounds`.
-pub fn zoom_source(lens_x: i32, lens_y: i32, lens_w: i32, lens_h: i32, aim_x: i32, aim_y: i32, zoom: f32, bounds: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
+pub fn zoom_source(
+    lens_x: i32,
+    lens_y: i32,
+    lens_w: i32,
+    lens_h: i32,
+    aim_x: i32,
+    aim_y: i32,
+    zoom: f32,
+    bounds: (i32, i32, i32, i32),
+) -> (i32, i32, i32, i32) {
     let _ = (lens_x, lens_y);
     let zoom = if zoom < 1.05 { 1.05 } else { zoom };
     let sw = ((lens_w as f32) / zoom).round().max(1.0) as i32;
     let sh = ((lens_h as f32) / zoom).round().max(1.0) as i32;
     let (bx, by, bw, bh) = bounds;
-    let x = if sw >= bw { bx } else { (aim_x - sw / 2).clamp(bx, bx + bw - sw) };
-    let y = if sh >= bh { by } else { (aim_y - sh / 2).clamp(by, by + bh - sh) };
+    let x = if sw >= bw {
+        bx
+    } else {
+        (aim_x - sw / 2).clamp(bx, bx + bw - sw)
+    };
+    let y = if sh >= bh {
+        by
+    } else {
+        (aim_y - sh / 2).clamp(by, by + bh - sh)
+    };
     (x, y, sw, sh)
 }
 
 /// Glass that shows `selection` at up to 2x. `inset` is the frame around the magnifier, in pixels.
 /// A selection larger than the window shrinks the zoom until the whole selection still fits.
-pub fn lock_lens(selection: PresentRect, window_w: i32, window_h: i32, inset: i32) -> Option<LockLens> {
-    if window_w < 1 || window_h < 1 || !selection.width.is_finite() || !selection.height.is_finite() {
+pub fn lock_lens(
+    selection: PresentRect,
+    window_w: i32,
+    window_h: i32,
+    inset: i32,
+) -> Option<LockLens> {
+    if window_w < 1 || window_h < 1 || !selection.width.is_finite() || !selection.height.is_finite()
+    {
         return None;
     }
     let max_w = window_w as f32;
@@ -771,9 +910,19 @@ pub fn lock_lens(selection: PresentRect, window_w: i32, window_h: i32, inset: i3
     let glass_x = (cx - outer_w / 2.0).clamp(0.0, (max_w - outer_w).max(0.0));
     let glass_y = (cy - outer_h / 2.0).clamp(0.0, (max_h - outer_h).max(0.0));
     Some(LockLens {
-        glass: PresentRect { x: glass_x / max_w, y: glass_y / max_h, width: outer_w / max_w, height: outer_h / max_h },
+        glass: PresentRect {
+            x: glass_x / max_w,
+            y: glass_y / max_h,
+            width: outer_w / max_w,
+            height: outer_h / max_h,
+        },
         zoom,
-        source: PresentRect { x: source_x / max_w, y: source_y / max_h, width: source_w / max_w, height: source_h / max_h },
+        source: PresentRect {
+            x: source_x / max_w,
+            y: source_y / max_h,
+            width: source_w / max_w,
+            height: source_h / max_h,
+        },
     })
 }
 
@@ -798,7 +947,8 @@ fn ensure_lens(owner: &Window) -> Result<(), String> {
     MAG_READY.store(true, Ordering::Release);
     register_lens_class()?;
     let owner_hwnd = owner.hwnd().map_err(|error| error.to_string())?;
-    let instance = unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None) }.map_err(|error| error.to_string())?;
+    let instance = unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None) }
+        .map_err(|error| error.to_string())?;
     let host = unsafe {
         CreateWindowExW(
             WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT,
@@ -842,12 +992,18 @@ fn ensure_lens(owner: &Window) -> Result<(), String> {
     Ok(())
 }
 
-unsafe extern "system" fn lens_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn lens_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
 }
 
 fn register_lens_class() -> Result<(), String> {
-    let instance = unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None) }.map_err(|error| error.to_string())?;
+    let instance = unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None) }
+        .map_err(|error| error.to_string())?;
     let class = WNDCLASSEXW {
         cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
         lpfnWndProc: Some(lens_proc),
@@ -907,7 +1063,9 @@ fn open_page(app: &AppHandle, owner: &Window, label: &str, page: &str) -> Result
         .disable_drag_drop_handler()
         .focused(false);
     let size = window.inner_size().map_err(|error| error.to_string())?;
-    window.add_child(webview, PhysicalPosition::new(0, 0), size).map_err(|error| error.to_string())?;
+    window
+        .add_child(webview, PhysicalPosition::new(0, 0), size)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -957,7 +1115,15 @@ fn cover_lens(app: &AppHandle) {
     let after = HWND(lens as *mut core::ffi::c_void);
     if let Some(stage) = app.get_window(STAGE).and_then(|window| window.hwnd().ok()) {
         unsafe {
-            let _ = SetWindowPos(after, Some(stage), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            let _ = SetWindowPos(
+                after,
+                Some(stage),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
         }
     }
     if let Some(controls) = app.get_window(CONTROLS) {
@@ -970,7 +1136,15 @@ fn above_top(window: &Window) {
         return;
     };
     unsafe {
-        let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        let _ = SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
     }
 }
 
@@ -984,7 +1158,12 @@ fn window_box(app: &AppHandle, label: &str) -> Option<ScreenBox> {
     if width < 40 || height < 40 {
         return None;
     }
-    Some(ScreenBox { x: rect.left, y: rect.top, width, height })
+    Some(ScreenBox {
+        x: rect.left,
+        y: rect.top,
+        width,
+        height,
+    })
 }
 
 fn pass_clicks(window: &Window) {
@@ -1016,14 +1195,19 @@ fn apply_click_through(app: &AppHandle) {
     let Some(stage) = app.get_window(STAGE) else {
         return;
     };
-    let through = !(CAPTURE.load(Ordering::Relaxed) || (PLACEABLE.load(Ordering::Relaxed) && alt_down()));
+    let through =
+        !(CAPTURE.load(Ordering::Relaxed) || (PLACEABLE.load(Ordering::Relaxed) && alt_down()));
     let _ = stage.set_ignore_cursor_events(through);
     let Ok(hwnd) = stage.hwnd() else {
         return;
     };
     set_click_through(hwnd, through);
     unsafe {
-        let _ = EnumChildWindows(Some(hwnd), Some(through_child), LPARAM(isize::from(through)));
+        let _ = EnumChildWindows(
+            Some(hwnd),
+            Some(through_child),
+            LPARAM(isize::from(through)),
+        );
     }
 }
 
@@ -1044,14 +1228,32 @@ fn set_click_through(hwnd: HWND, through: bool) {
             return;
         }
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next as isize);
-        let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        let _ = SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
     }
 }
 
-unsafe extern "system" fn stage_hit_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
+unsafe extern "system" fn stage_hit_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _: usize,
+    _: usize,
+) -> LRESULT {
     if message == WM_NCHITTEST {
         let point = hit_point(lparam);
-        if over_controls(point) || !(CAPTURE.load(Ordering::Relaxed) || (PLACEABLE.load(Ordering::Relaxed) && alt_down())) {
+        if over_controls(point)
+            || !(CAPTURE.load(Ordering::Relaxed)
+                || (PLACEABLE.load(Ordering::Relaxed) && alt_down()))
+        {
             return LRESULT(HTTRANSPARENT as isize);
         }
     }
@@ -1060,7 +1262,10 @@ unsafe extern "system" fn stage_hit_proc(hwnd: HWND, message: u32, wparam: WPARA
 
 fn hit_point(lparam: LPARAM) -> POINT {
     let packed = lparam.0 as u32;
-    POINT { x: packed as i16 as i32, y: (packed >> 16) as i16 as i32 }
+    POINT {
+        x: packed as i16 as i32,
+        y: (packed >> 16) as i16 as i32,
+    }
 }
 
 fn alt_down() -> bool {
@@ -1100,7 +1305,8 @@ fn arm_escape(app: &AppHandle) {
     if ESCAPE_HOOK.load(Ordering::Acquire) != 0 {
         return;
     }
-    let Ok(installed) = (unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(escape_proc), None, 0) }) else {
+    let Ok(installed) = (unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(escape_proc), None, 0) })
+    else {
         eprintln!("present: Escape hook was not installed");
         return;
     };
@@ -1136,15 +1342,29 @@ unsafe extern "system" fn escape_proc(code: i32, wparam: WPARAM, lparam: LPARAM)
 }
 
 fn sync_flags(live: &LiveSession) {
-    let draw = matches!(live.tool.as_str(), "lasso" | "highlight" | "pen" | "arrow" | "text" | "eraser");
+    let draw = matches!(
+        live.tool.as_str(),
+        "lasso" | "highlight" | "pen" | "arrow" | "text" | "eraser"
+    );
     let capture = draw || live.placing;
     CAPTURE.store(capture, Ordering::Relaxed);
-    PLACEABLE.store(matches!(live.tool.as_str(), "spotlight" | "cursor" | "zoom"), Ordering::Relaxed);
-    let follow_spot = matches!(live.tool.as_str(), "spotlight" | "cursor") && live.spotlight.is_none() && !live.placing;
+    PLACEABLE.store(
+        matches!(live.tool.as_str(), "spotlight" | "cursor" | "zoom"),
+        Ordering::Relaxed,
+    );
+    let follow_spot = matches!(live.tool.as_str(), "spotlight" | "cursor")
+        && live.spotlight.is_none()
+        && !live.placing;
     let follow_zoom = live.tool == "zoom" && live.zoom.is_none() && !live.placing;
-    FAST_POINTER.store(live.cursor != "off" || follow_spot || follow_zoom, Ordering::Relaxed);
+    FAST_POINTER.store(
+        live.cursor != "off" || follow_spot || follow_zoom,
+        Ordering::Relaxed,
+    );
     let hide_pointer = live.tool == "zoom" && !capture;
-    BLANK_CURSOR.store(hide_pointer || (live.cursor != "off" && !capture), Ordering::Relaxed);
+    BLANK_CURSOR.store(
+        hide_pointer || (live.cursor != "off" && !capture),
+        Ordering::Relaxed,
+    );
 }
 
 fn blank_cursor_tree(window: &Window) {
@@ -1176,8 +1396,18 @@ fn in_controls(hwnd: HWND) -> bool {
     owned_by(hwnd, HWND(raw as *mut core::ffi::c_void))
 }
 
-unsafe extern "system" fn cursor_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
-    let blank = message == WM_SETCURSOR && BLANK_CURSOR.load(Ordering::Relaxed) && LIVE.load(Ordering::Relaxed) && FOCUSED.load(Ordering::Relaxed);
+unsafe extern "system" fn cursor_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _: usize,
+    _: usize,
+) -> LRESULT {
+    let blank = message == WM_SETCURSOR
+        && BLANK_CURSOR.load(Ordering::Relaxed)
+        && LIVE.load(Ordering::Relaxed)
+        && FOCUSED.load(Ordering::Relaxed);
     if blank && !in_controls(hwnd) {
         let hit = (lparam.0 as u32) & 0xffff;
         if hit == HTCLIENT {
@@ -1229,7 +1459,8 @@ fn snapshot(slot: &Option<LiveSession>) -> PresentState {
 
 fn known_tool(tool: &str) -> Result<String, String> {
     match tool {
-        "none" | "lasso" | "spotlight" | "cursor" | "zoom" | "highlight" | "pen" | "arrow" | "text" | "eraser" => Ok(tool.to_string()),
+        "none" | "lasso" | "spotlight" | "cursor" | "zoom" | "highlight" | "pen" | "arrow"
+        | "text" | "eraser" => Ok(tool.to_string()),
         _ => Err("Unknown present tool.".into()),
     }
 }
@@ -1264,12 +1495,18 @@ fn known_dim(dim: f32) -> Result<f32, String> {
 
 fn known_width(width: f32) -> Result<f32, String> {
     const CHOICES: [f32; 3] = [0.32, 1.0, 2.4];
-    CHOICES.into_iter().find(|choice| (choice - width).abs() < 0.02).ok_or_else(|| "Present width is a stroke size.".into())
+    CHOICES
+        .into_iter()
+        .find(|choice| (choice - width).abs() < 0.02)
+        .ok_or_else(|| "Present width is a stroke size.".into())
 }
 
 fn known_color(color: &str) -> Result<String, String> {
     let bytes = color.as_bytes();
-    if bytes.len() == 7 && bytes[0] == b'#' && bytes[1..].iter().all(|byte| byte.is_ascii_hexdigit()) {
+    if bytes.len() == 7
+        && bytes[0] == b'#'
+        && bytes[1..].iter().all(|byte| byte.is_ascii_hexdigit())
+    {
         Ok(color.to_ascii_lowercase())
     } else {
         Err("Present color is a #rrggbb value.".into())
@@ -1277,7 +1514,11 @@ fn known_color(color: &str) -> Result<String, String> {
 }
 
 fn clean_rect(rect: PresentRect) -> Option<PresentRect> {
-    if !rect.x.is_finite() || !rect.y.is_finite() || !rect.width.is_finite() || !rect.height.is_finite() {
+    if !rect.x.is_finite()
+        || !rect.y.is_finite()
+        || !rect.width.is_finite()
+        || !rect.height.is_finite()
+    {
         return None;
     }
     let x = rect.x.min(rect.x + rect.width).clamp(0.0, 1.0);
@@ -1297,7 +1538,7 @@ fn clean_rect(rect: PresentRect) -> Option<PresentRect> {
 
 #[cfg(test)]
 mod tests {
-    use super::{clean_rect, lock_lens, zoom_source, PresentRect};
+    use super::{PresentRect, clean_rect, lock_lens, zoom_source};
 
     fn covers(outer: PresentRect, inner: PresentRect) -> bool {
         outer.x <= inner.x + 0.01
@@ -1316,33 +1557,75 @@ mod tests {
 
     #[test]
     fn lock_lens_doubles_a_small_selection_and_keeps_it_in_view() {
-        let selection = PresentRect { x: 0.2, y: 0.2, width: 0.1, height: 0.1 };
+        let selection = PresentRect {
+            x: 0.2,
+            y: 0.2,
+            width: 0.1,
+            height: 0.1,
+        };
         let lens = lock_lens(selection, 1000, 800, 0).expect("lens");
         assert!((lens.zoom - 2.0).abs() < 0.05, "zoom {}", lens.zoom);
-        assert!((lens.glass.width - 0.2).abs() < 0.02, "glass width {}", lens.glass.width);
-        assert!((lens.glass.height - 0.2).abs() < 0.02, "glass height {}", lens.glass.height);
+        assert!(
+            (lens.glass.width - 0.2).abs() < 0.02,
+            "glass width {}",
+            lens.glass.width
+        );
+        assert!(
+            (lens.glass.height - 0.2).abs() < 0.02,
+            "glass height {}",
+            lens.glass.height
+        );
         assert!(lens.glass.x >= 0.0 && lens.glass.y >= 0.0);
         assert!(lens.glass.x + lens.glass.width <= 1.01);
         assert!(lens.glass.y + lens.glass.height <= 1.01);
-        assert!(covers(lens.source, selection), "source {:?} selection {:?}", lens.source, selection);
+        assert!(
+            covers(lens.source, selection),
+            "source {:?} selection {:?}",
+            lens.source,
+            selection
+        );
     }
 
     #[test]
     fn lock_lens_shrinks_zoom_so_a_large_selection_still_fits() {
-        let selection = PresentRect { x: 0.0, y: 0.0, width: 0.8, height: 0.8 };
+        let selection = PresentRect {
+            x: 0.0,
+            y: 0.0,
+            width: 0.8,
+            height: 0.8,
+        };
         let lens = lock_lens(selection, 1000, 800, 0).expect("lens");
         assert!(lens.zoom < 2.0, "zoom {}", lens.zoom);
         assert!(lens.glass.x >= -0.001 && lens.glass.y >= -0.001);
         assert!(lens.glass.x + lens.glass.width <= 1.01);
         assert!(lens.glass.y + lens.glass.height <= 1.01);
-        assert!(covers(lens.source, selection), "source {:?} selection {:?}", lens.source, selection);
+        assert!(
+            covers(lens.source, selection),
+            "source {:?} selection {:?}",
+            lens.source,
+            selection
+        );
     }
 
     #[test]
     fn clean_rect_keeps_a_thin_bar_and_drops_a_dot() {
-        let bar = clean_rect(PresentRect { x: 0.1, y: 0.4, width: 0.5, height: 0.0 }).expect("bar");
+        let bar = clean_rect(PresentRect {
+            x: 0.1,
+            y: 0.4,
+            width: 0.5,
+            height: 0.0,
+        })
+        .expect("bar");
         assert!(bar.width > 0.4);
         assert!(bar.height > 0.0);
-        assert!(clean_rect(PresentRect { x: 0.2, y: 0.2, width: 0.004, height: 0.004 }).is_none());
+        assert!(
+            clean_rect(PresentRect {
+                x: 0.2,
+                y: 0.2,
+                width: 0.004,
+                height: 0.004
+            })
+            .is_none()
+        );
     }
 }

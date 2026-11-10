@@ -310,8 +310,10 @@ fn category_of(action: &str) -> &'static str {
         | "bookmark"
         | "toggle-bookmarks-bar"
         | "toggle-tools" => "Address bar and bookmarks",
-        "reload" | "reload-key" | "back" | "forward" | "find" | "find-all" | "zoom-in" | "zoom-in-shift"
-        | "zoom-out" | "zoom-reset" | "devtools" | "inspect" | "debug-hud" => "Page",
+        "reload" | "reload-key" | "back" | "forward" | "find" | "find-all" | "zoom-in"
+        | "zoom-in-shift" | "zoom-out" | "zoom-reset" | "devtools" | "inspect" | "debug-hud" => {
+            "Page"
+        }
         _ => "Browser",
     }
 }
@@ -716,7 +718,9 @@ pub fn defaults() -> Vec<ShortcutBinding> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, ShortcutBinding, ShortcutFile, action_from, chord_token, effective, normalize_saved};
+    use super::{
+        Action, ShortcutBinding, ShortcutFile, action_from, chord_token, effective, normalize_saved,
+    };
 
     #[test]
     fn slash_and_brackets_have_names() {

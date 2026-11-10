@@ -42,10 +42,10 @@ mod prices;
 mod print;
 mod print_images;
 mod privacy;
-mod recording;
 mod profile_archive;
 mod profile_icons;
 mod profiles;
+mod recording;
 mod rewrite;
 mod secrets;
 mod session;
@@ -685,7 +685,10 @@ async fn stop_recording() -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn list_recording_targets(app: AppHandle, window: String) -> Result<Vec<recording::RecordingTarget>, String> {
+async fn list_recording_targets(
+    app: AppHandle,
+    window: String,
+) -> Result<Vec<recording::RecordingTarget>, String> {
     let skip = app
         .get_window(&window)
         .and_then(|window| window.hwnd().ok())
@@ -728,7 +731,10 @@ async fn set_recording_mic_muted(muted: bool) -> Result<recording::ScreenRecordi
 }
 
 #[tauri::command]
-async fn set_recording_camera(app: AppHandle, on: bool) -> Result<recording::ScreenRecordingStatus, String> {
+async fn set_recording_camera(
+    app: AppHandle,
+    on: bool,
+) -> Result<recording::ScreenRecordingStatus, String> {
     recording::set_camera(&app, on)
 }
 
@@ -758,7 +764,10 @@ async fn set_present_tool(app: AppHandle, tool: String) -> Result<present::Prese
 }
 
 #[tauri::command]
-async fn set_present_cursor(app: AppHandle, cursor: String) -> Result<present::PresentState, String> {
+async fn set_present_cursor(
+    app: AppHandle,
+    cursor: String,
+) -> Result<present::PresentState, String> {
     present::set_cursor(&app, &cursor)
 }
 
@@ -823,12 +832,19 @@ async fn set_recording_controls_mode(app: AppHandle, mode: String) -> Result<(),
 }
 
 #[tauri::command]
-async fn set_recording_drawing(app: AppHandle, on: bool) -> Result<recording::ScreenRecordingStatus, String> {
+async fn set_recording_drawing(
+    app: AppHandle,
+    on: bool,
+) -> Result<recording::ScreenRecordingStatus, String> {
     recording::set_drawing(&app, on)
 }
 
 #[tauri::command]
-async fn set_recording_style(app: AppHandle, tool: String, color: String) -> Result<recording::ScreenRecordingStatus, String> {
+async fn set_recording_style(
+    app: AppHandle,
+    tool: String,
+    color: String,
+) -> Result<recording::ScreenRecordingStatus, String> {
     recording::set_style(&app, tool, color)
 }
 
@@ -868,7 +884,10 @@ async fn list_recordings(app: AppHandle) -> Result<Vec<recording::RecordingEntry
 }
 
 #[tauri::command]
-async fn update_recording(app: AppHandle, patch: recording::RecordingUpdate) -> Result<recording::RecordingEntry, String> {
+async fn update_recording(
+    app: AppHandle,
+    patch: recording::RecordingUpdate,
+) -> Result<recording::RecordingEntry, String> {
     recording::library_update(&app, patch)
 }
 
