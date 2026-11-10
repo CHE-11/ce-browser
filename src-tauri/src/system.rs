@@ -975,38 +975,173 @@ pub fn refresh_tray(app: &AppHandle) {
     }
 }
 
-pub fn toast(title: &str, body: &str, launch: &str) {
-    use windows::Data::Xml::Dom::XmlDocument;
-    use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
-    let xml = format!(
-        r#"<toast launch="{}"><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual></toast>"#,
-        xml_escape(launch),
-        xml_escape(title),
-        xml_escape(body)
-    );
-    let document = match XmlDocument::new() {
-        Ok(document) => document,
-        Err(_) => return,
-    };
-    if document
-        .LoadXml(&windows::core::HSTRING::from(&xml))
-        .is_err()
+/// How a Windows toast should sound. WebView2's own notification is silent, so site
+/// notifications go through this instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToastSound {
+    /// One system notification chime.
+    Default,
+    /// Banner only.
+    Silent,
+    /// Rings until the toast is dismissed. For an incoming call.
+    Call,
+}
+
+/// A click on a site toast. The id is the one embedded in the toast argument.
+#[derive(Debug, PartialEq, Eq)]
+pub enum NoteAction {
+    Open(u64),
+    Dismiss(u64),
+}
+
+pub fn note_open_arg(id: u64) -> String {
+    format!("ce-note-open:{id}")
+}
+
+pub fn note_dismiss_arg(id: u64) -> String {
+    format!("ce-note-dismiss:{id}")
+}
+
+pub fn note_action(argument: &str) -> Option<NoteAction> {
+    let (kind, id) = argument.split_once(':')?;
+    let id = id.parse().ok()?;
+    match kind {
+        "ce-note-open" => Some(NoteAction::Open(id)),
+        "ce-note-dismiss" => Some(NoteAction::Dismiss(id)),
+        _ => None,
+    }
+}
+
+/// An incoming call, as opposed to a message that merely mentions calling.
+/// Missed-call alerts stay ordinary notifications so they do not keep ringing.
+pub fn notification_is_call(title: &str, body: &str, tag: &str) -> bool {
+    let tag = tag.trim().to_ascii_lowercase();
+    let tagged = tag == "call"
+        || tag.contains("incoming-call")
+        || tag.contains("incoming_call")
+        || tag.contains("phonecall")
+        || tag.contains("voice-call")
+        || tag.contains("video-call");
+    if tagged {
+        return true;
+    }
+    let text = format!("{title} {body}").to_lowercase();
+    if text.contains("missed call")
+        || text.contains("missed voice")
+        || text.contains("missed video")
     {
-        return;
+        return false;
     }
-    let toast = match ToastNotification::CreateToastNotification(&document) {
-        Ok(toast) => toast,
-        Err(_) => return,
+    const PHRASES: &[&str] = &[
+        "incoming call",
+        "incoming voice",
+        "incoming video",
+        "video call",
+        "voice call",
+        "phone call",
+        "is calling",
+        "calling you",
+        "wants to call",
+        "call from",
+        "started a call",
+    ];
+    PHRASES.iter().any(|phrase| text.contains(phrase))
+}
+
+/// `page_audible` means the tab is already making sound the user can hear. A call
+/// then keeps the page's own ringtone. Otherwise the toast rings, including when
+/// the site marked the notification silent and plays a ringtone this browser cannot.
+pub fn notification_sound(silent: bool, call: bool, page_audible: bool) -> ToastSound {
+    if call && !page_audible {
+        ToastSound::Call
+    } else if silent {
+        ToastSound::Silent
+    } else {
+        ToastSound::Default
+    }
+}
+
+pub(crate) fn toast_markup(
+    launch: &str,
+    title: &str,
+    body: &str,
+    sound: ToastSound,
+    decline: &str,
+) -> String {
+    let audio = match sound {
+        ToastSound::Default => r#"<audio src="ms-winsoundevent:Notification.Default"/>"#,
+        ToastSound::Silent => r#"<audio silent="true"/>"#,
+        ToastSound::Call => {
+            r#"<audio src="ms-winsoundevent:Notification.Looping.Call" loop="true"/>"#
+        }
     };
-    if let Ok(notifier) = ToastNotificationManager::CreateToastNotifierWithId(
-        &windows::core::HSTRING::from(profiles::current_model_id()),
-    ) {
-        let _ = notifier.Show(&toast);
+    let scenario = if sound == ToastSound::Call {
+        r#" scenario="incomingCall""#
+    } else {
+        ""
+    };
+    let actions = if sound == ToastSound::Call {
+        format!(
+            r#"<actions><action content="Answer" arguments="{}"/><action content="Decline" arguments="{}"/></actions>"#,
+            xml_text(launch),
+            xml_text(decline),
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        r#"<toast launch="{}"{scenario}><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text></binding></visual>{actions}{audio}</toast>"#,
+        xml_text(launch),
+        xml_text(title),
+        xml_text(body),
+    )
+}
+
+pub fn toast(title: &str, body: &str, launch: &str) {
+    let _ = present_toast(&toast_markup(launch, title, body, ToastSound::Default, ""));
+}
+
+pub(crate) fn create_toast(markup: &str) -> Option<windows::UI::Notifications::ToastNotification> {
+    use windows::Data::Xml::Dom::XmlDocument;
+    use windows::UI::Notifications::ToastNotification;
+    let document = XmlDocument::new().ok()?;
+    document
+        .LoadXml(&windows::core::HSTRING::from(markup))
+        .ok()?;
+    ToastNotification::CreateToastNotification(&document).ok()
+}
+
+pub(crate) fn show_created(toast: &windows::UI::Notifications::ToastNotification) -> bool {
+    notifier().is_some_and(|notifier| notifier.Show(toast).is_ok())
+}
+
+pub(crate) fn hide_created(toast: &windows::UI::Notifications::ToastNotification) {
+    if let Some(notifier) = notifier() {
+        let _ = notifier.Hide(toast);
     }
+}
+
+fn present_toast(markup: &str) -> bool {
+    create_toast(markup).is_some_and(|toast| show_created(&toast))
+}
+
+fn notifier() -> Option<windows::UI::Notifications::ToastNotifier> {
+    windows::UI::Notifications::ToastNotificationManager::CreateToastNotifierWithId(
+        &windows::core::HSTRING::from(profiles::current_model_id()),
+    )
+    .ok()
 }
 
 pub fn toast_download(name: &str, path: &str) {
     toast("Download finished", name, &format!("--open={path}"));
+}
+
+fn xml_text(text: &str) -> String {
+    let cleaned: String = text
+        .chars()
+        .filter(|c| matches!(c, '\t' | '\n' | '\r') || !c.is_control())
+        .collect();
+    xml_escape(&cleaned)
 }
 
 fn xml_escape(text: &str) -> String {
@@ -1399,14 +1534,34 @@ pub fn sync_frames(app: &AppHandle) {
     }
 }
 
+/// Keeps `Notification.permission` granted for a site that was allowed, and tells the host
+/// about the notification. A current WebView2 raises `NotificationReceived` and shows one
+/// toast with sound, so the host ignores this message then. Older runtimes use it as the
+/// only path, which is why `silent` and `tag` are included.
 pub const NOTIFY_JS: &str = r#"(function () {
   if (window.__ceNotify || !window.Notification) return;
   window.__ceNotify = true;
   var Native = window.Notification;
+  function callText(title, options) {
+    var body = options && options.body ? String(options.body) : "";
+    var tag = options && options.tag ? String(options.tag) : "";
+    var text = (String(title || "") + " " + body).toLowerCase();
+    var mark = tag.toLowerCase();
+    if (mark === "call" || mark.indexOf("incoming-call") >= 0 || mark.indexOf("incoming_call") >= 0 || mark.indexOf("voice-call") >= 0 || mark.indexOf("video-call") >= 0) return true;
+    if (text.indexOf("missed call") >= 0 || text.indexOf("missed voice") >= 0) return false;
+    return text.indexOf("incoming call") >= 0 || text.indexOf("incoming voice") >= 0 || text.indexOf("incoming video") >= 0 || text.indexOf("voice call") >= 0 || text.indexOf("video call") >= 0 || text.indexOf("is calling") >= 0 || text.indexOf("calling you") >= 0;
+  }
   function Wrapped(title, options) {
     try {
+      if (callText(title, options) && window.__ceAllowPlayback) window.__ceAllowPlayback();
       var host = window.__ceHost || (window.chrome && window.chrome.webview);
-      if (host) host.postMessage({ type: "ce-notify", title: String(title || ""), body: options && options.body ? String(options.body) : "" });
+      if (host) host.postMessage({
+        type: "ce-notify",
+        title: String(title || ""),
+        body: options && options.body ? String(options.body) : "",
+        silent: !!(options && options.silent),
+        tag: options && options.tag ? String(options.tag) : ""
+      });
     } catch (error) {}
     return new Native(title, options);
   }
@@ -1547,5 +1702,53 @@ mod tests {
         assert!(power_is_battery(0));
         assert!(!power_is_battery(1));
         assert!(!power_is_battery(255));
+    }
+
+    #[test]
+    fn a_ringing_call_is_not_a_missed_call_or_a_mention() {
+        use super::{
+            NoteAction, ToastSound, note_action, note_dismiss_arg, note_open_arg,
+            notification_is_call, notification_sound,
+        };
+        assert!(notification_is_call("Alice", "Incoming voice call", ""));
+        assert!(notification_is_call("Bob", "Bob is calling you", ""));
+        assert!(notification_is_call("Meet", "Call from Dana", "ping"));
+        assert!(notification_is_call("Phone", "", "incoming-call"));
+        assert!(!notification_is_call("Alice", "Missed voice call", ""));
+        assert!(!notification_is_call("Alice", "I'll call you later", ""));
+        assert_eq!(notification_sound(true, true, false), ToastSound::Call);
+        assert_eq!(notification_sound(true, true, true), ToastSound::Silent);
+        assert_eq!(notification_sound(false, false, false), ToastSound::Default);
+        assert_eq!(notification_sound(true, false, false), ToastSound::Silent);
+        assert_eq!(note_action(&note_open_arg(7)), Some(NoteAction::Open(7)));
+        assert_eq!(
+            note_action(&note_dismiss_arg(7)),
+            Some(NoteAction::Dismiss(7))
+        );
+        assert_eq!(note_action("--open=C:\\a.pdf"), None);
+    }
+
+    #[test]
+    fn a_call_toast_loops_and_a_normal_one_chimes() {
+        use super::{ToastSound, toast_markup};
+        let call = toast_markup(
+            "ce-note-open:4",
+            "Alice & Bob",
+            "Incoming call",
+            ToastSound::Call,
+            "ce-note-dismiss:4",
+        );
+        assert!(call.contains(r#"scenario="incomingCall""#));
+        assert!(call.contains("ms-winsoundevent:Notification.Looping.Call"));
+        assert!(call.contains(r#"loop="true""#));
+        assert!(call.contains("Answer"));
+        assert!(call.contains("Decline"));
+        assert!(call.contains("Alice &amp; Bob"));
+        assert!(!call.contains("Alice & Bob"));
+        let chime = toast_markup("open", "Done", "Saved", ToastSound::Default, "");
+        assert!(chime.contains("ms-winsoundevent:Notification.Default"));
+        assert!(!chime.contains("incomingCall"));
+        let quiet = toast_markup("open", "Done", "Saved", ToastSound::Silent, "");
+        assert!(quiet.contains(r#"silent="true""#));
     }
 }

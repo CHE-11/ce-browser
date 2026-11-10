@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { tabProblemTitle, type HeavyTab } from "@/lib/tab-alert";
 import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
-import { TAB_SIZE, tabItemStyle } from "@/lib/tab-size";
+import { TAB_SIZE, horizontalTabHeight, tabItemStyle } from "@/lib/tab-size";
 import { useSettings } from "@/lib/use-browser";
 import { hoverTab, leaveTab } from "@/lib/tab-hover";
 import { useTabUnderPointer } from "@/lib/tab-pointer";
@@ -66,13 +66,19 @@ export function TabItem({
   const vertical = orientation === "vertical";
   const iconSize = metric(settings?.tabIconSize, CHROME.tabIconSize);
   const closeSize = iconSize * 0.875;
+  const closeControl = Math.max(1.25, closeSize);
+  // Icon-only pinned tabs still take the full horizontal tab height, including when they are the only tabs.
+  const stripHeight = horizontalTabHeight(
+    settings?.tabItemTextSize,
+    settings?.tabItemPadding,
+    metric(settings?.tabItemHeight, CHROME.tabItemHeight),
+    Math.max(iconSize, closeControl),
+  );
   const itemStyle = compact
-    ? null
-    : tabItemStyle(
-        settings?.tabItemTextSize,
-        settings?.tabItemPadding,
-        vertical ? undefined : metric(settings?.tabItemHeight, CHROME.tabItemHeight),
-      );
+    ? vertical
+      ? null
+      : { minHeight: `${stripHeight}rem` }
+    : tabItemStyle(settings?.tabItemTextSize, settings?.tabItemPadding, vertical ? undefined : stripHeight);
   const accent = settings?.siteAccent && tab.accent && !tab.pinned ? tab.accent : null;
   const pinBorder = (settings?.pinTabBorder ?? true) && tab.pinned ? tab.accent : null;
   const domId = `tab-${tab.id}`;
@@ -166,7 +172,7 @@ export function TabItem({
       )}
       style={{
         viewTransitionName: `tab-${tab.id}`,
-        ["--tab-close" as string]: `${Math.max(1.25, closeSize)}rem`,
+        ["--tab-close" as string]: `${closeControl}rem`,
         ...(itemStyle ?? null),
         ...(!vertical && !compact ? { width: tabWidth } : null),
         ...(backgroundColor ? { backgroundColor, "--tab-fill": backgroundColor } : null),

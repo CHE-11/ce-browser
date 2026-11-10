@@ -18,6 +18,11 @@ type PopupFrameProps = {
   width?: number | "menu" | "fill";
   /** Px at 100% Browser UI size. Taller content scrolls. */
   maxHeight?: number;
+  /** Px at 100% Browser UI size. The window opens at this size and the content fills it.
+   * Later growth scrolls instead of changing the window. */
+  frame?: { width: number; height: number };
+  /** Drawn over the window, outside the scrolling content. Resize edges live here. */
+  chrome?: ReactNode;
   /** The content shows real data, not a loading placeholder. The popup appears once it is. */
   ready?: boolean;
   role?: "dialog";
@@ -41,17 +46,26 @@ function widthLayout(width: PopupFrameProps["width"]): { className: string; styl
  * Popup surface. Its content lays out at its natural size and reports it, so the popup window
  * opens at exactly that size and follows the content as it grows or shrinks.
  */
-export function PopupFrame({ id, children, className, width, maxHeight = 640, ready = true, role, labelledBy }: PopupFrameProps) {
+export function PopupFrame({ id, children, className, width, maxHeight = 640, frame, chrome, ready = true, role, labelledBy }: PopupFrameProps) {
   const host = usePopupHost();
   const scrollerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const token = host?.token;
   const live = ready && (host?.appearanceReady ?? false);
+  const frameWidth = frame?.width;
+  const frameHeight = frame?.height;
 
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     const content = contentRef.current;
     if (token === undefined || !scroller || !content) {
+      return;
+    }
+    if (frameWidth !== undefined && frameHeight !== undefined) {
+      if (frameWidth < 1 || frameHeight < 1) {
+        return;
+      }
+      void popupMeasured(token, Math.round(frameWidth), Math.round(frameHeight), live).catch(() => undefined);
       return;
     }
     let reported = "";
@@ -80,7 +94,7 @@ export function PopupFrame({ id, children, className, width, maxHeight = 640, re
     observer.observe(content);
     observer.observe(scroller);
     return () => observer.disconnect();
-  }, [token, live, maxHeight, width]);
+  }, [token, live, maxHeight, width, frameWidth, frameHeight]);
 
   useEffect(() => {
     const onKey = (event: globalThis.KeyboardEvent) => {
@@ -92,20 +106,30 @@ export function PopupFrame({ id, children, className, width, maxHeight = 640, re
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const layout = widthLayout(width);
+  const framed = frameWidth !== undefined && frameHeight !== undefined;
+  const layout = framed ? { className: "min-h-full w-full", style: undefined } : widthLayout(width);
   return (
     <div
       id={id}
       role={role}
       aria-labelledby={labelledBy}
-      className={cn(popupSurfaceClass, "flex h-screen w-screen flex-col overflow-hidden")}
+      className={cn(popupSurfaceClass, "flex h-screen w-screen flex-col overflow-hidden", chrome && "relative")}
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div id={`${id}-scroller`} ref={scrollerRef} className="min-h-0 flex-1 overflow-anchor-none overflow-x-hidden overflow-y-auto">
+      <div
+        id={`${id}-scroller`}
+        ref={scrollerRef}
+        className={cn("min-h-0 flex-1 overflow-anchor-none", framed ? "overflow-auto" : "overflow-x-hidden overflow-y-auto")}
+      >
         <div id={`${id}-content`} ref={contentRef} className={cn(layout.className, className)} style={layout.style}>
           {children}
         </div>
       </div>
+      {chrome ? (
+        <div id={`${id}-chrome`} className="pointer-events-none absolute inset-0 z-20">
+          {chrome}
+        </div>
+      ) : null}
     </div>
   );
 }

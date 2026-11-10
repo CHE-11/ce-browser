@@ -798,6 +798,20 @@ export function onTabSwitcherStep(handler: (step: number) => void): Promise<Unli
   return getCurrentWebview().listen<number>("tab-switcher-step", (event) => handler(event.payload));
 }
 
+/** Ctrl+scroll or Ctrl+Plus / Ctrl+Minus / Ctrl+0 while the tab overview is open. */
+export function onTabOverviewZoom(handler: (change: "in" | "out" | "reset") => void): Promise<UnlistenFn> {
+  return getCurrentWebview().listen<string>("tab-overview-zoom", (event) => {
+    if (event.payload === "in" || event.payload === "out" || event.payload === "reset") {
+      handler(event.payload);
+    }
+  });
+}
+
+/** Drags the tab overview. `width` and `height` are CSS px. `left` and `top` keep the opposite edge still. */
+export function resizePopup(width: number, height: number, left: boolean, top: boolean) {
+  return invoke<void>("resize_popup", { width, height, left, top });
+}
+
 // Workspaces
 
 export function createWorkspace(name: string, color: TabGroupColor) {

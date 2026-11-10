@@ -89,7 +89,7 @@ export function TabStrip({ snapshot }: TabStripProps) {
       <div id="tab-strip-overview" className="flex shrink-0 items-end pb-1 pl-2">
         <IconButton
           id="tab-strip-overview-button"
-          label="All tabs"
+          label="All tabs (Ctrl + `)"
           aria-haspopup="dialog"
           className="size-7 rounded-md"
           onClick={() => void openTabOverview()}
@@ -156,6 +156,16 @@ export function TabStrip({ snapshot }: TabStripProps) {
           >
             <ChevronDown id="tab-strip-overflow-icon" aria-hidden />
           </IconButton>
+        </div>
+      ) : null}
+      {import.meta.env.DEV ? (
+        <div id="tab-strip-dev-mode" className="flex shrink-0 items-center pr-2">
+          <span
+            id="tab-strip-dev-mode-chip"
+            className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-amber-300"
+          >
+            DEV MODE
+          </span>
         </div>
       ) : null}
       <WindowControls />

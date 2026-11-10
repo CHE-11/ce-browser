@@ -133,8 +133,12 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             show_tab_switcher(app, &window, step);
             Ok(())
         }
-        Action::TabSwitcher(step) => {
-            show_tab_switcher(app, &window, step);
+        Action::TabSwitcher(_) => {
+            // Same panel as the tab-strip grid button. It stays up only while Ctrl is held.
+            // A repeat of the shortcut must not toggle that panel shut.
+            if popup::kind(app, &window).as_deref() != Some("tab-overview") {
+                tabs::send_command(app, &window, "tab-overview");
+            }
             Ok(())
         }
         Action::SelectTab(index) => tabs::select_index(app, Some(index)),
@@ -194,6 +198,10 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
                 Action::ZoomOut => "out",
                 _ => "reset",
             };
+            if popup::kind(app, &window).as_deref() == Some("tab-overview") {
+                popup::emit_to_top(app, &window, "tab-overview-zoom", change);
+                return Ok(());
+            }
             match active {
                 Some(id) => tabs::zoom(app, id, change).map(|_| ()),
                 None => Ok(()),
@@ -319,6 +327,9 @@ fn category_of(action: &str) -> &'static str {
 }
 
 fn with_category(mut binding: ShortcutBinding) -> ShortcutBinding {
+    if let Some(current) = defaults().into_iter().find(|item| item.action == binding.action) {
+        binding.label = current.label;
+    }
     binding.category = category_of(&binding.action).to_string();
     binding
 }
@@ -654,12 +665,8 @@ pub fn defaults() -> Vec<ShortcutBinding> {
         bind("reopen-tab", "Reopen closed tab", "ctrl+shift+z"),
         bind("next-tab", "Next tab", "ctrl+tab"),
         bind("previous-tab", "Previous tab", "ctrl+shift+tab"),
-        bind("tab-switcher", "Tab switcher", "ctrl+backquote"),
-        bind(
-            "tab-switcher-back",
-            "Tab switcher, previous",
-            "ctrl+shift+backquote",
-        ),
+        bind("tab-switcher", "All tabs", "ctrl+backquote"),
+        bind("tab-switcher-back", "All tabs", "ctrl+shift+backquote"),
         bind("last-tab", "Last tab", "ctrl+9"),
         bind("focus-address", "Focus address bar", "ctrl+l"),
         bind("alt-focus", "Focus address bar", "alt+d"),
@@ -761,18 +768,20 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_backquote_opens_the_tab_switcher() {
+    fn ctrl_backquote_opens_all_tabs() {
         let rows = effective(&[]);
         let forward = rows
             .iter()
             .find(|row| row.action == "tab-switcher")
-            .expect("switcher");
+            .expect("all tabs");
+        assert_eq!(forward.label, "All tabs");
         assert_eq!(forward.keys, vec!["ctrl+backquote".to_string()]);
         assert_eq!(forward.category, "Tabs");
         let back = rows
             .iter()
             .find(|row| row.action == "tab-switcher-back")
-            .expect("switcher back");
+            .expect("all tabs back");
+        assert_eq!(back.label, "All tabs");
         assert_eq!(back.keys, vec!["ctrl+shift+backquote".to_string()]);
     }
 

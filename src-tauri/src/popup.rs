@@ -56,6 +56,9 @@ const GAP: f64 = 4.0;
 const SIDE_GAP: f64 = 2.0;
 /// Logical px a popup keeps from the edge of the browser window.
 const SCREEN_INSET: f64 = 4.0;
+/// Smallest tab overview, in CSS px. Matches the handles in the page.
+const OVERVIEW_MIN_WIDTH: f64 = 360.0;
+const OVERVIEW_MIN_HEIGHT: f64 = 240.0;
 
 /// Logical px in the webview that asked for the popup.
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
@@ -1021,6 +1024,160 @@ fn browser_bounds(app: &AppHandle, window: &str) -> Option<Bounds> {
     })
 }
 
+/// Browser window whose open tab overview contains this screen point.
+pub fn overview_window_at(app: &AppHandle, x: i32, y: i32) -> Option<String> {
+    if app.try_state::<Popups>().is_none() {
+        return None;
+    }
+    let open = with(app, |state| {
+        state
+            .stacks
+            .iter()
+            .filter_map(|(window, stack)| {
+                stack
+                    .levels
+                    .iter()
+                    .rev()
+                    .find(|level| level.kind == "tab-overview" && level.shown)
+                    .map(|level| (window.clone(), level.label.clone()))
+            })
+            .collect::<Vec<_>>()
+    });
+    open.into_iter().find_map(|(window, label)| {
+        let popup = app.get_window(&label)?;
+        webview2::client_contains_screen_point(hwnd_of(&popup), x, y).then_some(window)
+    })
+}
+
+/// Grows or shrinks the tab overview from the edges the pointer is dragging.
+/// `width` and `height` are CSS px. `left` and `top` keep the opposite edge in place.
+pub fn resize_overview(
+    app: &AppHandle,
+    label: &str,
+    width: f64,
+    height: f64,
+    left: bool,
+    top: bool,
+) -> Result<(), String> {
+    if !width.is_finite() || !height.is_finite() {
+        return Err("The size is not a number.".into());
+    }
+    let owner = owner_of(label);
+    let shown = with(app, |state| {
+        state.stacks.get(&owner).is_some_and(|stack| {
+            stack
+                .levels
+                .iter()
+                .any(|level| level.label == label && level.kind == "tab-overview" && level.shown)
+        })
+    });
+    if !shown {
+        return Err("The tab overview is not open.".into());
+    }
+    let popup = app
+        .get_window(label)
+        .ok_or("The tab overview is not open.")?;
+    let position = popup.inner_position().map_err(|error| error.to_string())?;
+    let current = popup.inner_size().map_err(|error| error.to_string())?;
+    let scale = app
+        .get_window(&owner)
+        .and_then(|window| window.scale_factor().ok())
+        .unwrap_or(1.0)
+        .max(0.1);
+    let here = Bounds {
+        x: f64::from(position.x),
+        y: f64::from(position.y),
+        width: f64::from(current.width).max(1.0),
+        height: f64::from(current.height).max(1.0),
+    };
+    let (screen, _) = work_area(app, &owner, &here);
+    let area = browser_bounds(app, &owner)
+        .and_then(|browser| screen.intersection(browser))
+        .unwrap_or(screen)
+        .inset(SCREEN_INSET * scale);
+    let next = anchored_resize(
+        here,
+        width * scale,
+        height * scale,
+        left,
+        top,
+        area,
+        OVERVIEW_MIN_WIDTH * scale,
+        OVERVIEW_MIN_HEIGHT * scale,
+    );
+    with(app, |state| {
+        if let Some(level) = state
+            .stacks
+            .get_mut(&owner)
+            .and_then(|stack| stack.levels.iter_mut().find(|level| level.label == label))
+        {
+            level.size = Some((
+                (next.width / scale).round().max(1.0),
+                (next.height / scale).round().max(1.0),
+            ));
+        }
+    });
+    let hwnd = hwnd_of(&popup);
+    let x = next.x.round() as i32;
+    let y = next.y.round() as i32;
+    let width = next.width.round().max(1.0) as u32;
+    let height = next.height.round().max(1.0) as u32;
+    let webview = app.get_webview(label);
+    let _ = app.run_on_main_thread(move || {
+        webview2::place_popup_window(hwnd, x, y, width as i32, height as i32, false);
+        if let Some(webview) = &webview {
+            let _ = webview.set_bounds(Rect {
+                position: Position::Physical(PhysicalPosition::new(0, 0)),
+                size: Size::Physical(PhysicalSize::new(width, height)),
+            });
+        }
+    });
+    Ok(())
+}
+
+/// Moves one or two edges and leaves the others where they are. Everything is physical px.
+fn anchored_resize(
+    current: Bounds,
+    width: f64,
+    height: f64,
+    left: bool,
+    top: bool,
+    area: Bounds,
+    min_width: f64,
+    min_height: f64,
+) -> Bounds {
+    let min_width = min_width.min(area.width).max(1.0);
+    let min_height = min_height.min(area.height).max(1.0);
+    let (x, width) = if left {
+        let right = current.right().clamp(area.x + min_width, area.right());
+        let x = (right - width).clamp(area.x, right - min_width);
+        (x, right - x)
+    } else {
+        let x = current
+            .x
+            .clamp(area.x, (area.right() - min_width).max(area.x));
+        let right = (x + width).clamp(x + min_width, area.right());
+        (x, right - x)
+    };
+    let (y, height) = if top {
+        let bottom = current.bottom().clamp(area.y + min_height, area.bottom());
+        let y = (bottom - height).clamp(area.y, bottom - min_height);
+        (y, bottom - y)
+    } else {
+        let y = current
+            .y
+            .clamp(area.y, (area.bottom() - min_height).max(area.y));
+        let bottom = (y + height).clamp(y + min_height, area.bottom());
+        (y, bottom - y)
+    };
+    Bounds {
+        x,
+        y,
+        width,
+        height,
+    }
+}
+
 fn present(app: &AppHandle, window: &str, plan: Present) {
     let Some(popup) = app.get_window(&plan.label) else {
         return;
@@ -1869,5 +2026,37 @@ mod tests {
         assert_eq!(owner_of("popup-main-3-1"), "main-3");
         assert_eq!(owner_of("extpopup-main-3"), "main-3");
         assert_eq!(owner_of("main-2"), "main-2");
+    }
+
+    #[test]
+    fn resizing_the_overview_keeps_the_edge_that_is_not_dragged() {
+        let current = Bounds {
+            x: 100.0,
+            y: 80.0,
+            width: 400.0,
+            height: 300.0,
+        };
+        let wider = anchored_resize(current, 500.0, 300.0, false, false, SCREEN, 360.0, 240.0);
+        assert_eq!(
+            (wider.x, wider.y, wider.width, wider.height),
+            (100.0, 80.0, 500.0, 300.0)
+        );
+        let from_left = anchored_resize(current, 500.0, 300.0, true, false, SCREEN, 360.0, 240.0);
+        assert_eq!(
+            (from_left.x, from_left.right(), from_left.height),
+            (0.0, 500.0, 300.0)
+        );
+        let from_top = anchored_resize(current, 400.0, 360.0, false, true, SCREEN, 360.0, 240.0);
+        assert_eq!(
+            (from_top.y, from_top.bottom(), from_top.width),
+            (20.0, 380.0, 400.0)
+        );
+        let stopped = anchored_resize(current, 5000.0, 5000.0, false, false, SCREEN, 360.0, 240.0);
+        assert_eq!(
+            (stopped.x, stopped.y, stopped.right(), stopped.bottom()),
+            (100.0, 80.0, 1000.0, 800.0)
+        );
+        let minimum = anchored_resize(current, 10.0, 10.0, false, false, SCREEN, 360.0, 240.0);
+        assert_eq!((minimum.width, minimum.height), (360.0, 240.0));
     }
 }

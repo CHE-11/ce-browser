@@ -2,46 +2,87 @@ import { useEffect, useRef, useState } from "react";
 import { Moon } from "lucide-react";
 import { FavIcon } from "@/components/FavIcon";
 import { PopupFrame } from "@/components/PopupFrame";
-import { activateTab, closePopup, openPopup, tabThumbnail } from "@/lib/browser-client";
+import { activateTab, closePopup, ctrlHeld, onTabOverviewZoom, openPopup, tabThumbnail } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { hostOf } from "@/lib/format";
 import { groupColorClasses } from "@/lib/tab-rows";
 import { useTabs } from "@/lib/use-browser";
-import { zoomWheelStep } from "@/lib/zoom";
+import { PAGE_ZOOM_LEVELS, stepPageZoom } from "@/lib/zoom";
 import type { TabGroup, TabInfo } from "@type/browser";
 
 const THUMB_BATCH = 4;
-/** `p-3` on the frame, in the same units as `PopupFrame`'s width. */
-const FRAME_PADDING = 24;
 const WINDOW_MARGIN = 32;
-const MIN_SCALE = 0.5;
-const MAX_SCALE = 1;
-const SCALE_STEP = 0.08;
-const DEFAULT_SCALE = 1;
+const CARD_REM = 14;
+const GAP_REM = 0.5;
+const PAD_REM = 0.75;
+const ZOOM_KEY = "ce-browser.tab-overview-zoom";
+const RELEASE_POLL_MS = 60;
 
 type TabOverviewProps = {
   params: URLSearchParams;
 };
 
-/** Kept for the session, so the next open uses the size last chosen with Ctrl+scroll. */
-let overviewScale = DEFAULT_SCALE;
+function readOverviewZoom() {
+  try {
+    const value = Number(localStorage.getItem(ZOOM_KEY));
+    if (PAGE_ZOOM_LEVELS.includes(value)) {
+      return value;
+    }
+  } catch {
+    // Missing or unreadable.
+  }
+  return 100;
+}
 
-/** CSS px from the browser window, expressed the way `PopupFrame` sizes its content. */
+function writeOverviewZoom(zoom: number) {
+  try {
+    localStorage.setItem(ZOOM_KEY, String(zoom));
+  } catch {
+    // The level still applies until the overview closes.
+  }
+}
+
+function rootFont() {
+  return parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+}
+
+/** PopupFrame sizes in px at a 16px root. The popup's own font zoom turns that back into CSS px. */
 function layoutPx(value: number) {
-  const font = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-  return Math.round((value * 16) / font);
+  return Math.round((value * 16) / rootFont());
 }
 
-function frameLimit(raw: string | null, fallback: number) {
+function roomAxis(raw: string | null, fallback: number) {
   const value = Number(raw);
-  return Number.isFinite(value) && value >= 240 ? value : fallback;
+  return Number.isFinite(value) && value >= 240 ? Math.round(value) : fallback;
 }
 
-/** Centers the all-tabs grid and gives it nearly the whole window to grow into. */
-export function openTabOverview() {
-  const width = layoutPx(Math.max(640, window.innerWidth - WINDOW_MARGIN * 2));
-  const height = layoutPx(Math.max(420, window.innerHeight - WINDOW_MARGIN * 2));
-  return openPopup("tab-overview", { x: 0, y: 0 }, { placement: "center", params: `width=${width}&height=${height}` });
+/** How many cards fit across, and the window width that wraps those columns. */
+function gridWidth(count: number, zoom: number, maxWidth: number) {
+  const font = rootFont();
+  const factor = zoom / 100;
+  const card = CARD_REM * font * factor;
+  const gap = GAP_REM * font * factor;
+  const pad = PAD_REM * font * 2;
+  const innerMax = Math.max(card, maxWidth - pad);
+  const cols = Math.min(Math.max(count, 1), Math.max(1, Math.floor((innerMax + gap) / (card + gap))));
+  const innerRem = cols * CARD_REM + Math.max(0, cols - 1) * GAP_REM;
+  const width = Math.min(maxWidth, Math.ceil(innerRem * font * factor + pad));
+  return { cols, innerRem, width };
+}
+
+function applyZoomChange(current: number, change: "in" | "out" | "reset") {
+  const next = change === "reset" ? 100 : stepPageZoom(current, change === "in" ? 1 : -1);
+  writeOverviewZoom(next);
+  return next;
+}
+
+/** Opens the all-tabs grid in the middle of the window. The grid sizes the popup, up to this room.
+ * `hold` is the Ctrl+` shortcut: the grid closes when Ctrl is released. A click stays until Escape. */
+export function openTabOverview(hold = false) {
+  const width = Math.round(Math.max(320, window.innerWidth - WINDOW_MARGIN * 2));
+  const height = Math.round(Math.max(240, window.innerHeight - WINDOW_MARGIN * 2));
+  const held = hold ? "&hold=1" : "";
+  return openPopup("tab-overview", { x: 0, y: 0 }, { placement: "center", params: `maxWidth=${width}&maxHeight=${height}${held}` });
 }
 
 /** Every tab in this workspace, as a thumbnail grid. Click or Enter switches; Escape closes. */
@@ -49,8 +90,7 @@ export function TabOverview({ params }: TabOverviewProps) {
   const snapshot = useTabs();
   const [selectedId, setSelectedId] = useState<number | null>(snapshot.activeId);
   const [thumbs, setThumbs] = useState<Record<number, string>>({});
-  const [scale, setScale] = useState(overviewScale);
-  const zoomBucket = useRef(0);
+  const [zoom, setZoom] = useState(readOverviewZoom);
   const tabsRef = useRef<TabInfo[]>(snapshot.tabs);
   const selectedRef = useRef(selectedId);
   const activeRef = useRef(snapshot.activeId);
@@ -59,14 +99,10 @@ export function TabOverview({ params }: TabOverviewProps) {
   selectedRef.current = selectedId;
   activeRef.current = snapshot.activeId;
 
-  const room = {
-    width: frameLimit(params.get("width"), 880),
-    height: frameLimit(params.get("height"), 560),
-  };
-  const size = {
-    width: Math.round(room.width * scale),
-    height: Math.round(room.height * scale),
-  };
+  const maxWidth = roomAxis(params.get("maxWidth"), 960);
+  const maxHeight = roomAxis(params.get("maxHeight"), 640);
+  const hold = params.get("hold") === "1";
+  const fitted = gridWidth(snapshot.tabs.length, zoom, maxWidth);
 
   const tabKey = snapshot.tabs.map((tab) => tab.id).join(",");
 
@@ -87,27 +123,46 @@ export function TabOverview({ params }: TabOverviewProps) {
   }, [selectedId]);
 
   useEffect(() => {
-    const onWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey) {
-        zoomBucket.current = 0;
-        return;
-      }
-      event.preventDefault();
-      const stepped = zoomWheelStep(zoomBucket.current, event.deltaY, event.deltaMode);
-      zoomBucket.current = stepped.bucket;
-      if (!stepped.change) {
-        return;
-      }
-      setScale((current) => {
-        const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, current + (stepped.change === "in" ? SCALE_STEP : -SCALE_STEP)));
-        const rounded = Math.round(next * 100) / 100;
-        overviewScale = rounded;
-        return rounded;
-      });
+    const unlisten = onTabOverviewZoom((change) => {
+      setZoom((current) => applyZoomChange(current, change));
+    });
+    return () => {
+      void unlisten.then((stop) => stop());
     };
-    window.addEventListener("wheel", onWheel, { passive: false });
-    return () => window.removeEventListener("wheel", onWheel);
   }, []);
+
+  useEffect(() => {
+    if (!hold) {
+      return;
+    }
+    let cancelled = false;
+    const close = () => {
+      if (cancelled || done.current) {
+        return;
+      }
+      done.current = true;
+      void closePopup();
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === "Control") {
+        close();
+      }
+    };
+    window.addEventListener("keyup", onKeyUp);
+    // The keyup can land in the page that had focus before this popup, so also ask Windows.
+    const timer = window.setInterval(() => {
+      void ctrlHeld().then((held) => {
+        if (!held) {
+          close();
+        }
+      });
+    }, RELEASE_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("keyup", onKeyUp);
+      window.clearInterval(timer);
+    };
+  }, [hold]);
 
   useEffect(() => {
     if (!snapshot.loaded) {
@@ -198,14 +253,38 @@ export function TabOverview({ params }: TabOverviewProps) {
   const groups = new Map<number, TabGroup>(snapshot.groups.map((group) => [group.id, group]));
 
   return (
-    <PopupFrame id="tab-overview" width={size.width} maxHeight={size.height} ready={snapshot.loaded} className="flex flex-col p-3">
-      <div id="tab-overview-body" className="flex flex-1 flex-col" style={{ minHeight: `${(size.height - FRAME_PADDING) / 16}rem` }}>
+    <PopupFrame
+      id="tab-overview"
+      width={layoutPx(fitted.width)}
+      maxHeight={layoutPx(maxHeight)}
+      ready={snapshot.loaded}
+      className="relative flex items-center justify-center p-3"
+    >
+      {zoom === 100 ? null : (
+        <button
+          id="tab-overview-zoom"
+          type="button"
+          title="Reset zoom"
+          aria-label={`Tab overview zoom ${zoom} percent. Reset`}
+          className="absolute right-2 top-2 z-10 rounded bg-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-600 hover:text-zinc-100"
+          onClick={() => setZoom((current) => applyZoomChange(current, "reset"))}
+        >
+          {zoom}%
+        </button>
+      )}
+      <div id="tab-overview-body" className="flex w-full items-center justify-center">
         {snapshot.tabs.length === 0 ? (
           <div id="tab-overview-empty" className="px-3 py-6 text-center text-sm text-zinc-500">
             No tabs.
           </div>
         ) : (
-          <div id="tab-overview-grid" role="listbox" aria-label="All tabs. Ctrl+scroll changes the size." className="grid grid-cols-4 content-start gap-2">
+          <div
+            id="tab-overview-grid"
+            role="listbox"
+            aria-label="All tabs. Ctrl+scroll zooms."
+            className="flex flex-wrap items-center justify-center gap-2"
+            style={{ zoom: zoom / 100, width: `${fitted.innerRem}rem` }}
+          >
             {snapshot.tabs.map((tab) => {
               const group = tab.groupId === null ? null : (groups.get(tab.groupId) ?? null);
               const selected = tab.id === selectedId;
@@ -219,6 +298,7 @@ export function TabOverview({ params }: TabOverviewProps) {
                     "flex cursor-default flex-col overflow-hidden rounded-lg bg-zinc-950 ring-2 transition-colors",
                     selected ? "ring-sky-500" : "ring-transparent hover:ring-zinc-700",
                   )}
+                  style={{ width: `${CARD_REM}rem` }}
                   onMouseEnter={() => setSelectedId(tab.id)}
                   onClick={() => commit(tab.id)}
                 >

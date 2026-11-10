@@ -27,6 +27,7 @@ mod library;
 mod media;
 mod microphone;
 mod model_prices;
+mod notify;
 mod ocr;
 mod page_dialogs;
 mod page_errors;
@@ -595,6 +596,18 @@ async fn popup_measured(
     ready: bool,
 ) {
     popup::measured(&app, webview.label(), token, width, height, ready);
+}
+
+#[tauri::command]
+async fn resize_popup(
+    app: AppHandle,
+    webview: Webview,
+    width: f64,
+    height: f64,
+    left: bool,
+    top: bool,
+) -> Result<(), String> {
+    popup::resize_overview(&app, webview.label(), width, height, left, top)
 }
 
 #[tauri::command]
@@ -2991,6 +3004,7 @@ pub fn run() {
             open_popup,
             close_popup,
             popup_measured,
+            resize_popup,
             popup_current,
             capture_page_png,
             copy_page_png,

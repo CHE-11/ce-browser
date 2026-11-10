@@ -427,7 +427,8 @@ export type BrowserCommand =
   | "tab-search"
   | "shortcut-sheet"
   | "tab-switcher"
-  | "tab-switcher-back";
+  | "tab-switcher-back"
+  | "tab-overview";
 
 export type PopupKind =
   | "downloads"

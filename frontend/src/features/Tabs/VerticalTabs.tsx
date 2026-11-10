@@ -118,7 +118,7 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
       <div id="vertical-tabs-top" className={cn("flex shrink-0 items-center gap-1 px-1.5 pb-1 pt-2", collapsed && "flex-col")}>
         <IconButton
           id="vertical-tabs-overview"
-          label="All tabs"
+          label="All tabs (Ctrl + `)"
           aria-haspopup="dialog"
           className="size-7 rounded-md"
           onClick={() => void openTabOverview()}

@@ -1421,6 +1421,7 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
         .background_color(color)
         .focused(false)
         .initialization_script_for_all_frames(webview2::WEBVIEW_CLOAK_SCRIPT)
+        .initialization_script_for_all_frames(webview2::CLONE_MESSAGE_SCRIPT)
         .initialization_script(AUTOPLAY_GUARD_SCRIPT)
         .initialization_script(page_background_script(app))
         .initialization_script(PEEK_CLICK_SCRIPT)
@@ -1564,7 +1565,9 @@ fn page_zoom_for(app: &AppHandle, url: &str) -> f64 {
 /// or a frame that did not receive that click. `suspend()` stays in progress after it is called,
 /// and `resume()` while the context is still running does nothing, so the context was left
 /// suspended and the answered call was silent. Resume waits until that suspend finishes.
-/// Ringback and the microphone resume that context. Ordinary video stays paused until a click.
+/// Ringback and the microphone resume that context. A ringtone is an audio file started by the
+/// incoming invite, with no click, so audio elements are left free to play. Ordinary video stays
+/// paused until a click.
 const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
   if (window.__ceAutoplayGuard || !window.HTMLMediaElement || !HTMLMediaElement.prototype) return;
   window.__ceAutoplayGuard = true;
@@ -1700,7 +1703,7 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
   function stop(media) {
     if (allowed || !media || media.nodeType !== 1) return;
     var tag = media.tagName;
-    if (tag !== "VIDEO" && tag !== "AUDIO") return;
+    if (tag !== "VIDEO") return;
     if (streamOnly(media)) return;
     try {
       if (media.autoplay || (media.hasAttribute && media.hasAttribute("autoplay"))) media.autoplay = false;
@@ -1712,8 +1715,9 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
     if (!root || root.__ceAutoplayWatch) return;
     try { root.__ceAutoplayWatch = true; } catch (error) { return; }
     function onPlay(event) {
-      if (streamOnly(event.target)) resumeParked();
-      else stop(event.target);
+      var media = event.target;
+      if (streamOnly(media) || (media && media.tagName === "AUDIO")) resumeParked();
+      else stop(media);
     }
     root.addEventListener("play", onPlay, true);
     root.addEventListener("playing", onPlay, true);
@@ -1748,7 +1752,7 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
   }
 
   HTMLMediaElement.prototype.play = function () {
-    if (streamOnly(this)) {
+    if (streamOnly(this) || this.tagName === "AUDIO") {
       resumeParked();
       return nativePlay.apply(this, arguments);
     }
@@ -1781,8 +1785,8 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
       get: function () { return autoplay.get.call(this); },
       set: function (value) {
         if (value) this.__ceWantAutoplay = true;
-        if (value && streamOnly(this)) resumeParked();
-        autoplay.set.call(this, !!value && (allowed || streamOnly(this)));
+        if (value && (streamOnly(this) || this.tagName === "AUDIO")) resumeParked();
+        autoplay.set.call(this, !!value && (allowed || streamOnly(this) || this.tagName === "AUDIO"));
       }
     });
   }
@@ -1835,6 +1839,7 @@ const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
     discover(document, 0);
     tick();
   };
+  window.__ceAllowPlayback = release;
   window.__cePlayMedia = function (media) {
     release();
     return nativePlay.call(media);
@@ -2078,6 +2083,7 @@ fn script_window(
     let position = features.position();
     let host = app.clone();
     let mut builder = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(blank))
+        .initialization_script(webview2::CLONE_MESSAGE_SCRIPT)
         .title(if extension { "Extension" } else { "ce-browser" })
         .inner_size(width, height)
         .min_inner_size(
@@ -3773,6 +3779,7 @@ pub fn close_many(
 
 /// Closes one tab without adding it to the recently closed list. Returns what to remember.
 fn close_tab_inner(app: &AppHandle, id: u32) -> Result<Option<ClosedTab>, String> {
+    crate::notify::dismiss_tab(app, id);
     crate::automation::tab_closed(app, id);
     let plan = with_state(app, |state| {
         let window = state.tab_window(id)?;

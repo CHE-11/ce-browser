@@ -9,6 +9,7 @@ import type { PopupKind } from "@type/browser";
 import { BrowserBody } from "./BrowserBody";
 import { BrowserHeader } from "./BrowserHeader";
 import { ExtensionsToolbar } from "../Extensions/ExtensionsToolbar";
+import { openTabOverview } from "../Tabs/TabOverview";
 
 
 
@@ -103,6 +104,9 @@ export function BrowserPage() {
         case "tab-switcher":
         case "tab-switcher-back":
           centered("tab-switcher", Math.max(52, window.innerHeight / 2 - 220), `step=${command === "tab-switcher" ? 1 : -1}`);
+          break;
+        case "tab-overview":
+          void openTabOverview(true);
           break;
       }
     });

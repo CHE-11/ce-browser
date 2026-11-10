@@ -593,6 +593,8 @@ pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview, window: &str) {
 /// and chooses the target from the cursor.
 const ZOOM_WHEEL_SUBCLASS: usize = 0x00CE_5A11;
 const ZOOM_SINK_SUBCLASS: usize = 0x00CE_5A12;
+/// Wheel bucket for the tab overview. It is its own window, not a page webview.
+const OVERVIEW_ZOOM_BUCKET: isize = 0x00CE_0A11;
 const WM_ZOOM_SUBCLASS: u32 = WM_APP + 0x5A;
 const WM_ZOOM_WHEEL: u32 = WM_APP + 0x5B;
 const WHEEL_NOTCH: i32 = 120;
@@ -1032,6 +1034,20 @@ fn classify(point: POINT) -> Option<ZoomHit> {
 
 /// `true` when this notch belongs to a page or the browser header and WebView2 must not see it.
 fn offer_wheel(point: POINT, delta: i32, ctrl: bool) -> bool {
+    // The overview sits on top of the page. A notch here zooms the grid, not the page under it.
+    if ctrl
+        && let Some(app) = browser_app()
+        && let Some(window) = popup::overview_window_at(&app, point.x, point.y)
+    {
+        let steps = push_wheel(OVERVIEW_ZOOM_BUCKET, delta);
+        if steps != 0 {
+            let change = if steps > 0 { "in" } else { "out" };
+            for _ in 0..steps.unsigned_abs() {
+                popup::emit_to_top(&app, &window, "tab-overview-zoom", change);
+            }
+        }
+        return true;
+    }
     let Some(hit) = classify(point) else {
         return false;
     };
@@ -2057,11 +2073,19 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                             .get("body")
                             .and_then(|value| value.as_str())
                             .unwrap_or("");
+                        let silent = message
+                            .get("silent")
+                            .and_then(|value| value.as_bool())
+                            .unwrap_or(false);
+                        let tag = message
+                            .get("tag")
+                            .and_then(|value| value.as_str())
+                            .unwrap_or("");
                         let page = tabs::tab_page_url(&message_app, id).unwrap_or_default();
                         if crate::privacy::decision(&message_app, &page, "notifications")
                             == Some(true)
                         {
-                            crate::system::toast(title, body, "");
+                            crate::notify::from_script(&message_app, id, title, body, silent, tag);
                         }
                     }
                     Some("ce-theme") => {
@@ -2998,6 +3022,7 @@ fn attach_adblock(
             &mut token,
         )?;
     }
+    crate::notify::attach(app, &core, id);
     Ok(())
 }
 
@@ -3460,6 +3485,56 @@ fn webview_token_len(lower: &str) -> usize {
     }
     len
 }
+
+/// A call client sends Angular `HttpHeaders` through a `MessagePort`. The headers keep a
+/// `lazyInit` function until they are read, and structured clone rejects the whole message.
+/// The call channel and its logger then fail. Reading the headers and dropping that function
+/// lets the same message through. A message that already clones is left untouched.
+pub const CLONE_MESSAGE_SCRIPT: &str = r#"(function () {
+  if (window.__ceCloneMessage) return;
+  window.__ceCloneMessage = true;
+
+  function materialize(value, seen) {
+    if (!value || typeof value !== "object") return;
+    if (seen.has(value)) return;
+    seen.add(value);
+    if (typeof value.nodeType === "number" || value === window) return;
+    if (typeof value.lazyInit === "function") {
+      try { value.lazyInit.call(value); } catch (error) {}
+      try { value.lazyInit = null; } catch (error) {}
+    }
+    if (typeof Map !== "undefined" && value instanceof Map) {
+      try { value.forEach(function (item) { materialize(item, seen); }); } catch (error) {}
+    }
+    var keys;
+    try { keys = Object.keys(value); } catch (error) { return; }
+    for (var i = 0; i < keys.length; i++) {
+      try { materialize(value[keys[i]], seen); } catch (error) {}
+    }
+  }
+
+  function patch(prototype, name) {
+    if (!prototype) return;
+    var native = prototype[name];
+    if (typeof native !== "function" || native.__ceClone) return;
+    function wrapped(message) {
+      try {
+        return native.apply(this, arguments);
+      } catch (error) {
+        if (!error || error.name !== "DataCloneError") throw error;
+        materialize(message, new WeakSet());
+        return native.apply(this, arguments);
+      }
+    }
+    wrapped.__ceClone = true;
+    try { prototype[name] = wrapped; } catch (error) {}
+  }
+
+  if (window.MessagePort) patch(MessagePort.prototype, "postMessage");
+  if (window.BroadcastChannel) patch(BroadcastChannel.prototype, "postMessage");
+  if (window.Worker) patch(Worker.prototype, "postMessage");
+  patch(Window.prototype, "postMessage");
+})();"#;
 
 /// Runs before every frame's own scripts. Prime Video treats `chrome.webview` as its native
 /// shell and then crashes on the missing host object (`Element not found` / `0x80070490`).
