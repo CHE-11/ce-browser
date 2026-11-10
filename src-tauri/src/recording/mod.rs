@@ -191,9 +191,16 @@ pub fn list_targets(skip_hwnd: isize) -> Vec<RecordingTarget> {
     targets::list(skip_hwnd)
 }
 
+pub fn running() -> bool {
+    SESSION.lock().expect("recording").is_some()
+}
+
 pub fn start(app: &AppHandle, request: StartRequest) -> Result<ScreenRecordingStatus, String> {
-    if SESSION.lock().expect("recording").is_some() {
+    if running() {
         return Err("A recording is already running.".into());
+    }
+    if crate::present::is_on() {
+        crate::present::close(app)?;
     }
     let target = targets::resolve(app, &request)?;
     let id = library::new_id();

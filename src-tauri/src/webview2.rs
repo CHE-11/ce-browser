@@ -2286,6 +2286,62 @@ fn certificate_detail(certificate: &ICoreWebView2Certificate) -> String {
     }
 }
 
+/// The download cancelled this navigation. Leave the page that is still showing, or go back
+/// when the document was replaced by the file.
+pub(crate) fn settle_download_abort(app: &AppHandle, id: u32, core: Option<ICoreWebView2>) {
+    if !downloads::claim_download_abort(id) {
+        return;
+    }
+    let reading = match core.as_ref() {
+        Some(core) => Some(source_and_back(core)),
+        None => read_page_source(app, id),
+    };
+    let Some((source, back)) = reading else {
+        tabs::release_after_download(app, id, "");
+        return;
+    };
+    let download_url = downloads::recent_download_url(id);
+    let previous = crate::page_errors::previous_page(id);
+    if back && downloads::should_leave_download_navigation(&source, &download_url, &previous) {
+        tabs::release_after_download(app, id, "");
+        if let Some(core) = core {
+            let _ = unsafe { core.GoBack() };
+        } else {
+            tabs::go_back(app, id);
+        }
+        return;
+    }
+    tabs::release_after_download(app, id, &source);
+}
+
+fn source_and_back(core: &ICoreWebView2) -> (String, bool) {
+    unsafe {
+        (
+            read_pwstr(|value| core.Source(value)),
+            read_bool(|value| core.CanGoBack(value)),
+        )
+    }
+}
+
+/// Source and back state, read on the main thread. `None` when the page view is already gone.
+fn read_page_source(app: &AppHandle, id: u32) -> Option<(String, bool)> {
+    let webview = tabs::page_view(app, id)?;
+    let (tx, rx) = mpsc::channel();
+    if webview
+        .with_webview(move |platform| {
+            let Ok(core) = core(&platform) else {
+                let _ = tx.send(None);
+                return;
+            };
+            let _ = tx.send(Some(source_and_back(&core)));
+        })
+        .is_err()
+    {
+        return None;
+    }
+    rx.recv().ok().flatten()
+}
+
 /// Load progress, finished and failed navigations, certificate errors, and crashed or hung pages.
 fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows::core::Result<()> {
     let mut token = 0i64;
@@ -2338,7 +2394,7 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
 
         let done_app = app.clone();
         core.add_NavigationCompleted(
-            &NavigationCompletedEventHandler::create(Box::new(move |_, args| {
+            &NavigationCompletedEventHandler::create(Box::new(move |sender, args| {
                 let Some(args) = args else {
                     return Ok(());
                 };
@@ -2353,6 +2409,34 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
                     tabs::set_progress(&done_app, id, 100);
                     return Ok(());
                 };
+                // A download cancels the navigation that started it and reports the same
+                // status as a dropped connection. Keep the page the file was downloaded from.
+                if code == "CONNECTION_ABORTED" {
+                    if downloads::explains_connection_abort(id) {
+                        settle_download_abort(&done_app, id, sender);
+                        return Ok(());
+                    }
+                    let app = done_app.clone();
+                    let started = crate::page_errors::navigation_started_at(id);
+                    std::thread::spawn(move || {
+                        // DownloadStarting can land just after this failure.
+                        std::thread::sleep(Duration::from_millis(400));
+                        let main = app.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            if crate::page_errors::navigation_started_at(id) != started {
+                                return;
+                            }
+                            if downloads::explains_connection_abort(id) {
+                                settle_download_abort(&main, id, None);
+                                return;
+                            }
+                            if tabs::failure_of(&main, id).is_none() {
+                                tabs::set_failure(&main, id, kind, code, String::new());
+                            }
+                        });
+                    });
+                    return Ok(());
+                }
                 let app = done_app.clone();
                 tauri::async_runtime::spawn(async move {
                     if tabs::failure_of(&app, id).is_none() {
@@ -3932,6 +4016,11 @@ fn attach_accelerators(
                 if key == 0x1B && !key_down(VK_CONTROL) && !key_down(VK_MENU) {
                     // Stop before the page sees Escape, so a reply already chosen cannot
                     // click or type over the key the user just pressed.
+                    if crate::present::escape_is_useful() {
+                        args.SetHandled(true)?;
+                        crate::present::on_escape(&app);
+                        return Ok(());
+                    }
                     let stopped_agent = crate::automation::agent::stop_focused(&app);
                     if matches!(target, shortcuts::Target::Ui | shortcuts::Target::Page) {
                         let windows = popup::passive_open(&app);
@@ -3950,6 +4039,11 @@ fn attach_accelerators(
                             return Ok(());
                         }
                     }
+                }
+                if (key == 0x2E || key == 0x08) && !key_down(VK_CONTROL) && !key_down(VK_MENU) && crate::present::delete_is_useful() {
+                    args.SetHandled(true)?;
+                    crate::present::on_delete(&app);
+                    return Ok(());
                 }
                 let action = shortcuts::action_for(
                     key,

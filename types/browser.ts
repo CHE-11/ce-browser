@@ -1433,7 +1433,7 @@ export type ScreenRecordingStatus = {
 };
 
 /** What Present is doing. Marks stay in the overlay; a lock is the rectangle it holds. */
-export type PresentTool = "spotlight" | "zoom" | "highlight" | "pen" | "arrow" | "text" | "eraser";
+export type PresentTool = "none" | "lasso" | "spotlight" | "cursor" | "zoom" | "highlight" | "pen" | "arrow" | "text" | "eraser";
 
 /** Drawn on top of the window. `off` leaves the system pointer alone. */
 export type PresentCursor = "dot" | "ring" | "arrow" | "crosshair" | "off";
@@ -1451,10 +1451,22 @@ export type PresentState = {
   tool: PresentTool | string;
   cursor: PresentCursor | string;
   color: string;
+  /** Stroke scale. 1 is the medium pen. */
+  width: number;
+  /** Spotlight shade, from 0 (clear) to 1 (solid). */
+  dim: number;
+  /** Highlight corner radius in CSS pixels. */
+  radius: number;
+  /** Cursor-tool circle diameter in CSS pixels. */
+  spread: number;
+  /** Large circle around the pointer while the cursor tool is selected. */
+  circle: boolean;
   /** The next drag locks the spotlight or zoom. */
   placing: boolean;
   /** Bumps when the palette asks the stage to drop every mark. */
   clear: number;
+  /** Bumps when the palette asks the stage to drop the last mark. */
+  undo: number;
   spotlight: PresentRect | null;
   zoom: PresentRect | null;
 };
@@ -1464,6 +1476,8 @@ export type PresentPointer = {
   x: number;
   y: number;
   inside: boolean;
+  /** Zoom glass, as fractions of the window. Null unless the zoom tool is showing it. */
+  lens: PresentRect | null;
 };
 
 export type ScreenRecording = {

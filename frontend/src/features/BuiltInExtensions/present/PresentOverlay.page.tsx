@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { onPresentChanged, onPresentPointer, presentState } from "@/lib/browser-client";
-import type { PresentPointer, PresentState } from "@type/browser";
+import { onPresentChanged, presentState } from "@/lib/browser-client";
+import type { PresentState } from "@type/browser";
 import { PresentStage } from "./PresentStage";
 
 const IDLE: PresentState = {
@@ -8,17 +8,20 @@ const IDLE: PresentState = {
   tool: "spotlight",
   cursor: "dot",
   color: "#f59e0b",
+  width: 1,
+  dim: 0.62,
+  radius: 12,
+  spread: 240,
+  circle: false,
   placing: false,
   clear: 0,
+  undo: 0,
   spotlight: null,
   zoom: null,
 };
 
-const AWAY: PresentPointer = { x: 0, y: 0, inside: false };
-
 export function PresentOverlayPage() {
   const [state, setState] = useState<PresentState>(IDLE);
-  const [pointer, setPointer] = useState<PresentPointer>(AWAY);
 
   useEffect(() => {
     document.title = "Present";
@@ -32,14 +35,10 @@ export function PresentOverlayPage() {
     const stateListen = onPresentChanged((next) => {
       if (!stop) setState(next);
     });
-    const pointerListen = onPresentPointer((next) => {
-      if (!stop) setPointer(next);
-    });
     return () => {
       stop = true;
       delete document.documentElement.dataset.presentClear;
       void stateListen.then((unlisten) => unlisten());
-      void pointerListen.then((unlisten) => unlisten());
     };
   }, []);
 
@@ -48,11 +47,15 @@ export function PresentOverlayPage() {
       tool={state.tool}
       cursor={state.cursor}
       color={state.color}
+      width={state.width}
+      dim={state.dim}
+      radius={state.radius}
+      spread={state.spread}
+      circle={state.circle}
       placing={state.placing}
       clearToken={state.clear}
+      undoToken={state.undo}
       spotlight={state.spotlight}
-      zoom={state.zoom}
-      pointer={pointer}
     />
   );
 }

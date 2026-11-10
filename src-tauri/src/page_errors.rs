@@ -15,8 +15,16 @@ const UNRESPONSIVE_FOR: Duration = Duration::from_secs(30);
 static ALLOWED_CERTIFICATES: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 static RESTARTING: AtomicBool = AtomicBool::new(false);
 static EXITING: AtomicBool = AtomicBool::new(false);
+/// Address each tab's current main-frame navigation is loading, when it started, and the
+/// page it left. A download abort uses the previous page to decide whether to go back.
+struct NavigationTarget {
+    url: String,
+    previous: String,
+    at: Instant,
+}
+
 /// Address each tab's current main-frame navigation is loading.
-static TARGETS: Mutex<Option<HashMap<u32, String>>> = Mutex::new(None);
+static TARGETS: Mutex<Option<HashMap<u32, NavigationTarget>>> = Mutex::new(None);
 /// Renderer processes of tabs WebView2 reported as not answering, and when it last said so.
 static UNRESPONSIVE: Mutex<Option<HashMap<u32, (Vec<u32>, Instant)>>> = Mutex::new(None);
 
@@ -25,7 +33,46 @@ pub fn note_navigation(id: u32, url: &str) {
         .lock()
         .expect("navigation targets")
         .get_or_insert_with(HashMap::new)
-        .insert(id, url.to_string());
+        .insert(
+            id,
+            NavigationTarget {
+                url: url.to_string(),
+                previous: String::new(),
+                at: Instant::now(),
+            },
+        );
+}
+
+/// The page this navigation is replacing. Called once the tab still has that address.
+pub fn note_previous_page(id: u32, previous: &str) {
+    if let Some(target) = TARGETS
+        .lock()
+        .expect("navigation targets")
+        .get_or_insert_with(HashMap::new)
+        .get_mut(&id)
+    {
+        target.previous = previous.to_string();
+    }
+}
+
+/// When the current main-frame navigation started. `None` after the tab is gone.
+pub fn navigation_started_at(id: u32) -> Option<Instant> {
+    TARGETS
+        .lock()
+        .expect("navigation targets")
+        .as_ref()
+        .and_then(|targets| targets.get(&id).map(|target| target.at))
+}
+
+/// The page shown before the current navigation, when one was recorded.
+pub fn previous_page(id: u32) -> String {
+    TARGETS
+        .lock()
+        .expect("navigation targets")
+        .as_ref()
+        .and_then(|targets| targets.get(&id))
+        .map(|target| target.previous.clone())
+        .unwrap_or_default()
 }
 
 pub fn forget_tab(id: u32) {
@@ -95,7 +142,7 @@ pub fn is_page_request(id: u32, url: &str) -> bool {
         .lock()
         .expect("navigation targets")
         .as_ref()
-        .and_then(|targets| targets.get(&id).cloned());
+        .and_then(|targets| targets.get(&id).map(|target| target.url.clone()));
     match (target.as_deref().and_then(host_of), host_of(url)) {
         (Some(page), Some(request)) => page == request,
         _ => true,
@@ -131,7 +178,8 @@ pub fn certificate_allowed(url: &str) -> bool {
 }
 
 /// The failure kind and WebView2 name for a navigation that did not succeed. `None` means the
-/// browser's own handling is right: a cancelled load, a sign-in prompt, or a download.
+/// browser's own handling is right: a cancelled load or a sign-in prompt. A download also ends
+/// as `CONNECTION_ABORTED`; the navigation handler drops that one when a download just started.
 pub fn web_error(status: COREWEBVIEW2_WEB_ERROR_STATUS) -> Option<(&'static str, &'static str)> {
     let found = match status {
         COREWEBVIEW2_WEB_ERROR_STATUS_HOST_NAME_NOT_RESOLVED => ("dns", "HOST_NAME_NOT_RESOLVED"),

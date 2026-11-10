@@ -24,6 +24,10 @@ use crate::{files, paths, popup, settings, system, tabs};
 const FILE: &str = "downloads.json";
 const MAX_HISTORY: usize = 500;
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
+/// How long after a download starts its aborted navigation is still that download.
+const DOWNLOAD_ABORT_WINDOW: Duration = Duration::from_secs(3);
+/// DownloadStarting can be recorded a moment before the navigation start we compare it with.
+const DOWNLOAD_ABORT_GRACE: Duration = Duration::from_millis(500);
 
 pub const IN_PROGRESS: &str = "inProgress";
 pub const PAUSED: &str = "paused";
@@ -74,6 +78,88 @@ pub struct Downloads(Mutex<DownloadsState>);
 thread_local! {
     /// Live WebView2 operations by download id. Only the main thread touches these.
     static OPERATIONS: RefCell<HashMap<u32, ICoreWebView2DownloadOperation>> = RefCell::new(HashMap::new());
+}
+
+struct PageDownload {
+    url: String,
+    at: Instant,
+}
+
+/// Download that just took over a tab's navigation. The connection-aborted event that follows
+/// belongs to the file, not to the page.
+static PAGE_DOWNLOADS: LazyLock<Mutex<HashMap<u32, PageDownload>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Navigation start already restored, so a second abort event does not go back twice.
+static SETTLED_ABORTS: LazyLock<Mutex<HashMap<u32, Instant>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Remember that `tab` just started a download of `url`. An empty url still counts.
+pub fn note_page_download(tab: u32, url: &str) {
+    let mut downloads = PAGE_DOWNLOADS.lock().expect("page downloads");
+    if let Some(existing) = downloads.get_mut(&tab) {
+        existing.at = Instant::now();
+        if !url.is_empty() {
+            existing.url = url.to_string();
+        }
+        return;
+    }
+    downloads.insert(
+        tab,
+        PageDownload {
+            url: url.to_string(),
+            at: Instant::now(),
+        },
+    );
+}
+
+pub fn forget_page_download(tab: u32) {
+    PAGE_DOWNLOADS
+        .lock()
+        .expect("page downloads")
+        .remove(&tab);
+    SETTLED_ABORTS.lock().expect("settled aborts").remove(&tab);
+}
+
+/// True the first time this download's aborted navigation is handled.
+pub fn claim_download_abort(tab: u32) -> bool {
+    let noted = PAGE_DOWNLOADS
+        .lock()
+        .expect("page downloads")
+        .get(&tab)
+        .map(|download| download.at);
+    let Some(noted) = noted else {
+        return false;
+    };
+    let mut settled = SETTLED_ABORTS.lock().expect("settled aborts");
+    if settled.get(&tab) == Some(&noted) {
+        return false;
+    }
+    settled.insert(tab, noted);
+    true
+}
+
+/// The connection abort is the download navigation WebView2 cancelled, not a dropped page.
+pub fn explains_connection_abort(tab: u32) -> bool {
+    let downloads = PAGE_DOWNLOADS.lock().expect("page downloads");
+    let Some(download) = downloads.get(&tab) else {
+        return false;
+    };
+    download_owns_abort(
+        download.at,
+        crate::page_errors::navigation_started_at(tab),
+        Instant::now(),
+    )
+}
+
+/// Address of the download that just started on `tab`, when it is still recent.
+pub fn recent_download_url(tab: u32) -> String {
+    PAGE_DOWNLOADS
+        .lock()
+        .expect("page downloads")
+        .get(&tab)
+        .filter(|download| download.at.elapsed() <= DOWNLOAD_ABORT_WINDOW)
+        .map(|download| download.url.clone())
+        .unwrap_or_default()
 }
 
 fn now_ms() -> u64 {
@@ -234,6 +320,55 @@ fn settle_unfinished(item: &mut DownloadItem) {
     item.can_resume = resumable;
 }
 
+/// A download belongs to the navigation that was already underway, not to a later page load.
+/// `navigation_at` is when that load started.
+pub(crate) fn download_owns_abort(
+    download_at: Instant,
+    navigation_at: Option<Instant>,
+    now: Instant,
+) -> bool {
+    if now.saturating_duration_since(download_at) > DOWNLOAD_ABORT_WINDOW {
+        return false;
+    }
+    match navigation_at {
+        Some(started) => download_at + DOWNLOAD_ABORT_GRACE >= started,
+        None => true,
+    }
+}
+
+fn same_resource(left: &str, right: &str) -> bool {
+    fn identity(value: &str) -> Option<String> {
+        let mut url = url::Url::parse(value).ok()?;
+        url.set_fragment(None);
+        Some(url.to_string())
+    }
+    match (identity(left), identity(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => left == right,
+    }
+}
+
+/// The document was replaced by the download, so Back returns to the page that started it.
+/// A source that is still the previous page stays put.
+pub(crate) fn should_leave_download_navigation(
+    source: &str,
+    download_url: &str,
+    previous: &str,
+) -> bool {
+    let source = source.trim();
+    let previous = previous.trim();
+    if source.is_empty()
+        || source.eq_ignore_ascii_case("about:blank")
+        || source.to_ascii_lowercase().starts_with("about:")
+    {
+        return !previous.is_empty();
+    }
+    if download_url.is_empty() || previous.is_empty() {
+        return false;
+    }
+    same_resource(source, download_url) && !same_resource(source, previous)
+}
+
 /// Runs on the main thread for every download a page view starts. The default WebView2
 /// flyout is suppressed and the file goes to the configured folder under a unique name.
 pub fn on_download_starting(
@@ -244,8 +379,21 @@ pub fn on_download_starting(
 ) -> windows::core::Result<()> {
     unsafe {
         args.SetHandled(true)?;
+        // Noted before the operation is read so a connection-aborted event that arrives
+        // while this handler is still running still belongs to the download.
+        note_page_download(tab, "");
         let operation = args.DownloadOperation()?;
         let url = read_pwstr(|value| operation.Uri(value));
+        note_page_download(tab, &url);
+        if tabs::failure_of(app, tab).is_some_and(|failure| failure.code == "CONNECTION_ABORTED") {
+            let restore_app = app.clone();
+            std::thread::spawn(move || {
+                let app = restore_app.clone();
+                let _ = restore_app.run_on_main_thread(move || {
+                    crate::webview2::settle_download_abort(&app, tab, None);
+                });
+            });
+        }
         let suggested = read_pwstr(|value| args.ResultFilePath(value));
         let raw_name = Path::new(&suggested)
             .file_name()
@@ -1244,7 +1392,12 @@ fn refresh_session(app: &AppHandle, url: &str) -> (String, String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{DownloadItem, adopt_local, computer_name, on_this_computer};
+    use std::time::{Duration, Instant};
+
+    use super::{
+        DownloadItem, adopt_local, computer_name, download_owns_abort, on_this_computer,
+        should_leave_download_navigation,
+    };
 
     #[test]
     fn an_older_download_file_still_loads() {
@@ -1303,5 +1456,43 @@ mod tests {
         assert!(missing.computer_name.is_empty());
         assert!(!on_this_computer(&missing));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_download_explains_only_the_navigation_that_started_it() {
+        let start = Instant::now();
+        let download_at = start + Duration::from_millis(20);
+        assert!(download_owns_abort(
+            download_at,
+            Some(start),
+            start + Duration::from_millis(80)
+        ));
+        assert!(!download_owns_abort(
+            download_at,
+            Some(start + Duration::from_secs(2)),
+            start + Duration::from_secs(2)
+        ));
+        assert!(!download_owns_abort(
+            download_at,
+            Some(start),
+            start + Duration::from_secs(4)
+        ));
+        assert!(download_owns_abort(download_at, None, start + Duration::from_millis(80)));
+    }
+
+    #[test]
+    fn a_download_navigation_goes_back_only_when_it_replaced_the_page() {
+        let page = "https://openai.com/codex/";
+        let file = "https://cdn.example/ChatGPT-Installer.exe";
+        assert!(!should_leave_download_navigation(page, file, page));
+        assert!(should_leave_download_navigation("about:blank", file, page));
+        assert!(!should_leave_download_navigation("about:blank", file, ""));
+        assert!(should_leave_download_navigation(file, file, page));
+        assert!(!should_leave_download_navigation(
+            "https://openai.com/codex/#top",
+            page,
+            page
+        ));
+        assert!(!should_leave_download_navigation(page, "", page));
     }
 }

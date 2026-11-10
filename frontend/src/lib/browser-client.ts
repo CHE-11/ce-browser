@@ -1166,12 +1166,48 @@ export function setPresentColor(color: string) {
   return invoke<PresentState>("set_present_color", { color });
 }
 
+export function setPresentWidth(width: number) {
+  return invoke<PresentState>("set_present_width", { width });
+}
+
+export function setPresentDim(dim: number) {
+  return invoke<PresentState>("set_present_dim", { dim });
+}
+
+export function setPresentRadius(radius: number) {
+  return invoke<PresentState>("set_present_radius", { radius });
+}
+
+export function setPresentSpread(spread: number) {
+  return invoke<PresentState>("set_present_spread", { spread });
+}
+
+export function setPresentCircle(circle: boolean) {
+  return invoke<PresentState>("set_present_circle", { circle });
+}
+
 export function finishPresentPlace(kind: "spotlight" | "zoom", rect: PresentRect | null) {
   return invoke<PresentState>("finish_present_place", { kind, rect });
 }
 
 export function clearPresentMarks() {
   return invoke<PresentState>("clear_present_marks");
+}
+
+export function undoPresentMark() {
+  return invoke<PresentState>("undo_present_mark");
+}
+
+export function setPresentHoldEscape(hold: boolean) {
+  return invoke<void>("set_present_hold_escape", { hold });
+}
+
+export function onPresentEscape(handler: () => void): Promise<UnlistenFn> {
+  return listen("present-escape", () => handler());
+}
+
+export function onPresentDelete(handler: () => void): Promise<UnlistenFn> {
+  return listen("present-delete", () => handler());
 }
 
 export function setRecordingControlsMode(mode: "hidden" | "pill" | "settings" | "tools") {

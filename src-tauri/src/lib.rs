@@ -768,6 +768,42 @@ async fn set_present_color(app: AppHandle, color: String) -> Result<present::Pre
 }
 
 #[tauri::command]
+async fn set_present_width(app: AppHandle, width: f64) -> Result<present::PresentState, String> {
+    present::set_width(&app, width as f32)
+}
+
+#[tauri::command]
+async fn set_present_dim(app: AppHandle, dim: f64) -> Result<present::PresentState, String> {
+    present::set_dim(&app, dim as f32)
+}
+
+#[tauri::command]
+async fn set_present_radius(app: AppHandle, radius: f64) -> Result<present::PresentState, String> {
+    present::set_radius(&app, radius as f32)
+}
+
+#[tauri::command]
+async fn set_present_spread(app: AppHandle, spread: f64) -> Result<present::PresentState, String> {
+    present::set_spread(&app, spread as f32)
+}
+
+#[tauri::command]
+async fn set_present_circle(app: AppHandle, circle: bool) -> Result<present::PresentState, String> {
+    present::set_circle(&app, circle)
+}
+
+#[tauri::command]
+async fn undo_present_mark(app: AppHandle) -> Result<present::PresentState, String> {
+    present::undo_mark(&app)
+}
+
+#[tauri::command]
+async fn set_present_hold_escape(hold: bool) -> Result<(), String> {
+    present::set_hold_escape(hold);
+    Ok(())
+}
+
+#[tauri::command]
 async fn finish_present_place(
     app: AppHandle,
     kind: String,
@@ -2962,8 +2998,15 @@ pub fn run() {
             set_present_tool,
             set_present_cursor,
             set_present_color,
+            set_present_width,
+            set_present_dim,
+            set_present_radius,
+            set_present_spread,
+            set_present_circle,
             finish_present_place,
             clear_present_marks,
+            undo_present_mark,
+            set_present_hold_escape,
             set_recording_drawing,
             set_recording_style,
             add_recording_stroke,

@@ -2954,6 +2954,7 @@ pub fn navigation_started(app: &AppHandle, id: u32, uri: &str) {
         if let Some(target) = target {
             let switching = !same_document(&tab.info.url, &target);
             if tab.info.url != target {
+                crate::page_errors::note_previous_page(id, &tab.info.url);
                 if switching {
                     tab.title_ready = false;
                 }
@@ -3060,6 +3061,39 @@ pub fn set_progress(app: &AppHandle, id: u32, progress: u8) {
         Some(())
     });
     if changed.is_some() {
+        emit_tabs(app);
+    }
+}
+
+/// A download took the navigation. Drop a connection-aborted screen, stop the load bar, and
+/// keep the address on `source` when that is still a page.
+pub fn release_after_download(app: &AppHandle, id: u32, source: &str) {
+    let source = source.trim();
+    let keep_source = !source.is_empty() && !source.to_ascii_lowercase().starts_with("about:");
+    let displayed = keep_source.then(|| paths::display_url(app, source));
+    let window = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        if tab
+            .info
+            .failure
+            .as_ref()
+            .is_some_and(|failure| failure.code == "CONNECTION_ABORTED")
+        {
+            tab.info.failure = None;
+        }
+        tab.info.loading = false;
+        tab.info.progress = 100;
+        tab.blank = false;
+        if let Some(url) = &displayed
+            && tab.info.url != *url
+        {
+            tab.title_ready = false;
+            tab.info.url = url.clone();
+        }
+        Some(tab.info.window.clone())
+    });
+    if let Some(window) = window {
+        place_pages(app, &window, false);
         emit_tabs(app);
     }
 }
@@ -3621,6 +3655,7 @@ fn retire_webview(app: &AppHandle, label: Option<String>) {
     {
         crate::adblock::forget(id);
         crate::webview2::forget_early_script(id);
+        crate::downloads::forget_page_download(id);
         crate::microphone::forget_tab(app, id);
         crate::hang_guard::end_frozen_page(id);
         crate::page_errors::forget_tab(id);
