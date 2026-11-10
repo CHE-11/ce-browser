@@ -10,6 +10,8 @@ import { AgentPanelPage } from "./features/BuiltInExtensions/agent/AgentPanel.pa
 import { AutomationsPage } from "./features/BuiltInExtensions/automation/Automations.page";
 import { AutomationsPanelPage } from "./features/BuiltInExtensions/automation/AutomationsPanel.page";
 import { CaptureEditorPage } from "./features/BuiltInExtensions/capture-editor/CaptureEditor.page";
+import { PresentOverlayPage } from "./features/BuiltInExtensions/present/PresentOverlay.page";
+import { PresentPalette } from "./features/BuiltInExtensions/present/PresentPalette";
 import { RecordingCamera } from "./features/BuiltInExtensions/recording/RecordingCamera";
 import { RecordingControls } from "./features/BuiltInExtensions/recording/RecordingControls";
 import { RecordingDraw } from "./features/BuiltInExtensions/recording/RecordingDraw";
@@ -107,6 +109,10 @@ function App() {
       return <RecordingCamera />;
     case "recording-draw":
       return <RecordingDraw />;
+    case "present":
+      return <PresentOverlayPage />;
+    case "present-controls":
+      return <PresentPalette />;
     case "boards":
       return <BoardsPage params={route.params} />;
     case "whats-new":

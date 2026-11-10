@@ -3,6 +3,7 @@ import { AdBlockerButton } from "./ad-blocker/AdBlockerButton";
 import { PageControlsButton } from "./page-controls/PageControlsButton";
 import { ClearCacheButton } from "./clear-cache/ClearCacheButton";
 import { PageCaptureButton } from "./page-capture/PageCaptureButton";
+import { PresentButton } from "./present/PresentButton";
 import { RecordingButton } from "./recording/RecordingButton";
 import { WebpageMarkdownButton } from "./webpage-markdown/WebpageMarkdownButton";
 import { PasswordButton } from "./password/Password";
@@ -28,6 +29,8 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <PageCaptureButton activeTab={activeTab} settings={settings} />;
     case "recording":
       return <RecordingButton activeTab={activeTab} settings={settings} />;
+    case "present":
+      return <PresentButton />;
     case "webpage-markdown":
       return <WebpageMarkdownButton activeTab={activeTab} settings={settings} />;
     case "boards":

@@ -5,6 +5,7 @@ import {
   clearSiteCache,
   closePopup,
   debugToggleHud,
+  togglePresent,
   createEphemeralTab,
   createTab,
   groupBySite,
@@ -232,7 +233,7 @@ export function CommandPalette() {
       group: "Setting",
       run: () => openSetting(snapshot.windowTabs, entry.id),
     }));
-    const tools: Hit[] = BUILTIN_TOOLS.filter((tool) => builtinToolEnabled(settings, tool.id) && (active || tool.dev)).map((tool) => ({
+    const tools: Hit[] = BUILTIN_TOOLS.filter((tool) => builtinToolEnabled(settings, tool.id) && (active || tool.dev || tool.id === "present")).map((tool) => ({
       id: `tool-${tool.id}`,
       title: tool.name,
       hint: tool.description,
@@ -240,6 +241,9 @@ export function CommandPalette() {
       run: () => {
         if (tool.id === "debug-hud") {
           return debugToggleHud();
+        }
+        if (tool.id === "present") {
+          return togglePresent();
         }
         if (!active) {
           return;

@@ -6,17 +6,21 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
+use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
+use windows::Win32::Graphics::Direct3D::D3D_FEATURE_LEVEL_11_0;
+use windows::Win32::Graphics::Direct3D11::{D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice};
 use windows::Win32::Media::MediaFoundation::{
-    MFAudioFormat_AAC, MFAudioFormat_PCM, MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample,
+    MFAudioFormat_AAC, MFAudioFormat_PCM, MFCreateDXGIDeviceManager, MFCreateMediaType, MFCreateMemoryBuffer, MFCreateSample,
     MFCreateSinkWriterFromURL, MFCreateSourceReaderFromURL, MFMediaType_Audio, MFMediaType_Video,
     MFStartup, MFVideoFormat_H264, MFVideoFormat_RGB32, MFVideoInterlace_Progressive, MF_MT_AUDIO_AVG_BYTES_PER_SECOND,
     MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_BLOCK_ALIGNMENT, MF_MT_AUDIO_NUM_CHANNELS,
     MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_AVG_BITRATE, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_RATE,
     MF_MT_FRAME_SIZE, MF_MT_INTERLACE_MODE, MF_MT_MAJOR_TYPE, MF_MT_PIXEL_ASPECT_RATIO, MF_MT_SUBTYPE,
     MF_SOURCE_READERF_ENDOFSTREAM, MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-    MF_VERSION, MFSTARTUP_NOSOCKET, IMFMediaBuffer, IMFSample, IMFSinkWriter, IMFSourceReader,
+    MF_VERSION, MFSTARTUP_NOSOCKET, IMFDXGIDeviceManager, IMFMediaBuffer, IMFSample, IMFSinkWriter, IMFSourceReader,
 };
-use windows::core::HSTRING;
+use windows::Win32::Foundation::HMODULE;
+use windows::core::{IUnknown, HSTRING};
 
 use super::output_size;
 
@@ -30,30 +34,18 @@ pub struct Writer {
     audio: Option<u32>,
     width: u32,
     height: u32,
+    /// Kept alive so a hardware encoder can keep using the device.
+    _manager: Option<windows::Win32::Media::MediaFoundation::IMFDXGIDeviceManager>,
 }
 
 impl Writer {
     pub fn open(path: &Path, width: u32, height: u32) -> Result<Self, String> {
         mf_startup()?;
         let (width, height) = output_size(width, height, width.max(height));
-        unsafe {
-            let mut attrs = None;
-            windows::Win32::Media::MediaFoundation::MFCreateAttributes(&mut attrs, 1)
-                .map_err(text)?;
-            if let Some(attrs) = attrs.as_ref() {
-                let _ = attrs.SetUINT32(
-                    &windows::Win32::Media::MediaFoundation::MF_SINK_WRITER_DISABLE_THROTTLING,
-                    1,
-                );
-                let _ = attrs.SetUINT32(&windows::Win32::Media::MediaFoundation::MF_LOW_LATENCY, 1);
-            }
-            let wide = HSTRING::from(path.to_string_lossy().as_ref());
-            let writer = MFCreateSinkWriterFromURL(&wide, None, attrs.as_ref()).map_err(text)?;
-            let video = add_video(&writer, width, height)?;
-            let audio = add_audio(&writer).ok();
-            writer.BeginWriting().map_err(text)?;
-            Ok(Self { writer, video, audio, width, height })
+        if let Ok(writer) = open_configured(path, width, height, true) {
+            return Ok(writer);
         }
+        open_configured(path, width, height, false)
     }
 
     pub fn size(&self) -> (u32, u32) {
@@ -303,6 +295,67 @@ fn pack(high: u32, low: u32) -> u64 {
 
 fn ms_to_hns(ms: u64) -> i64 {
     (ms as i64).saturating_mul(10_000)
+}
+
+fn open_configured(path: &Path, width: u32, height: u32, hardware: bool) -> Result<Writer, String> {
+    unsafe {
+        let mut attrs = None;
+        windows::Win32::Media::MediaFoundation::MFCreateAttributes(&mut attrs, 8).map_err(text)?;
+        let manager = hardware.then(hardware_manager).flatten();
+        if let Some(attrs) = attrs.as_ref() {
+            let _ = attrs.SetUINT32(
+                &windows::Win32::Media::MediaFoundation::MF_SINK_WRITER_DISABLE_THROTTLING,
+                1,
+            );
+            let _ = attrs.SetUINT32(&windows::Win32::Media::MediaFoundation::MF_LOW_LATENCY, 1);
+            if hardware {
+                let _ = attrs.SetUINT32(
+                    &windows::Win32::Media::MediaFoundation::MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS,
+                    1,
+                );
+                if let Some(manager) = manager.as_ref() {
+                    let _ = attrs.SetUnknown(
+                        &windows::Win32::Media::MediaFoundation::MF_SINK_WRITER_D3D_MANAGER,
+                        manager,
+                    );
+                }
+            }
+        }
+        let wide = HSTRING::from(path.to_string_lossy().as_ref());
+        let writer = MFCreateSinkWriterFromURL(&wide, None, attrs.as_ref()).map_err(text)?;
+        let video = add_video(&writer, width, height)?;
+        let audio = add_audio(&writer).ok();
+        writer.BeginWriting().map_err(text)?;
+        Ok(Writer { writer, video, audio, width, height, _manager: manager })
+    }
+}
+
+fn hardware_manager() -> Option<IMFDXGIDeviceManager> {
+    unsafe {
+        let mut token = 0u32;
+        let mut manager = None;
+        MFCreateDXGIDeviceManager(&mut token, &mut manager).ok()?;
+        let manager = manager?;
+        let mut device = None;
+        let mut context = None;
+        let levels = [D3D_FEATURE_LEVEL_11_0];
+        D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_HARDWARE,
+            HMODULE(std::ptr::null_mut()),
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            Some(&levels),
+            D3D11_SDK_VERSION,
+            Some(&mut device),
+            None,
+            Some(&mut context),
+        )
+        .ok()?;
+        let device = device?;
+        let unknown: IUnknown = windows::core::Interface::cast(&device).ok()?;
+        manager.ResetDevice(&unknown, token).ok()?;
+        Some(manager)
+    }
 }
 
 fn mf_startup() -> Result<(), String> {

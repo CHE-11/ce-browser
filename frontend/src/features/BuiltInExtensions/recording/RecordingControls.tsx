@@ -13,14 +13,13 @@ import {
   setRecordingControlsMode,
   setRecordingCursor,
   setRecordingDrawing,
-  setRecordingFocus,
   setRecordingMicMuted,
   setRecordingStyle,
   stopScreenRecording,
   undoRecordingStroke,
 } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
-import type { RecordingCameraCorner, RecordingCursor, RecordingFocus, RecordingSettings, ScreenRecordingStatus } from "@type/browser";
+import type { RecordingCameraCorner, RecordingCursor, RecordingSettings, ScreenRecordingStatus } from "@type/browser";
 import { clock } from "./time";
 
 const COLORS = ["#ef4444", "#22c55e", "#f97316", "#171717", "#facc15", "#f5f5f5", "#a1a1aa"];
@@ -41,11 +40,6 @@ const CURSORS: { id: RecordingCursor; label: string }[] = [
   { id: "system", label: "System" },
   { id: "hidden", label: "Hidden" },
   { id: "circle", label: "Circle" },
-];
-const FOCUSES: { id: RecordingFocus; label: string }[] = [
-  { id: "off", label: "Off" },
-  { id: "1.5", label: "1.5×" },
-  { id: "2", label: "2×" },
 ];
 const EMPTY: ScreenRecordingStatus = {
   phase: "countdown",
@@ -73,7 +67,6 @@ const DEFAULT_PREFS: RecordingSettings = {
   resolution: "1440",
   cameraCorner: "bottom-left",
   cursor: "system",
-  focus: "off",
 };
 
 const METER = [0.12, 0.28, 0.46, 0.66, 0.86];
@@ -171,7 +164,6 @@ export function RecordingControls() {
       .catch(() => undefined);
     if (next.cameraCorner !== prefs.cameraCorner) void setRecordingCameraCorner(next.cameraCorner).catch(() => undefined);
     if (next.cursor !== prefs.cursor) void setRecordingCursor(next.cursor).catch(() => undefined);
-    if (next.focus !== prefs.focus) void setRecordingFocus(next.focus).catch(() => undefined);
   };
 
   return (
@@ -216,26 +208,6 @@ export function RecordingControls() {
                   onClick={() => savePrefs({ ...prefs, cursor: cursor.id })}
                 >
                   {cursor.label}
-                </button>
-              ))}
-            </div>
-            <p id="recording-controls-focus-label" className="px-0.5 pt-1 pb-0.5 text-[9px] leading-none tracking-wide text-zinc-500 uppercase">
-              Focus
-            </p>
-            <div id="recording-controls-focuses" className="grid w-max grid-cols-3 gap-0.5">
-              {FOCUSES.map((focus) => (
-                <button
-                  id={`recording-controls-focus-${focus.id === "1.5" ? "15" : focus.id}`}
-                  key={focus.id}
-                  type="button"
-                  aria-pressed={prefs.focus === focus.id}
-                  className={cn(
-                    "h-5 rounded px-1.5 text-[9px] leading-none whitespace-nowrap hover:bg-zinc-800",
-                    prefs.focus === focus.id && "bg-zinc-700 text-white",
-                  )}
-                  onClick={() => savePrefs({ ...prefs, focus: focus.id })}
-                >
-                  {focus.label}
                 </button>
               ))}
             </div>

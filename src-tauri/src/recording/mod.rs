@@ -80,9 +80,6 @@ pub struct StartRequest {
     /// `system`, `hidden`, or `circle`.
     #[serde(default = "default_cursor")]
     pub cursor: String,
-    /// `off`, `1.5`, or `2`.
-    #[serde(default = "default_focus")]
-    pub focus: String,
 }
 
 fn default_corner() -> String {
@@ -91,10 +88,6 @@ fn default_corner() -> String {
 
 fn default_cursor() -> String {
     "system".into()
-}
-
-fn default_focus() -> String {
-    "off".into()
 }
 
 fn default_resolution() -> String {
@@ -110,22 +103,6 @@ fn cursor_code(mode: &str) -> u8 {
         "hidden" => CURSOR_HIDDEN,
         "circle" => CURSOR_CIRCLE,
         _ => CURSOR_SYSTEM,
-    }
-}
-
-fn focus_code(mode: &str) -> u8 {
-    match mode {
-        "1.5" => 1,
-        "2" => 2,
-        _ => 0,
-    }
-}
-
-fn focus_zoom(mode: u8) -> f32 {
-    match mode {
-        1 => 1.5,
-        2 => 2.0,
-        _ => 1.0,
     }
 }
 
@@ -158,7 +135,6 @@ struct Control {
     drawing: AtomicBool,
     camera_on: AtomicBool,
     cursor: AtomicU8,
-    focus: AtomicU8,
     elapsed_ms: AtomicU64,
     countdown: AtomicU64,
     phase: AtomicU8,
@@ -230,7 +206,6 @@ pub fn start(app: &AppHandle, request: StartRequest) -> Result<ScreenRecordingSt
         drawing: AtomicBool::new(false),
         camera_on: AtomicBool::new(request.camera),
         cursor: AtomicU8::new(cursor_code(&request.cursor)),
-        focus: AtomicU8::new(focus_code(&request.focus)),
         elapsed_ms: AtomicU64::new(0),
         countdown: AtomicU64::new(if request.countdown { 3 } else { 0 }),
         phase: AtomicU8::new(if request.countdown { COUNTDOWN } else { RECORDING }),
@@ -333,11 +308,6 @@ pub fn set_camera_corner(app: &AppHandle, corner: &str) -> Result<(), String> {
 
 pub fn set_cursor(mode: &str) -> Result<(), String> {
     with_control(|control| control.cursor.store(cursor_code(mode), Ordering::Relaxed))?;
-    Ok(())
-}
-
-pub fn set_focus(mode: &str) -> Result<(), String> {
-    with_control(|control| control.focus.store(focus_code(mode), Ordering::Relaxed))?;
     Ok(())
 }
 
@@ -567,6 +537,11 @@ fn phase_name(phase: u8) -> String {
     .into()
 }
 
+struct LatestFrame {
+    bytes: Vec<u8>,
+    seq: u64,
+}
+
 fn publish(app: &AppHandle, control: &Control) {
     let _ = app.emit("screen-recording", snapshot(control));
 }
@@ -588,8 +563,6 @@ fn run(app: AppHandle, control: Arc<Control>, countdown: bool, device_id: String
         }
     };
     grabber.set_cursor_visible(control.cursor.load(Ordering::Relaxed) == CURSOR_SYSTEM);
-    let mut system_cursor = control.cursor.load(Ordering::Relaxed) == CURSOR_SYSTEM;
-    let mut aim: Option<(f32, f32)> = None;
     let mut primed = None;
     let ready_at = Instant::now();
     while primed.is_none() && ready_at.elapsed() < Duration::from_secs(3) {
@@ -624,15 +597,49 @@ fn run(app: AppHandle, control: Arc<Control>, countdown: bool, device_id: String
     };
     let (width, height) = writer.size();
     audio.discard();
-    let opening = present(&first, width, height, &control, &mut aim);
+    let opening = present(&first, width, height, &control);
     if let Err(error) = writer.video(&opening, 0, FRAME_HNS) {
         fail(&app, &control, error);
         return;
     }
-    // Each later frame is stamped with the recording clock. A slow encode used to pack
-    // whatever frames it managed into a 30 fps timeline, so a 13s take played back in about 3s.
+    let latest = Arc::new(Mutex::new(LatestFrame { bytes: Vec::new(), seq: 0 }));
+    let capture_latest = latest.clone();
+    let capture_control = control.clone();
+    let capture_stop = Arc::new(AtomicBool::new(false));
+    let capture_flag = capture_stop.clone();
+    let capture = thread::Builder::new().name("recording-capture".into()).spawn(move || {
+        let mut carry = Vec::new();
+        let mut shown = capture_control.cursor.load(Ordering::Relaxed) == CURSOR_SYSTEM;
+        while !capture_control.stop.load(Ordering::Relaxed)
+            && !capture_flag.load(Ordering::Relaxed)
+            && targets::alive(&capture_control.target)
+        {
+            let show_system = capture_control.cursor.load(Ordering::Relaxed) == CURSOR_SYSTEM;
+            if show_system != shown {
+                grabber.set_cursor_visible(show_system);
+                shown = show_system;
+            }
+            match grabber.poll_new() {
+                Ok(Some(frame)) => {
+                    carry.clear();
+                    carry.extend_from_slice(frame);
+                    let mut slot = capture_latest.lock().expect("frame");
+                    std::mem::swap(&mut slot.bytes, &mut carry);
+                    slot.seq = slot.seq.wrapping_add(1);
+                }
+                Ok(None) => thread::sleep(Duration::from_millis(1)),
+                Err(_) => thread::sleep(Duration::from_millis(4)),
+            }
+        }
+    });
+    let Ok(capture) = capture else {
+        fail(&app, &control, "Couldn't read the screen.".into());
+        return;
+    };
+    // Frames are read on their own thread, so a slow encode does not stall the next grab.
+    let mut seen = 0u64;
+    let mut held = opening;
     let mut last_pts: i64 = 0;
-    let mut misses = 0u32;
     let mut last_emit = Instant::now();
     let mut last_follow = Instant::now();
     let clock_started = Instant::now();
@@ -653,11 +660,6 @@ fn run(app: AppHandle, control: Arc<Control>, countdown: bool, device_id: String
             break;
         }
         let drawing = control.drawing.load(Ordering::Relaxed);
-        let show_system = control.cursor.load(Ordering::Relaxed) == CURSOR_SYSTEM;
-        if show_system != system_cursor {
-            grabber.set_cursor_visible(show_system);
-            system_cursor = show_system;
-        }
         if last_follow.elapsed() > Duration::from_millis(400) {
             if drawing {
                 overlay::follow_draw(&app, &control.target);
@@ -671,7 +673,6 @@ fn run(app: AppHandle, control: Arc<Control>, countdown: bool, device_id: String
             if pause_began.is_none() {
                 pause_began = Some(Instant::now());
             }
-            let _ = grabber.frame();
             audio.discard();
             control.mic_level.store(audio.mic_level(), Ordering::Relaxed);
             control.phase.store(PAUSED, Ordering::Relaxed);
@@ -698,31 +699,21 @@ fn run(app: AppHandle, control: Arc<Control>, countdown: bool, device_id: String
             thread::sleep(Duration::from_nanos(wait.saturating_mul(100).min(33_000_000)));
             continue;
         }
-        let frame = match grabber.frame() {
-            Ok(Some(frame)) => {
-                misses = 0;
-                frame.to_vec()
-            }
-            Ok(None) => {
-                misses += 1;
-                if misses > 90 {
-                    break;
-                }
-                Vec::new()
-            }
-            Err(_) => {
-                misses += 1;
-                if misses > 90 {
-                    break;
-                }
-                Vec::new()
+        let fresh = {
+            let mut slot = latest.lock().expect("frame");
+            if slot.seq != seen && !slot.bytes.is_empty() {
+                std::mem::swap(&mut held, &mut slot.bytes);
+                seen = slot.seq;
+                true
+            } else {
+                false
             }
         };
-        if frame.is_empty() {
-            thread::sleep(Duration::from_millis(10));
+        if !fresh {
+            thread::sleep(Duration::from_millis(2));
             continue;
         }
-        let frame = present(&frame, width, height, &control, &mut aim);
+        let frame = present(&held, width, height, &control);
         let gap = (elapsed_hns - last_pts).max(FRAME_HNS);
         if writer.video(&frame, elapsed_hns, gap).is_err() {
             break;
@@ -736,6 +727,17 @@ fn run(app: AppHandle, control: Arc<Control>, countdown: bool, device_id: String
             publish(&app, &control);
             last_emit = Instant::now();
         }
+    }
+    capture_stop.store(true, Ordering::Relaxed);
+    let _ = capture.join();
+    let elapsed_hns = (note_time(paused_for, pause_began) as i64).saturating_mul(10_000);
+    if elapsed_hns > last_pts && !held.is_empty() {
+        let gap = (elapsed_hns - last_pts).max(FRAME_HNS);
+        let frame = present(&held, width, height, &control);
+        let _ = writer.video(&frame, elapsed_hns, FRAME_HNS);
+        let samples = ((gap.saturating_mul(48_000) + 5_000_000) / 10_000_000).max(1) as usize;
+        let pcm = audio.pull(samples, !control.mic_muted.load(Ordering::Relaxed));
+        let _ = writer.audio(&pcm, last_pts);
     }
     audio.discard();
     let elapsed = note_time(paused_for, pause_began);
@@ -792,36 +794,15 @@ fn fit(frame: &[u8], width: u32, height: u32) -> Vec<u8> {
     }
 }
 
-/// Strokes, focus zoom, and the circle pointer, in that order. The picture stays the same size.
-fn present(frame: &[u8], width: u32, height: u32, control: &Control, aim: &mut Option<(f32, f32)>) -> Vec<u8> {
+/// Strokes and the circle pointer. The picture stays the size of the first frame.
+fn present(frame: &[u8], width: u32, height: u32, control: &Control) -> Vec<u8> {
     let mut frame = fit(frame, width, height);
     {
         let strokes = control.strokes.lock().expect("strokes");
         draw::paint(&mut frame, width, height, &strokes);
     }
-    let cursor_mode = control.cursor.load(Ordering::Relaxed);
-    let zoom = focus_zoom(control.focus.load(Ordering::Relaxed));
-    let cursor = targets::cursor_in_frame(&control.target, width, height);
-    if zoom > 1.0 {
-        if let Some((x, y)) = cursor {
-            let (sx, sy) = match *aim {
-                Some((ax, ay)) => (ax + (x - ax) * 0.28, ay + (y - ay) * 0.28),
-                None => (x, y),
-            };
-            *aim = Some((sx, sy));
-            let (zoomed, mark) = capture::zoom_around(&frame, width, height, sx, sy, x, y, zoom);
-            frame = zoomed;
-            if cursor_mode == CURSOR_CIRCLE {
-                if let Some((mx, my)) = mark {
-                    draw::cursor_mark(&mut frame, width, height, mx, my);
-                }
-            }
-            return frame;
-        }
-    }
-    *aim = None;
-    if cursor_mode == CURSOR_CIRCLE {
-        if let Some((x, y)) = cursor {
+    if control.cursor.load(Ordering::Relaxed) == CURSOR_CIRCLE {
+        if let Some((x, y)) = targets::cursor_in_frame(&control.target, width, height) {
             if (0.0..width as f32).contains(&x) && (0.0..height as f32).contains(&y) {
                 draw::cursor_mark(&mut frame, width, height, x.round() as i32, y.round() as i32);
             }
@@ -881,20 +862,6 @@ mod tests {
         assert_eq!(output_size(2560, 1440, 1920), (1920, 1080));
         assert_eq!(output_size(1919, 1000, 2560).0 % 2, 0);
         assert_eq!(output_size(1919, 1000, 2560).1 % 2, 0);
-    }
-
-    #[test]
-    fn focus_zoom_keeps_the_frame_size_and_a_mark_near_the_pointer() {
-        let width = 40u32;
-        let height = 20u32;
-        let mut frame = vec![0u8; (width * height * 4) as usize];
-        let index = ((10 * width + 20) * 4) as usize;
-        frame[index] = 255;
-        let (zoomed, mark) = super::capture::zoom_around(&frame, width, height, 20.0, 10.0, 20.0, 10.0, 2.0);
-        assert_eq!(zoomed.len(), frame.len());
-        let (mx, my) = mark.expect("pointer stays in the zoom");
-        assert!((mx - 20).abs() <= 2);
-        assert!((my - 10).abs() <= 2);
     }
 }
 

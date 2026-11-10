@@ -52,7 +52,7 @@ pub fn set_controls_mode(app: &AppHandle, mode: &str) -> Result<(), String> {
     let scale = window.scale_factor().unwrap_or(1.0);
     let (logical_w, logical_h) = match mode {
         "hidden" => (168.0, 48.0),
-        "settings" => (460.0, 210.0),
+        "settings" => (460.0, 168.0),
         "tools" => (460.0, 104.0),
         _ => (460.0, 56.0),
     };

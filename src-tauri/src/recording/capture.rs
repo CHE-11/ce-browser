@@ -49,7 +49,7 @@ impl Grabber {
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &winrt,
             DirectXPixelFormat::B8G8R8A8UIntNormalized,
-            2,
+            4,
             size,
         )
         .map_err(text)?;
@@ -71,12 +71,11 @@ impl Grabber {
         })
     }
 
-    /// The latest frame, scaled to the size locked by the first one. `None` when nothing new arrived.
-    pub fn frame(&mut self) -> Result<Option<&[u8]>, String> {
-        let Some(packed) = self.copy_frame()? else {
-            return Ok(if self.last.is_empty() { None } else { Some(self.last.as_slice()) });
+    /// A frame Windows has not handed us before. `None` while the picture is unchanged.
+    pub fn poll_new(&mut self) -> Result<Option<&[u8]>, String> {
+        let Some((source_w, source_h, pixels)) = self.copy_frame()? else {
+            return Ok(None);
         };
-        let (source_w, source_h, pixels) = packed;
         let max_long = self.max_long;
         let (width, height) = *self.output.get_or_insert_with(|| output_size(source_w, source_h, max_long));
         self.last = if source_w == width && source_h == height {
@@ -87,6 +86,16 @@ impl Grabber {
             scale_bilinear(&pixels, source_w, source_h, width, height)
         };
         Ok(Some(self.last.as_slice()))
+    }
+
+    /// The latest frame, including the previous one when nothing new arrived.
+    pub fn frame(&mut self) -> Result<Option<&[u8]>, String> {
+        let arrived = self.poll_new()?.is_some();
+        if arrived || !self.last.is_empty() {
+            Ok(Some(self.last.as_slice()))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn size(&self) -> Option<(u32, u32)> {
@@ -241,45 +250,6 @@ fn crop(src: &[u8], source_width: u32, width: u32, height: u32) -> Vec<u8> {
         }
     }
     dst
-}
-
-/// Crops around `center` by `zoom` and scales back to the same frame size.
-/// The second value is where `cursor` lands in that picture, when it is still on screen.
-pub fn zoom_around(
-    src: &[u8],
-    width: u32,
-    height: u32,
-    center_x: f32,
-    center_y: f32,
-    cursor_x: f32,
-    cursor_y: f32,
-    zoom: f32,
-) -> (Vec<u8>, Option<(i32, i32)>) {
-    let need = (width as usize) * (height as usize) * 4;
-    if zoom <= 1.01 || width < 4 || height < 4 || src.len() < need {
-        return (src.to_vec(), Some((cursor_x.round() as i32, cursor_y.round() as i32)));
-    }
-    let crop_w = ((width as f32 / zoom).round() as u32).clamp(2, width) / 2 * 2;
-    let crop_h = ((height as f32 / zoom).round() as u32).clamp(2, height) / 2 * 2;
-    let crop_w = crop_w.max(2);
-    let crop_h = crop_h.max(2);
-    let x0 = (center_x - crop_w as f32 / 2.0).round().clamp(0.0, (width - crop_w) as f32) as u32;
-    let y0 = (center_y - crop_h as f32 / 2.0).round().clamp(0.0, (height - crop_h) as f32) as u32;
-    let mut crop = vec![0u8; (crop_w as usize) * (crop_h as usize) * 4];
-    for row in 0..crop_h {
-        let from = (((y0 + row) * width + x0) * 4) as usize;
-        let to = (row * crop_w * 4) as usize;
-        let len = (crop_w * 4) as usize;
-        if from + len <= src.len() {
-            crop[to..to + len].copy_from_slice(&src[from..from + len]);
-        }
-    }
-    let scaled = scale_bilinear(&crop, crop_w, crop_h, width, height);
-    let mark_x = (cursor_x - x0 as f32) * width as f32 / crop_w as f32;
-    let mark_y = (cursor_y - y0 as f32) * height as f32 / crop_h as f32;
-    let mark = (mark_x >= -20.0 && mark_y >= -20.0 && mark_x < width as f32 + 20.0 && mark_y < height as f32 + 20.0)
-        .then_some((mark_x.round() as i32, mark_y.round() as i32));
-    (scaled, mark)
 }
 
 fn scale_bilinear(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {

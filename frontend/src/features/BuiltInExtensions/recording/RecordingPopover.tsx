@@ -30,7 +30,6 @@ export function RecordingPopover({ params }: RecordingPopoverProps) {
     resolution: "1440",
     cameraCorner: "bottom-left",
     cursor: "system",
-    focus: "off",
   });
   const [targets, setTargets] = useState<RecordingTargetInfo[]>([]);
   const [target, setTarget] = useState("");
@@ -83,7 +82,6 @@ export function RecordingPopover({ params }: RecordingPopoverProps) {
         resolution: choices.resolution,
         cameraCorner: choices.cameraCorner,
         cursor: choices.cursor,
-        focus: choices.focus,
       });
       void closePopup();
     } catch (caught) {

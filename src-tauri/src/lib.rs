@@ -37,6 +37,7 @@ mod paths;
 mod peek;
 mod placement;
 mod popup;
+mod present;
 mod prices;
 mod print;
 mod print_images;
@@ -742,8 +743,42 @@ async fn set_recording_cursor(mode: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn set_recording_focus(mode: String) -> Result<(), String> {
-    recording::set_focus(&mode)
+async fn toggle_present(app: AppHandle) -> Result<present::PresentState, String> {
+    present::toggle(&app)
+}
+
+#[tauri::command]
+async fn present_state() -> Result<present::PresentState, String> {
+    Ok(present::state())
+}
+
+#[tauri::command]
+async fn set_present_tool(app: AppHandle, tool: String) -> Result<present::PresentState, String> {
+    present::set_tool(&app, &tool)
+}
+
+#[tauri::command]
+async fn set_present_cursor(app: AppHandle, cursor: String) -> Result<present::PresentState, String> {
+    present::set_cursor(&app, &cursor)
+}
+
+#[tauri::command]
+async fn set_present_color(app: AppHandle, color: String) -> Result<present::PresentState, String> {
+    present::set_color(&app, &color)
+}
+
+#[tauri::command]
+async fn finish_present_place(
+    app: AppHandle,
+    kind: String,
+    rect: Option<present::PresentRect>,
+) -> Result<present::PresentState, String> {
+    present::finish_place(&app, &kind, rect)
+}
+
+#[tauri::command]
+async fn clear_present_marks(app: AppHandle) -> Result<present::PresentState, String> {
+    present::clear_marks(&app)
 }
 
 #[tauri::command]
@@ -2921,8 +2956,14 @@ pub fn run() {
             set_recording_camera,
             set_recording_camera_corner,
             set_recording_cursor,
-            set_recording_focus,
             set_recording_controls_mode,
+            toggle_present,
+            present_state,
+            set_present_tool,
+            set_present_cursor,
+            set_present_color,
+            finish_present_place,
+            clear_present_marks,
             set_recording_drawing,
             set_recording_style,
             add_recording_stroke,

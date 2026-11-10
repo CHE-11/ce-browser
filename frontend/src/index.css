@@ -493,7 +493,10 @@ html[data-backdrop] #browser {
 
 html[data-recording-clear],
 html[data-recording-clear] body,
-html[data-recording-clear] #root {
+html[data-recording-clear] #root,
+html[data-present-clear],
+html[data-present-clear] body,
+html[data-present-clear] #root {
   background: transparent !important;
 }
 

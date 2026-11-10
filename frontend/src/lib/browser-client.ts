@@ -71,13 +71,17 @@ import type {
   MediaElement,
   RecordingCameraCorner,
   RecordingCursor,
-  RecordingFocus,
   RecordingStatus,
   RecordingSource,
   RecordingStroke,
   RecordingTargetInfo,
   ScreenRecording,
   ScreenRecordingStatus,
+  PresentCursor,
+  PresentPointer,
+  PresentRect,
+  PresentState,
+  PresentTool,
   CameraLayout,
   PageRules,
   PageTechnologies,
@@ -1094,7 +1098,6 @@ export function startScreenRecording(request: {
   resolution?: string;
   cameraCorner?: string;
   cursor?: string;
-  focus?: string;
 }) {
   return invoke<ScreenRecordingStatus>("start_screen_recording", { request });
 }
@@ -1135,8 +1138,40 @@ export function setRecordingCursor(mode: RecordingCursor) {
   return invoke<void>("set_recording_cursor", { mode });
 }
 
-export function setRecordingFocus(mode: RecordingFocus) {
-  return invoke<void>("set_recording_focus", { mode });
+export function togglePresent() {
+  return invoke<PresentState>("toggle_present");
+}
+
+export function presentState() {
+  return invoke<PresentState>("present_state");
+}
+
+export function onPresentChanged(handler: (state: PresentState) => void): Promise<UnlistenFn> {
+  return listen<PresentState>("present-changed", (event) => handler(event.payload));
+}
+
+export function onPresentPointer(handler: (pointer: PresentPointer) => void): Promise<UnlistenFn> {
+  return listen<PresentPointer>("present-pointer", (event) => handler(event.payload));
+}
+
+export function setPresentTool(tool: PresentTool) {
+  return invoke<PresentState>("set_present_tool", { tool });
+}
+
+export function setPresentCursor(cursor: PresentCursor) {
+  return invoke<PresentState>("set_present_cursor", { cursor });
+}
+
+export function setPresentColor(color: string) {
+  return invoke<PresentState>("set_present_color", { color });
+}
+
+export function finishPresentPlace(kind: "spotlight" | "zoom", rect: PresentRect | null) {
+  return invoke<PresentState>("finish_present_place", { kind, rect });
+}
+
+export function clearPresentMarks() {
+  return invoke<PresentState>("clear_present_marks");
 }
 
 export function setRecordingControlsMode(mode: "hidden" | "pill" | "settings" | "tools") {

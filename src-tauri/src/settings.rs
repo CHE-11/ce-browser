@@ -1464,8 +1464,6 @@ pub struct RecordingSettings {
     pub camera_corner: String,
     /// `system`, `hidden`, or `circle`.
     pub cursor: String,
-    /// `off`, `1.5`, or `2`.
-    pub focus: String,
 }
 
 impl Default for RecordingSettings {
@@ -1478,7 +1476,6 @@ impl Default for RecordingSettings {
             resolution: "1440".into(),
             camera_corner: "bottom-left".into(),
             cursor: "system".into(),
-            focus: "off".into(),
         }
     }
 }
@@ -1496,9 +1493,6 @@ impl RecordingSettings {
         }
         if !matches!(self.cursor.as_str(), "system" | "hidden" | "circle") {
             self.cursor = "system".into();
-        }
-        if !matches!(self.focus.as_str(), "off" | "1.5" | "2") {
-            self.focus = "off".into();
         }
         self
     }
@@ -3090,7 +3084,6 @@ mod tests {
         assert!(!loaded.recording.camera);
         assert!(loaded.recording.countdown);
         assert_eq!(loaded.recording.cursor, "system");
-        assert_eq!(loaded.recording.focus, "off");
         assert_eq!(loaded.page_markdown.scope, "article");
         assert!(loaded.page_markdown.images);
         assert!(loaded.page_markdown.links);

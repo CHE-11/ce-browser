@@ -6,6 +6,7 @@ import {
   Eraser,
   FileText,
   ImageDown,
+  Presentation,
   Video,
   KeyRound,
   Languages,
@@ -51,6 +52,12 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Recording",
     description: "Record a tab, window, or screen.",
     icon: Video,
+  },
+  {
+    id: "present",
+    name: "Present",
+    description: "Spotlight, zoom, cursor, and marks on this window.",
+    icon: Presentation,
   },
   {
     id: "webpage-markdown",

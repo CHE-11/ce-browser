@@ -1372,9 +1372,6 @@ export type RecordingCameraCorner = "bottom-left" | "bottom-right" | "top-left" 
 /** `system` keeps the pointer Windows draws. `hidden` leaves it out. `circle` draws a ring instead. */
 export type RecordingCursor = "system" | "hidden" | "circle";
 
-/** `off` keeps the whole picture. `1.5` and `2` zoom toward the pointer. */
-export type RecordingFocus = "off" | "1.5" | "2";
-
 export type RecordingSettings = {
   microphone: boolean;
   systemAudio: boolean;
@@ -1386,8 +1383,6 @@ export type RecordingSettings = {
   cameraCorner: RecordingCameraCorner;
   /** How the pointer is drawn into the video. */
   cursor: RecordingCursor;
-  /** Zoom that follows the pointer. */
-  focus: RecordingFocus;
 };
 
 /** `article` keeps the main content. `page` keeps the whole document. */
@@ -1435,6 +1430,40 @@ export type ScreenRecordingStatus = {
   tool: string;
   color: string;
   ownerWindow: string;
+};
+
+/** What Present is doing. Marks stay in the overlay; a lock is the rectangle it holds. */
+export type PresentTool = "spotlight" | "zoom" | "highlight" | "pen" | "arrow" | "text" | "eraser";
+
+/** Drawn on top of the window. `off` leaves the system pointer alone. */
+export type PresentCursor = "dot" | "ring" | "arrow" | "crosshair" | "off";
+
+/** A rectangle as fractions of the browser window. */
+export type PresentRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type PresentState = {
+  on: boolean;
+  tool: PresentTool | string;
+  cursor: PresentCursor | string;
+  color: string;
+  /** The next drag locks the spotlight or zoom. */
+  placing: boolean;
+  /** Bumps when the palette asks the stage to drop every mark. */
+  clear: number;
+  spotlight: PresentRect | null;
+  zoom: PresentRect | null;
+};
+
+/** Cursor position in CSS pixels of the present stage. */
+export type PresentPointer = {
+  x: number;
+  y: number;
+  inside: boolean;
 };
 
 export type ScreenRecording = {
