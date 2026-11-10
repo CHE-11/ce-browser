@@ -13,6 +13,7 @@ mod capture;
 mod debug;
 mod devtools;
 mod downloads;
+mod extension_popouts;
 mod extension_store;
 mod extensions;
 mod favicons;
@@ -2827,6 +2828,7 @@ pub fn run() {
             tab_sleep::init(&handle);
             update::init(&handle);
             build_window(&handle)?;
+            extension_popouts::start(&handle);
             host_extensions::start(&handle);
             system::start(&handle);
             update::start(&handle);
@@ -2861,6 +2863,12 @@ pub fn run() {
             let label = window.label().to_string();
             if debug::is_debug_label(&label) {
                 debug::window_event(window, event);
+                return;
+            }
+            if label.starts_with("script-") {
+                if matches!(event, WindowEvent::Destroyed) {
+                    extension_popouts::closed(&label);
+                }
                 return;
             }
             if popup::is_popup_label(&label) {

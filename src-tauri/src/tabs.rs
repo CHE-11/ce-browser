@@ -1120,6 +1120,16 @@ pub fn debugging_port(dir: &std::path::Path) -> Option<u16> {
         .flatten()
 }
 
+/// Debugging ports already handed to WebView2 environments this session.
+pub fn active_debugging_ports() -> Vec<u16> {
+    debugging_ports()
+        .lock()
+        .expect("debugging ports")
+        .values()
+        .filter_map(|port| *port)
+        .collect()
+}
+
 pub fn resolve(app: &AppHandle, input: &str) -> Url {
     let search = settings::get(app).search_url();
     paths::resolve_input(app, input, &search)
@@ -2154,6 +2164,9 @@ fn script_window(
             }
             webview2::close_window_when_requested(app, window.label());
             if extension {
+                // `chrome.windows.create` often resolves with no window after this view exists.
+                // The passkey flow reads `.id` on that result, so the view is registered first.
+                crate::extension_popouts::track(window.label(), url.as_str());
                 if let Some(webview) = app.get_webview(window.label()) {
                     crate::host_extensions::attach_webview(app, &webview);
                 }

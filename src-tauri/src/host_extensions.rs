@@ -3633,6 +3633,26 @@ pub const EXTENSION_TAB_JS: &str = r##"(function () {
         createWindow.__ceExtensionTabs = true;
         try { chrome.windows.create = createWindow; } catch (error) {}
       }
+      ["update", "remove"].forEach(function (name) {
+        var native = chrome.windows[name];
+        if (typeof native !== "function" || native.__ceExtensionTabs) return;
+        function wrapped() {
+          var args = Array.prototype.slice.call(arguments);
+          var callback = args.length && typeof args[args.length - 1] === "function" ? args.pop() : null;
+          function done(value) {
+            if (chrome.runtime.lastError) {}
+            if (typeof callback === "function") callback(value);
+          }
+          args.push(done);
+          try {
+            return native.apply(chrome.windows, args);
+          } catch (error) {
+            done();
+          }
+        }
+        wrapped.__ceExtensionTabs = true;
+        try { chrome.windows[name] = wrapped; } catch (error) {}
+      });
     }
     var side = chrome.sidePanel;
     if (!(side && side.open && side.open.__ceExtensionTabs)) {

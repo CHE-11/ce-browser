@@ -327,7 +327,10 @@ fn category_of(action: &str) -> &'static str {
 }
 
 fn with_category(mut binding: ShortcutBinding) -> ShortcutBinding {
-    if let Some(current) = defaults().into_iter().find(|item| item.action == binding.action) {
+    if let Some(current) = defaults()
+        .into_iter()
+        .find(|item| item.action == binding.action)
+    {
         binding.label = current.label;
     }
     binding.category = category_of(&binding.action).to_string();
