@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -193,6 +193,8 @@ pub struct PageViewport {
     pub cutout: bool,
     /// Home indicator along the bottom of the page.
     pub home_bar: bool,
+    /// Installed standalone web app. The page extends under the status bar and home indicator.
+    pub installed: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -451,6 +453,15 @@ struct WindowChrome {
     viewport: Option<(u32, u32)>,
     viewport_cutout: bool,
     viewport_home: bool,
+    /// Standalone installed app. Safe-area insets and display-mode follow this.
+    viewport_installed: bool,
+    /// `top`, `right`, `bottom`, `left` in CSS pixels. Zero for a normal page.
+    viewport_insets: [u32; 4],
+    viewport_max_insets: [u32; 4],
+    /// `none`, `notch`, `island`, or `punch`.
+    viewport_style: String,
+    /// `ios`, `android`, or `desktop`.
+    viewport_platform: String,
     /// Screencast frames just after the bar was closed are the same session, not a new request.
     screencast_suppress: bool,
     screencast_at: Instant,
@@ -484,6 +495,11 @@ impl WindowChrome {
             viewport: None,
             viewport_cutout: true,
             viewport_home: true,
+            viewport_installed: false,
+            viewport_insets: [0; 4],
+            viewport_max_insets: [0; 4],
+            viewport_style: "none".to_string(),
+            viewport_platform: "desktop".to_string(),
             screencast_suppress: false,
             screencast_at: Instant::now()
                 .checked_sub(Duration::from_secs(60))
@@ -816,6 +832,7 @@ impl TabsState {
                         height,
                         cutout: chrome.viewport_cutout,
                         home_bar: chrome.viewport_home,
+                        installed: chrome.viewport_installed,
                     }),
                     agent_panel: chrome.side == SidePanel::Agent && chrome.agent_panel > 0.0,
                     automation_panel: chrome.side == SidePanel::Automations
@@ -2734,17 +2751,29 @@ pub fn set_viewport(
     height: u32,
     cutout: bool,
     home_bar: bool,
+    installed: bool,
+    insets: [u32; 4],
+    max_insets: [u32; 4],
+    cutout_style: &str,
+    platform: &str,
 ) {
     let Some(size) = clamp_viewport(width, height) else {
         clear_viewport(app, window);
         return;
     };
+    let style = known_cutout_style(cutout_style);
+    let platform = known_platform(platform);
     let found = with_state(app, |state| {
         let chrome = state.chrome_mut(window)?;
         chrome.screencast_suppress = false;
         let same = chrome.viewport == Some(size)
             && chrome.viewport_cutout == cutout
-            && chrome.viewport_home == home_bar;
+            && chrome.viewport_home == home_bar
+            && chrome.viewport_installed == installed
+            && chrome.viewport_insets == insets
+            && chrome.viewport_max_insets == max_insets
+            && chrome.viewport_style == style
+            && chrome.viewport_platform == platform;
         if same {
             return None;
         }
@@ -2752,6 +2781,11 @@ pub fn set_viewport(
         chrome.viewport = Some(size);
         chrome.viewport_cutout = cutout;
         chrome.viewport_home = home_bar;
+        chrome.viewport_installed = installed;
+        chrome.viewport_insets = insets;
+        chrome.viewport_max_insets = max_insets;
+        chrome.viewport_style = style;
+        chrome.viewport_platform = platform;
         Some(resized)
     });
     let Some(resized) = found else {
@@ -2770,7 +2804,11 @@ pub fn clear_viewport(app: &AppHandle, window: &str) {
         let chrome = state.chrome_mut(window)?;
         chrome.screencast_suppress = true;
         chrome.screencast_at = Instant::now();
-        chrome.viewport.take().map(|_| ())
+        let had = chrome.viewport.take().is_some() || chrome.viewport_installed;
+        chrome.viewport_installed = false;
+        chrome.viewport_insets = [0; 4];
+        chrome.viewport_max_insets = [0; 4];
+        had.then_some(())
     });
     if found.is_none() {
         return;
@@ -2781,36 +2819,432 @@ pub fn clear_viewport(app: &AppHandle, window: &str) {
     release_viewport_emulation(app, window);
 }
 
-fn device_chrome_script(cutout: bool, home: bool, portrait: bool) -> String {
+fn known_cutout_style(style: &str) -> String {
+    match style {
+        "notch" | "island" | "punch" | "none" => style.to_string(),
+        _ => "none".to_string(),
+    }
+}
+
+fn known_platform(platform: &str) -> String {
+    match platform {
+        "ios" | "android" | "desktop" => platform.to_string(),
+        _ => "desktop".to_string(),
+    }
+}
+
+/// Chrome drawn over a sized page. Insets are CSS pixels, top then right, bottom, left.
+struct ChromeSpec {
+    cutout: bool,
+    home: bool,
+    installed: bool,
+    portrait: bool,
+    style: String,
+    platform: String,
+    top: u32,
+    right: u32,
+    bottom: u32,
+    left: u32,
+}
+
+impl ChromeSpec {
+    fn plain() -> Self {
+        Self {
+            cutout: false,
+            home: false,
+            installed: false,
+            portrait: true,
+            style: "none".to_string(),
+            platform: "desktop".to_string(),
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+        }
+    }
+}
+
+/// Last environment applied to a page. Absent means this tab was never overridden.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PageEnvironment {
+    installed: bool,
+    insets: [u32; 4],
+    max_insets: [u32; 4],
+}
+
+impl PageEnvironment {
+    fn idle() -> Self {
+        Self {
+            installed: false,
+            insets: [0; 4],
+            max_insets: [0; 4],
+        }
+    }
+
+    fn is_idle(self) -> bool {
+        self == Self::idle()
+    }
+}
+
+fn page_environments() -> &'static Mutex<HashMap<u32, PageEnvironment>> {
+    static LAST: OnceLock<Mutex<HashMap<u32, PageEnvironment>>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn forget_page_environment(id: u32) {
+    if let Ok(mut last) = page_environments().lock() {
+        last.remove(&id);
+    }
+}
+
+/// Applies safe-area and display-mode once per change. A normal page that was never emulated
+/// is left alone. A failed call is forgotten so the next navigation tries again.
+fn sync_page_environment(app: &AppHandle, id: u32, env: PageEnvironment) {
+    let previous = {
+        let Ok(mut last) = page_environments().lock() else {
+            return;
+        };
+        let previous = last.get(&id).copied();
+        if previous == Some(env) {
+            return;
+        }
+        if env.is_idle() && previous.is_none() {
+            return;
+        }
+        last.insert(id, env);
+        previous
+    };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let Some(webview) = page_view(&app, id) else {
+            forget_page_environment(id);
+            return;
+        };
+        if let Err(error) =
+            webview2::apply_page_environment(&webview, env.installed, env.insets, env.max_insets)
+        {
+            eprintln!("viewport: {error}");
+            let Ok(mut last) = page_environments().lock() else {
+                return;
+            };
+            if last.get(&id) == Some(&env) {
+                match previous {
+                    Some(previous) => {
+                        last.insert(id, previous);
+                    }
+                    None => {
+                        last.remove(&id);
+                    }
+                }
+            }
+        }
+    });
+}
+
+const STATUS_ICONS: &str = concat!(
+    r#"<span id="ce-device-system" style="display:inline-flex;align-items:center;gap:5px;">"#,
+    r#"<span id="ce-device-signal" style="display:inline-flex;align-items:flex-end;gap:1px;height:11px;">"#,
+    r#"<span style="width:3px;height:4px;background:currentColor;border-radius:1px;"></span>"#,
+    r#"<span style="width:3px;height:6px;background:currentColor;border-radius:1px;"></span>"#,
+    r#"<span style="width:3px;height:8px;background:currentColor;border-radius:1px;"></span>"#,
+    r#"<span style="width:3px;height:11px;background:currentColor;border-radius:1px;"></span>"#,
+    r#"</span>"#,
+    r#"<svg id="ce-device-wifi" width="15" height="11" viewBox="0 0 15 11" aria-hidden="true">"#,
+    r#"<path fill="currentColor" d="M7.5 8.2a1.15 1.15 0 1 1 0 2.3 1.15 1.15 0 0 1 0-2.3z"></path>"#,
+    r#"<path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M4.2 6.6a4.6 4.6 0 0 1 6.6 0"></path>"#,
+    r#"<path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M2 4.3a7.6 7.6 0 0 1 11 0"></path>"#,
+    r#"</svg>"#,
+    r#"<span id="ce-device-battery" style="display:inline-flex;align-items:center;">"#,
+    r#"<span style="width:22px;height:11px;box-sizing:border-box;border:1.5px solid currentColor;border-radius:3px;padding:1px;">"#,
+    r#"<span style="display:block;width:70%;height:100%;background:currentColor;border-radius:1px;"></span>"#,
+    r#"</span>"#,
+    r#"<span style="width:1.5px;height:4px;margin-left:1px;background:currentColor;border-radius:0 1px 1px 0;"></span>"#,
+    r#"</span></span>"#,
+);
+
+fn cutout_html(style: &str, portrait: bool) -> String {
+    match (style, portrait) {
+        ("island", true) => concat!(
+            r#"<div id="ce-device-cutout" style="position:absolute;top:11px;left:50%;width:min(126px,34vw);height:37px;"#,
+            r#"transform:translateX(-50%);background:#000;border-radius:20px;"></div>"#,
+        )
+        .to_string(),
+        ("island", false) => concat!(
+            r#"<div id="ce-device-cutout" style="position:absolute;left:11px;top:50%;width:37px;height:min(126px,34vh);"#,
+            r#"transform:translateY(-50%);background:#000;border-radius:20px;"></div>"#,
+        )
+        .to_string(),
+        ("notch", true) => concat!(
+            r#"<div id="ce-device-cutout" style="position:absolute;top:0;left:50%;width:min(156px,40vw);height:33px;"#,
+            r#"transform:translateX(-50%);background:#000;border-radius:0 0 18px 18px;"></div>"#,
+        )
+        .to_string(),
+        ("notch", false) => concat!(
+            r#"<div id="ce-device-cutout" style="position:absolute;left:0;top:50%;width:33px;height:min(156px,40vh);"#,
+            r#"transform:translateY(-50%);background:#000;border-radius:0 18px 18px 0;"></div>"#,
+        )
+        .to_string(),
+        ("punch", true) => concat!(
+            r#"<div id="ce-device-cutout" style="position:absolute;top:10px;left:50%;width:20px;height:20px;"#,
+            r#"transform:translateX(-50%);background:#000;border-radius:999px;"></div>"#,
+        )
+        .to_string(),
+        ("punch", false) => concat!(
+            r#"<div id="ce-device-cutout" style="position:absolute;left:10px;top:50%;width:20px;height:20px;"#,
+            r#"transform:translateY(-50%);background:#000;border-radius:999px;"></div>"#,
+        )
+        .to_string(),
+        _ => String::new(),
+    }
+}
+
+fn home_html(style: &str) -> String {
+    let width = if style == "punch" {
+        "min(108px,28vw)"
+    } else {
+        "min(134px,36vw)"
+    };
     format!(
-        r#"(function(cutout, home, portrait) {{
+        concat!(
+            r#"<div id="ce-device-home" style="position:absolute;left:50%;bottom:8px;width:{width};height:5px;"#,
+            r#"transform:translateX(-50%);border-radius:999px;background:rgba(235,235,235,0.92);"#,
+            r#"box-shadow:0 0 0 0.5px rgba(0,0,0,0.45);"></div>"#,
+        ),
+        width = width,
+    )
+}
+
+fn status_html(spec: &ChromeSpec) -> String {
+    if !spec.installed || spec.top + spec.right + spec.bottom + spec.left == 0 {
+        return String::new();
+    }
+    let height = if spec.portrait { spec.top.max(20) } else { 22 };
+    let pad_left = if spec.portrait { 26 } else { spec.left.max(16) };
+    let pad_right = if spec.portrait { 22 } else { spec.right.max(16) };
+    format!(
+        concat!(
+            r#"<div id="ce-device-status" style="position:absolute;top:0;left:0;right:0;height:{height}px;display:flex;"#,
+            r#"align-items:center;justify-content:space-between;box-sizing:border-box;padding:0 {pad_right}px 0 {pad_left}px;"#,
+            r#"color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;"#,
+            r#"font-weight:600;line-height:1;letter-spacing:-0.02em;"#,
+            r#"text-shadow:0 1px 1px rgba(0,0,0,.85),0 0 2px rgba(0,0,0,.9);">"#,
+            r#"<span id="ce-device-time">9:41</span>{icons}</div>"#,
+        ),
+        height = height,
+        pad_right = pad_right,
+        pad_left = pad_left,
+        icons = STATUS_ICONS,
+    )
+}
+
+/// Overlay for the sized page. Empty when the page should look like a normal browser window.
+fn chrome_markup(spec: &ChromeSpec) -> String {
+    let status = status_html(spec);
+    let cutout = if spec.cutout {
+        cutout_html(&spec.style, spec.portrait)
+    } else {
+        String::new()
+    };
+    let home = if spec.home {
+        home_html(&spec.style)
+    } else {
+        String::new()
+    };
+    if status.is_empty() && cutout.is_empty() && home.is_empty() {
+        String::new()
+    } else {
+        format!("{status}{cutout}{home}")
+    }
+}
+
+fn device_chrome_script(spec: &ChromeSpec) -> String {
+    let html = serde_json::to_string(&chrome_markup(spec)).unwrap_or_else(|_| "\"\"".to_string());
+    let ios = spec.installed && spec.platform == "ios";
+    let installed = spec.installed;
+    format!(
+        r#"(function(html, ios, installed) {{
   var root = document.getElementById("ce-device-chrome");
-  if (!cutout && !home) {{
+  if (!html) {{
     if (root) root.remove();
-    return;
+  }} else {{
+    if (!root) {{
+      root = document.createElement("div");
+      root.id = "ce-device-chrome";
+      root.setAttribute("aria-hidden", "true");
+      var parent = document.documentElement || document.body;
+      if (parent) parent.appendChild(root);
+    }}
+    if (root) {{
+      root.setAttribute("style", "position:fixed;inset:0;z-index:2147483646;pointer-events:none;user-select:none;");
+      root.innerHTML = html;
+    }}
   }}
-  if (!root) {{
-    root = document.createElement("div");
-    root.id = "ce-device-chrome";
-    var parent = document.documentElement || document.body;
-    if (!parent) return;
-    parent.appendChild(root);
+  try {{
+    if (ios) {{
+      Object.defineProperty(Navigator.prototype, "standalone", {{ configurable: true, get: function() {{ return true; }} }});
+    }} else if (Object.prototype.hasOwnProperty.call(Navigator.prototype, "standalone")) {{
+      delete Navigator.prototype.standalone;
+    }}
+  }} catch (e) {{}}
+  var state = window.__ceDisplayMode || (window.__ceDisplayMode = {{ rules: [], sheets: [], queries: [] }});
+  window.__ceInstalled = installed;
+  function rewriteRule(css) {{
+    if (!css || css.indexOf("display-mode") === -1) return null;
+    var next = String(css)
+      .replace(/\(display-mode:\s*standalone\)/gi, "(min-width:0px)")
+      .replace(/\(display-mode:\s*browser\)/gi, "(max-width:0px)")
+      .replace(/\(display-mode:\s*minimal-ui\)/gi, "(max-width:0px)")
+      .replace(/\(display-mode:\s*fullscreen\)/gi, "(max-width:0px)")
+      .replace(/\(display-mode:\s*window-controls-overlay\)/gi, "(max-width:0px)")
+      .replace(/\(display-mode:\s*borderless\)/gi, "(max-width:0px)")
+      .replace(/\(display-mode:\s*tabbed\)/gi, "(max-width:0px)");
+    return next === css ? null : next;
   }}
-  root.setAttribute("style", "position:fixed;inset:0;z-index:2147483646;pointer-events:none;");
-  var island = "";
-  if (cutout) {{
-    island = portrait
-      ? '<div id="ce-device-cutout" style="position:absolute;top:11px;left:50%;width:min(126px,34vw);height:37px;transform:translateX(-50%);background:#000;border-radius:20px;"></div>'
-      : '<div id="ce-device-cutout" style="position:absolute;left:11px;top:50%;width:37px;height:min(126px,34vh);transform:translateY(-50%);background:#000;border-radius:20px;"></div>';
+  function restore() {{
+    var sheets = state.sheets.splice(0);
+    for (var i = sheets.length - 1; i >= 0; i--) {{
+      try {{ sheets[i].sheet.replaceSync(sheets[i].text); }} catch (e) {{}}
+    }}
+    var rules = state.rules.splice(0);
+    for (var j = rules.length - 1; j >= 0; j--) {{
+      var item = rules[j];
+      try {{
+        item.parent.deleteRule(item.index);
+        item.parent.insertRule(item.css, item.index);
+      }} catch (e) {{}}
+    }}
   }}
-  var bar = home
-    ? '<div id="ce-device-home" style="position:absolute;left:50%;bottom:8px;width:min(134px,36vw);height:5px;transform:translateX(-50%);border-radius:999px;background:rgba(235,235,235,0.92);box-shadow:0 0 0 0.5px rgba(0,0,0,0.45);"></div>'
-    : "";
-  root.innerHTML = island + bar;
-}})({cutout}, {home}, {portrait})"#,
-        cutout = cutout,
-        home = home,
-        portrait = portrait,
+  function process(parent) {{
+    var rules;
+    try {{ rules = parent.cssRules; }} catch (e) {{ return; }}
+    if (!rules) return;
+    for (var i = rules.length - 1; i >= 0; i--) {{
+      var rule = rules[i];
+      if (rule.type === 3 && rule.styleSheet) {{
+        process(rule.styleSheet);
+        continue;
+      }}
+      if (rule.type === 4 && rule.cssText.indexOf("display-mode") !== -1) {{
+        var next = rewriteRule(rule.cssText);
+        if (!next) continue;
+        var saved = rule.cssText;
+        try {{
+          parent.deleteRule(i);
+          parent.insertRule(next, i);
+          state.rules.push({{ parent: parent, index: i, css: saved }});
+        }} catch (e) {{
+          try {{ parent.insertRule(saved, i); }} catch (e2) {{}}
+        }}
+      }} else if (rule.cssRules && rule.cssRules.length) {{
+        process(rule);
+      }}
+    }}
+  }}
+  function scanRoot(rootNode) {{
+    if (!rootNode) return;
+    var sheets = rootNode.styleSheets;
+    if (sheets) {{
+      for (var i = 0; i < sheets.length; i++) process(sheets[i]);
+    }}
+    var adopted = rootNode.adoptedStyleSheets;
+    if (adopted) {{
+      for (var j = 0; j < adopted.length; j++) process(adopted[j]);
+    }}
+    if (!rootNode.querySelectorAll) return;
+    var nodes = rootNode.querySelectorAll("*");
+    for (var k = 0; k < nodes.length; k++) {{
+      if (nodes[k].shadowRoot) scanRoot(nodes[k].shadowRoot);
+    }}
+  }}
+  if (!state.patched) {{
+    state.patched = true;
+    function patchInsert(proto) {{
+      if (!proto || !proto.insertRule || proto.__ceInsert) return;
+      var original = proto.insertRule;
+      proto.insertRule = function(rule, index) {{
+        var next = window.__ceInstalled ? rewriteRule(rule) : null;
+        var at = original.call(this, next || rule, index);
+        if (next) state.rules.push({{ parent: this, index: at, css: rule }});
+        return at;
+      }};
+      proto.__ceInsert = true;
+    }}
+    patchInsert(CSSStyleSheet.prototype);
+    if (window.CSSGroupingRule) patchInsert(CSSGroupingRule.prototype);
+    if (CSSStyleSheet.prototype.replaceSync) {{
+      var replaceSync = CSSStyleSheet.prototype.replaceSync;
+      CSSStyleSheet.prototype.replaceSync = function(text) {{
+        var next = window.__ceInstalled ? rewriteRule(text) : null;
+        if (next) state.sheets.push({{ sheet: this, text: text }});
+        return replaceSync.call(this, next || text);
+      }};
+    }}
+    var queued = false;
+    state.schedule = function() {{
+      if (!window.__ceInstalled || queued) return;
+      queued = true;
+      requestAnimationFrame(function() {{
+        queued = false;
+        if (window.__ceInstalled) scanRoot(document);
+      }});
+    }};
+    new MutationObserver(state.schedule).observe(document.documentElement, {{ childList: true, subtree: true }});
+    document.addEventListener("load", function(event) {{
+      if (event.target && event.target.tagName === "LINK") state.schedule();
+    }}, true);
+    var realMatch = window.matchMedia.bind(window);
+    window.matchMedia = function(query) {{
+      var mql = realMatch(query);
+      var normalized = String(query).replace(/\s+/g, "").toLowerCase();
+      var wrapped = {{
+        media: mql.media,
+        onchange: null,
+        __listeners: [],
+        addListener: function(listener) {{ mql.addListener(listener); }},
+        removeListener: function(listener) {{ mql.removeListener(listener); }},
+        addEventListener: function(type, listener, options) {{
+          if (type === "change" && wrapped.__listeners.indexOf(listener) === -1) wrapped.__listeners.push(listener);
+          mql.addEventListener(type, listener, options);
+        }},
+        removeEventListener: function(type, listener, options) {{
+          mql.removeEventListener(type, listener, options);
+        }},
+        dispatchEvent: function(event) {{ return mql.dispatchEvent(event); }}
+      }};
+      Object.defineProperty(wrapped, "matches", {{
+        get: function() {{
+          if (!window.__ceInstalled) return mql.matches;
+          if (normalized === "(display-mode:standalone)" || normalized === "display-mode:standalone") return true;
+          if (normalized === "(display-mode:browser)" || normalized === "display-mode:browser") return false;
+          if (normalized === "(display-mode:minimal-ui)" || normalized === "(display-mode:fullscreen)") return false;
+          return mql.matches;
+        }}
+      }});
+      state.queries.push(wrapped);
+      return wrapped;
+    }};
+  }}
+  var modeChanged = state.mode !== installed;
+  state.mode = installed;
+  if (installed) scanRoot(document);
+  else restore();
+  if (!modeChanged) return;
+  var queries = state.queries;
+  for (var q = 0; q < queries.length; q++) {{
+    var wrappedQuery = queries[q];
+    var change = {{ matches: wrappedQuery.matches, media: wrappedQuery.media }};
+    if (typeof wrappedQuery.onchange === "function") {{
+      try {{ wrappedQuery.onchange(change); }} catch (e) {{}}
+    }}
+    var listeners = wrappedQuery.__listeners || [];
+    for (var n = 0; n < listeners.length; n++) {{
+      try {{ listeners[n](change); }} catch (e) {{}}
+    }}
+  }}
+}})({html}, {ios}, {installed})"#,
+        html = html,
+        ios = if ios { "true" } else { "false" },
+        installed = if installed { "true" } else { "false" },
     )
 }
 
@@ -2819,22 +3253,36 @@ fn apply_device_chrome(app: &AppHandle, window: &str) {
         let chrome = state.chrome(window)?;
         let id = chrome.active?;
         let Some((width, height)) = chrome.viewport.filter(|_| !chrome.fullscreen) else {
-            return Some((id, false, false, true));
+            return Some((id, ChromeSpec::plain(), PageEnvironment::idle()));
         };
         Some((
             id,
-            chrome.viewport_cutout,
-            chrome.viewport_home,
-            height >= width,
+            ChromeSpec {
+                cutout: chrome.viewport_cutout,
+                home: chrome.viewport_home,
+                installed: chrome.viewport_installed,
+                portrait: height >= width,
+                style: chrome.viewport_style.clone(),
+                platform: chrome.viewport_platform.clone(),
+                top: chrome.viewport_insets[0],
+                right: chrome.viewport_insets[1],
+                bottom: chrome.viewport_insets[2],
+                left: chrome.viewport_insets[3],
+            },
+            PageEnvironment {
+                installed: chrome.viewport_installed,
+                insets: chrome.viewport_insets,
+                max_insets: chrome.viewport_max_insets,
+            },
         ))
     });
-    let Some((id, cutout, home, portrait)) = plan else {
+    let Some((id, spec, env)) = plan else {
         return;
     };
-    let Some(webview) = page_view(app, id) else {
-        return;
-    };
-    let _ = webview.eval(device_chrome_script(cutout, home, portrait));
+    if let Some(webview) = page_view(app, id) {
+        let _ = webview.eval(device_chrome_script(&spec));
+    }
+    sync_page_environment(app, id, env);
 }
 
 /// DevTools started a screencast of this tab. The second view is stopped, and the page webview
@@ -3404,6 +3852,7 @@ fn set_active(app: &AppHandle, id: u32, collapse: bool) -> Result<(), String> {
     }
     place_pages(app, &window, false);
     emit_tabs(app);
+    apply_device_chrome(app, &window);
     focus_active(app, &window);
     Ok(())
 }
@@ -3693,6 +4142,7 @@ fn retire_webview(app: &AppHandle, label: Option<String>) {
     {
         crate::adblock::forget(id);
         crate::webview2::forget_early_script(id);
+        forget_page_environment(id);
         crate::downloads::forget_page_download(id);
         crate::microphone::forget_tab(app, id);
         crate::hang_guard::end_frozen_page(id);
@@ -8239,6 +8689,63 @@ mod tests {
             (x, y, width, height),
             (12, 36 + 12, 800 - 24, 900 - 36 - 24)
         );
+    }
+
+    fn installed_phone(portrait: bool) -> ChromeSpec {
+        ChromeSpec {
+            cutout: true,
+            home: true,
+            installed: true,
+            portrait,
+            style: "island".to_string(),
+            platform: "ios".to_string(),
+            top: if portrait { 59 } else { 0 },
+            right: if portrait { 0 } else { 59 },
+            bottom: if portrait { 34 } else { 21 },
+            left: if portrait { 0 } else { 59 },
+        }
+    }
+
+    #[test]
+    fn an_installed_phone_draws_a_status_bar_over_the_page() {
+        let html = chrome_markup(&installed_phone(true));
+        assert!(html.contains("ce-device-time"));
+        assert!(html.contains("ce-device-cutout"));
+        assert!(html.contains("ce-device-home"));
+        assert!(html.contains("9:41"));
+        let script = device_chrome_script(&installed_phone(true));
+        assert!(script.contains("display-mode"));
+        assert!(script.contains(", true, true)"));
+    }
+
+    #[test]
+    fn a_browser_page_keeps_the_notch_without_a_status_bar() {
+        let html = chrome_markup(&ChromeSpec {
+            cutout: true,
+            home: true,
+            installed: false,
+            portrait: true,
+            style: "notch".to_string(),
+            platform: "ios".to_string(),
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+        });
+        assert!(html.contains("border-radius:0 0 18px 18px"));
+        assert!(!html.contains("ce-device-time"));
+    }
+
+    #[test]
+    fn landscape_puts_the_island_on_the_side() {
+        let html = chrome_markup(&installed_phone(false));
+        assert!(html.contains("left:11px"));
+        assert!(html.contains("padding:0 59px 0 59px"));
+    }
+
+    #[test]
+    fn a_plain_window_has_no_device_chrome() {
+        assert!(chrome_markup(&ChromeSpec::plain()).is_empty());
     }
 
     #[test]

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
-import { setViewport } from "@/lib/browser-client";
+import { pushViewport } from "./devices";
 
 type ViewportHandlesProps = {
   width: number;
   height: number;
   cutout: boolean;
   homeBar: boolean;
+  installed: boolean;
 };
 
 /** Matches the device bar and the gutter reserved in the native page layout. */
@@ -112,10 +113,10 @@ function handleStyle(id: HandleId, frame: Frame): CSSProperties {
  * Chrome-style grips around a sized page. They sit in the gutter outside the native webview,
  * which paints above this UI. Dragging an edge resizes both sides so the page stays centered.
  */
-export function ViewportHandles({ width, height, cutout, homeBar }: ViewportHandlesProps) {
+export function ViewportHandles({ width, height, cutout, homeBar, installed }: ViewportHandlesProps) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const chrome = useRef({ cutout, homeBar });
-  chrome.current = { cutout, homeBar };
+  const chrome = useRef({ cutout, homeBar, installed });
+  chrome.current = { cutout, homeBar, installed };
   const areaRef = useRef({ width: 0, height: 0 });
   const drag = useRef<{ id: HandleId; x: number; y: number; width: number; height: number } | null>(null);
   const pending = useRef<{ width: number; height: number } | null>(null);
@@ -164,7 +165,7 @@ export function ViewportHandles({ width, height, cutout, homeBar }: ViewportHand
       if (!size) {
         return;
       }
-      void setViewport(size.width, size.height, chrome.current.cutout, chrome.current.homeBar);
+      void pushViewport(size.width, size.height, chrome.current.cutout, chrome.current.homeBar, chrome.current.installed);
     });
   };
 
@@ -185,7 +186,9 @@ export function ViewportHandles({ width, height, cutout, homeBar }: ViewportHand
     const box = deviceFrame(width, height, areaRef.current.width, areaRef.current.height);
     const next = resized(start.id, start.width, start.height, event.clientX - start.x, event.clientY - start.y, box.maxWidth, box.maxHeight);
     setLive(next);
-    void setViewport(next.width, next.height, chrome.current.cutout, chrome.current.homeBar).catch(() => setLive(null));
+    void pushViewport(next.width, next.height, chrome.current.cutout, chrome.current.homeBar, chrome.current.installed).catch(() =>
+      setLive(null),
+    );
   };
 
   const shown = live ?? { width, height };

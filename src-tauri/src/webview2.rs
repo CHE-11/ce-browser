@@ -4765,6 +4765,30 @@ pub fn security_state(webview: &Webview) -> Option<serde_json::Value> {
     serde_json::from_str(&state?).ok()
 }
 
+/// Safe-area insets and `display-mode`, so an installed app can be styled with `env()` and
+/// `(display-mode: standalone)`. Zeros and `browser` put a normal page back.
+pub fn apply_page_environment(
+    webview: &Webview,
+    _installed: bool,
+    insets: [u32; 4],
+    max_insets: [u32; 4],
+) -> std::result::Result<(), String> {
+    let timeout = Duration::from_secs(2);
+    let [top, right, bottom, left] = insets;
+    let [top_max, right_max, bottom_max, left_max] = max_insets;
+    let safe = format!(
+        r#"{{"insets":{{"top":{top},"topMax":{top_max},"right":{right},"rightMax":{right_max},"bottom":{bottom},"bottomMax":{bottom_max},"left":{left},"leftMax":{left_max}}}}}"#
+    );
+    call_cdp_json(
+        webview,
+        "Emulation.setSafeAreaInsetsOverride",
+        &safe,
+        timeout,
+        "viewport",
+    )?;
+    Ok(())
+}
+
 /// Stops a DevTools screencast and any device-metrics override so the page view is the real page.
 pub fn release_page_emulation(webview: &Webview) {
     let timeout = Duration::from_secs(2);

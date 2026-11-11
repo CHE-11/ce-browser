@@ -110,6 +110,8 @@ export type PageViewport = {
   cutout: boolean;
   /** Home indicator along the bottom of the page. */
   homeBar: boolean;
+  /** Installed standalone web app. The page extends under the status bar and home indicator. */
+  installed: boolean;
 };
 
 export type WindowTabs = {

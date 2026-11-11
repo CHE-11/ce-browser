@@ -7,8 +7,8 @@ import { SplitDivider } from "@/components/SplitDivider";
 import { VerticalTabs } from "../Tabs/VerticalTabs";
 import { PageLoading, pagePending, useShownPages } from "./PageLoading";
 import { ExtensionsToolbar } from "../Extensions/ExtensionsToolbar";
-import { ViewportBar } from "./ViewportBar";
-import { ViewportHandles } from "./ViewportHandles";
+import { ViewportBar } from "../DevTools/ViewportBar";
+import { ViewportHandles } from "../DevTools/ViewportHandles";
 
 type BrowserBodyProps = {
   snapshot: WindowTabsState;
@@ -57,6 +57,7 @@ export function BrowserBody({
               height={snapshot.viewport?.height ?? 0}
               cutout={snapshot.viewport?.cutout ?? true}
               homeBar={snapshot.viewport?.homeBar ?? true}
+              installed={snapshot.viewport?.installed ?? false}
               devtoolsTabId={devtools ? snapshot.activeId : null}
             />
           ) : null}
@@ -66,6 +67,7 @@ export function BrowserBody({
               height={snapshot.viewport.height}
               cutout={snapshot.viewport.cutout}
               homeBar={snapshot.viewport.homeBar}
+              installed={snapshot.viewport.installed}
             />
           ) : null}
           {splitShown && split

@@ -1,37 +1,24 @@
 import { RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { clearViewport, openDevtools, setViewport } from "@/lib/browser-client";
+import { clearViewport, openDevtools } from "@/lib/browser-client";
+import { DEVICE_GROUPS, DEVICES, deviceFor, pushViewport, viewportEnvironment } from "./devices";
 
 type ViewportBarProps = {
   width: number;
   height: number;
   cutout: boolean;
   homeBar: boolean;
+  /** Standalone installed web app, instead of a page in a mobile browser. */
+  installed: boolean;
   /** Active tab, used to close the docked tools. Null hides the button. */
   devtoolsTabId: number | null;
 };
-
-const PRESETS = [
-  { id: "full", label: "Full size", width: 0, height: 0, cutout: false, home: false },
-  { id: "iphone-16", label: "iPhone 16", width: 393, height: 852, cutout: true, home: true },
-  { id: "iphone-se", label: "iPhone SE", width: 375, height: 667, cutout: false, home: false },
-  { id: "pixel-9", label: "Pixel 9", width: 412, height: 892, cutout: true, home: true },
-  { id: "ipad", label: "iPad", width: 820, height: 1180, cutout: false, home: true },
-  { id: "laptop", label: "Laptop", width: 1280, height: 800, cutout: false, home: false },
-] as const;
 
 function presetFor(width: number, height: number) {
   if (width <= 0 || height <= 0) {
     return "full";
   }
-  return (
-    PRESETS.find(
-      (preset) =>
-        preset.width > 0 &&
-        ((preset.width === width && preset.height === height) ||
-          (preset.width === height && preset.height === width)),
-    )?.id ?? "custom"
-  );
+  return deviceFor(width, height)?.id ?? "custom";
 }
 
 /**
@@ -41,7 +28,7 @@ function presetFor(width: number, height: number) {
 /** Matches the device bar height the page view is placed under. */
 const BAR_HEIGHT = 36;
 
-export function ViewportBar({ width, height, cutout, homeBar, devtoolsTabId }: ViewportBarProps) {
+export function ViewportBar({ width, height, cutout, homeBar, installed, devtoolsTabId }: ViewportBarProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const widthFocused = useRef(false);
   const heightFocused = useRef(false);
@@ -80,12 +67,18 @@ export function ViewportBar({ width, height, cutout, homeBar, devtoolsTabId }: V
     }
   }, [full, width, height, frame]);
 
-  const commit = (nextWidth: number, nextHeight: number, nextCutout = cutout, nextHome = homeBar) => {
+  const commit = (
+    nextWidth: number,
+    nextHeight: number,
+    nextCutout = cutout,
+    nextHome = homeBar,
+    nextInstalled = installed,
+  ) => {
     if (!Number.isFinite(nextWidth) || !Number.isFinite(nextHeight) || nextWidth <= 0 || nextHeight <= 0) {
       void clearViewport();
       return;
     }
-    void setViewport(Math.round(nextWidth), Math.round(nextHeight), nextCutout, nextHome);
+    void pushViewport(nextWidth, nextHeight, nextCutout, nextHome, nextInstalled);
   };
 
   const commitDraft = () => {
@@ -98,6 +91,11 @@ export function ViewportBar({ width, height, cutout, homeBar, devtoolsTabId }: V
   };
 
   const sized = width > 0 && height > 0;
+  const environment = viewportEnvironment(width, height, installed, cutout, homeBar);
+  const safe = environment.insets;
+  const installedTitle = installed
+    ? `Installed web app. Safe area ${safe.top} ${safe.right} ${safe.bottom} ${safe.left}. Standalone display mode, with the status bar and cutout over the page.`
+    : "Mobile web app installed. Full screen, with a status bar, cutout, and safe-area insets instead of a browser page.";
 
   return (
     <div
@@ -112,19 +110,30 @@ export function ViewportBar({ width, height, cutout, homeBar, devtoolsTabId }: V
       <select
         id="viewport-device"
         aria-label="Device"
-        className="h-7 max-w-40 rounded-md border border-zinc-700 bg-zinc-900 px-2 text-xs text-zinc-100"
+        className="h-7 max-w-48 rounded-md border border-zinc-700 bg-zinc-900 px-2 text-xs text-zinc-100"
         value={preset}
         onChange={(event) => {
-          const next = PRESETS.find((item) => item.id === event.target.value);
+          if (event.target.value === "full") {
+            void clearViewport();
+            return;
+          }
+          const next = DEVICES.find((item) => item.id === event.target.value);
           if (next) {
             commit(next.width, next.height, next.cutout, next.home);
           }
         }}
       >
-        {PRESETS.map((item) => (
-          <option id={`viewport-device-${item.id}`} key={item.id} value={item.id}>
-            {item.label}
-          </option>
+        <option id="viewport-device-full" value="full">
+          Full size
+        </option>
+        {DEVICE_GROUPS.map((group) => (
+          <optgroup id={`viewport-devices-${group.toLowerCase()}`} key={group} label={group}>
+            {DEVICES.filter((item) => item.group === group).map((item) => (
+              <option id={`viewport-device-${item.id}`} key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </optgroup>
         ))}
         <option id="viewport-device-custom" value="custom">
           Custom
@@ -210,6 +219,17 @@ export function ViewportBar({ width, height, cutout, homeBar, devtoolsTabId }: V
         onClick={() => commit(width, height, cutout, !homeBar)}
       >
         Home bar
+      </button>
+      <button
+        id="viewport-installed"
+        type="button"
+        aria-pressed={installed}
+        disabled={!sized}
+        title={installedTitle}
+        className="h-7 rounded-md px-2 text-xs text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 aria-pressed:bg-zinc-700"
+        onClick={() => commit(width, height, cutout, homeBar, !installed)}
+      >
+        Installed
       </button>
       </div>
       {devtoolsTabId !== null ? (

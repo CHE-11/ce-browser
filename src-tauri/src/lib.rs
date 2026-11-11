@@ -1973,6 +1973,17 @@ async fn set_viewport(
     height: u32,
     cutout: bool,
     home_bar: bool,
+    installed: bool,
+    inset_top: u32,
+    inset_right: u32,
+    inset_bottom: u32,
+    inset_left: u32,
+    max_inset_top: u32,
+    max_inset_right: u32,
+    max_inset_bottom: u32,
+    max_inset_left: u32,
+    cutout_style: String,
+    platform: String,
 ) {
     tabs::set_viewport(
         &app,
@@ -1981,6 +1992,16 @@ async fn set_viewport(
         height,
         cutout,
         home_bar,
+        installed,
+        [inset_top, inset_right, inset_bottom, inset_left],
+        [
+            max_inset_top,
+            max_inset_right,
+            max_inset_bottom,
+            max_inset_left,
+        ],
+        &cutout_style,
+        &platform,
     );
 }
 

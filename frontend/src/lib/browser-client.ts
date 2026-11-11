@@ -651,8 +651,32 @@ export function openDefaultApps() {
   return invoke<void>("open_default_apps");
 }
 
-export function setViewport(width: number, height: number, cutout: boolean, homeBar: boolean) {
-  return invoke<void>("set_viewport", { width, height, cutout, homeBar });
+export function setViewport(viewport: {
+  width: number;
+  height: number;
+  cutout: boolean;
+  homeBar: boolean;
+  /** Standalone installed app, with safe-area insets and no browser chrome. */
+  installed: boolean;
+  insets: { top: number; right: number; bottom: number; left: number };
+  maxInsets: { top: number; right: number; bottom: number; left: number };
+  /** `none`, `notch`, `island`, or `punch`. */
+  cutoutStyle: string;
+  /** `ios`, `android`, or `desktop`. */
+  platform: string;
+}) {
+  const { insets, maxInsets, ...rest } = viewport;
+  return invoke<void>("set_viewport", {
+    ...rest,
+    insetTop: insets.top,
+    insetRight: insets.right,
+    insetBottom: insets.bottom,
+    insetLeft: insets.left,
+    maxInsetTop: maxInsets.top,
+    maxInsetRight: maxInsets.right,
+    maxInsetBottom: maxInsets.bottom,
+    maxInsetLeft: maxInsets.left,
+  });
 }
 
 export function clearViewport() {
