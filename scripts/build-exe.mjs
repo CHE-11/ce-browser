@@ -16,7 +16,7 @@ const installer = join(
 );
 
 // The updater only trusts installers signed with the key whose public half is in tauri.conf.json.
-const keyFile = "S:/_keys_/ce-browser.key";
+const keyFile = "S:/_keys_/ce-browser/ce-browser.key";
 if (!existsSync(keyFile)) {
   console.error(`No signing key at ${keyFile}`);
   process.exit(1);
