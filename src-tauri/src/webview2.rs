@@ -2931,10 +2931,24 @@ fn attach_adblock(
                     args.SetResponse(&response)?;
                     return Ok(());
                 }
-                if let Ok(request) = args.Request() {
-                    if let Ok(headers) = request.Headers() {
-                        strip_webview_client_hints(&headers);
-                        apply_referrer(&request_app, &page, &uri, &headers);
+                // A service worker fetch that has its headers read comes back as a cache miss,
+                // and Gmail then drops the icon. Blocking already happened above.
+                if !service_worker_request(&args) {
+                    let hints = client_hints_matter(context);
+                    let referrer = hints
+                        || crate::page_rules::control_for(&request_app, &page).referrer
+                            != "default";
+                    if hints || referrer {
+                        if let Ok(request) = args.Request() {
+                            if let Ok(headers) = request.Headers() {
+                                if hints {
+                                    strip_webview_client_hints(&headers);
+                                }
+                                if referrer {
+                                    apply_referrer(&request_app, &page, &uri, &headers);
+                                }
+                            }
+                        }
                     }
                 }
                 Ok(())
@@ -3443,6 +3457,36 @@ fn form_escape(value: &str) -> String {
         }
     }
     out
+}
+
+/// Images, stylesheets, fonts, and media keep the headers WebView2 gave them.
+///
+/// `GetHeader` marks the request modified. A modified request skips the HTTP cache, so
+/// Gmail's service worker fails the icon with `ERR_CACHE_MISS` and the picture never paints.
+/// Scripts and documents still need the WebView2 brand removed: Prime Video's player CDN
+/// answers 403 when `Sec-CH-UA` names it.
+fn client_hints_matter(context: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> bool {
+    !matches!(
+        context,
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE
+            | COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET
+            | COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA
+            | COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT
+            | COREWEBVIEW2_WEB_RESOURCE_CONTEXT_TEXT_TRACK
+            | COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MANIFEST
+            | COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING
+            | COREWEBVIEW2_WEB_RESOURCE_CONTEXT_CSP_VIOLATION_REPORT
+    )
+}
+
+/// The fetch a service worker makes for a cached icon. Touching it breaks `respondWith`.
+fn service_worker_request(args: &ICoreWebView2WebResourceRequestedEventArgs) -> bool {
+    let Ok(args) = args.cast::<ICoreWebView2WebResourceRequestedEventArgs2>() else {
+        return false;
+    };
+    let mut kind = COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS::default();
+    unsafe { args.RequestedSourceKind(&mut kind) }.is_ok()
+        && kind.contains(COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_SERVICE_WORKER)
 }
 
 /// Drops the WebView2 client-hint brand before the request leaves.
@@ -5182,6 +5226,37 @@ mod tests {
         assert!(!declares_dark_scheme("", ["html.dark"]));
         assert!(!declares_dark_scheme("", ["body:hover"]));
         assert!(!declares_dark_scheme("", [".theme-dark"]));
+    }
+
+    #[test]
+    fn cached_icons_keep_their_request_headers() {
+        use webview2_com::Microsoft::Web::WebView2::Win32::{
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH,
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE,
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT,
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET,
+        };
+        assert!(!super::client_hints_matter(
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_IMAGE
+        ));
+        assert!(!super::client_hints_matter(
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_STYLESHEET
+        ));
+        assert!(!super::client_hints_matter(
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FONT
+        ));
+        assert!(!super::client_hints_matter(
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_MEDIA
+        ));
+        assert!(super::client_hints_matter(
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_SCRIPT
+        ));
+        assert!(super::client_hints_matter(
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_DOCUMENT
+        ));
+        assert!(super::client_hints_matter(
+            COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH
+        ));
     }
 
     #[test]

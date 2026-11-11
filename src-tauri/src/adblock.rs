@@ -13,6 +13,21 @@ const DOMAINS: &str = include_str!("../resources/adblock/domains.txt");
 const PATHS: &str = include_str!("../resources/adblock/paths.txt");
 const EARLY_JS: &str = include_str!("../resources/adblock/early.js");
 const COSMETIC_CSS: &str = include_str!("../resources/adblock/cosmetic.css");
+/// Hosts whose own scripts are the Google bar, not a third-party tag. `names` in the
+/// document-start script already includes parent domains, so `mail.google.com` matches `google.com`.
+const FIRST_PARTY: &[&str] = &[
+    "google.com",
+    "gmail.com",
+    "youtube.com",
+    "youtube-nocookie.com",
+    "ytimg.com",
+    "googlevideo.com",
+    "gstatic.com",
+    "googleapis.com",
+    "googleusercontent.com",
+    "ggpht.com",
+    "withgoogle.com",
+];
 const STATS_DELAY: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Serialize)]
@@ -408,7 +423,7 @@ pub fn early_stamp() -> String {
 }
 
 /// Document-start script: Google Analytics opt-out, ad stubs, and the cosmetic stylesheet.
-/// Paused sites and non-http pages leave the page alone.
+/// Paused sites, non-http pages, and Google's own hosts leave the page alone.
 pub fn early_script() -> String {
     let (enabled, paused) = early_parts();
     let paused = serde_json::to_string(&paused).unwrap_or_else(|_| "[]".into());
@@ -417,13 +432,27 @@ pub fn early_script() -> String {
         .replace("__CE_ENABLED__", if enabled { "true" } else { "false" })
         .replace("__CE_PAUSED__", &paused)
         .replace("__CE_CSS__", &css)
+        .replace("__CE_FIRST_PARTY__", &first_party_json())
+}
+
+fn first_party_json() -> String {
+    serde_json::to_string(FIRST_PARTY).unwrap_or_else(|_| "[]".into())
 }
 
 /// Script that adds the element-hiding stylesheet to the current document.
+/// Google's own pages are skipped: the same rules hide pieces of the Google bar.
 pub fn cosmetic_script() -> String {
     let css = serde_json::to_string(COSMETIC_CSS).unwrap_or_else(|_| "\"\"".into());
+    let hosts = first_party_json();
     format!(
-        "(() => {{ const mount = () => {{ if (document.getElementById('ce-adblock')) return true; \
+        "(() => {{ const host = String(location.hostname || '').trim().replace(/\\.+$/, '').toLowerCase(); \
+         const key = host.startsWith('www.') && host.length > 4 ? host.slice(4) : host; \
+         const firstParty = {hosts}; \
+         const names = []; let current = key; while (current) {{ names.push(current); \
+         const dot = current.indexOf('.'); if (dot === -1) break; const parent = current.slice(dot + 1); \
+         if (!parent.includes('.')) break; current = parent; }} \
+         if (names.some((name) => firstParty.includes(name))) return; \
+         const mount = () => {{ if (document.getElementById('ce-adblock')) return true; \
          const root = document.head || document.documentElement; if (!root) return false; \
          const style = document.createElement('style'); style.id = 'ce-adblock'; \
          style.textContent = {css}; root.appendChild(style); return true; }}; \
@@ -527,7 +556,16 @@ mod tests {
         let script = early_script();
         assert!(script.contains("_gaUserPrefs"));
         assert!(script.contains("ga-disable-"));
+        assert!(script.contains("google.com"));
+        assert!(script.contains("__ceEarly"));
         assert!(!script.contains("__CE_"));
+    }
+
+    #[test]
+    fn the_cosmetic_script_leaves_google_pages_alone() {
+        let script = cosmetic_script();
+        assert!(script.contains("google.com"));
+        assert!(script.contains("ce-adblock"));
     }
 
     #[test]

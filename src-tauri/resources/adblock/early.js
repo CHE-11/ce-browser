@@ -18,6 +18,14 @@
     current = parent;
   }
   if (names.some((name) => paused.includes(name))) return;
+  // A second pass from ContentLoading must not put the stubs back. The page may already
+  // have replaced them, and Gmail's bar gives up if they change again while it is loading.
+  if (window.__ceEarly) return;
+  window.__ceEarly = true;
+  // mail.google.com waits until window.gbar.qfgq exists. These stubs swallow the
+  // assignments Gmail and the Google bar use to finish that load, so the icons never paint.
+  const firstParty = __CE_FIRST_PARTY__;
+  if (names.some((name) => firstParty.includes(name))) return;
 
   const prefs = { ioo: () => true };
   try {
