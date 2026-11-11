@@ -1125,10 +1125,21 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           id="address-update"
           label={update.installing ? "Downloading the update…" : `Restart to update to ${update.available}`}
           disabled={update.installing}
-          className="text-sky-300 hover:bg-sky-500/20 hover:text-sky-200"
+          className="relative bg-sky-500 text-white ring-2 ring-sky-300 shadow-[0_0_12px_var(--app-sky-400)] hover:bg-sky-400 hover:text-white disabled:bg-sky-600 disabled:opacity-100"
           onClick={() => void installUpdate()}
         >
-          <RefreshCw id="address-update-icon" aria-hidden className={update.installing ? "animate-spin" : undefined} />
+          <RefreshCw
+            id="address-update-icon"
+            aria-hidden
+            strokeWidth={2.75}
+            className={update.installing ? "animate-spin" : undefined}
+          />
+          {update.installing ? null : (
+            <span id="address-update-badge" className="pointer-events-none absolute top-0.5 right-0.5 flex size-2.5">
+              <span id="address-update-badge-ping" className="absolute inline-flex size-full animate-ping rounded-full bg-amber-300 opacity-75" />
+              <span id="address-update-badge-dot" className="relative inline-flex size-2.5 rounded-full bg-amber-400 ring-2 ring-zinc-900" />
+            </span>
+          )}
         </IconButton>
       ) : null}
 
