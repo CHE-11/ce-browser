@@ -1531,7 +1531,58 @@ pub fn round_popup(
         let height = (height * scale).round().max(1.0) as i32;
         let radius = (radius.max(1.0) * scale).round().max(1.0) as i32;
         apply_region(hwnd, radius, width, height);
+        note_rounded(hwnd);
     });
+}
+
+/// Puts a previously rounded child webview back to a square. A window that was never
+/// rounded is left alone, so ordinary resizes do not repaint the page.
+pub fn square_popup(webview: &Webview, main: isize) {
+    let _ = webview.with_webview(move |platform| {
+        let main = HWND(main as *mut std::ffi::c_void);
+        let mut hwnd = HWND(std::ptr::null_mut());
+        if unsafe {
+            platform
+                .controller()
+                .ParentWindow(std::ptr::addr_of_mut!(hwnd))
+        }
+        .is_err()
+            || hwnd.0.is_null()
+            || hwnd == main
+            || !take_rounded(hwnd)
+        {
+            return;
+        }
+        clear_region(hwnd);
+        let _ = unsafe { EnumChildWindows(Some(hwnd), Some(clear_child_region), LPARAM(0)) };
+    });
+}
+
+fn rounded_hwnds() -> &'static Mutex<HashSet<isize>> {
+    static ROUNDED: std::sync::OnceLock<Mutex<HashSet<isize>>> = std::sync::OnceLock::new();
+    ROUNDED.get_or_init(Default::default)
+}
+
+fn note_rounded(hwnd: HWND) {
+    if let Ok(mut rounded) = rounded_hwnds().lock() {
+        rounded.insert(hwnd.0 as isize);
+    }
+}
+
+fn take_rounded(hwnd: HWND) -> bool {
+    rounded_hwnds()
+        .lock()
+        .map(|mut rounded| rounded.remove(&(hwnd.0 as isize)))
+        .unwrap_or(false)
+}
+
+fn clear_region(hwnd: HWND) {
+    let _ = unsafe { SetWindowRgn(hwnd, None, true) };
+}
+
+unsafe extern "system" fn clear_child_region(child: HWND, _param: LPARAM) -> BOOL {
+    clear_region(child);
+    BOOL(1)
 }
 
 /// Reads the document's scroll size. The callback runs on the UI thread once the script finishes.

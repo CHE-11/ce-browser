@@ -237,6 +237,7 @@ export function pushViewport(
   cutout: boolean,
   home: boolean,
   installed: boolean,
+  keyboard: boolean,
 ) {
   const roundedWidth = Math.round(width);
   const roundedHeight = Math.round(height);
@@ -247,6 +248,7 @@ export function pushViewport(
     cutout,
     homeBar: home,
     installed,
+    keyboard,
     insets: environment.insets,
     maxInsets: environment.maxInsets,
     cutoutStyle: environment.style,

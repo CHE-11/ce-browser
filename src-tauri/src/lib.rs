@@ -1974,6 +1974,7 @@ async fn set_viewport(
     cutout: bool,
     home_bar: bool,
     installed: bool,
+    keyboard: bool,
     inset_top: u32,
     inset_right: u32,
     inset_bottom: u32,
@@ -1993,6 +1994,7 @@ async fn set_viewport(
         cutout,
         home_bar,
         installed,
+        keyboard,
         [inset_top, inset_right, inset_bottom, inset_left],
         [
             max_inset_top,
@@ -2008,6 +2010,11 @@ async fn set_viewport(
 #[tauri::command]
 async fn clear_viewport(app: AppHandle, window: Window) {
     tabs::clear_viewport(&app, &browser_window(&window));
+}
+
+#[tauri::command]
+fn set_viewport_bar(app: AppHandle, window: Window, height: f64) {
+    tabs::set_viewport_bar(&app, &browser_window(&window), height);
 }
 
 #[tauri::command]
@@ -3236,6 +3243,7 @@ pub fn run() {
             open_default_apps,
             set_viewport,
             clear_viewport,
+            set_viewport_bar,
             list_rewrite_rules,
             save_rewrite_rules,
             installed_browsers,

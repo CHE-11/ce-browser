@@ -17,72 +17,113 @@ use crate::webview2;
 
 pub const LABEL_PREFIX: &str = "devtools-";
 
-/// Runs before the docked inspector's own scripts. Seeds Elements as the open panel, then
-/// moves off Welcome if Edge selects it after the release notes load. A panel the user already
-/// picked in this session is left as it is. The page stays hidden until that panel is showing.
+/// Runs before the docked inspector's own scripts. The inspector origin is the debugging port,
+/// and that port changes every launch, so Edge treats every open as a first run and selects
+/// Welcome. The stored choice is Elements unless this origin already has another panel. Welcome
+/// is closed again if Edge selects it after release notes load. A panel the user already picked
+/// is left as it is. The page stays hidden until a real panel is showing.
+///
+/// Current Edge puts `role="tab"` on the title span and `aria-selected` on
+/// `.tabbed-pane-header-tab`. The header id is `tab-` plus the tool id (`welcome`,
+/// `release-note`, `whats-new`).
 pub const PREFER_ELEMENTS_SCRIPT: &str = r#"(function () {
   var root = document.documentElement;
   if (!root) return;
-  try {
-    var selected = localStorage.getItem("panel-selected-tab");
-    if (!selected || selected === '"welcome"' || selected === "welcome") {
-      localStorage.setItem("panel-selected-tab", '"elements"');
-    }
-    var tabs = {};
-    try { tabs = JSON.parse(localStorage.getItem("closeable-tabs") || "{}"); } catch (e) { tabs = {}; }
-    if (!tabs || typeof tabs !== "object") tabs = {};
-    if (tabs.welcome !== false) {
-      tabs.welcome = false;
-      localStorage.setItem("closeable-tabs", JSON.stringify(tabs));
-    }
-    var notes = {};
-    try { notes = JSON.parse(localStorage.getItem("cloud-release-notes") || "{}"); } catch (e) { notes = {}; }
-    if (!notes || typeof notes !== "object") notes = {};
-    if (notes.shouldOpenWelcome !== false) {
-      notes.shouldOpenWelcome = false;
-      localStorage.setItem("cloud-release-notes", JSON.stringify(notes));
-    }
-  } catch (e) {}
+  var WELCOME = { welcome: 1, "release-note": 1, "whats-new": 1 };
+  var remembered = "";
+  try { seed(); } catch (e) {}
   root.style.visibility = "hidden";
   var started = Date.now();
-  var timer = setInterval(function () {
-    var name = selectedTab();
-    if (name === "welcome") {
-      var elements = findTab("elements");
-      if (elements) elements.click();
-      if (Date.now() - started > 4000) reveal();
+  var timer = setInterval(scan, 50);
+  function scan() {
+    try { seed(); } catch (e) {}
+    var landing = null;
+    var welcome = null;
+    var selected = false;
+    var prefer = remembered || "elements";
+    headers(function (header) {
+      if (toolId(header) === prefer) landing = header;
+      if (!isSelected(header)) return;
+      selected = true;
+      if (isWelcome(header)) welcome = header;
+    });
+    if (welcome && landing && welcome !== landing) {
+      landing.click();
+      closeTab(welcome);
       return;
     }
-    if (name || Date.now() - started > 4000) reveal();
-  }, 50);
+    if ((selected && !welcome) || Date.now() - started > 8000) reveal();
+  }
   function reveal() {
     clearInterval(timer);
     root.style.visibility = "";
   }
-  function selectedTab() {
-    var tab = null;
-    walk(function (node) {
-      if (tab) return;
-      if (node.getAttribute && node.getAttribute("role") === "tab" && node.getAttribute("aria-selected") === "true") {
-        tab = node;
+  function seed() {
+    var panel = unquote(localStorage.getItem("panel-selected-tab") || "");
+    if (panel && !WELCOME[panel]) remembered = panel;
+    if (!panel || WELCOME[panel]) {
+      localStorage.setItem("panel-selected-tab", JSON.stringify(remembered || "elements"));
+    }
+    var tabs = objectSetting("closeable-tabs");
+    var tabsChanged = false;
+    for (var id in WELCOME) {
+      if (tabs[id] !== false) {
+        tabs[id] = false;
+        tabsChanged = true;
       }
-    });
-    return tab ? tabName(tab) : "";
+    }
+    if (tabsChanged) localStorage.setItem("closeable-tabs", JSON.stringify(tabs));
+    var notes = objectSetting("cloud-release-notes");
+    if (notes.shouldOpenWelcome !== false) {
+      notes.shouldOpenWelcome = false;
+      localStorage.setItem("cloud-release-notes", JSON.stringify(notes));
+    }
+    bump("release-note-version-seen");
+    bump("releaseNoteVersionSeen");
+    if (localStorage.getItem("help.show-release-note") !== "false") {
+      localStorage.setItem("help.show-release-note", "false");
+    }
   }
-  function findTab(name) {
-    var found = null;
+  function objectSetting(key) {
+    try {
+      var value = JSON.parse(localStorage.getItem(key) || "{}");
+      if (value && typeof value === "object") return value;
+    } catch (e) {}
+    return {};
+  }
+  function bump(key) {
+    var seen = parseInt(unquote(localStorage.getItem(key) || ""), 10);
+    if (!seen || seen < 1000) localStorage.setItem(key, "1000");
+  }
+  function unquote(value) {
+    return String(value).replace(/^"|"$/g, "");
+  }
+  function headers(visit) {
     walk(function (node) {
-      if (found) return;
-      if (node.getAttribute && node.getAttribute("role") === "tab" && tabName(node) === name) found = node;
+      if (node.classList && node.classList.contains("tabbed-pane-header-tab")) visit(node);
     });
-    return found;
   }
-  function tabName(node) {
-    var title = node.querySelector && node.querySelector(".tabbed-pane-header-tab-title");
-    var text = (title && title.textContent) || node.getAttribute("aria-label") || "";
-    if (!text && node.shadowRoot) text = node.shadowRoot.textContent || "";
-    if (!text) text = node.textContent || "";
-    return text.replace(/\s+/g, " ").trim().toLowerCase().split(" ")[0];
+  function toolId(header) {
+    var id = header.id || "";
+    if (id.indexOf("tab-") === 0) return id.slice(4);
+    return labelOf(header).split(" ")[0];
+  }
+  function labelOf(header) {
+    var title = header.querySelector && header.querySelector(".tabbed-pane-header-tab-title");
+    var text = (title && title.textContent) || header.getAttribute("aria-label") || header.textContent || "";
+    return text.replace(/\s+/g, " ").trim().toLowerCase();
+  }
+  function isWelcome(header) {
+    if (WELCOME[toolId(header)]) return true;
+    var label = labelOf(header);
+    return label.indexOf("what's new") === 0 || label.indexOf("whats new") === 0;
+  }
+  function isSelected(header) {
+    return header.getAttribute("aria-selected") === "true" || header.classList.contains("selected");
+  }
+  function closeTab(header) {
+    var button = header.querySelector(".tabbed-pane-close-button, .close-button, dt-close-button");
+    if (button) button.click();
   }
   function walk(visit) {
     var stack = [document];
@@ -395,8 +436,10 @@ fn replace_preferences(path: &Path, temporary: &Path) -> std::io::Result<()> {
 fn local_inspector(port: u16, target_id: &str) -> String {
     // `inspector.html` registers the screencast app, which draws a second copy of the page
     // inside the tools. `devtools_app.html` is the tools only; the page stays the real webview.
+    // `panel=elements` is the frontend's own initial-panel parameter. Welcome can still
+    // replace it after release notes load; `PREFER_ELEMENTS_SCRIPT` puts Elements back.
     format!(
-        "http://127.0.0.1:{port}/devtools/devtools_app.html?ws=127.0.0.1:{port}/devtools/page/{target_id}"
+        "http://127.0.0.1:{port}/devtools/devtools_app.html?panel=elements&ws=127.0.0.1:{port}/devtools/page/{target_id}"
     )
 }
 
@@ -420,7 +463,7 @@ mod tests {
         let url = local_inspector(9, "abc");
         assert_eq!(
             url,
-            "http://127.0.0.1:9/devtools/devtools_app.html?ws=127.0.0.1:9/devtools/page/abc"
+            "http://127.0.0.1:9/devtools/devtools_app.html?panel=elements&ws=127.0.0.1:9/devtools/page/abc"
         );
         assert!(!url.contains("aka.ms"));
     }

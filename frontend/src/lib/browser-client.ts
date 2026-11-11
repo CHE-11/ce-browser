@@ -658,6 +658,8 @@ export function setViewport(viewport: {
   homeBar: boolean;
   /** Standalone installed app, with safe-area insets and no browser chrome. */
   installed: boolean;
+  /** iOS keyboard over the page while a text field is focused. */
+  keyboard: boolean;
   insets: { top: number; right: number; bottom: number; left: number };
   maxInsets: { top: number; right: number; bottom: number; left: number };
   /** `none`, `notch`, `island`, or `punch`. */
@@ -681,6 +683,11 @@ export function setViewport(viewport: {
 
 export function clearViewport() {
   return invoke<void>("clear_viewport");
+}
+
+/** Device bar height in CSS pixels, after its controls wrap. */
+export function setViewportBar(height: number) {
+  return invoke<void>("set_viewport_bar", { height });
 }
 
 export function listRewriteRules() {

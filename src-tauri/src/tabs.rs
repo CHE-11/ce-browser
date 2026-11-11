@@ -195,6 +195,8 @@ pub struct PageViewport {
     pub home_bar: bool,
     /// Installed standalone web app. The page extends under the status bar and home indicator.
     pub installed: bool,
+    /// iOS keyboard over the page while a text field is focused.
+    pub keyboard: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -419,6 +421,37 @@ pub enum PanelEdge {
     Left,
 }
 
+/// Device preview for one tab. It is shown only while that tab has DevTools open.
+#[derive(Clone, PartialEq, Eq)]
+struct TabViewport {
+    size: (u32, u32),
+    cutout: bool,
+    home: bool,
+    installed: bool,
+    keyboard: bool,
+    insets: [u32; 4],
+    max_insets: [u32; 4],
+    style: String,
+    platform: String,
+}
+
+impl TabViewport {
+    /// A screencast size, before the device bar has chosen a phone or tablet.
+    fn sized(size: (u32, u32)) -> Self {
+        Self {
+            size,
+            cutout: true,
+            home: true,
+            installed: false,
+            keyboard: false,
+            insets: [0; 4],
+            max_insets: [0; 4],
+            style: "none".to_string(),
+            platform: "desktop".to_string(),
+        }
+    }
+}
+
 struct WindowChrome {
     label: String,
     ui: String,
@@ -449,22 +482,13 @@ struct WindowChrome {
     workspace: String,
     /// Active tab of each workspace this window has left, so switching back returns to it.
     active_by_workspace: HashMap<String, u32>,
-    /// CSS size of the page view. Empty uses the whole page area.
-    viewport: Option<(u32, u32)>,
-    viewport_cutout: bool,
-    viewport_home: bool,
-    /// Standalone installed app. Safe-area insets and display-mode follow this.
-    viewport_installed: bool,
-    /// `top`, `right`, `bottom`, `left` in CSS pixels. Zero for a normal page.
-    viewport_insets: [u32; 4],
-    viewport_max_insets: [u32; 4],
-    /// `none`, `notch`, `island`, or `punch`.
-    viewport_style: String,
-    /// `ios`, `android`, or `desktop`.
-    viewport_platform: String,
-    /// Screencast frames just after the bar was closed are the same session, not a new request.
-    screencast_suppress: bool,
-    screencast_at: Instant,
+    /// Device preview for each tab that has turned it on. Another tab stays full size until
+    /// its own DevTools opens a preview.
+    viewports: HashMap<u32, TabViewport>,
+    /// Tabs whose preview was just closed. A late screencast frame must not open it again.
+    viewport_quiet: HashMap<u32, Instant>,
+    /// Height of the device bar in CSS pixels. It grows when the controls wrap.
+    viewport_bar: f64,
     /// Resident bookmarks tab for this window. Its page stays loaded while shelved.
     bookmarks: Option<u32>,
     /// The window is closing, so the resident bookmarks tab is destroyed with the rest.
@@ -492,18 +516,9 @@ impl WindowChrome {
             devtools: DevtoolsState::new(),
             workspace: DEFAULT_WORKSPACE.to_string(),
             active_by_workspace: HashMap::new(),
-            viewport: None,
-            viewport_cutout: true,
-            viewport_home: true,
-            viewport_installed: false,
-            viewport_insets: [0; 4],
-            viewport_max_insets: [0; 4],
-            viewport_style: "none".to_string(),
-            viewport_platform: "desktop".to_string(),
-            screencast_suppress: false,
-            screencast_at: Instant::now()
-                .checked_sub(Duration::from_secs(60))
-                .unwrap_or_else(Instant::now),
+            viewports: HashMap::new(),
+            viewport_quiet: HashMap::new(),
+            viewport_bar: VIEWPORT_BAR,
             bookmarks: None,
             discarding: false,
         }
@@ -827,13 +842,7 @@ impl TabsState {
                     }),
                     devtools: published_devtools(chrome),
                     peek_url: None,
-                    viewport: chrome.viewport.map(|(width, height)| PageViewport {
-                        width,
-                        height,
-                        cutout: chrome.viewport_cutout,
-                        home_bar: chrome.viewport_home,
-                        installed: chrome.viewport_installed,
-                    }),
+                    viewport: published_viewport(chrome),
                     agent_panel: chrome.side == SidePanel::Agent && chrome.agent_panel > 0.0,
                     automation_panel: chrome.side == SidePanel::Automations
                         && chrome.agent_panel > 0.0,
@@ -939,6 +948,41 @@ fn published_devtools(chrome: &WindowChrome) -> Option<DevtoolsDock> {
         ratio: chrome.devtools.ratio,
         visible: chrome.devtools.visible_for(Some(active)) && !chrome.fullscreen,
     })
+}
+
+/// Device size stored for `id`, and only while that tab has DevTools open.
+fn tab_viewport(chrome: &WindowChrome, id: u32) -> Option<&TabViewport> {
+    if !chrome.devtools.wants(id) {
+        return None;
+    }
+    chrome.viewports.get(&id)
+}
+
+/// Preview drawn for the active tab. Fullscreen uses the whole page.
+fn shown_viewport(chrome: &WindowChrome) -> Option<&TabViewport> {
+    if chrome.fullscreen {
+        return None;
+    }
+    chrome.active.and_then(|id| tab_viewport(chrome, id))
+}
+
+fn published_viewport(chrome: &WindowChrome) -> Option<PageViewport> {
+    let viewport = chrome.active.and_then(|id| tab_viewport(chrome, id))?;
+    let (width, height) = viewport.size;
+    Some(PageViewport {
+        width,
+        height,
+        cutout: viewport.cutout,
+        home_bar: viewport.home,
+        installed: viewport.installed,
+        keyboard: viewport.keyboard,
+    })
+}
+
+/// Drops one tab's preview and ignores the screencast frames that follow the close.
+fn quiet_viewport(chrome: &mut WindowChrome, id: u32) {
+    chrome.viewports.remove(&id);
+    chrome.viewport_quiet.insert(id, Instant::now());
 }
 
 pub fn snapshot(app: &AppHandle) -> TabsSnapshot {
@@ -2564,9 +2608,11 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
         if let Some(chrome) = state.chrome_mut(&label) {
             chrome.workspace = workspace;
         }
-        let drop_dock = state
-            .chrome_mut(&source)
-            .is_some_and(|chrome| chrome.devtools.release(id));
+        let drop_dock = state.chrome_mut(&source).is_some_and(|chrome| {
+            chrome.viewports.remove(&id);
+            chrome.viewport_quiet.remove(&id);
+            chrome.devtools.release(id)
+        });
         state.normalize_groups();
         if state.active_of(&source) == Some(id) {
             state.set_window_active(&source, next);
@@ -2615,6 +2661,9 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
         ensure_webview(app, next)?;
         place_pages(app, &source, false);
         layout(app, &source);
+        if !drop_dock {
+            apply_device_chrome(app, &source);
+        }
     } else {
         if drop_dock {
             close_devtools(app, &source);
@@ -2624,6 +2673,7 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
     ensure_webview(app, id)?;
     place_pages(app, &label, true);
     layout(app, &label);
+    apply_device_chrome(app, &label);
     if with_state(app, |state| state.chrome(&source).is_some()) {
         let _ = ensure_bookmarks_host(app, &source);
     }
@@ -2717,6 +2767,56 @@ fn clamp_viewport(width: u32, height: u32) -> Option<(u32, u32)> {
     Some((width.min(VIEWPORT_MAX), height.min(VIEWPORT_MAX)))
 }
 
+/// Screen corner radius in CSS pixels. Phones use the iPhone 16 display radius.
+/// Tablets use the iPad radius. A desktop size stays square.
+fn display_corner_radius(platform: &str, css_w: u32, css_h: u32) -> f64 {
+    if platform == "desktop" || css_w == 0 || css_h == 0 {
+        return 0.0;
+    }
+    if css_w.min(css_h) < 700 { 55.0 } else { 18.0 }
+}
+
+/// Clips the page view to the device's screen radius, or restores square corners.
+fn clip_page_corners(
+    app: &AppHandle,
+    window: &str,
+    webview: &tauri::Webview,
+    viewport: Option<(u32, u32)>,
+    platform: &str,
+    device_frame: bool,
+    shown_w: u32,
+    shown_h: u32,
+) {
+    let Some(main) = app.get_window(window).and_then(|window| window.hwnd().ok()) else {
+        return;
+    };
+    let main = main.0 as isize;
+    let radius = viewport
+        .filter(|_| device_frame)
+        .map(|(css_w, css_h)| {
+            let css = display_corner_radius(platform, css_w, css_h);
+            if css <= 0.0 || css_w == 0 {
+                return 0.0;
+            }
+            css * f64::from(shown_w) / f64::from(css_w)
+        })
+        .unwrap_or(0.0)
+        .round();
+    let limit = f64::from(shown_w.min(shown_h)) / 2.0 - 1.0;
+    if radius >= 1.0 && limit >= 1.0 {
+        webview2::round_popup(
+            webview,
+            main,
+            f64::from(shown_w),
+            f64::from(shown_h),
+            radius.min(limit),
+            false,
+        );
+    } else {
+        webview2::square_popup(webview, main);
+    }
+}
+
 /// Centers a CSS viewport in the page column, under the device bar.
 /// Leaves a gutter on every side so the resize handles are not covered by the webview.
 fn viewport_frame(
@@ -2724,9 +2824,10 @@ fn viewport_frame(
     page_w: u32,
     page_h: u32,
     scale: f64,
+    bar_css: f64,
 ) -> Option<(i32, i32, u32, u32)> {
     let (css_w, css_h) = viewport?;
-    let bar = (VIEWPORT_BAR * scale).round() as u32;
+    let bar = (bar_css.max(0.0) * scale).round() as u32;
     let gutter = (VIEWPORT_GUTTER * scale).round() as u32;
     let avail_w = page_w.saturating_sub(gutter.saturating_mul(2)).max(1);
     let avail_h = page_h
@@ -2744,6 +2845,25 @@ fn viewport_frame(
     ))
 }
 
+/// The device bar reports its height when the controls wrap onto another row.
+pub fn set_viewport_bar(app: &AppHandle, window: &str, height: f64) {
+    if !height.is_finite() {
+        return;
+    }
+    let height = height.clamp(VIEWPORT_BAR, 240.0);
+    let changed = with_state(app, |state| {
+        let chrome = state.chrome_mut(window)?;
+        if (chrome.viewport_bar - height).abs() < 0.5 {
+            return None;
+        }
+        chrome.viewport_bar = height;
+        Some(())
+    });
+    if changed.is_some() {
+        layout(app, window);
+    }
+}
+
 pub fn set_viewport(
     app: &AppHandle,
     window: &str,
@@ -2752,6 +2872,7 @@ pub fn set_viewport(
     cutout: bool,
     home_bar: bool,
     installed: bool,
+    keyboard: bool,
     insets: [u32; 4],
     max_insets: [u32; 4],
     cutout_style: &str,
@@ -2765,27 +2886,27 @@ pub fn set_viewport(
     let platform = known_platform(platform);
     let found = with_state(app, |state| {
         let chrome = state.chrome_mut(window)?;
-        chrome.screencast_suppress = false;
-        let same = chrome.viewport == Some(size)
-            && chrome.viewport_cutout == cutout
-            && chrome.viewport_home == home_bar
-            && chrome.viewport_installed == installed
-            && chrome.viewport_insets == insets
-            && chrome.viewport_max_insets == max_insets
-            && chrome.viewport_style == style
-            && chrome.viewport_platform == platform;
-        if same {
+        let id = chrome.active?;
+        if !chrome.devtools.wants(id) {
             return None;
         }
-        let resized = chrome.viewport != Some(size);
-        chrome.viewport = Some(size);
-        chrome.viewport_cutout = cutout;
-        chrome.viewport_home = home_bar;
-        chrome.viewport_installed = installed;
-        chrome.viewport_insets = insets;
-        chrome.viewport_max_insets = max_insets;
-        chrome.viewport_style = style;
-        chrome.viewport_platform = platform;
+        chrome.viewport_quiet.remove(&id);
+        let next = TabViewport {
+            size,
+            cutout,
+            home: home_bar,
+            installed,
+            keyboard,
+            insets,
+            max_insets,
+            style,
+            platform,
+        };
+        if chrome.viewports.get(&id) == Some(&next) {
+            return None;
+        }
+        let resized = chrome.viewports.get(&id).map(|viewport| viewport.size) != Some(size);
+        chrome.viewports.insert(id, next);
         Some(resized)
     });
     let Some(resized) = found else {
@@ -2802,12 +2923,12 @@ pub fn set_viewport(
 pub fn clear_viewport(app: &AppHandle, window: &str) {
     let found = with_state(app, |state| {
         let chrome = state.chrome_mut(window)?;
-        chrome.screencast_suppress = true;
-        chrome.screencast_at = Instant::now();
-        let had = chrome.viewport.take().is_some() || chrome.viewport_installed;
-        chrome.viewport_installed = false;
-        chrome.viewport_insets = [0; 4];
-        chrome.viewport_max_insets = [0; 4];
+        let id = chrome.active?;
+        if !chrome.devtools.wants(id) {
+            return None;
+        }
+        let had = chrome.viewports.contains_key(&id);
+        quiet_viewport(chrome, id);
         had.then_some(())
     });
     if found.is_none() {
@@ -2838,6 +2959,7 @@ struct ChromeSpec {
     cutout: bool,
     home: bool,
     installed: bool,
+    keyboard: bool,
     portrait: bool,
     style: String,
     platform: String,
@@ -2853,6 +2975,7 @@ impl ChromeSpec {
             cutout: false,
             home: false,
             installed: false,
+            keyboard: false,
             portrait: true,
             style: "none".to_string(),
             platform: "desktop".to_string(),
@@ -2962,33 +3085,40 @@ const STATUS_ICONS: &str = concat!(
     r#"</span></span>"#,
 );
 
-fn cutout_html(style: &str, portrait: bool) -> String {
+fn cutout_html(style: &str, portrait: bool, installed: bool) -> String {
+    let drop = if installed { 20 } else { 0 };
     match (style, portrait) {
-        ("island", true) => concat!(
-            r#"<div id="ce-device-cutout" style="position:absolute;top:11px;left:50%;width:min(126px,34vw);height:37px;"#,
-            r#"transform:translateX(-50%);background:#000;border-radius:20px;"></div>"#,
-        )
-        .to_string(),
+        ("island", true) => format!(
+            concat!(
+                r#"<div id="ce-device-cutout" style="position:absolute;top:{top}px;left:50%;width:min(126px,34vw);height:37px;"#,
+                r#"transform:translateX(-50%);background:#000;border-radius:20px;"></div>"#,
+            ),
+            top = 11 + drop,
+        ),
         ("island", false) => concat!(
             r#"<div id="ce-device-cutout" style="position:absolute;left:11px;top:50%;width:37px;height:min(126px,34vh);"#,
             r#"transform:translateY(-50%);background:#000;border-radius:20px;"></div>"#,
         )
         .to_string(),
-        ("notch", true) => concat!(
-            r#"<div id="ce-device-cutout" style="position:absolute;top:0;left:50%;width:min(156px,40vw);height:33px;"#,
-            r#"transform:translateX(-50%);background:#000;border-radius:0 0 18px 18px;"></div>"#,
-        )
-        .to_string(),
+        ("notch", true) => format!(
+            concat!(
+                r#"<div id="ce-device-cutout" style="position:absolute;top:{top}px;left:50%;width:min(156px,40vw);height:33px;"#,
+                r#"transform:translateX(-50%);background:#000;border-radius:0 0 18px 18px;"></div>"#,
+            ),
+            top = drop,
+        ),
         ("notch", false) => concat!(
             r#"<div id="ce-device-cutout" style="position:absolute;left:0;top:50%;width:33px;height:min(156px,40vh);"#,
             r#"transform:translateY(-50%);background:#000;border-radius:0 18px 18px 0;"></div>"#,
         )
         .to_string(),
-        ("punch", true) => concat!(
-            r#"<div id="ce-device-cutout" style="position:absolute;top:10px;left:50%;width:20px;height:20px;"#,
-            r#"transform:translateX(-50%);background:#000;border-radius:999px;"></div>"#,
-        )
-        .to_string(),
+        ("punch", true) => format!(
+            concat!(
+                r#"<div id="ce-device-cutout" style="position:absolute;top:{top}px;left:50%;width:20px;height:20px;"#,
+                r#"transform:translateX(-50%);background:#000;border-radius:999px;"></div>"#,
+            ),
+            top = 10 + drop,
+        ),
         ("punch", false) => concat!(
             r#"<div id="ce-device-cutout" style="position:absolute;left:10px;top:50%;width:20px;height:20px;"#,
             r#"transform:translateY(-50%);background:#000;border-radius:999px;"></div>"#,
@@ -3019,18 +3149,31 @@ fn status_html(spec: &ChromeSpec) -> String {
         return String::new();
     }
     let height = if spec.portrait { spec.top.max(20) } else { 22 };
+    let shade = height + 22;
     let pad_left = if spec.portrait { 26 } else { spec.left.max(16) };
-    let pad_right = if spec.portrait { 22 } else { spec.right.max(16) };
+    let pad_right = if spec.portrait {
+        22
+    } else {
+        spec.right.max(16)
+    };
     format!(
         concat!(
-            r#"<div id="ce-device-status" style="position:absolute;top:0;left:0;right:0;height:{height}px;display:flex;"#,
-            r#"align-items:center;justify-content:space-between;box-sizing:border-box;padding:0 {pad_right}px 0 {pad_left}px;"#,
+            r#"<div id="ce-device-status" style="position:absolute;top:0px;padding-top:20px;left:0;right:0;height:{height}px;">"#,
+            r#"<div id="ce-device-status-shade" aria-hidden="true" style="position:absolute;left:0;right:0;top:0;height:{shade}px;"#,
+            r#"backdrop-filter:blur(14px) saturate(1.5);-webkit-backdrop-filter:blur(14px) saturate(1.5);"#,
+            r#"-webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 48%,transparent 100%);"#,
+            r#"mask-image:linear-gradient(to bottom,#000 0%,#000 48%,transparent 100%);"#,
+            r#"background:linear-gradient(to bottom,rgba(0,0,0,.22),rgba(0,0,0,0));"#,
+            r#"box-shadow:0 12px 18px -14px rgba(0,0,0,.55);"></div>"#,
+            r#"<div id="ce-device-status-row" style="position:relative;z-index:1;height:100%;display:flex;align-items:center;"#,
+            r#"justify-content:space-between;box-sizing:border-box;padding:0 {pad_right}px 0 {pad_left}px;"#,
             r#"color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:15px;"#,
             r#"font-weight:600;line-height:1;letter-spacing:-0.02em;"#,
             r#"text-shadow:0 1px 1px rgba(0,0,0,.85),0 0 2px rgba(0,0,0,.9);">"#,
-            r#"<span id="ce-device-time">9:41</span>{icons}</div>"#,
+            r#"<span id="ce-device-time">9:41</span>{icons}</div></div>"#,
         ),
         height = height,
+        shade = shade,
         pad_right = pad_right,
         pad_left = pad_left,
         icons = STATUS_ICONS,
@@ -3041,7 +3184,7 @@ fn status_html(spec: &ChromeSpec) -> String {
 fn chrome_markup(spec: &ChromeSpec) -> String {
     let status = status_html(spec);
     let cutout = if spec.cutout {
-        cutout_html(&spec.style, spec.portrait)
+        cutout_html(&spec.style, spec.portrait, spec.installed)
     } else {
         String::new()
     };
@@ -3057,12 +3200,409 @@ fn chrome_markup(spec: &ChromeSpec) -> String {
     }
 }
 
+/// iOS keyboard that types into the focused field. Runs inside the device-chrome script.
+fn ios_keyboard_js() -> &'static str {
+    r##"
+  window.__ceKeyboard = !!keyboard;
+  if (window.__ceKeyboard && !state.keypad) state.keypad = (function () {
+    var ALPHA = [
+      ["q","w","e","r","t","y","u","i","o","p"],
+      ["a","s","d","f","g","h","j","k","l"],
+      ["shift","z","x","c","v","b","n","m","back"],
+      ["123","space","return"]
+    ];
+    var NUMBER = [
+      ["1","2","3","4","5","6","7","8","9","0"],
+      ["-","/",":",";","(",")","$","&","@","\""],
+      ["#+=",".",",","?","!","'","back"],
+      ["ABC","space","return"]
+    ];
+    var SYMBOL = [
+      ["[","]","{","}","#","%","^","*","+","="],
+      ["_","\\","|","~","<",">","€","£","¥","•"],
+      ["123",".",",","?","!","'","back"],
+      ["ABC","space","return"]
+    ];
+    var PAD = [["1","2","3"],["4","5","6"],["7","8","9"],["return",".","0","back"]];
+    var TEL = [["1","2","3"],["4","5","6"],["7","8","9"],["*","0","#"],["back","space","return"]];
+    var layout = "alpha";
+    var shift = false;
+    var caps = false;
+    var field = null;
+    var hold = 0;
+    var repeat = 0;
+    var savedPad = null;
+    var savedBodyPad = null;
+    var savedBodyTransform = null;
+    if (window.__ceVvOpen == null) {
+      window.__ceVvOpen = false;
+      window.__ceVvInset = 0;
+    }
+    if (!window.__ceVvPatched && window.VisualViewport) {
+      window.__ceVvPatched = true;
+      var vvProto = window.VisualViewport.prototype;
+      function patchVv(name, compute) {
+        var desc = Object.getOwnPropertyDescriptor(vvProto, name);
+        if (!desc || !desc.get) return;
+        var nativeGet = desc.get;
+        Object.defineProperty(vvProto, name, {
+          configurable: true,
+          get: function () {
+            var real = nativeGet.call(this);
+            if (!window.__ceVvOpen) return real;
+            return compute(real);
+          }
+        });
+      }
+      patchVv("height", function () { return Math.max(0, window.innerHeight - window.__ceVvInset); });
+    }
+    var root = document.getElementById("ce-ios-keyboard");
+    if (!root) {
+      root = document.createElement("div");
+      root.id = "ce-ios-keyboard";
+      root.setAttribute("aria-hidden", "true");
+      (document.documentElement || document.body).appendChild(root);
+    }
+    root.style.display = "none";
+    function palette() {
+      var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      return dark
+        ? { bg: "#2c2c2e", key: "#636366", special: "#48484a", text: "#fff", line: "rgba(255,255,255,.12)", pill: "rgba(255,255,255,.08)", ret: "#0a84ff" }
+        : { bg: "#d1d4db", key: "#fcfcfd", special: "#adb3bd", text: "#111", line: "rgba(0,0,0,.12)", pill: "rgba(255,255,255,.55)", ret: "#007aff" };
+    }
+    function metrics() {
+      var landscape = window.innerWidth > window.innerHeight;
+      var avail = Math.max(150, Math.round(window.innerHeight * (landscape ? 0.42 : 0.46)));
+      var suggest = landscape ? 0 : 38;
+      var chin = landscape ? 8 : 28;
+      var key = Math.max(28, Math.min(landscape ? 34 : 46, Math.floor((avail - suggest - chin - 36) / 4)));
+      return { landscape: landscape, key: key, chin: chin, suggest: suggest };
+    }
+    function editable(el) {
+      if (!el || el.nodeType !== 1) return false;
+      if (el.closest && el.closest("#ce-ios-keyboard")) return false;
+      if (el.isContentEditable) return true;
+      if (el.readOnly || el.disabled) return false;
+      if (el.tagName === "TEXTAREA") return true;
+      if (el.tagName !== "INPUT") return false;
+      var type = (el.type || "text").toLowerCase();
+      return ["text","search","email","url","tel","password","number",""].indexOf(type) !== -1;
+    }
+    function kindFor(el) {
+      var type = el && el.type ? String(el.type).toLowerCase() : "";
+      if (type === "tel") return "tel";
+      if (type === "number") return "pad";
+      return "alpha";
+    }
+    function rowsFor() {
+      if (layout === "number") return NUMBER;
+      if (layout === "symbol") return SYMBOL;
+      if (layout === "pad") return PAD;
+      if (layout === "tel") return TEL;
+      return ALPHA;
+    }
+    function returnLabel() {
+      var hint = field && field.getAttribute ? (field.getAttribute("enterkeyhint") || "") : "";
+      var type = field && field.type ? String(field.type).toLowerCase() : "";
+      if (hint === "search" || type === "search") return "search";
+      if (hint === "go" || type === "url" || type === "email") return "go";
+      if (hint === "send") return "send";
+      if (hint === "done" || layout === "pad" || layout === "tel") return "done";
+      if (hint === "next") return "next";
+      return "return";
+    }
+    function shown(id) {
+      if (id.length === 1 && (shift || caps) && id >= "a" && id <= "z") return id.toUpperCase();
+      if (id === "shift") return caps ? "⇪" : "⇧";
+      if (id === "back") return "⌫";
+      if (id === "space") return "";
+      if (id === "return") return returnLabel();
+      return id;
+    }
+    function special(id) {
+      return id === "shift" || id === "back" || id === "123" || id === "ABC" || id === "#+=" || id === "space" || id === "return";
+    }
+    function flexOf(id) {
+      if (id === "space") return "4";
+      if (id === "return" || id === "123" || id === "ABC" || id === "#+=") return "1.6";
+      if (id === "shift" || id === "back") return "1.35";
+      return "1";
+    }
+    function paint() {
+      var colors = palette();
+      var size = metrics();
+      root.textContent = "";
+      root.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:2147483647;box-sizing:border-box;display:block;padding:" + (size.suggest ? "0" : "6px") + " 3px " + size.chin + "px;background:" + colors.bg + ";color:" + colors.text + ";font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;user-select:none;-webkit-user-select:none;touch-action:none;";
+      if (size.suggest) {
+        var bar = document.createElement("div");
+        bar.id = "ce-ios-keyboard-suggest";
+        bar.style.cssText = "display:flex;gap:8px;align-items:center;height:" + size.suggest + "px;padding:0 8px;border-bottom:1px solid " + colors.line + ";";
+        for (var s = 0; s < 3; s++) {
+          var pill = document.createElement("div");
+          pill.id = "ce-ios-keyboard-suggest-" + s;
+          pill.style.cssText = "flex:1;height:26px;border-radius:6px;background:" + colors.pill + ";";
+          bar.appendChild(pill);
+        }
+        root.appendChild(bar);
+      }
+      var rows = rowsFor();
+      for (var r = 0; r < rows.length; r++) {
+        var row = document.createElement("div");
+        row.id = "ce-ios-keyboard-row-" + r;
+        var inset = layout === "alpha" && r === 1;
+        row.style.cssText = "display:flex;gap:6px;margin-top:" + (r === 0 && size.suggest ? "8px" : "8px") + ";padding:0 " + (inset ? "16px" : "0") + ";";
+        var keys = rows[r];
+        for (var k = 0; k < keys.length; k++) {
+          var id = keys[k];
+          var key = document.createElement("div");
+          key.id = "ce-ios-key-" + encodeURIComponent(id);
+          key.setAttribute("data-key", id);
+          key.setAttribute("role", "button");
+          var wide = special(id);
+          var bg = id === "return" ? colors.ret : wide ? colors.special : colors.key;
+          var fg = id === "return" ? "#fff" : colors.text;
+          var weight = id === "return" || id.length > 1 ? "500" : "400";
+          var font = id.length > 1 ? "16px" : "22px";
+          key.style.cssText = "flex:" + flexOf(id) + ";height:" + size.key + "px;border-radius:5px;background:" + bg + ";color:" + fg + ";display:flex;align-items:center;justify-content:center;font-size:" + font + ";font-weight:" + weight + ";box-shadow:0 1px 0 rgba(0,0,0,.35);";
+          key.textContent = shown(id);
+          row.appendChild(key);
+        }
+        root.appendChild(row);
+      }
+    }
+    function fireViewport() {
+      var vv = window.visualViewport;
+      if (!vv) return;
+      try { vv.dispatchEvent(new Event("resize")); } catch (e) {}
+      try { vv.dispatchEvent(new Event("scroll")); } catch (e) {}
+    }
+    function keyboardTop() {
+      return window.innerHeight - root.offsetHeight;
+    }
+    function scrollField(el) {
+      var gap = 12;
+      var parent = el.parentElement;
+      var hops = 0;
+      while (parent && hops < 16) {
+        hops += 1;
+        var scroller = null;
+        if (parent === document.body || parent === document.documentElement) {
+          scroller = document.scrollingElement || document.documentElement;
+        } else {
+          var oy = getComputedStyle(parent).overflowY;
+          if ((oy === "auto" || oy === "scroll" || oy === "overlay") && parent.scrollHeight > parent.clientHeight + 2) scroller = parent;
+        }
+        if (scroller) {
+          var rect = el.getBoundingClientRect();
+          var bounds = scroller.getBoundingClientRect();
+          var visibleBottom = Math.min(bounds.bottom, keyboardTop() - gap);
+          var delta = rect.bottom - visibleBottom;
+          if (delta > 1) scroller.scrollTop += delta;
+          var visibleTop = Math.max(bounds.top, 0);
+          if (rect.top < visibleTop + gap) scroller.scrollTop -= (visibleTop + gap) - rect.top;
+          if (scroller === document.scrollingElement || scroller === document.documentElement || scroller === document.body) break;
+        }
+        parent = parent.parentElement;
+      }
+    }
+    function openInset() {
+      var inset = root.offsetHeight;
+      if (!document.body || inset < 20) return;
+      if (savedBodyPad == null) savedBodyPad = document.body.style.paddingBottom || "";
+      document.body.style.paddingBottom = savedBodyPad ? "calc(" + savedBodyPad + " + " + inset + "px)" : inset + "px";
+      if (savedPad == null) savedPad = document.documentElement.style.scrollPaddingBottom || "";
+      document.documentElement.style.scrollPaddingBottom = inset + "px";
+      window.__ceVvOpen = true;
+      window.__ceVvInset = inset;
+    }
+    function alignField() {
+      var el = field;
+      var inset = root.offsetHeight;
+      if (!el || !document.body || inset < 20) return;
+      if (savedBodyTransform != null) document.body.style.transform = savedBodyTransform;
+      scrollField(el);
+      var overlap = Math.ceil(el.getBoundingClientRect().bottom - (keyboardTop() - 12));
+      if (overlap > 1) {
+        if (savedBodyTransform == null) savedBodyTransform = document.body.style.transform || "";
+        var base = savedBodyTransform;
+        document.body.style.transform = base ? base + " translateY(-" + overlap + "px)" : "translateY(-" + overlap + "px)";
+      } else if (savedBodyTransform != null) {
+        document.body.style.transform = savedBodyTransform;
+        savedBodyTransform = null;
+      }
+      fireViewport();
+    }
+    function closeInset() {
+      if (document.body) {
+        if (savedBodyPad != null) {
+          document.body.style.paddingBottom = savedBodyPad;
+          savedBodyPad = null;
+        }
+        if (savedBodyTransform != null) {
+          document.body.style.transform = savedBodyTransform;
+          savedBodyTransform = null;
+        }
+      }
+      if (savedPad != null) {
+        document.documentElement.style.scrollPaddingBottom = savedPad;
+        savedPad = null;
+      }
+      window.__ceVvOpen = false;
+      window.__ceVvInset = 0;
+      fireViewport();
+    }
+    function setNativeValue(el, value) {
+      var proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      var desc = Object.getOwnPropertyDescriptor(proto, "value");
+      if (desc && desc.set) desc.set.call(el, value);
+      else el.value = value;
+    }
+    function focusField() {
+      if (field && document.activeElement !== field) {
+        try { field.focus(); } catch (e) {}
+      }
+      return field && editable(field) ? field : editable(document.activeElement) ? document.activeElement : null;
+    }
+    function insert(text) {
+      var el = focusField();
+      if (!el) return;
+      var ok = false;
+      try { ok = document.execCommand("insertText", false, text); } catch (e) {}
+      if (!ok && typeof el.selectionStart === "number") {
+        var start = el.selectionStart;
+        var end = el.selectionEnd;
+        setNativeValue(el, el.value.slice(0, start) + text + el.value.slice(end));
+        el.selectionStart = el.selectionEnd = start + text.length;
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true, inputType: "insertText", data: text }));
+      }
+      alignField();
+    }
+    function removeChar() {
+      var el = focusField();
+      if (!el) return;
+      if (typeof el.selectionStart === "number") {
+        var start = el.selectionStart;
+        var end = el.selectionEnd;
+        if (start === end && start > 0) start -= 1;
+        if (start === end) return;
+        setNativeValue(el, el.value.slice(0, start) + el.value.slice(end));
+        el.selectionStart = el.selectionEnd = start;
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, cancelable: true, inputType: "deleteContentBackward" }));
+        return;
+      }
+      try { document.execCommand("delete"); } catch (e) {}
+    }
+    function pressReturn() {
+      var el = focusField();
+      if (!el) return;
+      if (el.tagName === "TEXTAREA" || el.isContentEditable) {
+        insert("\n");
+        return;
+      }
+      var event = new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true });
+      el.dispatchEvent(event);
+      if (event.defaultPrevented) return;
+      if (el.form && typeof el.form.requestSubmit === "function") {
+        try { el.form.requestSubmit(); return; } catch (e) {}
+      }
+      el.blur();
+    }
+    function press(id) {
+      if (id === "shift") {
+        if (shift && !caps) { caps = true; shift = false; }
+        else if (caps) { caps = false; shift = false; }
+        else shift = true;
+        paint();
+        return;
+      }
+      if (id === "back") { removeChar(); return; }
+      if (id === "space") { insert(" "); return; }
+      if (id === "return") { pressReturn(); return; }
+      if (id === "123") { layout = "number"; paint(); return; }
+      if (id === "ABC") { layout = "alpha"; paint(); return; }
+      if (id === "#+=") { layout = "symbol"; paint(); return; }
+      var text = id.length === 1 && (shift || caps) && id >= "a" && id <= "z" ? id.toUpperCase() : id;
+      insert(text);
+      if (shift && !caps) { shift = false; paint(); }
+    }
+    function stopHold() {
+      if (hold) clearTimeout(hold);
+      if (repeat) clearInterval(repeat);
+      hold = 0;
+      repeat = 0;
+    }
+    root.addEventListener("pointerdown", function (event) {
+      var key = event.target && event.target.closest ? event.target.closest("[data-key]") : null;
+      if (!key) return;
+      event.preventDefault();
+      event.stopPropagation();
+      var id = key.getAttribute("data-key");
+      press(id);
+      if (id === "back") {
+        stopHold();
+        hold = setTimeout(function () {
+          repeat = setInterval(removeChar, 45);
+        }, 350);
+      }
+    });
+    root.addEventListener("contextmenu", function (event) { event.preventDefault(); });
+    window.addEventListener("pointerup", stopHold, true);
+    window.addEventListener("pointercancel", stopHold, true);
+    document.addEventListener("pointerdown", function (event) {
+      var node = event.target;
+      if (node && node.closest && node.closest("#ce-ios-keyboard")) event.preventDefault();
+    }, true);
+    document.addEventListener("focusin", function (event) {
+      if (!window.__ceKeyboard) return;
+      var el = event.composedPath ? event.composedPath()[0] : event.target;
+      if (editable(el)) show(el);
+    }, true);
+    document.addEventListener("focusout", function () {
+      if (!window.__ceKeyboard) return;
+      setTimeout(function () {
+        if (!editable(document.activeElement)) hide();
+      }, 0);
+    }, true);
+    window.addEventListener("resize", function () {
+      if (root.style.display === "none") return;
+      paint();
+      openInset();
+      fireViewport();
+      alignField();
+    });
+    function show(el) {
+      field = el;
+      var next = kindFor(el);
+      if (layout === "alpha" || layout === "pad" || layout === "tel" || next !== "alpha") layout = next;
+      paint();
+      openInset();
+      fireViewport();
+      alignField();
+    }
+    function hide() {
+      root.style.display = "none";
+      field = null;
+      closeInset();
+      stopHold();
+    }
+    return {
+      sync: function () {
+        if (!window.__ceKeyboard) { hide(); return; }
+        if (editable(document.activeElement)) show(document.activeElement);
+        else hide();
+      }
+    };
+  })();
+  if (state.keypad) state.keypad.sync();
+"##
+}
+
 fn device_chrome_script(spec: &ChromeSpec) -> String {
     let html = serde_json::to_string(&chrome_markup(spec)).unwrap_or_else(|_| "\"\"".to_string());
     let ios = spec.installed && spec.platform == "ios";
     let installed = spec.installed;
     format!(
-        r#"(function(html, ios, installed) {{
+        r#"(function(html, ios, installed, keyboard) {{
   var root = document.getElementById("ce-device-chrome");
   if (!html) {{
     if (root) root.remove();
@@ -3156,46 +3696,103 @@ fn device_chrome_script(spec: &ChromeSpec) -> String {
       if (nodes[k].shadowRoot) scanRoot(nodes[k].shadowRoot);
     }}
   }}
-  if (!state.patched) {{
-    state.patched = true;
-    function patchInsert(proto) {{
-      if (!proto || !proto.insertRule || proto.__ceInsert) return;
-      var original = proto.insertRule;
-      proto.insertRule = function(rule, index) {{
-        var next = window.__ceInstalled ? rewriteRule(rule) : null;
-        var at = original.call(this, next || rule, index);
-        if (next) state.rules.push({{ parent: this, index: at, css: rule }});
-        return at;
-      }};
-      proto.__ceInsert = true;
-    }}
-    patchInsert(CSSStyleSheet.prototype);
-    if (window.CSSGroupingRule) patchInsert(CSSGroupingRule.prototype);
-    if (CSSStyleSheet.prototype.replaceSync) {{
-      var replaceSync = CSSStyleSheet.prototype.replaceSync;
-      CSSStyleSheet.prototype.replaceSync = function(text) {{
-        var next = window.__ceInstalled ? rewriteRule(text) : null;
-        if (next) state.sheets.push({{ sheet: this, text: text }});
-        return replaceSync.call(this, next || text);
-      }};
-    }}
-    var queued = false;
-    state.schedule = function() {{
-      if (!window.__ceInstalled || queued) return;
-      queued = true;
-      requestAnimationFrame(function() {{
-        queued = false;
-        if (window.__ceInstalled) scanRoot(document);
-      }});
-    }};
-    new MutationObserver(state.schedule).observe(document.documentElement, {{ childList: true, subtree: true }});
-    document.addEventListener("load", function(event) {{
-      if (event.target && event.target.tagName === "LINK") state.schedule();
-    }}, true);
+  if (!state.mediaReady) {{
+    try {{
     var realMatch = window.matchMedia.bind(window);
+    var nativeMatchesGet = null;
+    try {{
+      var matchesDesc = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, "matches");
+      nativeMatchesGet = matchesDesc && matchesDesc.get;
+    }} catch (e) {{}}
+    function ceReadMatches(list) {{
+      if (nativeMatchesGet) return nativeMatchesGet.call(list);
+      return list.matches;
+    }}
+    function ceSplitComma(input) {{
+      var parts = [];
+      var depth = 0;
+      var start = 0;
+      for (var i = 0; i < input.length; i++) {{
+        var ch = input.charAt(i);
+        if (ch === "(") depth++;
+        else if (ch === ")") depth = Math.max(0, depth - 1);
+        else if (ch === "," && depth === 0) {{
+          parts.push(input.slice(start, i));
+          start = i + 1;
+        }}
+      }}
+      parts.push(input.slice(start));
+      return parts;
+    }}
+    function ceKeywordAt(input, index, keyword) {{
+      if (input.substr(index, keyword.length).toLowerCase() !== keyword) return false;
+      var before = index === 0 ? " " : input.charAt(index - 1);
+      var after = input.charAt(index + keyword.length) || " ";
+      return /\s/.test(before) && /\s/.test(after);
+    }}
+    function ceSplitKeyword(input, keyword) {{
+      var parts = [];
+      var depth = 0;
+      var start = 0;
+      for (var i = 0; i < input.length; i++) {{
+        var ch = input.charAt(i);
+        if (ch === "(") depth++;
+        else if (ch === ")") depth = Math.max(0, depth - 1);
+        else if (depth === 0 && ceKeywordAt(input, i, keyword)) {{
+          parts.push(input.slice(start, i));
+          i += keyword.length;
+          while (input.charAt(i) === " ") i++;
+          start = i;
+          i--;
+        }}
+      }}
+      parts.push(input.slice(start));
+      return parts;
+    }}
+    function ceCondition(cond) {{
+      var plain = String(cond || "").trim().replace(/^\(+/, "").replace(/\)+$/, "").trim();
+      var mode = plain.match(/^display-mode\s*:\s*([a-z-]+)$/i);
+      if (mode) return mode[1].toLowerCase() === "standalone";
+      if (/^(only\s+)?(all|screen)$/i.test(plain)) return true;
+      if (/^(only\s+)?print$/i.test(plain)) return false;
+      if (!plain) return true;
+      try {{ return ceReadMatches(realMatch(cond)); }} catch (e) {{ return false; }}
+    }}
+    function ceAlternative(part) {{
+      var text = String(part || "").trim();
+      if (!text) return false;
+      var negated = /^not\s+/i.test(text);
+      if (negated) text = text.replace(/^not\s+/i, "").trim();
+      var bits = ceSplitKeyword(text, "and");
+      for (var i = 0; i < bits.length; i++) {{
+        if (!ceCondition(bits[i])) return negated;
+      }}
+      return !negated;
+    }}
+    // Installed apps match standalone, including `(display-mode: standalone), (display-mode: fullscreen)`.
+    function ceInstalledMedia(query, nativeMatches) {{
+      if (!window.__ceInstalled || String(query).toLowerCase().indexOf("display-mode") === -1) {{
+        return nativeMatches;
+      }}
+      var groups = ceSplitComma(String(query));
+      for (var i = 0; i < groups.length; i++) {{
+        var alternatives = ceSplitKeyword(groups[i], "or");
+        for (var j = 0; j < alternatives.length; j++) {{
+          if (ceAlternative(alternatives[j])) return true;
+        }}
+      }}
+      return false;
+    }}
+    if (nativeMatchesGet) {{
+      Object.defineProperty(MediaQueryList.prototype, "matches", {{
+        configurable: true,
+        get: function() {{
+          return ceInstalledMedia(this.media, nativeMatchesGet.call(this));
+        }}
+      }});
+    }}
     window.matchMedia = function(query) {{
       var mql = realMatch(query);
-      var normalized = String(query).replace(/\s+/g, "").toLowerCase();
       var wrapped = {{
         media: mql.media,
         onchange: null,
@@ -3213,21 +3810,66 @@ fn device_chrome_script(spec: &ChromeSpec) -> String {
       }};
       Object.defineProperty(wrapped, "matches", {{
         get: function() {{
-          if (!window.__ceInstalled) return mql.matches;
-          if (normalized === "(display-mode:standalone)" || normalized === "display-mode:standalone") return true;
-          if (normalized === "(display-mode:browser)" || normalized === "display-mode:browser") return false;
-          if (normalized === "(display-mode:minimal-ui)" || normalized === "(display-mode:fullscreen)") return false;
-          return mql.matches;
+          return ceInstalledMedia(query, ceReadMatches(mql));
         }}
       }});
       state.queries.push(wrapped);
       return wrapped;
     }};
+    state.mediaReady = true;
+    }} catch (error) {{
+      state.patchError = String(error && (error.stack || error));
+    }}
+  }}
+  if (!state.patched) {{
+    try {{
+    function patchInsert(proto) {{
+      if (!proto || !proto.insertRule || proto.__ceInsert) return;
+      var original = proto.insertRule;
+      proto.insertRule = function(rule, index) {{
+        var next = window.__ceInstalled ? rewriteRule(rule) : null;
+        var at = original.call(this, next || rule, index);
+        if (next) state.rules.push({{ parent: this, index: at, css: rule }});
+        return at;
+      }};
+      proto.__ceInsert = true;
+    }}
+    patchInsert(CSSStyleSheet.prototype);
+    if (window.CSSGroupingRule) patchInsert(CSSGroupingRule.prototype);
+    if (CSSStyleSheet.prototype.replaceSync && !CSSStyleSheet.prototype.__ceReplace) {{
+      var replaceSync = CSSStyleSheet.prototype.replaceSync;
+      CSSStyleSheet.prototype.replaceSync = function(text) {{
+        var next = window.__ceInstalled ? rewriteRule(text) : null;
+        if (next) state.sheets.push({{ sheet: this, text: text }});
+        return replaceSync.call(this, next || text);
+      }};
+      CSSStyleSheet.prototype.__ceReplace = true;
+    }}
+    var queued = false;
+    state.schedule = function() {{
+      if (!window.__ceInstalled || queued) return;
+      queued = true;
+      requestAnimationFrame(function() {{
+        queued = false;
+        if (window.__ceInstalled) scanRoot(document);
+      }});
+    }};
+    if (document.documentElement) {{
+      new MutationObserver(state.schedule).observe(document.documentElement, {{ childList: true, subtree: true }});
+    }}
+    document.addEventListener("load", function(event) {{
+      if (event.target && event.target.tagName === "LINK") state.schedule();
+    }}, true);
+    state.patched = true;
+    }} catch (error) {{
+      state.patchError = String(error && (error.stack || error));
+    }}
   }}
   var modeChanged = state.mode !== installed;
   state.mode = installed;
   if (installed) scanRoot(document);
   else restore();
+{keyboard_js}
   if (!modeChanged) return;
   var queries = state.queries;
   for (var q = 0; q < queries.length; q++) {{
@@ -3241,10 +3883,13 @@ fn device_chrome_script(spec: &ChromeSpec) -> String {
       try {{ listeners[n](change); }} catch (e) {{}}
     }}
   }}
-}})({html}, {ios}, {installed})"#,
+  try {{ window.dispatchEvent(new Event("resize")); }} catch (e) {{}}
+}})({html}, {ios}, {installed}, {keyboard})"#,
         html = html,
         ios = if ios { "true" } else { "false" },
         installed = if installed { "true" } else { "false" },
+        keyboard = if spec.keyboard { "true" } else { "false" },
+        keyboard_js = ios_keyboard_js(),
     )
 }
 
@@ -3252,27 +3897,29 @@ fn apply_device_chrome(app: &AppHandle, window: &str) {
     let plan = with_state(app, |state| {
         let chrome = state.chrome(window)?;
         let id = chrome.active?;
-        let Some((width, height)) = chrome.viewport.filter(|_| !chrome.fullscreen) else {
+        let Some(viewport) = shown_viewport(chrome) else {
             return Some((id, ChromeSpec::plain(), PageEnvironment::idle()));
         };
+        let (width, height) = viewport.size;
         Some((
             id,
             ChromeSpec {
-                cutout: chrome.viewport_cutout,
-                home: chrome.viewport_home,
-                installed: chrome.viewport_installed,
+                cutout: viewport.cutout,
+                home: viewport.home,
+                installed: viewport.installed,
+                keyboard: viewport.keyboard,
                 portrait: height >= width,
-                style: chrome.viewport_style.clone(),
-                platform: chrome.viewport_platform.clone(),
-                top: chrome.viewport_insets[0],
-                right: chrome.viewport_insets[1],
-                bottom: chrome.viewport_insets[2],
-                left: chrome.viewport_insets[3],
+                style: viewport.style.clone(),
+                platform: viewport.platform.clone(),
+                top: viewport.insets[0],
+                right: viewport.insets[1],
+                bottom: viewport.insets[2],
+                left: viewport.insets[3],
             },
             PageEnvironment {
-                installed: chrome.viewport_installed,
-                insets: chrome.viewport_insets,
-                max_insets: chrome.viewport_max_insets,
+                installed: viewport.installed,
+                insets: viewport.insets,
+                max_insets: viewport.max_insets,
             },
         ))
     });
@@ -3296,19 +3943,27 @@ pub fn adopt_screencast(app: &AppHandle, id: u32, width: u32, height: u32) {
     };
     let apply = with_state(app, |state| {
         let chrome = state.chrome_mut(&window)?;
-        let gap = chrome.screencast_at.elapsed();
-        chrome.screencast_at = Instant::now();
-        if chrome.screencast_suppress && gap < Duration::from_millis(700) {
+        if !chrome.devtools.wants(id) {
             return None;
         }
-        chrome.screencast_suppress = false;
-        if chrome.viewport == Some(size) {
+        if let Some(at) = chrome.viewport_quiet.get(&id).copied()
+            && at.elapsed() < Duration::from_millis(700)
+        {
+            chrome.viewport_quiet.insert(id, Instant::now());
             return None;
         }
-        chrome.viewport = Some(size);
-        Some(())
+        chrome.viewport_quiet.remove(&id);
+        match chrome.viewports.get_mut(&id) {
+            Some(viewport) if viewport.size == size => return None,
+            Some(viewport) => viewport.size = size,
+            None => {
+                chrome.viewports.insert(id, TabViewport::sized(size));
+            }
+        }
+        Some(chrome.active == Some(id))
     });
-    if apply.is_none() {
+    // A preview started on a background tab waits until that tab is showing.
+    if apply != Some(true) {
         return;
     }
     place_pages(app, &window, true);
@@ -3982,7 +4637,11 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         let active = state.active_of(window);
         let chrome = state.chrome(window)?;
         let fullscreen = chrome.fullscreen;
-        let viewport = chrome.viewport.filter(|_| !fullscreen);
+        let preview = shown_viewport(chrome);
+        let viewport = preview.map(|viewport| viewport.size);
+        let platform = preview
+            .map(|viewport| viewport.platform.clone())
+            .unwrap_or_default();
         let previous = chrome.shown.clone();
         let split = chrome.split.filter(|split| {
             viewport.is_none()
@@ -3992,6 +4651,7 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         let ratio = split.map(|split| split.ratio).unwrap_or(0.5);
         let dock_ratio =
             (chrome.devtools.visible_for(active) && !fullscreen).then_some(chrome.devtools.ratio);
+        let viewport_bar = chrome.viewport_bar;
         // A tab that failed, or whose first document has not painted, keeps its view off
         // screen so the browser UI behind can show why or that it is still loading.
         let painted_view = |id: u32| {
@@ -4042,9 +4702,30 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
         if let Some(chrome) = state.chrome_mut(window) {
             chrome.shown = shown.clone();
         }
-        Some((shown, parked, changed, ratio, wake, viewport, dock_ratio))
+        Some((
+            shown,
+            parked,
+            changed,
+            ratio,
+            wake,
+            viewport,
+            dock_ratio,
+            platform,
+            viewport_bar,
+        ))
     });
-    let Some((shown, parked, changed, ratio, wake, viewport, mut dock_ratio)) = plan else {
+    let Some((
+        shown,
+        parked,
+        changed,
+        ratio,
+        wake,
+        viewport,
+        mut dock_ratio,
+        platform,
+        viewport_bar,
+    )) = plan
+    else {
         return;
     };
     let mut dock_clamped = false;
@@ -4088,13 +4769,14 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
     // The device bar is drawn above the page whenever tools are docked or a size is set.
     // The tools column stays full height; only the page view moves down.
     let show_bar = dock_ratio.is_some() || viewport.is_some();
-    let bar_px = if show_bar {
-        (VIEWPORT_BAR * scale).round() as i32
+    let bar_css = if show_bar {
+        viewport_bar.max(VIEWPORT_BAR)
     } else {
-        0
+        0.0
     };
+    let bar_px = (bar_css * scale).round() as i32;
     let page_height = (page_size.height as i32 - bar_px).max(1) as u32;
-    let fitted = viewport_frame(viewport, content_width, page_size.height, scale);
+    let fitted = viewport_frame(viewport, content_width, page_size.height, scale, bar_css);
     for (label, slot) in &shown {
         let Some(webview) = app.get_webview(label) else {
             continue;
@@ -4112,6 +4794,16 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
             };
         let _ = webview.set_size(PhysicalSize::new(width, height));
         let _ = webview.set_position(PhysicalPosition::new(position.x + x, position.y + y));
+        clip_page_corners(
+            app,
+            window,
+            &webview,
+            viewport,
+            &platform,
+            matches!(slot, Slot::Full) && fitted.is_some(),
+            width,
+            height,
+        );
     }
     for label in parked {
         if let Some(webview) = app.get_webview(&label) {
@@ -4328,9 +5020,11 @@ fn close_tab_inner(app: &AppHandle, id: u32) -> Result<Option<ClosedTab>, String
         let strip_empty = state.strip_indexes(&window).is_empty();
         let last_window = state.windows.len() <= 1;
         state.forget_tab(id, &window);
-        let drop_dock = state
-            .chrome_mut(&window)
-            .is_some_and(|chrome| chrome.devtools.release(id));
+        let drop_dock = state.chrome_mut(&window).is_some_and(|chrome| {
+            chrome.viewports.remove(&id);
+            chrome.viewport_quiet.remove(&id);
+            chrome.devtools.release(id)
+        });
         Some((
             tab.webview,
             was_active,
@@ -4384,6 +5078,7 @@ fn close_tab_inner(app: &AppHandle, id: u32) -> Result<Option<ClosedTab>, String
     ensured?;
     emit_tabs(app);
     if was_active {
+        apply_device_chrome(app, &window);
         focus_active(app, &window);
     }
     Ok(remembered)
@@ -5704,16 +6399,20 @@ pub fn open_devtools(app: &AppHandle, id: u32) {
 /// Turns the dock off for one tab. The window's inspector stays while another tab still has one.
 fn close_devtools_tab(app: &AppHandle, window: &str, id: u32) {
     let last = with_state(app, |state| {
-        state
-            .chrome_mut(window)
-            .is_some_and(|chrome| chrome.devtools.release(id))
+        let chrome = state.chrome_mut(window)?;
+        quiet_viewport(chrome, id);
+        Some(chrome.devtools.release(id))
     });
-    if last {
+    if last == Some(true) {
         close_devtools(app, window);
         return;
     }
     place_pages(app, window, true);
     emit_tabs(app);
+    if with_state(app, |state| state.active_of(window)) == Some(id) {
+        apply_device_chrome(app, window);
+        release_viewport_emulation(app, window);
+    }
     focus_active(app, window);
 }
 
@@ -5729,9 +6428,15 @@ fn close_devtools(app: &AppHandle, window: &str) {
         chrome.devtools.ready = false;
         chrome.devtools.tab = None;
         chrome.devtools.page = None;
-        chrome.screencast_suppress = true;
-        chrome.screencast_at = Instant::now();
-        chrome.viewport = None;
+        let now = Instant::now();
+        let ids: Vec<u32> = chrome.viewports.keys().copied().collect();
+        chrome.viewports.clear();
+        for id in ids {
+            chrome.viewport_quiet.insert(id, now);
+        }
+        if let Some(id) = chrome.active {
+            chrome.viewport_quiet.insert(id, now);
+        }
     });
     if let Some(webview) = app.get_webview(&label) {
         let _ = webview.close();
@@ -8663,6 +9368,51 @@ mod tests {
     }
 
     #[test]
+    fn a_device_preview_stays_on_the_tab_that_opened_it() {
+        let mut chrome = WindowChrome::new("main", "ui");
+        chrome.active = Some(1);
+        chrome.devtools.tabs.insert(1);
+        chrome.devtools.ready = true;
+        chrome.devtools.tab = Some(1);
+        chrome.viewports.insert(1, TabViewport::sized((390, 844)));
+        assert_eq!(
+            shown_viewport(&chrome).map(|viewport| viewport.size),
+            Some((390, 844))
+        );
+
+        chrome.active = Some(2);
+        assert!(shown_viewport(&chrome).is_none());
+        assert!(published_viewport(&chrome).is_none());
+
+        chrome.devtools.tabs.insert(2);
+        chrome.devtools.ready = true;
+        chrome.devtools.tab = Some(2);
+        assert!(shown_viewport(&chrome).is_none());
+
+        chrome.viewports.insert(2, TabViewport::sized((768, 1024)));
+        assert_eq!(
+            shown_viewport(&chrome).map(|viewport| viewport.size),
+            Some((768, 1024))
+        );
+        assert_eq!(
+            chrome.viewports.get(&1).map(|viewport| viewport.size),
+            Some((390, 844))
+        );
+
+        chrome.devtools.tabs.remove(&2);
+        assert!(shown_viewport(&chrome).is_none());
+    }
+
+    #[test]
+    fn a_phone_screen_uses_the_iphone_corner() {
+        assert_eq!(display_corner_radius("ios", 393, 852), 55.0);
+        assert_eq!(display_corner_radius("android", 412, 923), 55.0);
+        assert_eq!(display_corner_radius("ios", 932, 430), 55.0);
+        assert_eq!(display_corner_radius("ios", 744, 1133), 18.0);
+        assert_eq!(display_corner_radius("desktop", 1440, 900), 0.0);
+    }
+
+    #[test]
     fn a_device_frame_stays_inside_the_page() {
         let (x, y, width, height) = fit_device(1000, 700, 1280, 800);
         assert!(x + width <= 1000);
@@ -8677,14 +9427,16 @@ mod tests {
 
     #[test]
     fn a_sized_page_keeps_a_gutter_for_resize_handles() {
-        let (x, y, width, height) = viewport_frame(Some((390, 844)), 800, 1000, 1.0).unwrap();
+        let (x, y, width, height) =
+            viewport_frame(Some((390, 844)), 800, 1000, 1.0, VIEWPORT_BAR).unwrap();
         assert_eq!((width, height), (390, 844));
         assert!(x >= 12);
         assert!(y >= 36 + 12);
         assert!(x + width as i32 <= 800 - 12);
         assert!(y + height as i32 <= 1000 - 12);
 
-        let (x, y, width, height) = viewport_frame(Some((1180, 1400)), 800, 900, 1.0).unwrap();
+        let (x, y, width, height) =
+            viewport_frame(Some((1180, 1400)), 800, 900, 1.0, VIEWPORT_BAR).unwrap();
         assert_eq!(
             (x, y, width, height),
             (12, 36 + 12, 800 - 24, 900 - 36 - 24)
@@ -8696,6 +9448,7 @@ mod tests {
             cutout: true,
             home: true,
             installed: true,
+            keyboard: false,
             portrait,
             style: "island".to_string(),
             platform: "ios".to_string(),
@@ -8710,12 +9463,16 @@ mod tests {
     fn an_installed_phone_draws_a_status_bar_over_the_page() {
         let html = chrome_markup(&installed_phone(true));
         assert!(html.contains("ce-device-time"));
+        assert!(html.contains("ce-device-status-shade"));
+        assert!(html.contains("backdrop-filter:blur"));
         assert!(html.contains("ce-device-cutout"));
         assert!(html.contains("ce-device-home"));
         assert!(html.contains("9:41"));
         let script = device_chrome_script(&installed_phone(true));
         assert!(script.contains("display-mode"));
-        assert!(script.contains(", true, true)"));
+        assert!(script.contains("ceInstalledMedia"));
+        assert!(script.contains("ce-ios-keyboard"));
+        assert!(script.contains(", true, true, false)"));
     }
 
     #[test]
@@ -8724,6 +9481,7 @@ mod tests {
             cutout: true,
             home: true,
             installed: false,
+            keyboard: false,
             portrait: true,
             style: "notch".to_string(),
             platform: "ios".to_string(),

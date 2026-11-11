@@ -39,7 +39,8 @@ export function BrowserBody({
 }: BrowserBodyProps) {
   const devtools = snapshot.devtools;
   const pagesWidth = devtools?.visible ? `calc(${devtools.ratio * 100}% - 3px)` : "100%";
-  const showViewportBar = Boolean(devtools?.visible || snapshot.viewport);
+  // The device bar belongs to the tab whose DevTools is open. Other tabs stay full size.
+  const showViewportBar = devtools != null && (devtools.visible || snapshot.viewport != null);
   const shown = useShownPages(snapshot.tabs);
   return (
     <div id="browser-body" className="flex min-h-0 flex-1 pt-[var(--chrome-top-slack,0px)]">
@@ -58,16 +59,18 @@ export function BrowserBody({
               cutout={snapshot.viewport?.cutout ?? true}
               homeBar={snapshot.viewport?.homeBar ?? true}
               installed={snapshot.viewport?.installed ?? false}
+              keyboard={snapshot.viewport?.keyboard ?? false}
               devtoolsTabId={devtools ? snapshot.activeId : null}
             />
           ) : null}
-          {snapshot.viewport && snapshot.viewport.width > 0 && snapshot.viewport.height > 0 ? (
+          {showViewportBar && snapshot.viewport && snapshot.viewport.width > 0 && snapshot.viewport.height > 0 ? (
             <ViewportHandles
               width={snapshot.viewport.width}
               height={snapshot.viewport.height}
               cutout={snapshot.viewport.cutout}
               homeBar={snapshot.viewport.homeBar}
               installed={snapshot.viewport.installed}
+              keyboard={snapshot.viewport.keyboard}
             />
           ) : null}
           {splitShown && split

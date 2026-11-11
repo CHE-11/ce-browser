@@ -7,6 +7,7 @@ type ViewportHandlesProps = {
   cutout: boolean;
   homeBar: boolean;
   installed: boolean;
+  keyboard: boolean;
 };
 
 /** Matches the device bar and the gutter reserved in the native page layout. */
@@ -38,14 +39,14 @@ type Frame = {
 };
 
 /** Same centering as the native page view: under the bar, with a gutter the webview does not cover. */
-function deviceFrame(cssWidth: number, cssHeight: number, areaWidth: number, areaHeight: number): Frame {
+function deviceFrame(cssWidth: number, cssHeight: number, areaWidth: number, areaHeight: number, bar: number): Frame {
   const maxWidth = Math.max(1, areaWidth - GUTTER * 2);
-  const maxHeight = Math.max(1, areaHeight - BAR - GUTTER * 2);
+  const maxHeight = Math.max(1, areaHeight - bar - GUTTER * 2);
   const width = Math.min(Math.max(cssWidth, 1), maxWidth);
   const height = Math.min(Math.max(cssHeight, 1), maxHeight);
   return {
     x: GUTTER + (maxWidth - width) / 2,
-    y: BAR + GUTTER + (maxHeight - height) / 2,
+    y: bar + GUTTER + (maxHeight - height) / 2,
     width,
     height,
     maxWidth,
@@ -113,15 +114,16 @@ function handleStyle(id: HandleId, frame: Frame): CSSProperties {
  * Chrome-style grips around a sized page. They sit in the gutter outside the native webview,
  * which paints above this UI. Dragging an edge resizes both sides so the page stays centered.
  */
-export function ViewportHandles({ width, height, cutout, homeBar, installed }: ViewportHandlesProps) {
+export function ViewportHandles({ width, height, cutout, homeBar, installed, keyboard }: ViewportHandlesProps) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const chrome = useRef({ cutout, homeBar, installed });
-  chrome.current = { cutout, homeBar, installed };
+  const chrome = useRef({ cutout, homeBar, installed, keyboard });
+  chrome.current = { cutout, homeBar, installed, keyboard };
   const areaRef = useRef({ width: 0, height: 0 });
   const drag = useRef<{ id: HandleId; x: number; y: number; width: number; height: number } | null>(null);
   const pending = useRef<{ width: number; height: number } | null>(null);
   const frame = useRef<number | null>(null);
   const [area, setArea] = useState({ width: 0, height: 0 });
+  const [bar, setBar] = useState(BAR);
   const [live, setLive] = useState<{ width: number; height: number } | null>(null);
   areaRef.current = area;
 
@@ -132,11 +134,18 @@ export function ViewportHandles({ width, height, cutout, homeBar, installed }: V
     }
     const measure = () => {
       const rect = pages.getBoundingClientRect();
+      const barNode = document.getElementById("viewport-bar");
+      const barHeight = barNode ? Math.round(barNode.getBoundingClientRect().height) : BAR;
+      setBar(Math.max(BAR, barHeight));
       setArea({ width: rect.width, height: rect.height });
     };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(pages);
+    const barNode = document.getElementById("viewport-bar");
+    if (barNode) {
+      observer.observe(barNode);
+    }
     return () => observer.disconnect();
   }, []);
 
@@ -165,7 +174,7 @@ export function ViewportHandles({ width, height, cutout, homeBar, installed }: V
       if (!size) {
         return;
       }
-      void pushViewport(size.width, size.height, chrome.current.cutout, chrome.current.homeBar, chrome.current.installed);
+      void pushViewport(size.width, size.height, chrome.current.cutout, chrome.current.homeBar, chrome.current.installed, chrome.current.keyboard);
     });
   };
 
@@ -183,16 +192,16 @@ export function ViewportHandles({ width, height, cutout, homeBar, installed }: V
       frame.current = null;
     }
     pending.current = null;
-    const box = deviceFrame(width, height, areaRef.current.width, areaRef.current.height);
+    const box = deviceFrame(width, height, areaRef.current.width, areaRef.current.height, bar);
     const next = resized(start.id, start.width, start.height, event.clientX - start.x, event.clientY - start.y, box.maxWidth, box.maxHeight);
     setLive(next);
-    void pushViewport(next.width, next.height, chrome.current.cutout, chrome.current.homeBar, chrome.current.installed).catch(() =>
+    void pushViewport(next.width, next.height, chrome.current.cutout, chrome.current.homeBar, chrome.current.installed, chrome.current.keyboard).catch(() =>
       setLive(null),
     );
   };
 
   const shown = live ?? { width, height };
-  const box = deviceFrame(shown.width, shown.height, area.width, area.height);
+  const box = deviceFrame(shown.width, shown.height, area.width, area.height, bar);
   if (area.width <= 0 || area.height <= 0) {
     return <div id="viewport-handles" ref={rootRef} className="pointer-events-none absolute inset-0" />;
   }
@@ -213,7 +222,7 @@ export function ViewportHandles({ width, height, cutout, homeBar, installed }: V
             event.preventDefault();
             event.stopPropagation();
             event.currentTarget.setPointerCapture(event.pointerId);
-            const current = deviceFrame(width, height, areaRef.current.width, areaRef.current.height);
+            const current = deviceFrame(width, height, areaRef.current.width, areaRef.current.height, bar);
             drag.current = {
               id: handle.id,
               x: event.clientX,
@@ -228,7 +237,7 @@ export function ViewportHandles({ width, height, cutout, homeBar, installed }: V
             if (!start || start.id !== handle.id) {
               return;
             }
-            const current = deviceFrame(width, height, areaRef.current.width, areaRef.current.height);
+            const current = deviceFrame(width, height, areaRef.current.width, areaRef.current.height, bar);
             const next = resized(
               start.id,
               start.width,

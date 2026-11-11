@@ -112,6 +112,8 @@ export type PageViewport = {
   homeBar: boolean;
   /** Installed standalone web app. The page extends under the status bar and home indicator. */
   installed: boolean;
+  /** An iOS keyboard slides up over the page when a text field is focused, and its keys type into that field. */
+  keyboard: boolean;
 };
 
 export type WindowTabs = {
@@ -124,7 +126,7 @@ export type WindowTabs = {
   devtools: DevtoolsDock | null;
   /** Address of the open peek, if any. */
   peekUrl: string | null;
-  /** Fixed CSS size of the page view. Null uses the whole page area. */
+  /** Fixed CSS size of the tab that has DevTools open. Null on every other tab. */
   viewport: PageViewport | null;
   /** The agent panel is docked beside the pages. */
   agentPanel: boolean;
