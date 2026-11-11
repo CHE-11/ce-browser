@@ -666,8 +666,18 @@ export function setViewport(viewport: {
   cutoutStyle: string;
   /** `ios`, `android`, or `desktop`. */
   platform: string;
+  /** User agent and touch the page should report. An empty user agent keeps the host browser. */
+  browser: {
+    userAgent: string;
+    navigatorPlatform: string;
+    maxTouchPoints: number;
+    mobile: boolean;
+    clientPlatform: string;
+    clientPlatformVersion: string;
+    model: string;
+  };
 }) {
-  const { insets, maxInsets, ...rest } = viewport;
+  const { insets, maxInsets, browser, ...rest } = viewport;
   return invoke<void>("set_viewport", {
     ...rest,
     insetTop: insets.top,
@@ -678,6 +688,13 @@ export function setViewport(viewport: {
     maxInsetRight: maxInsets.right,
     maxInsetBottom: maxInsets.bottom,
     maxInsetLeft: maxInsets.left,
+    userAgent: browser.userAgent,
+    navigatorPlatform: browser.navigatorPlatform,
+    maxTouchPoints: browser.maxTouchPoints,
+    mobile: browser.mobile,
+    clientPlatform: browser.clientPlatform,
+    clientPlatformVersion: browser.clientPlatformVersion,
+    clientModel: browser.model,
   });
 }
 

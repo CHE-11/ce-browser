@@ -23,10 +23,12 @@ use tauri::{
 };
 use url::Url;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
-    COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS, ICoreWebView2, ICoreWebView2_3,
+    COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY_CORS, COREWEBVIEW2_WEB_ERROR_STATUS, ICoreWebView2,
+    ICoreWebView2_3,
 };
 use webview2_com::{
-    AddScriptToExecuteOnDocumentCreatedCompletedHandler, WebMessageReceivedEventHandler,
+    AddScriptToExecuteOnDocumentCreatedCompletedHandler, ExecuteScriptCompletedHandler,
+    NavigationCompletedEventHandler, WebMessageReceivedEventHandler,
 };
 use windows::core::{HSTRING, Interface};
 
@@ -712,17 +714,23 @@ pub fn toggle_panel(app: &AppHandle, window: &str, id: &str) -> Result<bool, Str
     let layout = resolve_panel(&loaded.record, &loaded.manifest);
     let url = file_url(&id, panel_path)?;
     let label = tabs::host_panel_label(window);
-    ensure_child(app, window, &label, url.clone())?;
-    if let Some(view) = app.get_webview(&label) {
-        navigate_if_needed(&view, &url);
-    }
+    eprintln!("panel: open host extension {id} in {window} at {url}");
+    ensure_child(app, window, &label, url.clone()).map_err(|error| {
+        eprintln!("panel: {label} was not created: {error}");
+        error
+    })?;
+    remember_panel_target(&label, url.as_str(), true);
     let wanted = if layout.resizable && loaded.record.panel_width > 0 {
         f64::from(loaded.record.panel_width)
     } else {
         f64::from(layout.default_width)
     };
     let width = fitted_panel_width(app, window, wanted, &layout);
+    // Place the column before navigating. The extension lays out against the size it
+    // first sees, and a navigation started while the view is still parked often loses
+    // to the initial about:blank load.
     tabs::open_host_panel(app, window, &id, width, layout.edge);
+    reveal_panel_document(app, &label, &url);
     post_panel_chrome(app, window, &layout);
     if let Some(view) = app.get_webview(&label) {
         let _ = view.set_focus();
@@ -1136,7 +1144,20 @@ fn bookmarks_view(app: &AppHandle, window: &str) -> Option<Webview> {
 
 fn ensure_child(app: &AppHandle, window: &str, label: &str, url: Url) -> Result<Webview, String> {
     if let Some(view) = app.get_webview(label) {
-        return Ok(view);
+        if !label.starts_with("cext-panel-") || panel_view_alive(&view) {
+            return Ok(view);
+        }
+        eprintln!("panel: {label} stopped answering, so it is being created again");
+        let _ = view.close();
+        for _ in 0..30 {
+            if app.get_webview(label).is_none() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if app.get_webview(label).is_some() {
+            return Err(format!("{label} closed and could not be created again."));
+        }
     }
     let host = app
         .get_window(window)
@@ -1170,7 +1191,12 @@ fn ensure_child(app: &AppHandle, window: &str, label: &str, url: Url) -> Result<
         .map_err(|error| error.to_string())?;
     attach_webview(app, &view);
     let _ = view.set_zoom(settings::get(app).ui_zoom_factor());
-    let _ = view.navigate(url);
+    if label.starts_with("cext-panel-") {
+        watch_panel_navigation(app, &view, label);
+        eprintln!("panel: created {label}");
+    } else {
+        let _ = view.navigate(url);
+    }
     Ok(view)
 }
 
@@ -1205,14 +1231,415 @@ pub fn apply_ui_zoom(app: &AppHandle, zoom: f64, ratio: f64) {
 
 fn navigate_if_needed(view: &Webview, url: &Url) {
     let current = view.url().ok();
-    let failed = current.as_ref().is_some_and(|current| {
-        let text = current.as_str();
-        text.starts_with("chrome-error:") || text.starts_with("about:blank")
-    });
+    let failed = current
+        .as_ref()
+        .is_some_and(|current| panel_placeholder(current.as_str()));
     let same = current.is_some_and(|current| current.as_str() == url.as_str());
     if failed || !same {
         let _ = view.navigate(url.clone());
     }
+}
+
+const PANEL_CHECK_DELAY: Duration = Duration::from_millis(350);
+const PANEL_CONTENT_DELAY: Duration = Duration::from_millis(500);
+const PANEL_RETRIES: u8 = 2;
+
+struct PanelLoad {
+    url: String,
+    retries: u8,
+    logged_content: bool,
+    waiting: bool,
+}
+
+fn panel_loads() -> &'static Mutex<HashMap<String, PanelLoad>> {
+    static LOADS: std::sync::OnceLock<Mutex<HashMap<String, PanelLoad>>> =
+        std::sync::OnceLock::new();
+    LOADS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn panel_view_alive(view: &Webview) -> bool {
+    match view.url() {
+        Ok(_) => true,
+        Err(error) => {
+            eprintln!("panel: {} is not answering ({error})", view.label());
+            false
+        }
+    }
+}
+
+/// A blank or error document. The close and side buttons can paint here, with no extension.
+fn panel_placeholder(url: &str) -> bool {
+    let url = url.trim();
+    url.is_empty()
+        || url.starts_with("about:blank")
+        || url.starts_with("chrome-error:")
+        || url.starts_with("edge-error:")
+}
+
+/// Same extension document, ignoring a hash or query the page adds after it loads.
+fn panel_document_ready(current: &str, wanted: &str) -> bool {
+    if panel_placeholder(current) {
+        return false;
+    }
+    match (Url::parse(current), Url::parse(wanted)) {
+        (Ok(current), Ok(wanted)) => {
+            current.scheme() == wanted.scheme()
+                && current.host_str() == wanted.host_str()
+                && current.path().trim_end_matches('/') == wanted.path().trim_end_matches('/')
+        }
+        _ => false,
+    }
+}
+
+fn panel_target_url(label: &str) -> Option<String> {
+    panel_loads()
+        .lock()
+        .expect("panel loads")
+        .get(label)
+        .map(|load| load.url.clone())
+}
+
+fn remember_panel_target(label: &str, url: &str, fresh: bool) {
+    let mut loads = panel_loads().lock().expect("panel loads");
+    if let Some(load) = loads.get_mut(label) {
+        let same = load.url == url;
+        load.url = url.to_string();
+        if fresh || !same {
+            load.retries = 0;
+            load.logged_content = false;
+            load.waiting = false;
+        }
+        return;
+    }
+    loads.insert(
+        label.to_string(),
+        PanelLoad {
+            url: url.to_string(),
+            retries: 0,
+            logged_content: false,
+            waiting: false,
+        },
+    );
+}
+
+fn panel_column_open(app: &AppHandle, label: &str) -> bool {
+    let Some(window) = label.strip_prefix("cext-panel-") else {
+        return false;
+    };
+    tabs::side_panel(app, window) == tabs::SidePanel::Host
+        && tabs::agent_panel_width(app, window) > 0.0
+}
+
+fn panel_bounds(view: &Webview) -> String {
+    match (view.position(), view.size()) {
+        (Ok(at), Ok(size)) => format!("{},{} {}x{}", at.x, at.y, size.width, size.height),
+        (Err(error), _) | (_, Err(error)) => format!("unreadable ({error})"),
+    }
+}
+
+fn panel_is_parked(view: &Webview) -> bool {
+    view.position()
+        .is_ok_and(|at| at.x <= -4_000 || at.y <= -4_000)
+}
+
+/// Navigates the panel after the column has a real size, then checks that the extension arrived.
+fn reveal_panel_document(app: &AppHandle, label: &str, url: &Url) {
+    let Some(view) = app.get_webview(label) else {
+        eprintln!("panel: {label} is missing, so {url} cannot load");
+        return;
+    };
+    webview2::repaint_child(&view);
+    let current = view
+        .url()
+        .map(|current| current.to_string())
+        .unwrap_or_else(|error| format!("unreadable ({error})"));
+    if panel_document_ready(&current, url.as_str()) {
+        eprintln!(
+            "panel: {label} already showing {current} at {}",
+            panel_bounds(&view)
+        );
+        schedule_panel_content(app, label);
+        return;
+    }
+    eprintln!(
+        "panel: load {label} from {current} to {url} at {}",
+        panel_bounds(&view)
+    );
+    if let Err(error) = view.navigate(url.clone()) {
+        eprintln!("panel: navigate {label} failed: {error}");
+    }
+    schedule_panel_check(app, label);
+}
+
+fn schedule_panel_check(app: &AppHandle, label: &str) {
+    {
+        let mut loads = panel_loads().lock().expect("panel loads");
+        let Some(load) = loads.get_mut(label) else {
+            return;
+        };
+        if load.waiting {
+            return;
+        }
+        load.waiting = true;
+    }
+    let app = app.clone();
+    let label = label.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(PANEL_CHECK_DELAY);
+        let app_for_check = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            {
+                let mut loads = panel_loads().lock().expect("panel loads");
+                if let Some(load) = loads.get_mut(&label) {
+                    load.waiting = false;
+                }
+            }
+            check_panel_document(&app_for_check, &label);
+        });
+    });
+}
+
+fn check_panel_document(app: &AppHandle, label: &str) {
+    let Some(wanted) = panel_target_url(label) else {
+        return;
+    };
+    if !panel_column_open(app, label) {
+        return;
+    }
+    let Some(view) = app.get_webview(label) else {
+        eprintln!("panel: {label} disappeared before {wanted} loaded");
+        return;
+    };
+    let current = view.url().map(|url| url.to_string()).unwrap_or_default();
+    let place = panel_bounds(&view);
+    eprintln!("panel: check {label} at {place} url={current}");
+    if panel_is_parked(&view)
+        && let Some(window) = label.strip_prefix("cext-panel-")
+    {
+        eprintln!("panel: {label} is off screen while its column is open");
+        tabs::layout(app, window);
+    }
+    if panel_document_ready(&current, &wanted) {
+        repost_panel_chrome(app, label);
+        schedule_panel_content(app, label);
+        return;
+    }
+    retry_panel_document(app, label, &wanted, &current);
+}
+
+fn retry_panel_document(app: &AppHandle, label: &str, wanted: &str, current: &str) {
+    {
+        let mut loads = panel_loads().lock().expect("panel loads");
+        let Some(load) = loads.get_mut(label) else {
+            return;
+        };
+        if load.retries >= PANEL_RETRIES {
+            eprintln!("panel: gave up on {label} at {current}; wanted {wanted}");
+            return;
+        }
+        load.retries += 1;
+        eprintln!(
+            "panel: {label} is {current}, loading {wanted} again ({}/{})",
+            load.retries, PANEL_RETRIES
+        );
+    }
+    let Some(view) = app.get_webview(label) else {
+        eprintln!("panel: {label} is missing, so the retry cannot load {wanted}");
+        return;
+    };
+    let Ok(url) = Url::parse(wanted) else {
+        eprintln!("panel: {wanted} is not an address");
+        return;
+    };
+    if let Err(error) = view.navigate(url) {
+        eprintln!("panel: navigate {label} failed: {error}");
+    }
+    schedule_panel_check(app, label);
+}
+
+fn schedule_panel_content(app: &AppHandle, label: &str) {
+    {
+        let mut loads = panel_loads().lock().expect("panel loads");
+        let Some(load) = loads.get_mut(label) else {
+            return;
+        };
+        if load.logged_content {
+            return;
+        }
+        load.logged_content = true;
+    }
+    let app = app.clone();
+    let label = label.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(PANEL_CONTENT_DELAY);
+        let app_for_log = app.clone();
+        let _ = app.run_on_main_thread(move || log_panel_content(&app_for_log, &label));
+    });
+}
+
+const PANEL_SNAPSHOT_JS: &str = r#"(function () {
+  var body = document.body;
+  var text = "";
+  var nodes = 0;
+  if (body) {
+    text = String(body.innerText || "").replace(/\s+/g, " ").trim().slice(0, 160);
+    var children = body.children || [];
+    for (var i = 0; i < children.length; i++) {
+      var id = children[i] && children[i].id || "";
+      if (id.indexOf("ce-panel") === 0) continue;
+      nodes++;
+    }
+  }
+  return {
+    href: String(location.href || ""),
+    ready: document.readyState,
+    nodes: nodes,
+    text: text,
+    chrome: !!document.getElementById("ce-panel-chrome")
+  };
+})()"#;
+
+fn log_panel_content(app: &AppHandle, label: &str) {
+    if !panel_column_open(app, label) {
+        return;
+    }
+    let Some(view) = app.get_webview(label) else {
+        eprintln!("panel: {label} is gone before its contents could be checked");
+        return;
+    };
+    let label = label.to_string();
+    let _ = view.with_webview(move |platform| unsafe {
+        let Ok(core) = platform.controller().CoreWebView2() else {
+            eprintln!("panel: {label} has no document to check");
+            return;
+        };
+        let script_label = label.clone();
+        let handler = ExecuteScriptCompletedHandler::create(Box::new(move |result, value| {
+            match result {
+                Ok(()) => report_panel_content(&script_label, &value),
+                Err(error) => eprintln!("panel: {script_label} content check failed: {error}"),
+            }
+            Ok(())
+        }));
+        if let Err(error) = core.ExecuteScript(&HSTRING::from(PANEL_SNAPSHOT_JS), &handler) {
+            eprintln!("panel: {label} content check failed: {error}");
+        }
+    });
+}
+
+fn report_panel_content(label: &str, raw: &str) {
+    let Ok(value) = serde_json::from_str::<Value>(raw) else {
+        eprintln!("panel: {label} content {raw}");
+        return;
+    };
+    let href = value.get("href").and_then(Value::as_str).unwrap_or("");
+    let ready = value.get("ready").and_then(Value::as_str).unwrap_or("");
+    let nodes = value.get("nodes").and_then(Value::as_u64).unwrap_or(0);
+    let text = value.get("text").and_then(Value::as_str).unwrap_or("");
+    let chrome = value
+        .get("chrome")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if panel_placeholder(href) {
+        eprintln!("panel: {label} chrome is on {href} and the extension document is not");
+        return;
+    }
+    if nodes == 0 && text.is_empty() {
+        eprintln!(
+            "panel: {label} loaded {href} ({ready}) but the extension drew nothing; chrome={chrome}"
+        );
+        return;
+    }
+    eprintln!("panel: {label} is showing {href} ({nodes} nodes, chrome={chrome}, {ready})");
+}
+
+fn watch_panel_navigation(app: &AppHandle, view: &Webview, label: &str) {
+    let app = app.clone();
+    let label = label.to_string();
+    let watched = label.clone();
+    if let Err(error) = view.with_webview(move |platform| unsafe {
+        let Ok(core) = platform.controller().CoreWebView2() else {
+            eprintln!("panel: {label} has no webview to watch");
+            return;
+        };
+        let watch_app = app.clone();
+        let watch_label = label.clone();
+        let mut token = 0i64;
+        let handler = NavigationCompletedEventHandler::create(Box::new(move |sender, args| {
+            let Some(args) = args else {
+                return Ok(());
+            };
+            let success = webview2::read_bool(|value| args.IsSuccess(value));
+            let mut status = COREWEBVIEW2_WEB_ERROR_STATUS::default();
+            let _ = args.WebErrorStatus(&mut status);
+            let code = crate::page_errors::web_error(status)
+                .map(|(_, code)| code)
+                .unwrap_or(if success { "OK" } else { "CANCELED" });
+            let source = sender
+                .as_ref()
+                .map(|core| webview2::read_pwstr(|value| core.Source(value)))
+                .unwrap_or_default();
+            let app = watch_app.clone();
+            let label = watch_label.clone();
+            let code = code.to_string();
+            std::thread::spawn(move || {
+                let app_for_settle = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    settle_panel_navigation(&app_for_settle, &label, success, &code, &source);
+                });
+            });
+            Ok(())
+        }));
+        if core.add_NavigationCompleted(&handler, &mut token).is_err() {
+            eprintln!("panel: could not watch navigation for {label}");
+        }
+    }) {
+        eprintln!("panel: could not watch {watched}: {error}");
+    }
+}
+
+fn repost_panel_chrome(app: &AppHandle, label: &str) {
+    let Some(window) = label.strip_prefix("cext-panel-") else {
+        return;
+    };
+    let id = tabs::host_panel_extension(app, window);
+    if id.is_empty() {
+        return;
+    }
+    if state(app).iter().any(|record| record.id == id) {
+        let Ok(loaded) = require_enabled(app, &id) else {
+            eprintln!("panel: {label} belongs to {id}, which is not enabled");
+            return;
+        };
+        let layout = resolve_panel(&loaded.record, &loaded.manifest);
+        post_panel_chrome(app, window, &layout);
+        return;
+    }
+    post_store_panel_chrome(
+        app,
+        window,
+        store_panel_edge(app, &id),
+        store_panel_resizable(app, &id),
+    );
+}
+
+fn settle_panel_navigation(app: &AppHandle, label: &str, success: bool, code: &str, source: &str) {
+    let Some(wanted) = panel_target_url(label) else {
+        return;
+    };
+    if !panel_column_open(app, label) {
+        return;
+    }
+    eprintln!("panel: {label} navigation finished success={success} status={code} url={source}");
+    if success && panel_document_ready(source, &wanted) {
+        repost_panel_chrome(app, label);
+        return;
+    }
+    if !success && (code == "CANCELED" || code == "CONNECTION_ABORTED") {
+        eprintln!("panel: {label} navigation was cancelled");
+        return;
+    }
+    retry_panel_document(app, label, &wanted, source);
 }
 
 /// The browser window a store popover or side panel belongs to.
@@ -1420,7 +1847,9 @@ fn open_called_side_panel(app: &AppHandle, label: &str) {
         return;
     };
     let window = surface_window(app, label);
-    open_store_panel(app, &window, &id, page, store_panel_edge(app, &id));
+    if let Err(error) = open_store_panel(app, &window, &id, page, store_panel_edge(app, &id)) {
+        eprintln!("panel: {error}");
+    }
 }
 
 /// Browser controls on a panel, popover, or page toolbar. The document may be the browser's
@@ -2335,7 +2764,9 @@ fn apply_popup_chrome(app: &AppHandle, label: &str, action: &str, side: &str) {
             } else {
                 tabs::PanelEdge::Right
             };
-            open_store_panel(app, &window, &id, url, edge);
+            if let Err(error) = open_store_panel(app, &window, &id, url, edge) {
+                eprintln!("panel: {error}");
+            }
             crate::popup::close_level(app, label);
         }
         "toolbar" => {
@@ -2383,6 +2814,12 @@ fn apply_store_panel_chrome(app: &AppHandle, window: &str, id: &str, action: &st
     };
     let width = store_panel_width(app, id);
     tabs::open_host_panel(app, window, id, width, edge);
+    let label = tabs::host_panel_label(window);
+    if let Some(wanted) = panel_target_url(&label)
+        && let Ok(url) = Url::parse(&wanted)
+    {
+        reveal_panel_document(app, &label, &url);
+    }
     post_store_panel_chrome(app, window, edge, store_panel_resizable(app, id));
 }
 
@@ -2397,7 +2834,7 @@ pub fn toggle_store_extension_panel(
         return Ok(false);
     }
     let url = crate::extensions::store_panel_url(app, id)?;
-    open_store_panel(app, window, id, url, store_panel_edge(app, id));
+    open_store_panel(app, window, id, url, store_panel_edge(app, id))?;
     Ok(true)
 }
 
@@ -2407,7 +2844,7 @@ pub fn place_store_extension_panel(app: &AppHandle, window: &str, id: &str) -> R
         return Ok(());
     }
     let url = crate::extensions::store_panel_url(app, id)?;
-    open_store_panel(app, window, id, url, store_panel_edge(app, id));
+    open_store_panel(app, window, id, url, store_panel_edge(app, id))?;
     Ok(())
 }
 
@@ -2493,15 +2930,25 @@ fn remember_store_panel_side(app: &AppHandle, id: &str, side: &str) {
     });
 }
 
-fn open_store_panel(app: &AppHandle, window: &str, id: &str, url: Url, edge: tabs::PanelEdge) {
+fn open_store_panel(
+    app: &AppHandle,
+    window: &str,
+    id: &str,
+    url: Url,
+    edge: tabs::PanelEdge,
+) -> Result<(), String> {
     let label = tabs::host_panel_label(window);
-    let _ = ensure_child(app, window, &label, url.clone());
-    if let Some(view) = app.get_webview(&label) {
-        navigate_if_needed(&view, &url);
-    }
+    eprintln!("panel: open store extension {id} in {window} at {url}");
+    ensure_child(app, window, &label, url.clone()).map_err(|error| {
+        eprintln!("panel: {label} was not created: {error}");
+        error
+    })?;
+    remember_panel_target(&label, url.as_str(), true);
     let width = store_panel_width(app, id);
     tabs::open_host_panel(app, window, id, width, edge);
+    reveal_panel_document(app, &label, &url);
     post_store_panel_chrome(app, window, edge, store_panel_resizable(app, id));
+    Ok(())
 }
 
 fn post_store_panel_chrome(app: &AppHandle, window: &str, edge: tabs::PanelEdge, resizable: bool) {
@@ -2612,12 +3059,23 @@ fn apply_open_panel(app: &AppHandle, id: &str) {
     } else {
         f64::from(layout.default_width)
     };
+    let panel_path = loaded.manifest.panel_path().to_string();
+    let url = if panel_path.is_empty() {
+        None
+    } else {
+        file_url(id, &panel_path).ok()
+    };
     for window in tabs::snapshot(app).windows {
         if tabs::host_panel_extension(app, &window.label) != id {
             continue;
         }
         let width = fitted_panel_width(app, &window.label, wanted, &layout);
         tabs::open_host_panel(app, &window.label, id, width, layout.edge);
+        if let Some(url) = &url {
+            let label = tabs::host_panel_label(&window.label);
+            remember_panel_target(&label, url.as_str(), false);
+            reveal_panel_document(app, &label, url);
+        }
         post_panel_chrome(app, &window.label, &layout);
     }
 }
@@ -3685,6 +4143,24 @@ pub const EXTENSION_TAB_JS: &str = r##"(function () {
 "##;
 
 const PANEL_CHROME_JS: &str = r##"(function () {
+  function postChrome(action, side) {
+    var target = window.__ceHost && window.__ceHost.postMessage ? window.__ceHost : null;
+    if (!target) {
+      try { target = window.chrome && window.chrome.webview; } catch (error) { target = null; }
+    }
+    if (!target || !target.postMessage) return;
+    var message = { type: "ce-chrome", action: action };
+    if (side) message.side = side;
+    target.postMessage(JSON.stringify(message));
+  }
+  // window.close() would destroy this reusable webview and leave the column empty.
+  window.close = function () {
+    try { console.warn("ce panel: window.close"); } catch (error) {}
+    postChrome("close");
+  };
+  var href = "";
+  try { href = String(location.href || ""); } catch (error) { href = ""; }
+  if (href.indexOf("about:blank") === 0 || href.indexOf("chrome-error:") === 0 || href.indexOf("edge-error:") === 0) return;
   if (window.__cePanelChrome) return;
   window.__cePanelChrome = true;
   var style = document.createElement("style");
@@ -3697,16 +4173,6 @@ const PANEL_CHROME_JS: &str = r##"(function () {
     "#ce-panel-chrome button[aria-pressed=true]{background:#3f3f46;color:#fafafa}"
   ].join("");
   function stop(event) { event.stopPropagation(); }
-  function postChrome(action, side) {
-    var target = window.__ceHost && window.__ceHost.postMessage ? window.__ceHost : null;
-    if (!target) {
-      try { target = window.chrome && window.chrome.webview; } catch (error) { target = null; }
-    }
-    if (!target || !target.postMessage) return;
-    var message = { type: "ce-chrome", action: action };
-    if (side) message.side = side;
-    target.postMessage(JSON.stringify(message));
-  }
   function sideButton(value, text, label) {
     var button = document.createElement("button");
     button.id = "ce-panel-chrome-" + value;
@@ -3750,6 +4216,7 @@ const PANEL_CHROME_JS: &str = r##"(function () {
     root.appendChild(sides);
     root.appendChild(close);
     (document.documentElement || document.body).appendChild(root);
+    try { console.info("ce panel: exit and side buttons on " + location.href); } catch (error) {}
     return root;
   }
   function paint(side) {
@@ -3779,6 +4246,10 @@ const PANEL_CHROME_JS: &str = r##"(function () {
     ensure();
     var ui = window.ce && window.ce.ui;
     if (!ui || !ui.panelChrome) {
+      if (location.protocol === "chrome-extension:" && !window.__cePanelChromeAsked) {
+        window.__cePanelChromeAsked = true;
+        postChrome("chrome");
+      }
       setTimeout(pull, 60);
       return;
     }
@@ -4233,6 +4704,36 @@ const CONTENT_JS_END: &str = r#";
 #[cfg(test)]
 mod tests {
     use super::{grants_cover, safe_relative, valid_id};
+
+    #[test]
+    fn a_blank_panel_is_not_the_extension_document() {
+        assert!(super::panel_placeholder("about:blank"));
+        assert!(super::panel_placeholder("about:blank#blocked"));
+        assert!(super::panel_placeholder("chrome-error://chromewebdata/"));
+        assert!(!super::panel_placeholder(
+            "chrome-extension://abc/popup.html"
+        ));
+        assert!(!super::panel_document_ready(
+            "about:blank",
+            "chrome-extension://abc/popup.html"
+        ));
+        assert!(super::panel_document_ready(
+            "chrome-extension://abc/popup.html#/vault",
+            "chrome-extension://abc/popup.html"
+        ));
+        assert!(super::panel_document_ready(
+            "chrome-extension://abc/popup.html?uilocation=panel",
+            "chrome-extension://abc/popup.html"
+        ));
+        assert!(!super::panel_document_ready(
+            "chrome-extension://other/popup.html",
+            "chrome-extension://abc/popup.html"
+        ));
+        assert!(super::panel_document_ready(
+            "https://notes.ce-ext.localhost/panel.html",
+            "https://notes.ce-ext.localhost/panel.html"
+        ));
+    }
 
     #[test]
     fn a_store_panel_belongs_to_its_browser_window() {

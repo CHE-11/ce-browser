@@ -1738,6 +1738,16 @@ pub fn attach_popup_hooks(app: &AppHandle, webview: &Webview, label: &str) {
     });
 }
 
+/// Asks a child webview to paint again after it was moved. A document that loaded while the
+/// view was parked can keep a blank surface until the controller is told the parent moved.
+pub fn repaint_child(webview: &Webview) {
+    let _ = webview.with_webview(|platform| unsafe {
+        let controller = platform.controller();
+        let _ = controller.SetIsVisible(true);
+        let _ = controller.NotifyParentWindowPositionChanged();
+    });
+}
+
 /// Sizes the webview to its window. A popout created for `SetNewWindow` can keep a zero-size
 /// view, so the frame stays the background color after the document has loaded.
 pub fn fill_client_area(webview: &Webview) {
@@ -4816,13 +4826,94 @@ pub fn security_state(webview: &Webview) -> Option<serde_json::Value> {
     serde_json::from_str(&state?).ok()
 }
 
-/// Safe-area insets and `display-mode`, so an installed app can be styled with `env()` and
-/// `(display-mode: standalone)`. Zeros and `browser` put a normal page back.
+/// Browser identity a device preview applies on top of the safe-area insets.
+/// An empty user agent restores the host browser.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PageBrowser {
+    pub user_agent: String,
+    pub navigator_platform: String,
+    pub max_touch_points: u32,
+    pub mobile: bool,
+    pub client_platform: String,
+    pub client_platform_version: String,
+    pub model: String,
+}
+
+impl PageBrowser {
+    pub fn none() -> Self {
+        Self {
+            user_agent: String::new(),
+            navigator_platform: String::new(),
+            max_touch_points: 0,
+            mobile: false,
+            client_platform: String::new(),
+            client_platform_version: String::new(),
+            model: String::new(),
+        }
+    }
+
+    pub fn is_none(&self) -> bool {
+        self.user_agent.is_empty()
+    }
+}
+
+/// DevTools commands that make `navigator` and `(pointer: coarse)` match `browser`.
+/// An empty profile clears the override.
+pub fn browser_override_calls(browser: &PageBrowser) -> Vec<(&'static str, String)> {
+    if browser.is_none() {
+        return vec![
+            (
+                "Emulation.setUserAgentOverride",
+                r#"{"userAgent":""}"#.to_string(),
+            ),
+            (
+                "Emulation.setTouchEmulationEnabled",
+                r#"{"enabled":false}"#.to_string(),
+            ),
+            (
+                "Emulation.setEmulatedMedia",
+                r#"{"media":"","features":[]}"#.to_string(),
+            ),
+        ];
+    }
+    let agent = serde_json::json!({
+        "userAgent": browser.user_agent,
+        "platform": browser.navigator_platform,
+        "userAgentMetadata": {
+            "platform": browser.client_platform,
+            "platformVersion": browser.client_platform_version,
+            "architecture": "",
+            "model": browser.model,
+            "mobile": browser.mobile,
+        },
+    });
+    let touch = serde_json::json!({
+        "enabled": true,
+        "maxTouchPoints": browser.max_touch_points.max(1),
+    });
+    let media = serde_json::json!({
+        "features": [
+            { "name": "pointer", "value": "coarse" },
+            { "name": "hover", "value": "none" },
+            { "name": "any-pointer", "value": "coarse" },
+            { "name": "any-hover", "value": "none" },
+        ],
+    });
+    vec![
+        ("Emulation.setUserAgentOverride", agent.to_string()),
+        ("Emulation.setTouchEmulationEnabled", touch.to_string()),
+        ("Emulation.setEmulatedMedia", media.to_string()),
+    ]
+}
+
+/// Safe-area insets and the device's browser, so an installed app can be styled with `env()`
+/// and the page can tell a phone from a desktop. Zeros and an empty browser put a normal page back.
 pub fn apply_page_environment(
     webview: &Webview,
     _installed: bool,
     insets: [u32; 4],
     max_insets: [u32; 4],
+    browser: &PageBrowser,
 ) -> std::result::Result<(), String> {
     let timeout = Duration::from_secs(2);
     let [top, right, bottom, left] = insets;
@@ -4837,6 +4928,9 @@ pub fn apply_page_environment(
         timeout,
         "viewport",
     )?;
+    for (method, params) in browser_override_calls(browser) {
+        call_cdp_json(webview, method, &params, timeout, "viewport")?;
+    }
     Ok(())
 }
 
@@ -4987,6 +5081,34 @@ mod tests {
     use super::{
         HostScheme, WheelBand, declares_dark_scheme, wants_light_scheme, wheel_band, wheel_steps,
     };
+
+    #[test]
+    fn a_phone_override_reports_safari_and_a_coarse_pointer() {
+        let calls = super::browser_override_calls(&super::PageBrowser {
+            user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) Safari/604.1"
+                .to_string(),
+            navigator_platform: "iPhone".to_string(),
+            max_touch_points: 5,
+            mobile: true,
+            client_platform: "iOS".to_string(),
+            client_platform_version: "18.5".to_string(),
+            model: "iPhone".to_string(),
+        });
+        assert_eq!(calls[0].0, "Emulation.setUserAgentOverride");
+        assert!(calls[0].1.contains("iPhone"));
+        assert!(calls[0].1.contains("\"platform\":\"iOS\""));
+        assert!(calls[1].1.contains("\"maxTouchPoints\":5"));
+        assert!(calls[2].1.contains("\"pointer\""));
+        assert!(calls[2].1.contains("coarse"));
+    }
+
+    #[test]
+    fn an_empty_browser_clears_the_override() {
+        let calls = super::browser_override_calls(&super::PageBrowser::none());
+        assert!(calls[0].1.contains("\"userAgent\":\"\""));
+        assert!(calls[1].1.contains("\"enabled\":false"));
+        assert!(calls[2].1.contains("\"features\":[]"));
+    }
 
     #[test]
     fn a_device_sized_page_is_kept() {

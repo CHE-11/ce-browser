@@ -116,9 +116,13 @@ export function ViewportBar({ width, height, cutout, homeBar, installed, keyboar
   const sized = width > 0 && height > 0;
   const environment = viewportEnvironment(width, height, installed, cutout, homeBar);
   const safe = environment.insets;
+  const identity =
+    sized && environment.browser.model
+      ? `${environment.browser.clientPlatform} ${environment.browser.model}`
+      : "this computer";
   const installedTitle = installed
-    ? `Installed web app. Safe area ${safe.top} ${safe.right} ${safe.bottom} ${safe.left}. Standalone display mode, with the status bar and cutout over the page.`
-    : "Mobile web app installed. Full screen, with a status bar, cutout, and safe-area insets instead of a browser page.";
+    ? `Installed web app on ${identity}. Safe area ${safe.top} ${safe.right} ${safe.bottom} ${safe.left}. Standalone display mode, with the status bar and cutout over the page.`
+    : `Mobile web app installed on ${identity}. Full screen, with a status bar, cutout, and safe-area insets instead of a browser page.`;
 
   return (
     <div

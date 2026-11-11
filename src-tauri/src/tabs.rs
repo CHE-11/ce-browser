@@ -433,6 +433,7 @@ struct TabViewport {
     max_insets: [u32; 4],
     style: String,
     platform: String,
+    browser: crate::webview2::PageBrowser,
 }
 
 impl TabViewport {
@@ -448,6 +449,7 @@ impl TabViewport {
             max_insets: [0; 4],
             style: "none".to_string(),
             platform: "desktop".to_string(),
+            browser: crate::webview2::PageBrowser::none(),
         }
     }
 }
@@ -2877,6 +2879,7 @@ pub fn set_viewport(
     max_insets: [u32; 4],
     cutout_style: &str,
     platform: &str,
+    browser: crate::webview2::PageBrowser,
 ) {
     let Some(size) = clamp_viewport(width, height) else {
         clear_viewport(app, window);
@@ -2901,6 +2904,7 @@ pub fn set_viewport(
             max_insets,
             style,
             platform,
+            browser,
         };
         if chrome.viewports.get(&id) == Some(&next) {
             return None;
@@ -2963,6 +2967,7 @@ struct ChromeSpec {
     portrait: bool,
     style: String,
     platform: String,
+    browser: crate::webview2::PageBrowser,
     top: u32,
     right: u32,
     bottom: u32,
@@ -2979,6 +2984,7 @@ impl ChromeSpec {
             portrait: true,
             style: "none".to_string(),
             platform: "desktop".to_string(),
+            browser: crate::webview2::PageBrowser::none(),
             top: 0,
             right: 0,
             bottom: 0,
@@ -2988,11 +2994,12 @@ impl ChromeSpec {
 }
 
 /// Last environment applied to a page. Absent means this tab was never overridden.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 struct PageEnvironment {
     installed: bool,
     insets: [u32; 4],
     max_insets: [u32; 4],
+    browser: crate::webview2::PageBrowser,
 }
 
 impl PageEnvironment {
@@ -3001,11 +3008,15 @@ impl PageEnvironment {
             installed: false,
             insets: [0; 4],
             max_insets: [0; 4],
+            browser: crate::webview2::PageBrowser::none(),
         }
     }
 
-    fn is_idle(self) -> bool {
-        self == Self::idle()
+    fn is_idle(&self) -> bool {
+        !self.installed
+            && self.insets == [0; 4]
+            && self.max_insets == [0; 4]
+            && self.browser.is_none()
     }
 }
 
@@ -3027,14 +3038,14 @@ fn sync_page_environment(app: &AppHandle, id: u32, env: PageEnvironment) {
         let Ok(mut last) = page_environments().lock() else {
             return;
         };
-        let previous = last.get(&id).copied();
-        if previous == Some(env) {
+        let previous = last.get(&id).cloned();
+        if previous.as_ref() == Some(&env) {
             return;
         }
         if env.is_idle() && previous.is_none() {
             return;
         }
-        last.insert(id, env);
+        last.insert(id, env.clone());
         previous
     };
     let app = app.clone();
@@ -3043,9 +3054,13 @@ fn sync_page_environment(app: &AppHandle, id: u32, env: PageEnvironment) {
             forget_page_environment(id);
             return;
         };
-        if let Err(error) =
-            webview2::apply_page_environment(&webview, env.installed, env.insets, env.max_insets)
-        {
+        if let Err(error) = webview2::apply_page_environment(
+            &webview,
+            env.installed,
+            env.insets,
+            env.max_insets,
+            &env.browser,
+        ) {
             eprintln!("viewport: {error}");
             let Ok(mut last) = page_environments().lock() else {
                 return;
@@ -3597,12 +3612,28 @@ fn ios_keyboard_js() -> &'static str {
 "##
 }
 
+fn browser_json(browser: &crate::webview2::PageBrowser) -> String {
+    if browser.is_none() {
+        return "null".to_string();
+    }
+    serde_json::json!({
+        "userAgent": browser.user_agent,
+        "navigatorPlatform": browser.navigator_platform,
+        "maxTouchPoints": browser.max_touch_points,
+        "clientPlatform": browser.client_platform,
+        "clientPlatformVersion": browser.client_platform_version,
+        "model": browser.model,
+    })
+    .to_string()
+}
+
 fn device_chrome_script(spec: &ChromeSpec) -> String {
     let html = serde_json::to_string(&chrome_markup(spec)).unwrap_or_else(|_| "\"\"".to_string());
     let ios = spec.installed && spec.platform == "ios";
     let installed = spec.installed;
+    let browser = browser_json(&spec.browser);
     format!(
-        r#"(function(html, ios, installed, keyboard) {{
+        r#"(function(html, ios, installed, keyboard, browser) {{
   var root = document.getElementById("ce-device-chrome");
   if (!html) {{
     if (root) root.remove();
@@ -3627,6 +3658,64 @@ fn device_chrome_script(spec: &ChromeSpec) -> String {
     }}
   }} catch (e) {{}}
   var state = window.__ceDisplayMode || (window.__ceDisplayMode = {{ rules: [], sheets: [], queries: [] }});
+  window.__ceBrowser = browser && browser.userAgent ? browser : null;
+  (function () {{
+    var proto = Navigator.prototype;
+    var names = ["userAgent", "platform", "maxTouchPoints", "userAgentData"];
+    function remember(name) {{
+      var key = "native" + name;
+      if (state[key] === undefined) {{
+        try {{ state[key] = Object.getOwnPropertyDescriptor(proto, name) || null; }}
+        catch (e) {{ state[key] = null; }}
+      }}
+    }}
+    function restore(name) {{
+      var desc = state["native" + name];
+      if (!desc) return;
+      try {{ Object.defineProperty(proto, name, desc); }} catch (e) {{}}
+    }}
+    function override(name, get) {{
+      remember(name);
+      try {{ Object.defineProperty(proto, name, {{ configurable: true, get: get }}); }} catch (e) {{}}
+    }}
+    if (!window.__ceBrowser) {{
+      for (var n = 0; n < names.length; n++) restore(names[n]);
+      return;
+    }}
+    override("userAgent", function () {{ return window.__ceBrowser.userAgent; }});
+    override("platform", function () {{ return window.__ceBrowser.navigatorPlatform; }});
+    override("maxTouchPoints", function () {{ return window.__ceBrowser.maxTouchPoints | 0; }});
+    if (window.__ceBrowser.clientPlatform === "iOS") {{
+      remember("userAgentData");
+      try {{ delete proto.userAgentData; }} catch (e) {{}}
+    }} else if (window.__ceBrowser.clientPlatform) {{
+      override("userAgentData", function () {{
+        var hints = window.__ceBrowser;
+        var brands = [{{ brand: "Chromium", version: "131" }}, {{ brand: "Google Chrome", version: "131" }}];
+        return {{
+          brands: brands,
+          mobile: true,
+          platform: hints.clientPlatform,
+          toJSON: function () {{ return {{ brands: brands, mobile: true, platform: hints.clientPlatform }}; }},
+          getHighEntropyValues: function () {{
+            return Promise.resolve({{
+              brands: brands,
+              mobile: true,
+              platform: hints.clientPlatform,
+              platformVersion: hints.clientPlatformVersion || "",
+              architecture: "",
+              model: hints.model || "",
+              uaFullVersion: "131.0.0.0",
+              fullVersionList: [
+                {{ brand: "Chromium", version: "131.0.0.0" }},
+                {{ brand: "Google Chrome", version: "131.0.0.0" }}
+              ]
+            }});
+          }}
+        }};
+      }});
+    }}
+  }})();
   window.__ceInstalled = installed;
   function rewriteRule(css) {{
     if (!css || css.indexOf("display-mode") === -1) return null;
@@ -3749,10 +3838,19 @@ fn device_chrome_script(spec: &ChromeSpec) -> String {
       parts.push(input.slice(start));
       return parts;
     }}
+    function ceTouch() {{
+      return !!(window.__ceBrowser && window.__ceBrowser.maxTouchPoints > 0);
+    }}
     function ceCondition(cond) {{
       var plain = String(cond || "").trim().replace(/^\(+/, "").replace(/\)+$/, "").trim();
       var mode = plain.match(/^display-mode\s*:\s*([a-z-]+)$/i);
-      if (mode) return mode[1].toLowerCase() === "standalone";
+      if (mode) return !!window.__ceInstalled && mode[1].toLowerCase() === "standalone";
+      if (ceTouch()) {{
+        var pointer = plain.match(/^(?:any-)?pointer\s*:\s*([a-z]+)$/i);
+        if (pointer) return pointer[1].toLowerCase() === "coarse";
+        var hover = plain.match(/^(?:any-)?hover\s*:\s*([a-z]+)$/i);
+        if (hover) return hover[1].toLowerCase() === "none";
+      }}
       if (/^(only\s+)?(all|screen)$/i.test(plain)) return true;
       if (/^(only\s+)?print$/i.test(plain)) return false;
       if (!plain) return true;
@@ -3771,9 +3869,10 @@ fn device_chrome_script(spec: &ChromeSpec) -> String {
     }}
     // Installed apps match standalone, including `(display-mode: standalone), (display-mode: fullscreen)`.
     function ceInstalledMedia(query, nativeMatches) {{
-      if (!window.__ceInstalled || String(query).toLowerCase().indexOf("display-mode") === -1) {{
-        return nativeMatches;
-      }}
+      var text = String(query).toLowerCase();
+      var mode = !!window.__ceInstalled && text.indexOf("display-mode") !== -1;
+      var touch = ceTouch() && (text.indexOf("pointer") !== -1 || text.indexOf("hover") !== -1);
+      if (!mode && !touch) return nativeMatches;
       var groups = ceSplitComma(String(query));
       for (var i = 0; i < groups.length; i++) {{
         var alternatives = ceSplitKeyword(groups[i], "or");
@@ -3865,12 +3964,15 @@ fn device_chrome_script(spec: &ChromeSpec) -> String {
       state.patchError = String(error && (error.stack || error));
     }}
   }}
+  var profile = window.__ceBrowser ? window.__ceBrowser.userAgent : "";
+  var profileChanged = state.profile !== profile;
+  state.profile = profile;
   var modeChanged = state.mode !== installed;
   state.mode = installed;
   if (installed) scanRoot(document);
   else restore();
 {keyboard_js}
-  if (!modeChanged) return;
+  if (!modeChanged && !profileChanged) return;
   var queries = state.queries;
   for (var q = 0; q < queries.length; q++) {{
     var wrappedQuery = queries[q];
@@ -3884,11 +3986,15 @@ fn device_chrome_script(spec: &ChromeSpec) -> String {
     }}
   }}
   try {{ window.dispatchEvent(new Event("resize")); }} catch (e) {{}}
-}})({html}, {ios}, {installed}, {keyboard})"#,
+  requestAnimationFrame(function () {{
+    try {{ window.dispatchEvent(new Event("resize")); }} catch (e) {{}}
+  }});
+}})({html}, {ios}, {installed}, {keyboard}, {browser})"#,
         html = html,
         ios = if ios { "true" } else { "false" },
         installed = if installed { "true" } else { "false" },
         keyboard = if spec.keyboard { "true" } else { "false" },
+        browser = browser,
         keyboard_js = ios_keyboard_js(),
     )
 }
@@ -3911,6 +4017,7 @@ fn apply_device_chrome(app: &AppHandle, window: &str) {
                 portrait: height >= width,
                 style: viewport.style.clone(),
                 platform: viewport.platform.clone(),
+                browser: viewport.browser.clone(),
                 top: viewport.insets[0],
                 right: viewport.insets[1],
                 bottom: viewport.insets[2],
@@ -3920,6 +4027,7 @@ fn apply_device_chrome(app: &AppHandle, window: &str) {
                 installed: viewport.installed,
                 insets: viewport.insets,
                 max_insets: viewport.max_insets,
+                browser: viewport.browser.clone(),
             },
         ))
     });
@@ -7171,6 +7279,9 @@ fn place_column(
     edge: PanelEdge,
 ) {
     let Some(webview) = app.get_webview(label) else {
+        if show && label.starts_with("cext-panel-") {
+            note_absent_panel(label);
+        }
         return;
     };
     if !show {
@@ -7182,8 +7293,55 @@ fn place_column(
         PanelEdge::Right => position.x + page_size.width as i32,
         PanelEdge::Left => position.x - width_px,
     };
-    let _ = webview.set_size(PhysicalSize::new(width_px as u32, page_size.height));
+    let height = page_size.height.max(1);
+    if label.starts_with("cext-panel-") {
+        clear_absent_panel(label);
+        if page_size.height < 2 {
+            note_flat_panel(label);
+        }
+    }
+    let _ = webview.set_size(PhysicalSize::new(width_px as u32, height));
     let _ = webview.set_position(PhysicalPosition::new(x, position.y));
+    if label.starts_with("cext-panel-") {
+        webview2::repaint_child(&webview);
+    }
+}
+
+fn absent_panels() -> &'static Mutex<String> {
+    static LAST: OnceLock<Mutex<String>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(String::new()))
+}
+
+fn note_absent_panel(label: &str) {
+    let Ok(mut last) = absent_panels().lock() else {
+        return;
+    };
+    if last.as_str() == label {
+        return;
+    }
+    *last = label.to_string();
+    eprintln!("panel: {label} should be on screen but its webview is missing");
+}
+
+fn clear_absent_panel(label: &str) {
+    let Ok(mut last) = absent_panels().lock() else {
+        return;
+    };
+    if last.as_str() == label {
+        last.clear();
+    }
+}
+
+fn note_flat_panel(label: &str) {
+    static LAST: OnceLock<Mutex<String>> = OnceLock::new();
+    let Ok(mut last) = LAST.get_or_init(|| Mutex::new(String::new())).lock() else {
+        return;
+    };
+    if last.as_str() == label {
+        return;
+    }
+    *last = label.to_string();
+    eprintln!("panel: {label} is being placed with no height, so the extension cannot draw");
 }
 
 /// Width of the docked side column in CSS pixels. Zero when it is closed.
@@ -9452,6 +9610,15 @@ mod tests {
             portrait,
             style: "island".to_string(),
             platform: "ios".to_string(),
+            browser: crate::webview2::PageBrowser {
+                user_agent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1".to_string(),
+                navigator_platform: "iPhone".to_string(),
+                max_touch_points: 5,
+                mobile: true,
+                client_platform: "iOS".to_string(),
+                client_platform_version: "18.5".to_string(),
+                model: "iPhone".to_string(),
+            },
             top: if portrait { 59 } else { 0 },
             right: if portrait { 0 } else { 59 },
             bottom: if portrait { 34 } else { 21 },
@@ -9471,8 +9638,10 @@ mod tests {
         let script = device_chrome_script(&installed_phone(true));
         assert!(script.contains("display-mode"));
         assert!(script.contains("ceInstalledMedia"));
+        assert!(script.contains("ceTouch"));
+        assert!(script.contains("iPhone"));
         assert!(script.contains("ce-ios-keyboard"));
-        assert!(script.contains(", true, true, false)"));
+        assert!(script.contains(", true, true, false, "));
     }
 
     #[test]
@@ -9485,6 +9654,7 @@ mod tests {
             portrait: true,
             style: "notch".to_string(),
             platform: "ios".to_string(),
+            browser: crate::webview2::PageBrowser::none(),
             top: 0,
             right: 0,
             bottom: 0,

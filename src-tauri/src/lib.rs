@@ -1985,6 +1985,13 @@ async fn set_viewport(
     max_inset_left: u32,
     cutout_style: String,
     platform: String,
+    user_agent: String,
+    navigator_platform: String,
+    max_touch_points: u32,
+    mobile: bool,
+    client_platform: String,
+    client_platform_version: String,
+    client_model: String,
 ) {
     tabs::set_viewport(
         &app,
@@ -2004,6 +2011,15 @@ async fn set_viewport(
         ],
         &cutout_style,
         &platform,
+        webview2::PageBrowser {
+            user_agent,
+            navigator_platform,
+            max_touch_points,
+            mobile,
+            client_platform,
+            client_platform_version,
+            model: client_model,
+        },
     );
 }
 
