@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import { PageNavLinks, pageNavClassName } from "@/components/PageShell";
-import { cn } from "@/lib/cn";
-import { focusRing } from "@/lib/focus-ring";
+import { PageNav, pageNavButtonClass } from "@/components/PageShell";
 
 type SettingsNavSection = {
   id: string;
@@ -9,8 +7,6 @@ type SettingsNavSection = {
 };
 
 const TOOL_SECTION_IDS = ["settings-adblock", "settings-ai", "settings-automation", "settings-mcp", "settings-shopping", "settings-translate", "settings-print"] as const;
-
-const itemClass = "truncate rounded-md px-2 py-1 text-left text-[11px] leading-4 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100";
 
 export function SettingsNavigation({ sections, enabled }: { sections: readonly SettingsNavSection[]; enabled: boolean }) {
   const [activeId, setActiveId] = useState<string | undefined>(sections[0]?.id);
@@ -79,54 +75,58 @@ export function SettingsNavigation({ sections, enabled }: { sections: readonly S
   }, [enabled, visibleKey]);
 
   return (
-    <nav id="settings-page-nav" aria-label="Settings" className={cn(pageNavClassName(true), "gap-0.5 p-2.5")}>
-      <PageNavLinks id="settings-page" page="settings" compact>
-        {enabled && sections.length > 0 ? (
-          <div id="settings-page-nav-outline" className="mb-1 ml-3.5 flex flex-col gap-px border-l border-zinc-800 py-0.5 pl-1.5">
-            {mainSections.map((section) => (
-              <button
-                key={section.id}
-                id={`settings-page-nav-outline-${section.id}`}
-                type="button"
-                title={section.title}
-                aria-current={section.id === currentId ? "location" : undefined}
-                className={cn(itemClass, focusRing, section.id === currentId && "bg-sky-950 text-sky-300 hover:bg-sky-950")}
-                onClick={() => document.getElementById(section.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              >
+    <PageNav id="settings-page" page="settings" label="Settings" lockHorizontalScroll>
+      {enabled && sections.length > 0 ? (
+        <div id="settings-page-nav-outline" className="mb-1 ml-3.5 flex flex-col gap-1 border-l border-zinc-800 py-0.5 pl-1.5">
+          {mainSections.map((section) => (
+            <button
+              key={section.id}
+              id={`settings-page-nav-outline-${section.id}`}
+              type="button"
+              title={section.title}
+              aria-current={section.id === currentId ? "location" : undefined}
+              className={pageNavButtonClass(section.id === currentId)}
+              onClick={() => document.getElementById(section.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            >
+              <span id={`settings-page-nav-outline-${section.id}-label`} className="min-w-0 flex-1 truncate">
                 {section.title}
-              </button>
-            ))}
-            {toolSections.length > 0 ? (
-              <div id="settings-page-nav-tools" className="flex flex-col gap-px">
-                <button
-                  id="settings-page-nav-outline-settings-tools"
-                  type="button"
-                  title="Tools"
-                  className={cn(itemClass, focusRing, toolsActive && "bg-sky-950 text-sky-300 hover:bg-sky-950")}
-                  onClick={() => document.getElementById(toolSections[0].id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                >
+              </span>
+            </button>
+          ))}
+          {toolSections.length > 0 ? (
+            <div id="settings-page-nav-tools" className="flex flex-col gap-1">
+              <button
+                id="settings-page-nav-outline-settings-tools"
+                type="button"
+                title="Tools"
+                className={pageNavButtonClass(toolsActive)}
+                onClick={() => document.getElementById(toolSections[0].id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              >
+                <span id="settings-page-nav-outline-settings-tools-label" className="min-w-0 flex-1 truncate">
                   Tools
-                </button>
-                <div id="settings-page-nav-tools-items" className="ml-2 flex flex-col gap-px border-l border-zinc-800 py-0.5 pl-1.5">
-                  {toolSections.map((section) => (
-                    <button
-                      key={section.id}
-                      id={`settings-page-nav-outline-${section.id}`}
-                      type="button"
-                      title={section.title}
-                      aria-current={section.id === currentId ? "location" : undefined}
-                      className={cn(itemClass, focusRing, section.id === currentId && "bg-sky-950 text-sky-300 hover:bg-sky-950")}
-                      onClick={() => document.getElementById(section.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                    >
+                </span>
+              </button>
+              <div id="settings-page-nav-tools-items" className="ml-2 flex flex-col gap-1 border-l border-zinc-800 py-0.5 pl-1.5">
+                {toolSections.map((section) => (
+                  <button
+                    key={section.id}
+                    id={`settings-page-nav-outline-${section.id}`}
+                    type="button"
+                    title={section.title}
+                    aria-current={section.id === currentId ? "location" : undefined}
+                    className={pageNavButtonClass(section.id === currentId)}
+                    onClick={() => document.getElementById(section.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  >
+                    <span id={`settings-page-nav-outline-${section.id}-label`} className="min-w-0 flex-1 truncate">
                       {section.title}
-                    </button>
-                  ))}
-                </div>
+                    </span>
+                  </button>
+                ))}
               </div>
-            ) : null}
-          </div>
-        ) : null}
-      </PageNavLinks>
-    </nav>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </PageNav>
   );
 }
