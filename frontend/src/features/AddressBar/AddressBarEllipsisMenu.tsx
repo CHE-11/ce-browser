@@ -76,7 +76,7 @@ export function AddressBarEllipsisMenu() {
   };
 
   return (
-    <PopupFrame id="address-bar-ellipsis-menu" width={280} ready={snapshot.loaded}>
+    <PopupFrame id="address-bar-ellipsis-menu" width={280} maxHeight={2000} ready={snapshot.loaded}>
       <PopupMenu id="address-bar-ellipsis-menu-items" label="Browser menu">
         {update?.available ? (
           <>

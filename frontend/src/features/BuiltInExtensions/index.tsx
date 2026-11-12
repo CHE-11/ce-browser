@@ -19,6 +19,12 @@ import { ExtractButton } from "./automation/ExtractButton";
 import { RecordFlowButton } from "./automation/RecordFlowButton";
 import { BoardsButton } from "./boards/popover/BoardsButton";
 import { DebugHudButton } from "./debug-hud/DebugHudButton";
+import { FontPickerButton } from "./font-picker/FontPickerButton";
+import { NetworkButton } from "./network/NetworkButton";
+import { RewritesButton } from "./rewrites/RewritesButton";
+import { ScriptsButton } from "./scripts/ScriptsButton";
+import { StylePickerButton } from "./style-picker/StylePickerButton";
+import { ThemePickerButton } from "./theme-picker/ThemePickerButton";
 
 /** One pinned built-in tool. Unknown ids render nothing. */
 export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab: TabInfo | undefined; settings: BrowserSettings | null }) {
@@ -45,6 +51,18 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <AdBlockerButton activeTab={activeTab} settings={settings} />;
     case "page-controls":
       return <PageControlsButton activeTab={activeTab} />;
+    case "network":
+      return <NetworkButton activeTab={activeTab} />;
+    case "scripts":
+      return <ScriptsButton activeTab={activeTab} />;
+    case "rewrites":
+      return <RewritesButton />;
+    case "theme-picker":
+      return <ThemePickerButton />;
+    case "font-picker":
+      return <FontPickerButton />;
+    case "style-picker":
+      return <StylePickerButton />;
     case "translate":
       return <TranslateButton activeTab={activeTab} />;
     case "password":

@@ -3,10 +3,16 @@ import {
   Bot,
   CircleDot,
   Clapperboard,
+  Code,
   Eraser,
   FileText,
   ImageDown,
+  ListTree,
+  Palette,
   Presentation,
+  Route,
+  SwatchBook,
+  Type,
   Video,
   KeyRound,
   Languages,
@@ -29,6 +35,8 @@ export type BuiltinTool = {
   icon: LucideIcon;
   /** Defaults to the address bar. Other tools default to the tools toolbar. */
   address?: boolean;
+  /** Works with no website open. The command palette lists it even when no tab is active. */
+  anywhere?: boolean;
   /** Developer tool. It is listed with the other built-in tools and runs in dev and release builds. */
   dev?: boolean;
 };
@@ -101,6 +109,47 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Page controls",
     description: "Change dark mode, scripts, media and other behavior for this site.",
     icon: SlidersHorizontal,
+  },
+  {
+    id: "network",
+    name: "Network",
+    description: "See the requests this tab makes.",
+    icon: ListTree,
+  },
+  {
+    id: "scripts",
+    name: "Site scripts",
+    description: "Add CSS or JavaScript to the sites you choose.",
+    icon: Code,
+    anywhere: true,
+  },
+  {
+    id: "rewrites",
+    name: "Request rules",
+    description: "Block, redirect, or replace requests.",
+    icon: Route,
+    anywhere: true,
+  },
+  {
+    id: "theme-picker",
+    name: "Theme",
+    description: "Choose the browser theme and light or dark mode.",
+    icon: Palette,
+    anywhere: true,
+  },
+  {
+    id: "font-picker",
+    name: "Font",
+    description: "Choose the font used in the browser.",
+    icon: Type,
+    anywhere: true,
+  },
+  {
+    id: "style-picker",
+    name: "Styles",
+    description: "Pick a density preset, or open the Styles page.",
+    icon: SwatchBook,
+    anywhere: true,
   },
   {
     id: "translate",

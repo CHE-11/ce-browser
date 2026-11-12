@@ -43,9 +43,13 @@ export function AddressBarExtensionPopover() {
   const needle = query.trim().toLowerCase();
   const matches = (name: string) => needle === "" || name.toLowerCase().includes(needle);
   const installed = extensions.filter((extension) => !isComponentExtension(extension.id, extension.name) && matches(extension.name));
-  const components = extensions.filter((extension) => isComponentExtension(extension.id, extension.name) && matches(extension.name));
   const hosts = host.extensions.filter((extension) => matches(extension.name));
-  const builtins = BUILTIN_TOOLS.filter((tool) => matches(tool.name));
+  const builtinItems = [
+    ...extensions
+      .filter((extension) => isComponentExtension(extension.id, extension.name) && matches(extension.name))
+      .map((extension) => ({ kind: "component" as const, name: extension.name, extension })),
+    ...BUILTIN_TOOLS.filter((tool) => matches(tool.name)).map((tool) => ({ kind: "tool" as const, name: tool.name, tool })),
+  ].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
   const ready = loaded && host.loaded && settingsLoaded;
 
   const fail = (action: Promise<unknown>) => {
@@ -97,7 +101,7 @@ export function AddressBarExtensionPopover() {
     }
   };
 
-  const renderInstalled = (extension: ExtensionInfo) => (
+  const renderInstalled = (extension: ExtensionInfo, removable = true) => (
     <InstalledRow
       key={extension.id}
       extension={extension}
@@ -109,7 +113,7 @@ export function AddressBarExtensionPopover() {
         fail(openExtensionOptions(extension.id));
         void closePopup();
       }}
-      onRemove={() => setPending({ kind: "installed", id: extension.id, name: extension.name })}
+      onRemove={removable ? () => setPending({ kind: "installed", id: extension.id, name: extension.name }) : undefined}
       onUpdate={() => {
         setBusy(true);
         setStatus(null);
@@ -209,7 +213,7 @@ export function AddressBarExtensionPopover() {
           {installed.length === 0 ? (
             <Empty id="address-extension-popover-installed-empty" text={needle ? "No matching extensions." : "No third-party extensions installed."} />
           ) : (
-            installed.map(renderInstalled)
+            installed.map((extension) => renderInstalled(extension))
           )}
         </Section>
 
@@ -234,15 +238,22 @@ export function AddressBarExtensionPopover() {
         ) : null}
 
         <Section id="address-extension-popover-builtin" title="Built-in">
-          {components.length === 0 && builtins.length === 0 ? (
+          {builtinItems.length === 0 ? (
             <Empty id="address-extension-popover-builtin-empty" text="No matching built-in extensions." />
           ) : (
-            <>
-              {components.map(renderInstalled)}
-              {builtins.map((tool) => (
-                <BuiltinRow key={tool.id} tool={tool} settings={settings} onPlacement={setPlacement} onEnabled={(enabled) => settings && fail(saveBuiltinEnabled(settings, tool.id, enabled))} />
-              ))}
-            </>
+            builtinItems.map((item) =>
+              item.kind === "component" ? (
+                renderInstalled(item.extension, false)
+              ) : (
+                <BuiltinRow
+                  key={item.tool.id}
+                  tool={item.tool}
+                  settings={settings}
+                  onPlacement={setPlacement}
+                  onEnabled={(enabled) => settings && fail(saveBuiltinEnabled(settings, item.tool.id, enabled))}
+                />
+              ),
+            )
           )}
         </Section>
       </div>
@@ -413,7 +424,7 @@ function InstalledRow({
   onPlacement: (id: string, placement: ToolbarPlacement) => void;
   onEnabled: (enabled: boolean) => void;
   onOptions: () => void;
-  onRemove: () => void;
+  onRemove?: () => void;
   onUpdate: () => void;
 }) {
   const id = `address-extension-popover-ext-${extension.id}`;
@@ -443,9 +454,11 @@ function InstalledRow({
               <Settings2 id={`${id}-options-icon`} aria-hidden />
             </IconAction>
           ) : null}
-          <IconAction id={`${id}-remove`} label="Remove" onClick={onRemove}>
-            <Trash2 id={`${id}-remove-icon`} aria-hidden />
-          </IconAction>
+          {onRemove ? (
+            <IconAction id={`${id}-remove`} label="Remove" onClick={onRemove}>
+              <Trash2 id={`${id}-remove-icon`} aria-hidden />
+            </IconAction>
+          ) : null}
         </>
       }
     />

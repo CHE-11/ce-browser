@@ -233,7 +233,7 @@ export function CommandPalette() {
       group: "Setting",
       run: () => openSetting(snapshot.windowTabs, entry.id),
     }));
-    const tools: Hit[] = BUILTIN_TOOLS.filter((tool) => builtinToolEnabled(settings, tool.id) && (active || tool.dev || tool.id === "present")).map((tool) => ({
+    const tools: Hit[] = BUILTIN_TOOLS.filter((tool) => builtinToolEnabled(settings, tool.id) && (active || tool.dev || tool.anywhere || tool.id === "present")).map((tool) => ({
       id: `tool-${tool.id}`,
       title: tool.name,
       hint: tool.description,
@@ -245,11 +245,24 @@ export function CommandPalette() {
         if (tool.id === "present") {
           return togglePresent();
         }
+        if (tool.id === "scripts") {
+          const host = active ? siteKey(active.url) : "";
+          return createTab(host ? `ce://scripts?host=${encodeURIComponent(host)}` : "ce://scripts");
+        }
+        if (tool.id === "rewrites") {
+          return createTab("ce://rewrites");
+        }
+        if (tool.id === "font-picker" || tool.id === "theme-picker" || tool.id === "style-picker") {
+          return openHere(tool.id, "");
+        }
         if (!active) {
           return;
         }
         if (tool.id === "clear-cache") {
           return clearSiteCache(active.id);
+        }
+        if (tool.id === "network") {
+          return openHere("network", `id=${active.id}`);
         }
         const params =
           tool.id === "page-controls" ? `${tabParams(active)}&host=${encodeURIComponent(siteKey(active.url))}` : tabParams(active);
