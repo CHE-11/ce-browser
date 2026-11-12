@@ -26,11 +26,18 @@ export function pageNavClassName(lockHorizontalScroll = false) {
   );
 }
 
-/** Page links and the settings outline. Height, padding, text, and icons follow the saved menu style. */
+const pageNavItemClass = "flex min-w-0 items-center gap-3 rounded-md text-left text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100";
+
+/** Page links. Height, padding, text, and icons follow the saved menu style. */
 export function pageNavButtonClass(active: boolean) {
+  return cn(pageNavItemClass, menuRowClass, focusRing, active && "bg-sky-950 text-sky-300 hover:bg-sky-950");
+}
+
+/** Settings sections. Text is 90% of the page links. Top and bottom padding is half of the menu padding, then 80%. */
+export function pageNavOutlineClass(active: boolean) {
   return cn(
-    "flex min-w-0 items-center gap-3 rounded-md text-left text-zinc-300 hover:bg-zinc-900 hover:text-zinc-100",
-    menuRowClass,
+    pageNavItemClass,
+    "h-auto px-[calc(var(--menu-padding)*0.8)] py-[calc(var(--menu-padding)*0.4)] text-[length:calc(var(--menu-text)*0.9)] leading-tight",
     focusRing,
     active && "bg-sky-950 text-sky-300 hover:bg-sky-950",
   );

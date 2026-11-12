@@ -425,6 +425,13 @@ html[data-popup="true"] body {
   background: var(--app-zinc-900);
 }
 
+/* The entrance slide paints past the window. Without this, that overflow becomes a scrollbar for the first frames and the text jumps. */
+html[data-toast="true"],
+html[data-toast="true"] body,
+html[data-toast="true"] #root {
+  overflow: hidden;
+}
+
 #root {
   height: 100%;
 }

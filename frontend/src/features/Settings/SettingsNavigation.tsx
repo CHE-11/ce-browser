@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PageNav, pageNavButtonClass } from "@/components/PageShell";
+import { PageNav, pageNavOutlineClass } from "@/components/PageShell";
 
 type SettingsNavSection = {
   id: string;
@@ -85,7 +85,7 @@ export function SettingsNavigation({ sections, enabled }: { sections: readonly S
               type="button"
               title={section.title}
               aria-current={section.id === currentId ? "location" : undefined}
-              className={pageNavButtonClass(section.id === currentId)}
+              className={pageNavOutlineClass(section.id === currentId)}
               onClick={() => document.getElementById(section.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
             >
               <span id={`settings-page-nav-outline-${section.id}-label`} className="min-w-0 flex-1 truncate">
@@ -99,7 +99,7 @@ export function SettingsNavigation({ sections, enabled }: { sections: readonly S
                 id="settings-page-nav-outline-settings-tools"
                 type="button"
                 title="Tools"
-                className={pageNavButtonClass(toolsActive)}
+                className={pageNavOutlineClass(toolsActive)}
                 onClick={() => document.getElementById(toolSections[0].id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
               >
                 <span id="settings-page-nav-outline-settings-tools-label" className="min-w-0 flex-1 truncate">
@@ -114,7 +114,7 @@ export function SettingsNavigation({ sections, enabled }: { sections: readonly S
                     type="button"
                     title={section.title}
                     aria-current={section.id === currentId ? "location" : undefined}
-                    className={pageNavButtonClass(section.id === currentId)}
+                    className={pageNavOutlineClass(section.id === currentId)}
                     onClick={() => document.getElementById(section.id)?.scrollIntoView({ behavior: "smooth", block: "start" })}
                   >
                     <span id={`settings-page-nav-outline-${section.id}-label`} className="min-w-0 flex-1 truncate">

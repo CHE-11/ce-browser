@@ -7609,6 +7609,10 @@ pub(crate) fn popup_paint_script(color: Color) -> String {
   var color = "#{r:02x}{g:02x}{b:02x}";
   var root = document.documentElement;
   root.dataset.popup = "true";
+  if (location.hash.indexOf("#/popup/toast") === 0) {{
+    root.dataset.toast = "true";
+    root.style.overflow = "hidden";
+  }}
   var paint = function () {{
     root.style.backgroundColor = color;
     if (document.body) document.body.style.backgroundColor = color;

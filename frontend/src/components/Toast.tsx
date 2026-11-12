@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Undo2, X } from "lucide-react";
 import { createTab, dismissToast, installUpdate, undoAction, updateExtension } from "../lib/browser-client";
 import { Button } from "./Button";
@@ -26,7 +26,7 @@ export function Toast({ params }: ToastProps) {
   const [hovered, setHovered] = useState(false);
   const left = useRef(action ? ACTION_VISIBLE_MS : VISIBLE_MS);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.dataset.toast = "true";
   }, []);
 

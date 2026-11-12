@@ -11,6 +11,10 @@ const EMPTY: NetworkSpeed = {
   linkBps: 0,
   signal: null,
   rttMs: null,
+  pingMs: null,
+  jitterMs: null,
+  ipAddress: null,
+  externalIp: null,
 };
 
 /** Polls the adapter about once a second. A sample already in flight is left to finish. */

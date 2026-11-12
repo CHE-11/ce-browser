@@ -175,6 +175,14 @@ export type NetworkSpeed = {
   signal: number | null;
   /** Round trip to the default gateway, milliseconds. Null until a probe lands. */
   rttMs: number | null;
+  /** Round trip to 1.1.1.1, milliseconds. Null until a probe lands. */
+  pingMs: number | null;
+  /** Mean gap between consecutive public pings, milliseconds. Null until two land. */
+  jitterMs: number | null;
+  /** IPv4 of the connected adapter, or IPv6 when it has no IPv4. */
+  ipAddress: string | null;
+  /** Address a public server sees for this connection. */
+  externalIp: string | null;
 };
 
 export type AiProviderId = "openai" | "claude" | "custom" | "local";

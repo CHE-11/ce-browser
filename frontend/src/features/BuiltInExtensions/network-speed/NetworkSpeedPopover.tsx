@@ -1,14 +1,20 @@
 import { Gauge } from "lucide-react";
 import { PopupFrame } from "@/components/PopupFrame";
+import { copyText, showNotice } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { PopoverHeader } from "../PopoverParts";
-import { StrengthBars } from "./NetworkSpeedButton";
+
 import {
+  externalIpHint,
   formatBits,
   formatRate,
+  ipAddressHint,
+  jitterHint,
   kindLabel,
   latencyHint,
   linkHint,
+  pingHint,
+  Strength,
   strength,
   strengthHint,
   throughputHint,
@@ -24,10 +30,56 @@ const TONE_TEXT: Record<StrengthTone, string> = {
   strong: "text-emerald-300",
 };
 
+function copyIpAddress(address: string) {
+  void copyText(address)
+    .then(() => showNotice(`Copied ${address} to the clipboard.`))
+    .catch(() => undefined);
+}
+
+const BADGE_HEIGHT = ["h-[3px]", "h-[5px]", "h-[7px]", "h-[9px]"];
+const DETAIL_HEIGHT = ["h-1.5", "h-2.5", "h-3.5", "h-[18px]"];
+
+
+const TONE_BAR: Record<StrengthTone, string> = {
+  off: "bg-zinc-600",
+  weak: "bg-red-400",
+  fair: "bg-amber-400",
+  good: "bg-sky-400",
+  strong: "bg-emerald-400",
+};
+
+
+export function StrengthBars({ id, level, size }: { id: string; level: Strength; size: "badge" | "detail" }) {
+  const heights = size === "badge" ? BADGE_HEIGHT : DETAIL_HEIGHT;
+  return (
+    <span
+      id={id}
+      className={cn("pointer-events-none flex items-end gap-px", size === "badge" && "absolute -top-0.5 -right-0.5")}
+      aria-hidden
+    >
+      {heights.map((height, index) => (
+        <span
+          id={`${id}-bar-${index + 1}`}
+          key={height}
+          className={cn(
+            "rounded-[1px]",
+            size === "badge" ? "w-0.5" : "w-1",
+            height,
+            index < level.bars ? TONE_BAR[level.tone] : "bg-zinc-700",
+          )}
+        />
+      ))}
+    </span>
+  );
+}
+
+
 export function NetworkSpeedPopover() {
   const speed = useNetworkSpeed();
   const level = strength(speed);
   const subtitle = speed.online ? speed.name || kindLabel(speed.kind) : "Offline";
+  const address = speed.ipAddress;
+  const external = speed.externalIp;
 
   return (
     <PopupFrame id="network-speed-popover" width={300} maxHeight={360}>
@@ -79,18 +131,74 @@ export function NetworkSpeedPopover() {
           value={speed.rttMs == null ? "—" : `${speed.rttMs} ms`}
           hint={latencyHint(speed.rttMs)}
         />
+
+        <Row
+          id="network-speed-ping"
+          label="Ping"
+          value={speed.pingMs == null ? "—" : `${speed.pingMs} ms`}
+          hint={pingHint(speed.pingMs)}
+        />
+        <Row
+          id="network-speed-jitter"
+          label="Jitter"
+          value={speed.jitterMs == null ? "—" : `${speed.jitterMs} ms`}
+          hint={jitterHint(speed.jitterMs)}
+        />
+        <Row
+          id="network-speed-local-ip"
+          label="Local IP"
+          value={address ?? "—"}
+          hint={ipAddressHint(address)}
+          onActivate={address ? () => copyIpAddress(address) : undefined}
+        />
+        <Row
+          id="network-speed-external-ip"
+          label="External IP"
+          value={external ?? "—"}
+          hint={externalIpHint(external)}
+          onActivate={external ? () => copyIpAddress(external) : undefined}
+        />
+
       </div>
     </PopupFrame>
   );
 }
 
-function Row({ id, label, value, hint }: { id: string; label: string; value: string; hint?: string }) {
+function Row({
+  id,
+  label,
+  value,
+  hint,
+  onActivate,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  hint?: string;
+  onActivate?: () => void;
+}) {
   return (
     <div id={id} className="flex items-baseline justify-between gap-3 py-1">
       <span id={`${id}-label`} className="text-xs text-zinc-400">
         {label}
       </span>
-      <span id={`${id}-value`} className="cursor-help truncate text-xs font-medium tabular-nums text-zinc-100" title={hint}>
+      <span
+        id={`${id}-value`}
+        className={cn(
+          "truncate text-xs font-medium tabular-nums text-zinc-100",
+          onActivate ? "cursor-pointer" : "cursor-help",
+        )}
+        title={hint}
+        onClick={onActivate}
+        onContextMenu={
+          onActivate
+            ? (event) => {
+                event.preventDefault();
+                onActivate();
+              }
+            : undefined
+        }
+      >
         {value}
       </span>
     </div>

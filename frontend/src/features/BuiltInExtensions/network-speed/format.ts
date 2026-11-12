@@ -102,6 +102,50 @@ export function linkHint(linkBps: number) {
   return "Fast link. Ordinary browsing and streaming will not fill it.";
 }
 
+/** Round trip to a public server. Lower is better. */
+export function pingHint(pingMs: number | null) {
+  if (pingMs == null) {
+    return "No reply from the internet yet.";
+  }
+  if (pingMs <= 30) {
+    return "Good. A public server answers quickly, so the path off this network is healthy.";
+  }
+  if (pingMs <= 80) {
+    return "Fair. Replies take a little longer, so pages can feel a beat late.";
+  }
+  return "Poor. The path off this network is slow, so pages and calls will feel delayed.";
+}
+
+/** How much consecutive pings differ. Lower is steadier. */
+export function jitterHint(jitterMs: number | null) {
+  if (jitterMs == null) {
+    return "Not enough replies yet to judge how steady the ping is.";
+  }
+  if (jitterMs <= 5) {
+    return "Steady. Ping times barely move, so calls and games stay smooth.";
+  }
+  if (jitterMs <= 20) {
+    return "Uneven. Ping times wander a little, so calls may sound slightly uneven.";
+  }
+  return "Unsteady. Ping times jump around, so calls and games will stutter.";
+}
+
+/** Address of the connected adapter on the local network. */
+export function ipAddressHint(ipAddress: string | null) {
+  if (ipAddress == null) {
+    return "This adapter has not reported a local address.";
+  }
+  return `${ipAddress} on this network. Click to copy it.`;
+}
+
+/** Address websites see for this connection. */
+export function externalIpHint(ipAddress: string | null) {
+  if (ipAddress == null) {
+    return "The address websites see is not available yet.";
+  }
+  return `${ipAddress} is the address websites see. Click to copy it.`;
+}
+
 /** Round trip to the default gateway. Lower is better. */
 export function latencyHint(rttMs: number | null) {
   if (rttMs == null) {
