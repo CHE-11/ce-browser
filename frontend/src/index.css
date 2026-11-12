@@ -632,6 +632,7 @@ html[data-backdrop] #browser .bg-zinc-900 {
 .chrome-tool-strip .chrome-toolbar-button {
   width: var(--toolbar-button, 2rem);
   height: var(--toolbar-button, 2rem);
+  cursor: pointer;
 }
 
 .chrome-toolbar .chrome-toolbar-button > svg:not(.absolute),

@@ -1,4 +1,4 @@
-import { forwardRef, useRef, useState, type DragEvent } from "react";
+import { forwardRef, useRef, useState, type DragEvent, type MouseEvent, type MouseEventHandler } from "react";
 import { ListCollapse } from "lucide-react";
 import type { BrowserSettings, ExtensionInfo, TabInfo, ToolbarSide } from "@type/browser";
 import { ToolbarIcon } from "@features/BuiltInExtensions";
@@ -19,7 +19,7 @@ import {
 } from "@/lib/toolbar-pin";
 import { toolbarSidePatch } from "@/lib/toolbar-side";
 import { ExtensionIcon } from "@/components/ExtensionIcon";
-import { IconButton } from "@/components/IconButton";
+import { IconButton, ToolbarEntryClickContext } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
 import { ExtensionsToolbarScrollbar } from "./ExtensionsToolbarScrollbar";
 import { ExtensionsToolbarSideControl } from "./ExtensionsToolbarSideControl";
@@ -63,6 +63,18 @@ export function ExtensionToolbarButton({ extension, idPrefix }: ExtensionToolbar
   );
 }
 
+function activateToolbarEntry(event: MouseEvent<HTMLElement>, run: MouseEventHandler<HTMLElement> | null) {
+  const button = event.currentTarget.querySelector<HTMLButtonElement>("button.chrome-toolbar-button");
+  if (!button || button.disabled || !run) {
+    return;
+  }
+  const hit = event.target instanceof Element ? event.target.closest("button") : null;
+  if (hit && hit !== button) {
+    return;
+  }
+  run(event);
+}
+
 type ToolbarEntryProps = {
   id: string;
   idPrefix: string;
@@ -98,6 +110,7 @@ export function ToolbarEntry({
   onDragEnd,
 }: ToolbarEntryProps) {
   const hostExtensions = useHostExtensions().extensions;
+  const toolbarClick = useRef<MouseEventHandler<HTMLElement> | null>(null);
   const host = hostExtensions.find((item) => `host:${item.id}` === id);
   const domId = `${idPrefix}-tool-${id}`;
   const caption = extension?.name ?? host?.name ?? builtinTool(id)?.name ?? "";
@@ -105,63 +118,66 @@ export function ToolbarEntry({
   const stacked = vertical || labeled;
   const listDrag = toolbarIndex !== undefined;
   return (
-    <span
-      id={domId}
-      title={caption || undefined}
-      data-toolbar-index={listDrag ? toolbarIndex : undefined}
-      className={cn(
-        "relative",
-        stacked ? "flex shrink-0 flex-col items-center" : "inline-flex",
-        vertical ? "w-full py-0.5" : stacked && (labeled ? "w-max px-1.5 py-0" : "w-12 py-0.5"),
-        labeled && vertical && "gap-0 px-0.5 py-0",
-        labeled &&
-          "group rounded-md hover:bg-zinc-800 hover:text-zinc-100 has-[[data-active=true]]:bg-zinc-800 has-[[data-active=true]]:text-zinc-100 [&_.chrome-toolbar-button]:rounded-md [&_.chrome-toolbar-button]:hover:bg-transparent has-[[data-active=true]]:[&_.chrome-toolbar-button]:bg-transparent",
-        dragging && "opacity-40",
-      )}
-      {...(listDrag
-        ? { draggable: true, onDragStart, onDragEnd }
-        : toolbarDragHandlers(id, onMove ?? (() => undefined)))}
-      onContextMenu={(event) => openToolbarPinMenu(event, id)}
-    >
-      {drop === "before" ? (
-        <span
-          id={`${domId}-drop-before`}
-          className={cn(
-            "pointer-events-none absolute z-10 rounded-full bg-sky-400 shadow-[0_0_6px_rgb(56_189_248)]",
-            vertical ? "inset-x-1.5 -top-px h-0.5" : "inset-y-1.5 -left-px w-0.5",
-          )}
-        />
-      ) : null}
-      {drop === "after" ? (
-        <span
-          id={`${domId}-drop-after`}
-          className={cn(
-            "pointer-events-none absolute z-10 rounded-full bg-sky-400 shadow-[0_0_6px_rgb(56_189_248)]",
-            vertical ? "inset-x-1.5 -bottom-px h-0.5" : "inset-y-1.5 -right-px w-0.5",
-          )}
-        />
-      ) : null}
-      {extension ? (
-        <ExtensionToolbarButton extension={extension} idPrefix={idPrefix} />
-      ) : host ? (
-        <HostToolbarButton extension={host} idPrefix={idPrefix} />
-      ) : (
-        <ToolbarIcon id={id} activeTab={activeTab} settings={settings} />
-      )}
-      {labeled && caption ? (
-        <span
-          id={`${domId}-label`}
-          className={cn(
-            "pointer-events-none min-w-0 px-0.5 text-center text-[8px] leading-none text-zinc-400 group-hover:text-zinc-100 group-has-[[data-active=true]]:text-zinc-100",
-            vertical
-              ? "-mt-1.5 line-clamp-2 w-full wrap-break-word pb-1"
-              : "-mt-1 w-max whitespace-nowrap pb-0.5",
-          )}
-        >
-          {caption}
-        </span>
-      ) : null}
-    </span>
+    <ToolbarEntryClickContext.Provider value={toolbarClick}>
+      <span
+        id={domId}
+        title={caption || undefined}
+        data-toolbar-index={listDrag ? toolbarIndex : undefined}
+        className={cn(
+          "group relative has-[.chrome-toolbar-button:not(:disabled)]:cursor-pointer",
+          stacked ? "flex shrink-0 flex-col items-center" : "inline-flex",
+          vertical ? "w-full py-0.5" : stacked && (labeled ? "w-max px-1.5 py-0" : "w-12 py-0.5"),
+          labeled && vertical && "gap-0 px-0.5 py-0",
+          !labeled &&
+            "hover:[&_.chrome-toolbar-button:not(:disabled)]:bg-zinc-800 hover:[&_.chrome-toolbar-button:not(:disabled)]:text-zinc-100",
+          labeled &&
+            "rounded-md hover:bg-zinc-800 hover:text-zinc-100 has-[[data-active=true]]:bg-zinc-800 has-[[data-active=true]]:text-zinc-100 [&_.chrome-toolbar-button]:rounded-md [&_.chrome-toolbar-button]:hover:bg-transparent has-[[data-active=true]]:[&_.chrome-toolbar-button]:bg-transparent",
+          dragging && "opacity-40",
+        )}
+        {...(listDrag
+          ? { draggable: true, onDragStart, onDragEnd }
+          : toolbarDragHandlers(id, onMove ?? (() => undefined)))}
+        onClick={(event) => activateToolbarEntry(event, toolbarClick.current)}
+        onContextMenu={(event) => openToolbarPinMenu(event, id)}
+      >
+        {drop === "before" ? (
+          <span
+            id={`${domId}-drop-before`}
+            className={cn(
+              "pointer-events-none absolute z-10 rounded-full bg-sky-400 shadow-[0_0_6px_rgb(56_189_248)]",
+              vertical ? "inset-x-1.5 -top-px h-0.5" : "inset-y-1.5 -left-px w-0.5",
+            )}
+          />
+        ) : null}
+        {drop === "after" ? (
+          <span
+            id={`${domId}-drop-after`}
+            className={cn(
+              "pointer-events-none absolute z-10 rounded-full bg-sky-400 shadow-[0_0_6px_rgb(56_189_248)]",
+              vertical ? "inset-x-1.5 -bottom-px h-0.5" : "inset-y-1.5 -right-px w-0.5",
+            )}
+          />
+        ) : null}
+        {extension ? (
+          <ExtensionToolbarButton extension={extension} idPrefix={idPrefix} />
+        ) : host ? (
+          <HostToolbarButton extension={host} idPrefix={idPrefix} />
+        ) : (
+          <ToolbarIcon id={id} activeTab={activeTab} settings={settings} />
+        )}
+        {labeled && caption ? (
+          <span
+            id={`${domId}-label`}
+            className={cn(
+              "pointer-events-none min-w-0 px-0.5 text-center text-[8px] leading-none text-zinc-400 group-hover:text-zinc-100 group-has-[[data-active=true]]:text-zinc-100",
+              vertical ? "-mt-1.5 line-clamp-2 w-full wrap-break-word pb-1" : "-mt-1 w-max whitespace-nowrap pb-0.5",
+            )}
+          >
+            {caption}
+          </span>
+        ) : null}
+      </span>
+    </ToolbarEntryClickContext.Provider>
   );
 }
 
