@@ -107,6 +107,7 @@ import type {
   OmniboxState,
   Container,
   NetworkEntry,
+  NetworkSpeed,
   OmniboxSuggestion,
   PeekInfo,
   PermissionGrant,
@@ -442,6 +443,10 @@ export function showNotice(message: string) {
 
 export function readingStats(id: number) {
   return invoke<ReadingStats>("reading_stats", { id });
+}
+
+export function networkSpeed() {
+  return invoke<NetworkSpeed>("network_speed");
 }
 
 // Boards

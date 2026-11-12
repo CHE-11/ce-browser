@@ -21,6 +21,7 @@ import { BoardsButton } from "./boards/popover/BoardsButton";
 import { DebugHudButton } from "./debug-hud/DebugHudButton";
 import { FontPickerButton } from "./font-picker/FontPickerButton";
 import { NetworkButton } from "./network/NetworkButton";
+import { NetworkSpeedButton } from "./network-speed/NetworkSpeedButton";
 import { RewritesButton } from "./rewrites/RewritesButton";
 import { ScriptsButton } from "./scripts/ScriptsButton";
 import { StylePickerButton } from "./style-picker/StylePickerButton";
@@ -53,6 +54,8 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <PageControlsButton activeTab={activeTab} />;
     case "network":
       return <NetworkButton activeTab={activeTab} />;
+    case "network-speed":
+      return <NetworkSpeedButton />;
     case "scripts":
       return <ScriptsButton activeTab={activeTab} />;
     case "rewrites":

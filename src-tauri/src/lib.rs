@@ -28,6 +28,8 @@ mod library;
 mod media;
 mod microphone;
 mod model_prices;
+#[path = "network_speed.rs"]
+mod net_speed;
 mod notify;
 mod ocr;
 mod page_dialogs;
@@ -1689,6 +1691,11 @@ async fn reading_stats(app: AppHandle, id: u32) -> Result<tools::ReadingStats, S
 }
 
 #[tauri::command]
+async fn network_speed() -> Result<net_speed::NetworkSpeed, String> {
+    blocking(|| Ok(net_speed::snapshot())).await
+}
+
+#[tauri::command]
 fn list_prices(app: AppHandle) -> Vec<tools::ProductPrice> {
     tools::list_prices(&app)
 }
@@ -3213,6 +3220,7 @@ pub fn run() {
             copy_text,
             show_notice,
             reading_stats,
+            network_speed,
             list_prices,
             track_price,
             check_prices,

@@ -252,7 +252,12 @@ export function CommandPalette() {
         if (tool.id === "rewrites") {
           return createTab("ce://rewrites");
         }
-        if (tool.id === "font-picker" || tool.id === "theme-picker" || tool.id === "style-picker") {
+        if (
+          tool.id === "font-picker" ||
+          tool.id === "theme-picker" ||
+          tool.id === "style-picker" ||
+          tool.id === "network-speed"
+        ) {
           return openHere(tool.id, "");
         }
         if (!active) {

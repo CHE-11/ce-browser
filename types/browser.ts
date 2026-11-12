@@ -162,6 +162,21 @@ export type ReadingStats = {
   ease: number;
 };
 
+/** Live adapter throughput. Rates are bytes per second for the whole adapter. */
+export type NetworkSpeed = {
+  online: boolean;
+  name: string;
+  kind: "wifi" | "ethernet" | "other" | "offline";
+  downBps: number;
+  upBps: number;
+  /** Negotiated link speed, bits per second. Zero when unknown. */
+  linkBps: number;
+  /** Wi-Fi signal 0–100. Null on a wired link. */
+  signal: number | null;
+  /** Round trip to the default gateway, milliseconds. Null until a probe lands. */
+  rttMs: number | null;
+};
+
 export type AiProviderId = "openai" | "claude" | "custom" | "local";
 
 export type AiProviderSlot = {
@@ -467,6 +482,7 @@ export type PopupKind =
   | "workspaces"
   | "page-controls"
   | "network"
+  | "network-speed"
   | "translate"
   | "password"
   | "reading"

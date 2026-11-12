@@ -28,6 +28,7 @@ import { CommandPalette } from "../BuiltInExtensions/command-palette/CommandPale
 import { MediaGrid } from "../BuiltInExtensions/media/MediaGrid";
 import { MediaHub } from "../BuiltInExtensions/media/MediaHub";
 import { NetworkPopover } from "../BuiltInExtensions/network/NetworkPopover";
+import { NetworkSpeedPopover } from "../BuiltInExtensions/network-speed/NetworkSpeedPopover";
 import { PageCapturePopover } from "../BuiltInExtensions/page-capture/PageCapturePopover";
 import { RecordingPopover } from "../BuiltInExtensions/recording/RecordingPopover";
 import { PageControlsPopover } from "../BuiltInExtensions/page-controls/PageControlsPopover";
@@ -211,6 +212,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <PageControlsPopover params={params} />;
     case "network":
       return <NetworkPopover tabId={Number(params.get("id"))} />;
+    case "network-speed":
+      return <NetworkSpeedPopover />;
     case "translate":
       return <TranslatePopover params={params} />;
     case "password":

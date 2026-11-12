@@ -1,6 +1,6 @@
 [package]
 name = "ce-browser"
-version = "0.1.88"
+version = "0.1.89"
 description = "Tabbed WebView2 browser"
 authors = ["you"]
 edition = "2024"
@@ -50,6 +50,10 @@ windows = { version = "0.61", features = [
     "Win32_System_Variant",
     "Win32_Devices_FunctionDiscovery",
     "Win32_Graphics_Gdi",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_NetworkManagement_WiFi",
+    "Win32_Networking_WinSock",
     "Win32_Media_Audio",
     "Win32_Media_Audio_Endpoints",
     "Win32_Storage",

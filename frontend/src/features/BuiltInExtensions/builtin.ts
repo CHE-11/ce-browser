@@ -6,6 +6,7 @@ import {
   Code,
   Eraser,
   FileText,
+  Gauge,
   ImageDown,
   ListTree,
   Palette,
@@ -115,6 +116,13 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Network",
     description: "See the requests this tab makes.",
     icon: ListTree,
+  },
+  {
+    id: "network-speed",
+    name: "Network speed",
+    description: "Live download, upload, latency, and connection strength.",
+    icon: Gauge,
+    anywhere: true,
   },
   {
     id: "scripts",
