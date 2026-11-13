@@ -2009,9 +2009,10 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
             &SourceChangedEventHandler::create(Box::new(move |sender, _| {
                 if let Some(core) = sender {
                     let source = read_pwstr(|value| core.Source(value));
-                    if !source.is_empty() {
+                    if !source.is_empty() && !crate::page_errors::ignore_load_event(id, &source) {
                         tabs::update_url(&source_app, id, &source);
                     }
+                    crate::page_errors::note_committed_source(id, &source);
                 }
                 Ok(())
             })),
@@ -2394,8 +2395,10 @@ pub(crate) fn settle_download_abort(app: &AppHandle, id: u32, core: Option<ICore
         tabs::release_after_download(app, id, "");
         if let Some(core) = core {
             let _ = unsafe { core.GoBack() };
-        } else {
-            tabs::go_back(app, id);
+        } else if let Some(webview) = tabs::page_view(app, id) {
+            // The download already replaced the document. Move back through history
+            // instead of treating this as a link the user cancelled.
+            go_back(&webview);
         }
         return;
     }
@@ -2486,6 +2489,9 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
                 let Some(args) = args else {
                     return Ok(());
                 };
+                let mut navigation_id = 0u64;
+                let _ = args.NavigationId(&mut navigation_id);
+                crate::page_errors::note_finished(id, navigation_id);
                 let success = read_bool(|value| args.IsSuccess(value));
                 if success {
                     tabs::set_progress(&done_app, id, 100);
@@ -2494,28 +2500,31 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
                 let mut status = COREWEBVIEW2_WEB_ERROR_STATUS::default();
                 let _ = args.WebErrorStatus(&mut status);
                 let Some((kind, code)) = crate::page_errors::web_error(status) else {
-                    tabs::set_progress(&done_app, id, 100);
+                    if crate::page_errors::failure_applies(id, navigation_id) {
+                        tabs::set_progress(&done_app, id, 100);
+                    }
                     return Ok(());
                 };
                 // A download cancels the navigation that started it and reports the same
-                // status as a dropped connection. Keep the page the file was downloaded from.
+                // status as a dropped connection. Back and Stop do too: that abort belongs
+                // to the load the user left, not to the page that is showing.
                 if code == "CONNECTION_ABORTED" {
                     if downloads::explains_connection_abort(id) {
                         settle_download_abort(&done_app, id, sender);
                         return Ok(());
                     }
                     let app = done_app.clone();
-                    let started = crate::page_errors::navigation_started_at(id);
+                    let completed_id = navigation_id;
                     std::thread::spawn(move || {
                         // DownloadStarting can land just after this failure.
                         std::thread::sleep(Duration::from_millis(400));
                         let main = app.clone();
                         let _ = app.run_on_main_thread(move || {
-                            if crate::page_errors::navigation_started_at(id) != started {
-                                return;
-                            }
                             if downloads::explains_connection_abort(id) {
                                 settle_download_abort(&main, id, None);
+                                return;
+                            }
+                            if !crate::page_errors::failure_applies(id, completed_id) {
                                 return;
                             }
                             if tabs::failure_of(&main, id).is_none() {
@@ -2523,6 +2532,9 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
                             }
                         });
                     });
+                    return Ok(());
+                }
+                if !crate::page_errors::failure_applies(id, navigation_id) {
                     return Ok(());
                 }
                 let app = done_app.clone();
@@ -2961,7 +2973,9 @@ fn attach_adblock(
             &NavigationStartingEventHandler::create(Box::new(move |sender, args| {
                 if let Some(args) = args {
                     let uri = read_pwstr(|value| args.Uri(value));
-                    crate::page_errors::note_navigation(id, &uri);
+                    let mut navigation_id = 0u64;
+                    let _ = args.NavigationId(&mut navigation_id);
+                    crate::page_errors::note_navigation(id, &uri, navigation_id, load_kind(&args));
                     tabs::navigation_started(&navigation_app, id, &uri);
                     tabs::clear_errors(&navigation_app, id);
                     tabs::clear_accent(&navigation_app, id);
@@ -2987,7 +3001,13 @@ fn attach_adblock(
 
         let content_app = app.clone();
         core.add_ContentLoading(
-            &ContentLoadingEventHandler::create(Box::new(move |sender, _| {
+            &ContentLoadingEventHandler::create(Box::new(move |sender, args| {
+                if let Some(args) = args.as_ref() {
+                    let mut navigation_id = 0u64;
+                    if args.NavigationId(&mut navigation_id).is_ok() {
+                        crate::page_errors::note_committed(id, navigation_id);
+                    }
+                }
                 let Some(core) = sender else {
                     return Ok(());
                 };
@@ -4442,6 +4462,32 @@ pub fn attach_peek_hooks(app: &AppHandle, webview: &Webview, window: &str, page:
 
 pub fn go_back(webview: &Webview) {
     with_core(webview, |core| unsafe { core.GoBack() });
+}
+
+/// Runs `work` on the webview thread with this page's WebView2 core.
+pub fn on_core(webview: &Webview, work: impl FnOnce(&ICoreWebView2) + Send + 'static) {
+    let _ = webview.with_webview(move |platform| {
+        if let Ok(core) = core(&platform) {
+            work(&core);
+        }
+    });
+}
+
+fn load_kind(args: &ICoreWebView2NavigationStartingEventArgs) -> crate::page_errors::LoadKind {
+    let Ok(args) = args.cast::<ICoreWebView2NavigationStartingEventArgs3>() else {
+        return crate::page_errors::LoadKind::NewDocument;
+    };
+    let mut kind = COREWEBVIEW2_NAVIGATION_KIND_NEW_DOCUMENT;
+    if unsafe { args.NavigationKind(&mut kind) }.is_err() {
+        return crate::page_errors::LoadKind::NewDocument;
+    }
+    if kind == COREWEBVIEW2_NAVIGATION_KIND_RELOAD {
+        crate::page_errors::LoadKind::Reload
+    } else if kind == COREWEBVIEW2_NAVIGATION_KIND_BACK_OR_FORWARD {
+        crate::page_errors::LoadKind::BackOrForward
+    } else {
+        crate::page_errors::LoadKind::NewDocument
+    }
 }
 
 pub fn go_forward(webview: &Webview) {

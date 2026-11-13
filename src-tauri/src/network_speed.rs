@@ -25,13 +25,11 @@ use windows::Win32::NetworkManagement::Ndis::{
     NdisPhysicalMediumWirelessLan,
 };
 use windows::Win32::NetworkManagement::WiFi::{
-    WlanCloseHandle, WlanEnumInterfaces, WlanFreeMemory, WlanGetNetworkBssList, WlanOpenHandle,
-    WlanQueryInterface, WLAN_BSS_LIST, WLAN_CONNECTION_ATTRIBUTES, WLAN_INTERFACE_INFO_LIST,
+    WLAN_BSS_LIST, WLAN_CONNECTION_ATTRIBUTES, WLAN_INTERFACE_INFO_LIST, WlanCloseHandle,
+    WlanEnumInterfaces, WlanFreeMemory, WlanGetNetworkBssList, WlanOpenHandle, WlanQueryInterface,
     dot11_BSS_type_any, wlan_intf_opcode_current_connection,
 };
-use windows::Win32::Networking::WinSock::{
-    AF_INET, AF_INET6, IpDadStatePreferred, SOCKADDR_INET,
-};
+use windows::Win32::Networking::WinSock::{AF_INET, AF_INET6, IpDadStatePreferred, SOCKADDR_INET};
 use windows::core::GUID;
 
 const FRESH: Duration = Duration::from_millis(700);
@@ -264,8 +262,7 @@ impl State {
             ),
             _ => (0.0, 0.0),
         };
-        let same_wifi =
-            adapter.kind == NetworkKind::Wifi && self.wifi_guid == Some(adapter.guid);
+        let same_wifi = adapter.kind == NetworkKind::Wifi && self.wifi_guid == Some(adapter.guid);
         let signal = if same_wifi {
             self.snapshot.signal
         } else {
@@ -656,8 +653,7 @@ fn unicast_address(
     family: windows::Win32::Networking::WinSock::ADDRESS_FAMILY,
 ) -> Option<String> {
     let mut table: *mut MIB_UNICASTIPADDRESS_TABLE = std::ptr::null_mut();
-    if unsafe { GetUnicastIpAddressTable(family, &mut table) } != ERROR_SUCCESS || table.is_null()
-    {
+    if unsafe { GetUnicastIpAddressTable(family, &mut table) } != ERROR_SUCCESS || table.is_null() {
         return None;
     }
     let rows = unsafe {

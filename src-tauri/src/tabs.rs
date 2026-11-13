@@ -1500,6 +1500,11 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
         .initialization_script(PEEK_CLICK_SCRIPT)
         .initialization_script(ZOOM_WHEEL_SCRIPT)
         .on_page_load(move |_, payload| {
+            // Back, Forward, or Stop already left this document. A late completion must
+            // not put its address, or an aborted-connection screen, back on the tab.
+            if crate::page_errors::ignore_load_event(id, payload.url().as_str()) {
+                return;
+            }
             let finished = matches!(payload.event(), PageLoadEvent::Finished);
             let loading = matches!(payload.event(), PageLoadEvent::Started);
             let url = paths::display_url(&load_app, payload.url().as_str());
@@ -4325,6 +4330,33 @@ pub fn set_progress(app: &AppHandle, id: u32, progress: u8) {
     }
 }
 
+/// Back or Stop cancelled a document that had not committed. The page still showing is
+/// `previous`; put the address back on it and drop the load.
+pub fn restore_cancelled_navigation(app: &AppHandle, id: u32, previous: &str) {
+    let previous = previous.trim();
+    if previous.is_empty() {
+        return;
+    }
+    let display = paths::display_url(app, previous);
+    let window = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        if tab.info.url != display {
+            tab.info.url = display;
+        }
+        tab.title_ready = true;
+        tab.info.loading = false;
+        tab.info.progress = 100;
+        tab.info.failure = None;
+        tab.blank = false;
+        tab.blank_next = false;
+        Some(tab.info.window.clone())
+    });
+    if let Some(window) = window {
+        place_pages(app, &window, false);
+        emit_tabs(app);
+    }
+}
+
 /// A download took the navigation. Drop a connection-aborted screen, stop the load bar, and
 /// keep the address on `source` when that is still a page.
 pub fn release_after_download(app: &AppHandle, id: u32, source: &str) {
@@ -5743,6 +5775,7 @@ pub fn navigate(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
     let label = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
         if !same_document(&tab.info.url, &display) {
+            crate::page_errors::note_leaving(id, &tab.info.url);
             let page = |address: &str| address.split(['?', '#']).next().unwrap_or("").to_string();
             if !in_page || page(&tab.info.url) != page(&display) {
                 tab.title_ready = false;
@@ -5784,21 +5817,56 @@ pub fn navigate(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
 }
 
 pub fn go_back(app: &AppHandle, id: u32) {
-    if let Some(webview) = page_view(app, id) {
-        webview2::go_back(&webview);
-    }
+    history_move(app, id, true);
 }
 
 pub fn go_forward(app: &AppHandle, id: u32) {
-    if let Some(webview) = page_view(app, id) {
-        webview2::go_forward(&webview);
-    }
+    history_move(app, id, false);
+}
+
+/// Back and Forward while a link has not committed cancel that load and stay on the page
+/// that is still showing. WebView2's own GoBack would leave that page and report the
+/// cancelled load as a dropped connection.
+fn history_move(app: &AppHandle, id: u32, back: bool) {
+    let Some(webview) = page_view(app, id) else {
+        return;
+    };
+    let app = app.clone();
+    let page = webview.clone();
+    // The choice and the WebView2 call run together on the webview thread. A commit
+    // cannot land between them and turn a cancel into a history step.
+    webview2::on_core(&webview, move |_| {
+        if let crate::page_errors::HistoryInterrupt::Stay(previous) =
+            crate::page_errors::interrupt_history(id)
+        {
+            webview2::stop(&page);
+            restore_cancelled_navigation(&app, id, &previous);
+            return;
+        }
+        if back {
+            webview2::go_back(&page);
+        } else {
+            webview2::go_forward(&page);
+        }
+    });
 }
 
 pub fn stop(app: &AppHandle, id: u32) {
-    if let Some(webview) = page_view(app, id) {
-        webview2::stop(&webview);
-    }
+    let Some(webview) = page_view(app, id) else {
+        return;
+    };
+    let app = app.clone();
+    let page = webview.clone();
+    webview2::on_core(&webview, move |_| {
+        if let crate::page_errors::HistoryInterrupt::Stay(previous) =
+            crate::page_errors::interrupt_history(id)
+        {
+            webview2::stop(&page);
+            restore_cancelled_navigation(&app, id, &previous);
+            return;
+        }
+        webview2::stop(&page);
+    });
 }
 
 pub fn reload(app: &AppHandle, id: u32) -> Result<(), String> {

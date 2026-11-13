@@ -15,43 +15,250 @@ const UNRESPONSIVE_FOR: Duration = Duration::from_secs(30);
 static ALLOWED_CERTIFICATES: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 static RESTARTING: AtomicBool = AtomicBool::new(false);
 static EXITING: AtomicBool = AtomicBool::new(false);
+/// How this main-frame navigation was started. WebView2 reports it on `NavigationStarting`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoadKind {
+    NewDocument,
+    Reload,
+    BackOrForward,
+}
+
+/// What Back or Forward should do with the load that is underway.
+#[derive(Debug, PartialEq, Eq)]
+pub enum HistoryInterrupt {
+    /// The current document is in history. Move to the neighboring entry.
+    Entry,
+    /// A new document has not committed. Stop it and show this page again.
+    Stay(String),
+}
+
 /// Address each tab's current main-frame navigation is loading, when it started, and the
 /// page it left. A download abort uses the previous page to decide whether to go back.
+#[derive(Clone)]
 struct NavigationTarget {
     url: String,
     previous: String,
     at: Instant,
+    navigation_id: u64,
+    kind: LoadKind,
+    /// The new document has taken the webview. Back moves through history from here.
+    committed: bool,
+    /// `NavigationCompleted` has run for `navigation_id`.
+    finished: bool,
+    /// The user left this load with Back, Forward, or Stop. Its failure is not a dropped connection.
+    ignore_failure: bool,
+    /// Document those actions left. A late load event for it must not replace the page on screen.
+    abandoned: String,
 }
 
 /// Address each tab's current main-frame navigation is loading.
 static TARGETS: Mutex<Option<HashMap<u32, NavigationTarget>>> = Mutex::new(None);
+/// Page a typed address left, recorded before the tab URL changes. The next navigation consumes it.
+static LEAVING: Mutex<Option<HashMap<u32, String>>> = Mutex::new(None);
 /// Renderer processes of tabs WebView2 reported as not answering, and when it last said so.
 static UNRESPONSIVE: Mutex<Option<HashMap<u32, (Vec<u32>, Instant)>>> = Mutex::new(None);
 
-pub fn note_navigation(id: u32, url: &str) {
-    TARGETS
+/// The address bar moved to a new document before WebView2 started loading it.
+pub fn note_leaving(id: u32, url: &str) {
+    let url = url.trim();
+    if url.is_empty() {
+        return;
+    }
+    LEAVING
         .lock()
-        .expect("navigation targets")
+        .expect("leaving pages")
         .get_or_insert_with(HashMap::new)
-        .insert(
-            id,
-            NavigationTarget {
-                url: url.to_string(),
-                previous: String::new(),
-                at: Instant::now(),
-            },
-        );
+        .insert(id, url.to_string());
 }
 
-/// The page this navigation is replacing. Called once the tab still has that address.
-pub fn note_previous_page(id: u32, previous: &str) {
-    if let Some(target) = TARGETS
+fn take_leaving(id: u32) -> String {
+    LEAVING
         .lock()
-        .expect("navigation targets")
-        .get_or_insert_with(HashMap::new)
-        .get_mut(&id)
+        .expect("leaving pages")
+        .as_mut()
+        .and_then(|pages| pages.remove(&id))
+        .unwrap_or_default()
+}
+
+pub fn note_navigation(id: u32, url: &str, navigation_id: u64, kind: LoadKind) {
+    let mut guard = TARGETS.lock().expect("navigation targets");
+    let map = guard.get_or_insert_with(HashMap::new);
+    if let Some(old) = map.get(&id)
+        && old.navigation_id == navigation_id
+        && navigation_id != 0
     {
+        // A redirect of the load the user already cancelled. Keep the page that is showing.
+        if old.ignore_failure {
+            return;
+        }
+        let mut next = old.clone();
+        next.url = url.to_string();
+        next.kind = kind;
+        map.insert(id, next);
+        return;
+    }
+    let leaving = take_leaving(id);
+    let (previous, abandoned) = map
+        .get(&id)
+        .map(|old| {
+            let mut previous = if old.committed {
+                old.url.clone()
+            } else if !old.previous.is_empty() {
+                old.previous.clone()
+            } else {
+                String::new()
+            };
+            if previous.is_empty() {
+                previous = leaving.clone();
+            }
+            let mut abandoned = if !old.abandoned.is_empty() {
+                old.abandoned.clone()
+            } else if old.ignore_failure {
+                old.url.clone()
+            } else {
+                String::new()
+            };
+            if !abandoned.is_empty() && same_document(&abandoned, url) {
+                abandoned.clear();
+            }
+            (previous, abandoned)
+        })
+        .unwrap_or((leaving, String::new()));
+    map.insert(
+        id,
+        NavigationTarget {
+            url: url.to_string(),
+            previous,
+            at: Instant::now(),
+            navigation_id,
+            kind,
+            committed: false,
+            finished: false,
+            ignore_failure: false,
+            abandoned,
+        },
+    );
+}
+
+/// The page this navigation is replacing. A redirect keeps the page that was actually showing.
+pub fn note_previous_page(id: u32, previous: &str) {
+    let previous = previous.trim();
+    if previous.is_empty() {
+        return;
+    }
+    let mut guard = TARGETS.lock().expect("navigation targets");
+    let Some(target) = guard.get_or_insert_with(HashMap::new).get_mut(&id) else {
+        return;
+    };
+    if target.previous.is_empty() {
         target.previous = previous.to_string();
+    }
+}
+
+fn with_target<T>(id: u32, change: impl FnOnce(&mut NavigationTarget) -> T) -> Option<T> {
+    let mut guard = TARGETS.lock().expect("navigation targets");
+    Some(change(guard.as_mut()?.get_mut(&id)?))
+}
+
+/// The document for `navigation_id` has committed, so Back moves through history.
+pub fn note_committed(id: u32, navigation_id: u64) {
+    with_target(id, |target| {
+        if navigation_id != 0 && target.navigation_id != navigation_id {
+            return;
+        }
+        // The load the user already left can still commit. It is not the page on screen.
+        if target.ignore_failure {
+            return;
+        }
+        target.committed = true;
+        target.abandoned.clear();
+    });
+}
+
+/// `Source` changed to a real document. `about:` hops are not a commit.
+pub fn note_committed_source(id: u32, source: &str) {
+    if source.is_empty() || source.to_ascii_lowercase().starts_with("about:") {
+        return;
+    }
+    with_target(id, |target| {
+        if target.ignore_failure || !same_document(&target.url, source) {
+            return;
+        }
+        target.committed = true;
+        target.abandoned.clear();
+    });
+}
+
+pub fn note_finished(id: u32, navigation_id: u64) {
+    with_target(id, |target| {
+        if navigation_id != 0 && target.navigation_id != navigation_id {
+            return;
+        }
+        target.finished = true;
+    });
+}
+
+/// Back or Forward while a new document has not committed stays on the page that is showing.
+/// Either way, the load being left must not surface as a dropped connection.
+pub fn interrupt_history(id: u32) -> HistoryInterrupt {
+    with_target(id, |target| {
+        if target.finished {
+            return HistoryInterrupt::Entry;
+        }
+        let stay = target.kind == LoadKind::NewDocument
+            && !target.committed
+            && !target.previous.is_empty()
+            && !same_document(&target.previous, &target.url);
+        target.ignore_failure = true;
+        if target.abandoned.is_empty() {
+            target.abandoned = target.url.clone();
+        }
+        if !stay {
+            return HistoryInterrupt::Entry;
+        }
+        let previous = target.previous.clone();
+        target.url = previous.clone();
+        target.finished = true;
+        target.committed = true;
+        HistoryInterrupt::Stay(previous)
+    })
+    .unwrap_or(HistoryInterrupt::Entry)
+}
+
+/// `navigation_id` failed. False when that load was cancelled or a newer one has started.
+pub fn failure_applies(id: u32, navigation_id: u64) -> bool {
+    let guard = TARGETS.lock().expect("navigation targets");
+    let Some(target) = guard.as_ref().and_then(|targets| targets.get(&id)) else {
+        return true;
+    };
+    if navigation_id != 0 && target.navigation_id != navigation_id {
+        return false;
+    }
+    !target.ignore_failure
+}
+
+/// A load event for the document Back, Forward, or Stop already left.
+pub fn ignore_load_event(id: u32, url: &str) -> bool {
+    let guard = TARGETS.lock().expect("navigation targets");
+    let Some(target) = guard.as_ref().and_then(|targets| targets.get(&id)) else {
+        return false;
+    };
+    if target.abandoned.is_empty() || !same_document(&target.abandoned, url) {
+        return false;
+    }
+    !same_document(&target.url, url)
+}
+
+/// Same page, ignoring a hash. A fragment navigation is already a history entry.
+fn same_document(left: &str, right: &str) -> bool {
+    fn identity(value: &str) -> Option<String> {
+        let mut url = Url::parse(value).ok()?;
+        url.set_fragment(None);
+        Some(url.to_string())
+    }
+    match (identity(left), identity(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => left == right,
     }
 }
 
@@ -78,6 +285,9 @@ pub fn previous_page(id: u32) -> String {
 pub fn forget_tab(id: u32) {
     if let Some(targets) = TARGETS.lock().expect("navigation targets").as_mut() {
         targets.remove(&id);
+    }
+    if let Some(leaving) = LEAVING.lock().expect("leaving pages").as_mut() {
+        leaving.remove(&id);
     }
     clear_unresponsive(id);
 }
@@ -178,8 +388,8 @@ pub fn certificate_allowed(url: &str) -> bool {
 }
 
 /// The failure kind and WebView2 name for a navigation that did not succeed. `None` means the
-/// browser's own handling is right: a cancelled load or a sign-in prompt. A download also ends
-/// as `CONNECTION_ABORTED`; the navigation handler drops that one when a download just started.
+/// browser's own handling is right: a cancelled load or a sign-in prompt. A download, Back, and
+/// Stop also end as `CONNECTION_ABORTED`; the navigation handler drops those.
 pub fn web_error(status: COREWEBVIEW2_WEB_ERROR_STATUS) -> Option<(&'static str, &'static str)> {
     let found = match status {
         COREWEBVIEW2_WEB_ERROR_STATUS_HOST_NAME_NOT_RESOLVED => ("dns", "HOST_NAME_NOT_RESOLVED"),
@@ -268,5 +478,96 @@ mod tests {
         allow_certificate("https://self-signed.test/login").expect("allow");
         assert!(certificate_allowed("https://SELF-SIGNED.test/other"));
         assert!(!certificate_allowed("https://other.test/"));
+    }
+
+    #[test]
+    fn back_before_a_link_commits_stays_on_the_current_page() {
+        let id = 910_001;
+        note_navigation(id, "https://example.com/next", 5, LoadKind::NewDocument);
+        note_previous_page(id, "https://example.com/now");
+        assert_eq!(
+            interrupt_history(id),
+            HistoryInterrupt::Stay("https://example.com/now".into())
+        );
+        assert!(!failure_applies(id, 5));
+        assert!(ignore_load_event(id, "https://example.com/next"));
+        assert!(!ignore_load_event(id, "https://example.com/now"));
+        forget_tab(id);
+    }
+
+    #[test]
+    fn back_after_the_document_commits_leaves_that_navigation() {
+        let id = 910_002;
+        note_navigation(id, "https://example.com/next", 6, LoadKind::NewDocument);
+        note_previous_page(id, "https://example.com/now");
+        note_committed(id, 6);
+        assert_eq!(interrupt_history(id), HistoryInterrupt::Entry);
+        assert!(!failure_applies(id, 6));
+        note_navigation(id, "https://example.com/now", 7, LoadKind::BackOrForward);
+        assert!(!failure_applies(id, 6));
+        assert!(failure_applies(id, 7));
+        assert!(ignore_load_event(id, "https://example.com/next"));
+        assert!(!ignore_load_event(id, "https://example.com/now"));
+        forget_tab(id);
+    }
+
+    #[test]
+    fn a_redirect_keeps_the_page_that_was_showing() {
+        let id = 910_003;
+        note_navigation(id, "https://example.com/next", 8, LoadKind::NewDocument);
+        note_previous_page(id, "https://example.com/now");
+        note_navigation(
+            id,
+            "https://example.com/redirected",
+            8,
+            LoadKind::NewDocument,
+        );
+        note_previous_page(id, "https://example.com/next");
+        assert_eq!(previous_page(id), "https://example.com/now");
+        assert_eq!(
+            interrupt_history(id),
+            HistoryInterrupt::Stay("https://example.com/now".into())
+        );
+        forget_tab(id);
+    }
+
+    #[test]
+    fn a_finished_page_and_a_reload_use_history() {
+        let id = 910_004;
+        note_navigation(id, "https://example.com/next", 9, LoadKind::NewDocument);
+        note_previous_page(id, "https://example.com/now");
+        note_committed(id, 9);
+        note_finished(id, 9);
+        assert_eq!(interrupt_history(id), HistoryInterrupt::Entry);
+        assert!(failure_applies(id, 9));
+
+        note_navigation(id, "https://example.com/next", 10, LoadKind::Reload);
+        note_previous_page(id, "https://example.com/next");
+        assert_eq!(interrupt_history(id), HistoryInterrupt::Entry);
+        assert!(!failure_applies(id, 10));
+        forget_tab(id);
+    }
+
+    #[test]
+    fn a_hash_change_and_a_typed_address_go_back_correctly() {
+        let id = 910_005;
+        note_navigation(
+            id,
+            "https://example.com/now#section",
+            11,
+            LoadKind::NewDocument,
+        );
+        note_previous_page(id, "https://example.com/now");
+        assert_eq!(interrupt_history(id), HistoryInterrupt::Entry);
+        forget_tab(id);
+
+        note_leaving(id, "https://example.com/now");
+        note_navigation(id, "https://example.com/typed", 12, LoadKind::NewDocument);
+        assert_eq!(previous_page(id), "https://example.com/now");
+        assert_eq!(
+            interrupt_history(id),
+            HistoryInterrupt::Stay("https://example.com/now".into())
+        );
+        forget_tab(id);
     }
 }
