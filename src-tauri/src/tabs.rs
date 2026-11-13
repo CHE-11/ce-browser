@@ -50,7 +50,8 @@ pub const GROUP_COLORS: &[&str] = &[
 /// until a click or key press inside it. Selecting the tab does not count.
 ///
 /// `browser_args` adds the debugging port the docked inspector loads from.
-const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
+/// Edge's PDF viewer (`msPdfOOUI`) stays enabled so a local PDF opens in that viewer.
+const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
 /// Logical px between the two split panes. The browser UI shows through it as the divider.
 const SPLIT_GAP: f64 = 6.0;
 /// Share of the page area kept for pages when developer tools are docked. The tools take the rest.

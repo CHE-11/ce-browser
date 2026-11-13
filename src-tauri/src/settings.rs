@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use tauri::webview::Color;
 use tauri::{AppHandle, Emitter, Manager};
@@ -181,21 +182,25 @@ impl Default for AiProviders {
     }
 }
 
-/// Page that opens one file type inside the browser.
+/// Retired PDF editor. An older file that still points here, and never set `native`, opens in Edge's PDF viewer.
 pub const DEFAULT_PDF_EDITOR: &str = "https://ce-file-tools.vercel.app/pdf/view-and-markup";
 pub const DEFAULT_PDF_INPUT: &str = "pdf-dropzone-input";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, rename_all = "camelCase")]
+/// How one file type opens inside the browser.
+/// A native PDF loads in Edge's PDF viewer. Every other row opens `url` and places the file on its file input.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct FileHandler {
     /// Lowercase extension without a dot, such as `pdf`.
     pub extension: String,
-    /// `http` or `https` page. The file is placed on that page's file input.
+    /// `http` or `https` page. The file is placed on that page's file input. Empty when `native` is set.
     pub url: String,
     /// Element id of the file input. Empty uses the first file input on the page.
     pub input_id: String,
     /// Profile that opens this type. Empty uses an open profile, or the default profile.
     pub profile: String,
+    /// Opens the file in Edge's PDF viewer. Only `pdf` keeps this.
+    pub native: bool,
 }
 
 impl Default for FileHandler {
@@ -205,17 +210,56 @@ impl Default for FileHandler {
             url: String::new(),
             input_id: String::new(),
             profile: String::new(),
+            native: false,
         }
     }
 }
 
+impl<'de> Deserialize<'de> for FileHandler {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Raw {
+            #[serde(default)]
+            extension: String,
+            #[serde(default)]
+            url: String,
+            #[serde(default)]
+            input_id: String,
+            #[serde(default)]
+            profile: String,
+            native: Option<bool>,
+        }
+        let raw = Raw::deserialize(deserializer)?;
+        let native = raw
+            .native
+            .unwrap_or_else(|| retired_pdf_editor(&raw.extension, &raw.url, &raw.input_id));
+        Ok(Self {
+            extension: raw.extension,
+            url: raw.url,
+            input_id: raw.input_id,
+            profile: raw.profile,
+            native,
+        })
+    }
+}
+
+/// The previous default PDF editor, on a file that has no `native` field.
+fn retired_pdf_editor(extension: &str, url: &str, input_id: &str) -> bool {
+    clean_extension(extension).as_deref() == Some("pdf")
+        && url.trim() == DEFAULT_PDF_EDITOR
+        && clean_input_id(input_id) == DEFAULT_PDF_INPUT
+}
+
 /// Used when `settings.json` has no `fileHandlers` key. A saved empty list stays empty.
+/// PDF is the only default, and it opens in Edge's PDF viewer.
 pub fn default_file_handlers() -> Vec<FileHandler> {
     vec![FileHandler {
         extension: "pdf".into(),
-        url: DEFAULT_PDF_EDITOR.into(),
-        input_id: DEFAULT_PDF_INPUT.into(),
+        url: String::new(),
+        input_id: String::new(),
         profile: String::new(),
+        native: true,
     }]
 }
 
@@ -294,21 +338,35 @@ fn normalize_file_handlers(handlers: Vec<FileHandler>) -> Vec<FileHandler> {
         let Some(extension) = clean_extension(&handler.extension) else {
             continue;
         };
-        let Some(url) = clean_handler_url(&handler.url) else {
-            continue;
-        };
         if kept
             .iter()
             .any(|item: &FileHandler| item.extension == extension)
         {
             continue;
         }
-        kept.push(FileHandler {
-            extension,
-            url,
-            input_id: clean_input_id(&handler.input_id),
-            profile: clean_profile(&handler.profile),
-        });
+        if handler.native {
+            if extension != "pdf" {
+                continue;
+            }
+            kept.push(FileHandler {
+                extension,
+                url: String::new(),
+                input_id: String::new(),
+                profile: clean_profile(&handler.profile),
+                native: true,
+            });
+        } else {
+            let Some(url) = clean_handler_url(&handler.url) else {
+                continue;
+            };
+            kept.push(FileHandler {
+                extension,
+                url,
+                input_id: clean_input_id(&handler.input_id),
+                profile: clean_profile(&handler.profile),
+                native: false,
+            });
+        }
         if kept.len() >= 40 {
             break;
         }
@@ -2774,7 +2832,7 @@ fn clean_agent_suggestions(items: &[String]) -> Vec<String> {
 }
 
 fn default_command_palette_width() -> u32 {
-    560
+    760
 }
 
 fn default_command_palette_input_height() -> f32 {
@@ -3537,7 +3595,7 @@ mod tests {
         assert_eq!(loaded.downloads_icon_size, 2.0);
         assert_eq!(loaded.history_panel_width, 380);
         assert_eq!(loaded.agent_panel_width, 380);
-        assert_eq!(loaded.command_palette_width, 560);
+        assert_eq!(loaded.command_palette_width, 760);
         assert_eq!(loaded.command_palette_input_height, 3.0);
         assert_eq!(loaded.command_palette_row_height, 2.5);
     }
@@ -3781,12 +3839,51 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_file_handler_list_keeps_the_pdf_editor() {
+    fn a_missing_file_handler_list_opens_pdfs_in_the_edge_viewer() {
         let loaded: super::BrowserSettings =
             serde_json::from_str(r#"{"searchEngine":"bing"}"#).expect("settings parse");
         let loaded = loaded.normalize();
         assert_eq!(loaded.file_handlers.len(), 1);
         assert_eq!(loaded.file_handlers[0].extension, "pdf");
+        assert!(loaded.file_handlers[0].native);
+        assert_eq!(loaded.file_handlers[0].url, "");
+        assert_eq!(loaded.file_handlers[0].input_id, "");
+        assert_eq!(loaded.file_handlers[0].profile, "");
+        assert_eq!(
+            loaded.clone().normalize().file_handlers,
+            loaded.file_handlers
+        );
+    }
+
+    #[test]
+    fn an_old_pdf_editor_opens_in_the_edge_viewer() {
+        let loaded: super::BrowserSettings = serde_json::from_str(&format!(
+            r#"{{"fileHandlers":[{{"extension":"pdf","url":"{}","inputId":"{}"}}]}}"#,
+            super::DEFAULT_PDF_EDITOR,
+            super::DEFAULT_PDF_INPUT
+        ))
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.file_handlers.len(), 1);
+        assert!(loaded.file_handlers[0].native);
+        assert_eq!(loaded.file_handlers[0].url, "");
+        assert_eq!(loaded.file_handlers[0].input_id, "");
+        assert_eq!(
+            loaded.clone().normalize().file_handlers,
+            loaded.file_handlers
+        );
+    }
+
+    #[test]
+    fn a_pdf_page_chosen_on_purpose_stays() {
+        let loaded: super::BrowserSettings = serde_json::from_str(&format!(
+            r#"{{"fileHandlers":[{{"extension":"pdf","url":"{}","inputId":"{}","native":false}}]}}"#,
+            super::DEFAULT_PDF_EDITOR,
+            super::DEFAULT_PDF_INPUT
+        ))
+        .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert!(!loaded.file_handlers[0].native);
         assert_eq!(loaded.file_handlers[0].url, super::DEFAULT_PDF_EDITOR);
         assert_eq!(loaded.file_handlers[0].input_id, super::DEFAULT_PDF_INPUT);
     }
@@ -3815,6 +3912,7 @@ mod tests {
         assert_eq!(loaded.file_handlers[0].url, "https://example.com/png");
         assert_eq!(loaded.file_handlers[0].input_id, "dropzone");
         assert_eq!(loaded.file_handlers[0].profile, "");
+        assert!(!loaded.file_handlers[0].native);
     }
 
     #[test]
@@ -3828,7 +3926,9 @@ mod tests {
         .expect("settings parse");
         let loaded = loaded.normalize();
         assert_eq!(loaded.file_handlers[0].profile, "work-1");
+        assert!(!loaded.file_handlers[0].native);
         assert_eq!(loaded.file_handlers[1].profile, "");
+        assert!(!loaded.file_handlers[1].native);
     }
 
     #[test]

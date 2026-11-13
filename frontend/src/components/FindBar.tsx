@@ -1,20 +1,33 @@
 import { useEffect, useRef, useState } from "react";
-import { CaseSensitive, ChevronDown, ChevronUp, Layers, WholeWord, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { CaseSensitive, ChevronDown, ChevronUp, Layers, PanelRight, WholeWord, X } from "lucide-react";
 import type { FindResult } from "@type/browser";
 import { clearFind, findInPage, openPopup } from "../lib/browser-client";
 import { cn } from "../lib/cn";
+import { FindResultsPanel } from "./FindResultsPanel";
 import { IconButton } from "./IconButton";
 
 type FindBarProps = {
   tabId: number;
-  /** Bumped each time Ctrl+F is pressed so the input refocuses. */
+  /** Bumped when find opens, so the input focuses. Ctrl+F closes it again. */
   focusToken: number;
   /** Bumped by Ctrl+Shift+F. Opens Find in all tabs when the field has a query. */
   openAllToken: number;
+  /** The results list beside the page. */
+  panelOpen: boolean;
+  onPanelChange: (open: boolean) => void;
+  /** Fullscreen covers the page edge, so the panel stays closed until it ends. */
+  fullscreen: boolean;
   onClose: () => void;
 };
 
-export function FindBar({ tabId, focusToken, openAllToken, onClose }: FindBarProps) {
+type SearchOptions = {
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  select?: number;
+};
+
+export function FindBar({ tabId, focusToken, openAllToken, panelOpen, onPanelChange, fullscreen, onClose }: FindBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -23,6 +36,7 @@ export function FindBar({ tabId, focusToken, openAllToken, onClose }: FindBarPro
   const request = useRef(0);
   const optionsRef = useRef({ query, caseSensitive, wholeWord });
   const seenAll = useRef(openAllToken);
+  const searchRef = useRef<(backwards: boolean, step: boolean, value?: string, options?: SearchOptions) => void>(() => {});
   optionsRef.current = { query, caseSensitive, wholeWord };
 
   const openAllTabs = (anchor: HTMLElement) => {
@@ -56,9 +70,12 @@ export function FindBar({ tabId, focusToken, openAllToken, onClose }: FindBarPro
 
   useEffect(() => {
     setResult(null);
+    if (optionsRef.current.query) {
+      void searchRef.current(false, false);
+    }
   }, [tabId]);
 
-  const search = async (backwards: boolean, step: boolean, value = query, options = { caseSensitive, wholeWord }) => {
+  const search = async (backwards: boolean, step: boolean, value = query, options: SearchOptions = { caseSensitive, wholeWord }) => {
     const ticket = ++request.current;
     if (!value) {
       setResult(null);
@@ -66,7 +83,13 @@ export function FindBar({ tabId, focusToken, openAllToken, onClose }: FindBarPro
       return;
     }
     try {
-      const found = await findInPage(tabId, value, backwards, { ...options, step });
+      const found = await findInPage(tabId, value, backwards, {
+        caseSensitive: options.caseSensitive,
+        wholeWord: options.wholeWord,
+        step: options.select == null ? step : false,
+        list: panelOpen,
+        ...(options.select == null ? {} : { select: options.select }),
+      });
       if (ticket === request.current) {
         setResult(found);
       }
@@ -76,6 +99,14 @@ export function FindBar({ tabId, focusToken, openAllToken, onClose }: FindBarPro
       }
     }
   };
+  searchRef.current = search;
+
+  useEffect(() => {
+    if (!panelOpen || !optionsRef.current.query) {
+      return;
+    }
+    void searchRef.current(false, false);
+  }, [panelOpen]);
 
   const toggle = (option: "caseSensitive" | "wholeWord") => {
     const options = { caseSensitive, wholeWord, [option]: !(option === "caseSensitive" ? caseSensitive : wholeWord) };
@@ -90,6 +121,8 @@ export function FindBar({ tabId, focusToken, openAllToken, onClose }: FindBarPro
     onClose();
   };
 
+  const showPanel = panelOpen && !fullscreen;
+  const slot = showPanel ? document.getElementById("find-results-slot") : null;
   const none = !!query && result?.count === 0;
 
   return (
@@ -148,6 +181,15 @@ export function FindBar({ tabId, focusToken, openAllToken, onClose }: FindBarPro
         <WholeWord id="find-bar-word-icon" aria-hidden />
       </IconButton>
       <IconButton
+        id="find-bar-results"
+        label="Results panel"
+        aria-pressed={panelOpen}
+        active={panelOpen}
+        onClick={() => onPanelChange(!panelOpen)}
+      >
+        <PanelRight id="find-bar-results-icon" aria-hidden />
+      </IconButton>
+      <IconButton
         id="find-bar-all-tabs"
         label="Find in all tabs (Ctrl+Shift+F)"
         disabled={!query}
@@ -164,6 +206,20 @@ export function FindBar({ tabId, focusToken, openAllToken, onClose }: FindBarPro
       <IconButton id="find-bar-close" label="Close (Escape)" onClick={close}>
         <X id="find-bar-close-icon" aria-hidden />
       </IconButton>
+      {slot
+        ? createPortal(
+            <FindResultsPanel
+              query={query}
+              result={result}
+              onClose={() => onPanelChange(false)}
+              onSelect={(index) => {
+                void search(false, false, query, { caseSensitive, wholeWord, select: index });
+                inputRef.current?.focus();
+              }}
+            />,
+            slot,
+          )
+        : null}
     </div>
   );
 }

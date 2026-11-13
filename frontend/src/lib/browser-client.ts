@@ -918,6 +918,10 @@ export type FindOptions = {
   wholeWord?: boolean;
   /** Move to the next or previous match. False searches again from the top of the view. */
   step?: boolean;
+  /** Jump to this match instead of stepping. */
+  select?: number;
+  /** Include each match's location and surrounding text. */
+  list?: boolean;
 };
 
 export function findInPage(id: number, query: string, backwards = false, options: FindOptions = {}) {

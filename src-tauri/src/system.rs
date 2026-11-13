@@ -567,6 +567,9 @@ fn open_one_file(
     handler: &settings::FileHandler,
     window: Option<&str>,
 ) -> Result<(), String> {
+    if handler.native {
+        return open_native_pdf(app, path, window);
+    }
     let attach = stage_file(path, handler)?;
     let title = attach.file_name.clone();
     arm_file(attach);
@@ -582,6 +585,27 @@ fn open_one_file(
         }
         return Err(error);
     }
+    Ok(())
+}
+
+/// Loads the PDF at `path` in Edge's built-in PDF viewer.
+fn open_native_pdf(app: &AppHandle, path: &str, window: Option<&str>) -> Result<(), String> {
+    let file = PathBuf::from(path);
+    if !file.is_file() {
+        return Err(format!("Couldn't find {path}."));
+    }
+    let url = url::Url::from_file_path(&file).map_err(|_| format!("Couldn't open {path}."))?;
+    let title = file
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("PDF")
+        .to_string();
+    let mut tab = tabs::OpenTab::new(url);
+    tab.title = Some(title);
+    if let Some(window) = window {
+        tab.window = window.to_string();
+    }
+    tabs::open(app, tab)?;
     Ok(())
 }
 
@@ -1621,16 +1645,9 @@ mod tests {
             Launch::Open(r"C:\docs\note.pdf".into())
         );
         let defaults = default_file_handlers();
-        assert!(handler_matches(
-            "https://ce-file-tools.vercel.app/pdf/view-and-markup",
-            &defaults
-        ));
-        assert!(handler_matches(
-            "https://ce-file-tools.vercel.app/pdf/view-and-markup?x=1",
-            &defaults
-        ));
+        assert!(defaults[0].native);
         assert!(!handler_matches(
-            "https://ce-file-tools.vercel.app/convert",
+            "https://ce-file-tools.vercel.app/pdf/view-and-markup",
             &defaults
         ));
         let custom = vec![FileHandler {
@@ -1638,6 +1655,7 @@ mod tests {
             url: "https://example.com/pdf/view-and-markup".into(),
             input_id: "pdf-dropzone-input".into(),
             profile: String::new(),
+            native: false,
         }];
         assert!(handler_matches(
             "https://example.com/pdf/view-and-markup",
@@ -1656,12 +1674,14 @@ mod tests {
             url: "https://example.com/default".into(),
             input_id: "pdf-dropzone-input".into(),
             profile: String::new(),
+            native: false,
         };
         let work = FileHandler {
             extension: "pdf".into(),
             url: "https://example.com/work".into(),
             input_id: "drop".into(),
             profile: "personal".into(),
+            native: false,
         };
         let known = [
             "default".to_string(),

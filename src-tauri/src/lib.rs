@@ -508,6 +508,8 @@ async fn find_in_page(
     case_sensitive: Option<bool>,
     whole_word: Option<bool>,
     step: Option<bool>,
+    select: Option<i32>,
+    list: Option<bool>,
 ) -> Result<find::FindResult, String> {
     blocking(move || {
         find::find(
@@ -518,6 +520,8 @@ async fn find_in_page(
             case_sensitive.unwrap_or(false),
             whole_word.unwrap_or(false),
             step.unwrap_or(true),
+            select,
+            list.unwrap_or(false),
         )
     })
     .await

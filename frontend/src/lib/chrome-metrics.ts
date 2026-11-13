@@ -70,7 +70,7 @@ export const CHROME = {
   historyPadding: 0.75,
   historyRowPadding: 0.5,
   historyIconSize: 1,
-  commandPaletteWidth: 560,
+  commandPaletteWidth: 760,
   commandPaletteInputHeight: 3,
   commandPaletteRowHeight: 2.5,
   commandPaletteTextSize: 0.875,

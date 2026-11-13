@@ -25,11 +25,13 @@ import {
   switchWorkspace,
   zoomTab,
 } from "@/lib/browser-client";
+import { FavIcon } from "@/components/FavIcon";
 import { PopupFrame } from "@/components/PopupFrame";
 import { CHROME, metric, paletteHintClass, paletteInputClass, paletteRowClass } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { extensionOpenAs } from "@/lib/extension-open";
-import { flattenBookmarks, useBookmarks, useExtensions, useHistory, useRecentlyClosed, useSettings, useTabs } from "@/lib/use-browser";
+import { faviconKey } from "@/lib/format";
+import { flattenBookmarks, useBookmarks, useExtensions, useHistory, useRecentlyClosed, useSettings, useSiteFavicons, useTabs } from "@/lib/use-browser";
 import { BUILTIN_TOOLS } from "@features/BuiltInExtensions/builtin";
 import { builtinToolEnabled } from "@/lib/toolbar-pin";
 import { siteKey } from "@features/BuiltInExtensions/page-controls/site";
@@ -44,6 +46,10 @@ type Hit = {
   hint: string;
   /** Extra words that match but are not shown. */
   keywords?: string;
+  /** Page address whose favicon sits beside the title. */
+  iconUrl?: string;
+  /** Favicon already stored on a tab. Bookmarks leave this empty and use the site cache. */
+  iconSrc?: string | null;
   group: "Action" | "Tab" | "Recently closed" | "Workspace" | "Setting" | "Tool" | "Extension" | "Bookmark" | "History";
   run: () => Promise<unknown> | void;
   /** Opens another popup in this one's place, which already dismisses the palette. */
@@ -221,6 +227,8 @@ export function CommandPalette() {
         title: tab.title || tab.url,
         hint: workspace ? `Tab in ${workspace}` : "Switch to tab",
         keywords: tab.url,
+        iconUrl: tab.url,
+        iconSrc: tab.favicon,
         group: "Tab",
         run: () => activateTab(tab.id),
       };
@@ -315,6 +323,7 @@ export function CommandPalette() {
         id: `bookmark-${bookmark.id}`,
         title: bookmark.title || bookmark.url,
         hint: bookmark.url,
+        iconUrl: bookmark.url,
         group: "Bookmark" as const,
         run: () => createTab(bookmark.url),
       })),
@@ -381,6 +390,8 @@ export function CommandPalette() {
             }));
     return [...matched, ...extra].slice(0, MAX_HITS);
   }, [all, fuse, parsed.filter, parsed.text, textHits]);
+
+  const siteIcons = useSiteFavicons(ranked.map((item) => item.hit.iconUrl));
 
   useEffect(() => {
     const needle = parsed.text;
@@ -519,8 +530,17 @@ export function CommandPalette() {
               <span id={`command-palette-${hit.id}-group`} className="w-24 shrink-0 truncate text-[11px] uppercase tracking-wide text-zinc-500">
                 {hit.group}
               </span>
-              <span id={`command-palette-${hit.id}-title`} className="min-w-0 flex-1 truncate">
-                <Highlighted id={`command-palette-${hit.id}-text`} text={hit.title} matches={matches} />
+              <span id={`command-palette-${hit.id}-title`} className="flex min-w-0 flex-1 items-center gap-2">
+                {hit.iconUrl ? (
+                  <FavIcon
+                    id={`command-palette-${hit.id}-icon`}
+                    url={hit.iconUrl}
+                    src={hit.iconSrc || (siteIcons[faviconKey(hit.iconUrl) ?? ""] ?? null)}
+                  />
+                ) : null}
+                <span id={`command-palette-${hit.id}-label`} className="min-w-0 truncate">
+                  <Highlighted id={`command-palette-${hit.id}-text`} text={hit.title} matches={matches} />
+                </span>
               </span>
               <span id={`command-palette-${hit.id}-hint`} className={paletteHintClass}>
                 {hit.hint}

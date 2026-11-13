@@ -1,5 +1,5 @@
 
-import { backdropSupport, onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
+import { backdropSupport, clearFind, onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
 import { leaveTab } from "@/lib/tab-hover";
 import { hostToolbarIds, splitToolbar } from "@/lib/toolbar-pin";
 import { toolbarSide } from "@/lib/toolbar-side";
@@ -26,6 +26,9 @@ export function BrowserPage() {
   const toolbarRef = useRef<HTMLElement>(null);
   const [findToken, setFindToken] = useState<number | null>(null);
   const [findAllToken, setFindAllToken] = useState(0);
+  const [findPanel, setFindPanel] = useState(false);
+  const findOpen = useRef(false);
+  const findTabId = useRef<number | undefined>(undefined);
 
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const vertical = settings?.tabLayout === "vertical";
@@ -79,6 +82,15 @@ export function BrowserPage() {
     }
   }, [hoverPreview]);
 
+  findOpen.current = findToken !== null;
+  findTabId.current = activeTab?.id;
+
+  useEffect(() => {
+    if (findToken === null) {
+      setFindPanel(false);
+    }
+  }, [findToken]);
+
   useEffect(() => {
     /** Centred across the window, `top` px down. */
     const centered = (kind: PopupKind, top: number, params = "") =>
@@ -86,6 +98,14 @@ export function BrowserPage() {
     const unlisten = onBrowserCommand((command) => {
       switch (command) {
         case "find":
+          if (findOpen.current) {
+            const id = findTabId.current;
+            if (id !== undefined) {
+              void clearFind(id);
+            }
+            setFindToken(null);
+            break;
+          }
           setFindToken((token) => (token ?? 0) + 1);
           break;
         case "find-all":
@@ -132,8 +152,10 @@ export function BrowserPage() {
       const toolBox = toolbarRef.current?.getBoundingClientRect();
       const toolWidth = toolBox ? Math.ceil(toolBox.width) : 0;
       const toolHeight = toolBox ? Math.ceil(toolBox.height) : 0;
+      const results = document.getElementById("find-results");
+      const resultsWidth = results ? Math.ceil(results.getBoundingClientRect().width) : 0;
       const left = sidebar + (toolSide === "left" ? toolWidth : 0);
-      const right = toolSide === "right" ? toolWidth : 0;
+      const right = (toolSide === "right" ? toolWidth : 0) + resultsWidth;
       const bottom = toolSide === "bottom" ? toolHeight : 0;
       void setUiInsets(top, left, right, bottom);
     };
@@ -146,8 +168,12 @@ export function BrowserPage() {
     if (toolbarRef.current) {
       observer.observe(toolbarRef.current);
     }
+    const results = document.getElementById("find-results");
+    if (results) {
+      observer.observe(results);
+    }
     return () => observer.disconnect();
-  }, [vertical, snapshot.fullscreen, showToolStrip, toolSide, settings?.verticalToolbarLabels]);
+  }, [vertical, snapshot.fullscreen, showToolStrip, toolSide, settings?.verticalToolbarLabels, findPanel]);
 
   const showBookmarksBar = settings?.showBookmarksBar ?? true;
 
@@ -167,6 +193,8 @@ export function BrowserPage() {
         toolbarRef={toolSide === "top" ? toolbarRef : undefined}
         findToken={findToken}
         findAllToken={findAllToken}
+        findPanel={findPanel}
+        onFindPanelChange={setFindPanel}
         activeTab={activeTab}
         onCloseFind={() => setFindToken(null)}
       />

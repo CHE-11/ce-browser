@@ -96,6 +96,7 @@ export function BrowserBody({
         </div>
         {devtools?.visible ? <DevtoolsDivider ratio={devtools.ratio} /> : null}
       </div>
+      <div id="find-results-slot" className="contents" />
       {showToolStrip && toolSide === "right" ? (
         <ExtensionsToolbar ref={toolbarRef} side="right" activeTab={activeTab} extensions={extensions} settings={settings} />
       ) : null}

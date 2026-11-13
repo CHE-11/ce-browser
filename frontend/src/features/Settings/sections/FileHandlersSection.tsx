@@ -18,7 +18,7 @@ import {
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-file-handlers")!;
 
 const HINT =
-  "Opening a file of this type loads this page and places the file on its file input. A chosen profile always opens it. With none chosen, an open profile is used, or the default profile when none are open. Windows lists ce-browser under Open with for these types.";
+  "PDFs open in the Edge PDF viewer. Any other type loads a page and places the file on its file input. A chosen profile always opens the file. With none chosen, an open profile is used, or the default profile when none are open. Windows lists ce-browser under Open with for these types.";
 
 const emptyDraft = { extension: "", url: "", inputId: "", profile: "" };
 
@@ -79,7 +79,10 @@ export function FileHandlersSection({ settings, query, onUpdate, onMatch }: Sett
   const pdfDiffers =
     builtin !== null &&
     pdf !== undefined &&
-    (pdf.url !== builtin.url || pdf.inputId !== builtin.inputId || (pdf.profile || "") !== (builtin.profile || ""));
+    (pdf.native !== builtin.native ||
+      pdf.url !== builtin.url ||
+      pdf.inputId !== builtin.inputId ||
+      (pdf.profile || "") !== (builtin.profile || ""));
 
   const commit = (index: number, next: FileHandler) => {
     const extension = cleanExtension(next.extension);
@@ -96,7 +99,7 @@ export function FileHandlersSection({ settings, query, onUpdate, onMatch }: Sett
       return true;
     }
     const copy = handlers.slice();
-    copy[index] = { extension, url, inputId, profile: next.profile || "" };
+    copy[index] = { extension, url, inputId, profile: next.profile || "", native: false };
     save(copy);
     return true;
   };
@@ -109,7 +112,7 @@ export function FileHandlersSection({ settings, query, onUpdate, onMatch }: Sett
     }
     save([
       ...handlers.filter((item) => item.extension !== extension),
-      { extension, url, inputId: draft.inputId.trim(), profile: "" },
+      { extension, url, inputId: draft.inputId.trim(), profile: "", native: false },
     ]);
     setDraft(emptyDraft);
   };
@@ -130,20 +133,26 @@ export function FileHandlersSection({ settings, query, onUpdate, onMatch }: Sett
         <ul id="settings-file-handlers-rows" className="flex flex-col gap-2">
           {handlers.map((handler, index) => (
             <li id={`settings-file-handler-${handler.extension}`} key={handler.extension} className="flex items-center gap-2">
-              <input
-                id={`settings-file-handler-${handler.extension}-extension`}
-                defaultValue={handler.extension}
-                key={`${handler.extension}-extension`}
-                spellCheck={false}
-                maxLength={16}
-                aria-label={`${handler.extension} extension`}
-                className={`${inputClass} w-20`}
-                onBlur={(event) => {
-                  if (!commit(index, { ...handler, extension: event.target.value })) {
-                    event.target.value = handler.extension;
-                  }
-                }}
-              />
+              {handler.native ? (
+                <span id={`settings-file-handler-${handler.extension}-extension`} className={cn(inputClass, "flex w-20 shrink-0 items-center")}>
+                  {handler.extension}
+                </span>
+              ) : (
+                <input
+                  id={`settings-file-handler-${handler.extension}-extension`}
+                  defaultValue={handler.extension}
+                  key={`${handler.extension}-extension`}
+                  spellCheck={false}
+                  maxLength={16}
+                  aria-label={`${handler.extension} extension`}
+                  className={`${inputClass} w-20`}
+                  onBlur={(event) => {
+                    if (!commit(index, { ...handler, extension: event.target.value })) {
+                      event.target.value = handler.extension;
+                    }
+                  }}
+                />
+              )}
               <select
                 id={`settings-file-handler-${handler.extension}-profile`}
                 value={handler.profile || ""}
@@ -168,35 +177,43 @@ export function FileHandlersSection({ settings, query, onUpdate, onMatch }: Sett
                   </option>
                 ))}
               </select>
-              <input
-                id={`settings-file-handler-${handler.extension}-url`}
-                defaultValue={handler.url}
-                key={`${handler.extension}-url-${handler.url}`}
-                spellCheck={false}
-                aria-label={`${handler.extension} page`}
-                className={inputClass}
-                onBlur={(event) => {
-                  if (!commit(index, { ...handler, url: event.target.value })) {
-                    event.target.value = handler.url;
-                  }
-                }}
-              />
-              <input
-                id={`settings-file-handler-${handler.extension}-input`}
-                defaultValue={handler.inputId}
-                key={`${handler.extension}-input-${handler.inputId}`}
-                spellCheck={false}
-                placeholder="File input id"
-                aria-label={`${handler.extension} file input`}
-                className={`${inputClass} w-40`}
-                onBlur={(event) => {
-                  if (!commit(index, { ...handler, inputId: event.target.value })) {
-                    event.target.value = handler.inputId;
-                  }
-                }}
-              />
+              {handler.native ? (
+                <span id={`settings-file-handler-${handler.extension}-viewer`} className="min-w-0 flex-1 truncate px-1 text-sm text-zinc-300">
+                  Edge PDF viewer
+                </span>
+              ) : (
+                <>
+                  <input
+                    id={`settings-file-handler-${handler.extension}-url`}
+                    defaultValue={handler.url}
+                    key={`${handler.extension}-url-${handler.url}`}
+                    spellCheck={false}
+                    aria-label={`${handler.extension} page`}
+                    className={inputClass}
+                    onBlur={(event) => {
+                      if (!commit(index, { ...handler, url: event.target.value })) {
+                        event.target.value = handler.url;
+                      }
+                    }}
+                  />
+                  <input
+                    id={`settings-file-handler-${handler.extension}-input`}
+                    defaultValue={handler.inputId}
+                    key={`${handler.extension}-input-${handler.inputId}`}
+                    spellCheck={false}
+                    placeholder="File input id"
+                    aria-label={`${handler.extension} file input`}
+                    className={`${inputClass} w-40`}
+                    onBlur={(event) => {
+                      if (!commit(index, { ...handler, inputId: event.target.value })) {
+                        event.target.value = handler.inputId;
+                      }
+                    }}
+                  />
+                </>
+              )}
               {handler.extension === "pdf" && pdfDiffers ? (
-                <IconButton id="settings-file-handler-pdf-reset" label="Restore the PDF editor" onClick={restorePdf}>
+                <IconButton id="settings-file-handler-pdf-reset" label="Restore the PDF viewer" onClick={restorePdf}>
                   <RotateCcw id="settings-file-handler-pdf-reset-icon" aria-hidden />
                 </IconButton>
               ) : null}

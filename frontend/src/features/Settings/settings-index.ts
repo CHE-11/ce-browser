@@ -20,7 +20,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
   { id: "settings-ask-save", label: "Ask where to save each file", section: "settings-downloads" },
   { id: "settings-accelerate", label: "Accelerate large downloads", section: "settings-downloads" },
   { id: "settings-download-name", label: "Download file name", section: "settings-downloads", keywords: "template rename" },
-  { id: "settings-file-handlers-list", label: "File handlers", section: "settings-file-handlers", keywords: "pdf open with extension file type profile" },
+  { id: "settings-file-handlers-list", label: "File handlers", section: "settings-file-handlers", keywords: "pdf open with extension file type profile edge viewer" },
   { id: "settings-workspaces", label: "Workspaces", section: "settings-tabs", keywords: "switcher tab strip" },
   { id: "settings-tab-layout", label: "Tab layout", section: "settings-tabs", keywords: "vertical horizontal sidebar" },
   { id: "settings-tab-styles-link", label: "Fine-tune styles", section: "settings-tabs", keywords: "styles editor height icon padding width pixels text size rem context menu" },

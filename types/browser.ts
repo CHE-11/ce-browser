@@ -756,16 +756,18 @@ export type SearchEngine =
   | "mojeek"
   | "custom";
 
-/** A page that opens one file type inside the browser. */
+/** How one file type opens inside the browser. */
 export type FileHandler = {
   /** Lowercase extension without a dot, such as `pdf`. */
   extension: string;
-  /** Page opened in a tab. The file is placed on that page's file input. */
+  /** Page opened in a tab. The file is placed on that page's file input. Empty when `native` is set. */
   url: string;
   /** Element id of the file input. Empty uses the first file input on the page. */
   inputId: string;
   /** Profile id that opens this type. Empty uses an open profile, or the default profile. */
   profile: string;
+  /** Opens the file in Edge's PDF viewer. Only pdf uses this. */
+  native: boolean;
 };
 
 /** Edge of the window where the tools toolbar sits. */
@@ -1927,10 +1929,22 @@ export type BackdropSupport = {
   restartNeeded: boolean;
 };
 
+/** One match for the results panel. */
+export type FindHit = {
+  index: number;
+  before: string;
+  text: string;
+  after: string;
+  /** A heading, a line in an editor, or how far down the page the match is. */
+  location: string;
+};
+
 /** Text matches on one page. `index` is the highlighted match, or -1. */
 export type FindResult = {
   count: number;
   index: number;
+  /** Filled when the results panel is open. */
+  hits?: FindHit[];
 };
 
 /** Matches in one tab for "Find in all tabs". */

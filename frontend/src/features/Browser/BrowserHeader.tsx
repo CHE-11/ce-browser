@@ -27,6 +27,9 @@ type BrowserHeaderProps = {
   findToken: number | null;
   /** Bumped by Ctrl+Shift+F. The find bar opens Find in all tabs when it has a query. */
   findAllToken: number;
+  /** Results list beside the page. */
+  findPanel: boolean;
+  onFindPanelChange: (open: boolean) => void;
   activeTab: TabInfo | undefined;
   onCloseFind: () => void;
 };
@@ -45,6 +48,8 @@ export function BrowserHeader({
   toolbarRef,
   findToken,
   findAllToken,
+  findPanel,
+  onFindPanelChange,
   activeTab,
   onCloseFind,
 }: BrowserHeaderProps) {
@@ -83,7 +88,15 @@ export function BrowserHeader({
         />
       ) : null}
       {findToken !== null && activeTab ? (
-        <FindBar tabId={activeTab.id} focusToken={findToken} openAllToken={findAllToken} onClose={onCloseFind} />
+        <FindBar
+          tabId={activeTab.id}
+          focusToken={findToken}
+          openAllToken={findAllToken}
+          panelOpen={findPanel}
+          onPanelChange={onFindPanelChange}
+          fullscreen={snapshot.fullscreen}
+          onClose={onCloseFind}
+        />
       ) : null}
       <SyncToast />
     </div>
