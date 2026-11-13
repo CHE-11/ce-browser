@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -6336,6 +6337,7 @@ pub fn select_index(app: &AppHandle, index: Option<usize>) -> Result<(), String>
 }
 
 /// `change` is `in`, `out` or `reset`. Extension pages stay on Browser UI size.
+/// Ctrl++, Ctrl+- and Ctrl+scroll all come through here, and so does the zoom menu.
 pub fn zoom(app: &AppHandle, id: u32, change: &str) -> Result<f64, String> {
     let extension_zoom = with_state(app, |state| {
         state
@@ -6367,27 +6369,106 @@ pub fn zoom(app: &AppHandle, id: u32, change: &str) -> Result<f64, String> {
             _ => Some(reset),
         }
         .unwrap_or(current);
-        tab.info.zoom = next;
         Some((next, tab.info.url.clone()))
     })
     .ok_or("That tab is no longer open.")?;
     let (next, url) = next;
+    // Saved before the webview is told, so a failed zoom call still keeps the site value.
+    commit_page_zoom(app, id, next, &url, change == "reset");
     if let Some(webview) = page_view(app, id) {
         webview.set_zoom(next).map_err(|error| error.to_string())?;
     }
+    emit_tabs(app);
+    Ok(next)
+}
+
+/// WebView2 changed the zoom on its own (Ctrl+scroll or Ctrl+/- that the page handled).
+/// A document load also forces 100%; that reset is not a zoom the user chose.
+pub fn observe_controller_zoom(app: &AppHandle, id: u32, factor: f64) {
+    if !factor.is_finite() || factor <= 0.0 {
+        return;
+    }
+    if OBSERVING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let _guard = ObserveGuard;
+    let Some((current, url)) = with_state(app, |state| {
+        let tab = state.tab_mut(id)?;
+        Some((tab.info.zoom, tab.info.url.clone()))
+    }) else {
+        return;
+    };
+    if is_extension_url(&url) || zoom_factor_is_document_reset(current, factor) {
+        return;
+    }
+    let next = nearest_page_zoom(current, factor);
+    if (next - current).abs() < 0.001 {
+        return;
+    }
+    commit_page_zoom(app, id, next, &url, false);
+    if (factor - next).abs() >= 0.02
+        && let Some(webview) = page_view(app, id)
+    {
+        let _ = webview.set_zoom(next);
+    }
+    emit_tabs(app);
+}
+
+/// Stops `SetZoomFactor` from handling its own change notification.
+static OBSERVING: AtomicBool = AtomicBool::new(false);
+
+struct ObserveGuard;
+
+impl Drop for ObserveGuard {
+    fn drop(&mut self) {
+        OBSERVING.store(false, Ordering::Release);
+    }
+}
+
+fn commit_page_zoom(app: &AppHandle, id: u32, next: f64, url: &str, reset: bool) {
+    with_state(app, |state| {
+        if let Some(tab) = state.tab_mut(id) {
+            tab.info.zoom = next;
+        }
+    });
     if url.starts_with("http://") || url.starts_with("https://") {
         let percent = (next * 100.0).round() as u32;
-        let default_percent = (default_zoom * 100.0).round() as u32;
-        let remembered = if change == "reset" || percent == default_percent {
+        let default_percent = (settings::get(app).page_zoom_factor() * 100.0).round() as u32;
+        let remembered = if reset || percent == default_percent {
             0
         } else {
             percent
         };
-        crate::page_rules::remember_zoom(app, &url, remembered);
-        apply_site_zoom(app, &url, next, id);
+        crate::page_rules::remember_zoom(app, url, remembered);
+        apply_site_zoom(app, url, next, id);
     }
-    emit_tabs(app);
-    Ok(next)
+}
+
+/// `true` when WebView2 has put a zoomed document back to 100% while it loads.
+fn zoom_factor_is_document_reset(current: f64, factor: f64) -> bool {
+    (factor - 1.0).abs() < 0.02 && (current - 1.0).abs() >= 0.02
+}
+
+/// Nearest page-zoom step. A tie stays on the step closer to `current`.
+fn nearest_page_zoom(current: f64, factor: f64) -> f64 {
+    ZOOM_LEVELS
+        .iter()
+        .copied()
+        .min_by(|left, right| {
+            let left_distance = (left - factor).abs();
+            let right_distance = (right - factor).abs();
+            left_distance
+                .partial_cmp(&right_distance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    let left_current = (left - current).abs();
+                    let right_current = (right - current).abs();
+                    left_current
+                        .partial_cmp(&right_current)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        })
+        .unwrap_or(current)
 }
 
 /// Other open tabs on the same site follow a zoom change.
@@ -9214,6 +9295,25 @@ pub fn try_tab_url(app: &AppHandle, id: u32) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_controller_zoom_snaps_to_the_nearest_page_step() {
+        assert_eq!(super::nearest_page_zoom(1.0, 1.0), 1.0);
+        assert_eq!(super::nearest_page_zoom(0.9, 1.12), 1.1);
+        assert_eq!(super::nearest_page_zoom(0.9, 0.67), 0.67);
+        // Halfway between 100% and 110% stays on the current step.
+        assert_eq!(super::nearest_page_zoom(1.0, 1.05), 1.0);
+        assert_eq!(super::nearest_page_zoom(1.1, 1.05), 1.1);
+    }
+
+    #[test]
+    fn a_document_reset_to_100_percent_is_not_a_chosen_zoom() {
+        assert!(super::zoom_factor_is_document_reset(0.9, 1.0));
+        assert!(super::zoom_factor_is_document_reset(0.75, 1.01));
+        assert!(!super::zoom_factor_is_document_reset(1.0, 1.0));
+        assert!(!super::zoom_factor_is_document_reset(0.9, 1.1));
+        assert!(!super::zoom_factor_is_document_reset(0.75, 0.8));
+    }
 
     #[test]
     fn page_zoom_follows_the_site_and_stays_for_one_site() {

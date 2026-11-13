@@ -1,7 +1,7 @@
 import { Laptop, Maximize2, RotateCw, Scaling, Smartphone, Tablet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { clearViewport, openDevtools, setViewportBar } from "@/lib/browser-client";
-import { DEVICE_GROUPS, DEVICES, deviceFor, pushViewport, viewportEnvironment } from "./devices";
+import { DEVICE_GROUPS, DEVICES, deviceFor, pushViewport, viewportEnvironment, viewportShowsMobileOptions } from "./devices";
 
 type ViewportBarProps = {
   width: number;
@@ -114,6 +114,16 @@ export function ViewportBar({ width, height, cutout, homeBar, installed, keyboar
   };
 
   const sized = width > 0 && height > 0;
+  const shownWidth = full ? frame.width : width;
+  const shownHeight = full ? frame.height : height;
+  const showMobileOptions = viewportShowsMobileOptions(shownWidth, shownHeight);
+
+  useEffect(() => {
+    if (!sized || showMobileOptions || (!cutout && !homeBar && !installed && !keyboard)) {
+      return;
+    }
+    void pushViewport(width, height, false, false, false, false);
+  }, [cutout, height, homeBar, installed, keyboard, showMobileOptions, sized, width]);
   const environment = viewportEnvironment(width, height, installed, cutout, homeBar);
   const safe = environment.insets;
   const identity =
@@ -125,12 +135,13 @@ export function ViewportBar({ width, height, cutout, homeBar, installed, keyboar
     : `Mobile web app installed on ${identity}. Full screen, with a status bar, cutout, and safe-area insets instead of a browser page.`;
 
   return (
-    <div
-      id="viewport-bar"
-      ref={barRef}
-      className="absolute inset-x-0 top-0 z-20 min-h-9 border-b border-zinc-800 bg-zinc-950"
-    >
-      <div id="viewport-controls" className="flex max-w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 px-2 py-1 [&>*]:shrink-0">
+    <div id="viewport-bar" ref={barRef} className="absolute inset-x-0 top-0 z-20 bg-zinc-950">
+      <div
+        id="viewport-controls"
+        className="grid min-h-9 grid-cols-[1fr_auto_1fr] items-center border-b border-zinc-800 py-1"
+      >
+      <div id="viewport-controls-start" />
+      <div id="viewport-controls-center" className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 [&>*]:shrink-0">
       <div id="viewport-quick" className="flex items-center gap-0.5">
         {QUICK_DEVICES.map((item) => {
           const Icon = item.icon;
@@ -265,65 +276,75 @@ export function ViewportBar({ width, height, cutout, homeBar, installed, keyboar
       >
         <RotateCw id="viewport-rotate-icon" className="size-3.5" aria-hidden />
       </button>
-      <button
-        id="viewport-cutout"
-        type="button"
-        aria-pressed={cutout}
-        disabled={!sized}
-        title="Cutout"
-        className={TOGGLE}
-        onClick={() => commit(width, height, !cutout, homeBar)}
-      >
-        Cutout
-      </button>
-      <button
-        id="viewport-home"
-        type="button"
-        aria-pressed={homeBar}
-        disabled={!sized}
-        title="Home bar"
-        className={TOGGLE}
-        onClick={() => commit(width, height, cutout, !homeBar)}
-      >
-        Home bar
-      </button>
-      <button
-        id="viewport-installed"
-        type="button"
-        aria-pressed={installed}
-        disabled={!sized}
-        title={installedTitle}
-        className={TOGGLE}
-        onClick={() => commit(width, height, cutout, homeBar, !installed)}
-      >
-        Installed
-      </button>
-      <button
-        id="viewport-keyboard"
-        type="button"
-        aria-pressed={keyboard}
-        disabled={!sized}
-        title={
-          keyboard
-            ? "Keyboard is on. Focusing a text field slides an iOS keyboard up, and the keys type into that field."
-            : "Show an iOS keyboard when a text field is focused."
-        }
-        className={TOGGLE}
-        onClick={() => commit(width, height, cutout, homeBar, installed, !keyboard)}
-      >
-        Keyboard
-      </button>
-      {devtoolsTabId !== null ? (
-        <button
-          id="viewport-close-devtools"
-          type="button"
-          className="h-7 rounded-md px-2 text-xs text-zinc-200 hover:bg-zinc-800"
-          onClick={() => void openDevtools(devtoolsTabId)}
-        >
-          Close DevTools
-        </button>
-      ) : null}
       </div>
+      <div id="viewport-controls-end" className="flex items-center justify-end pr-2">
+        {devtoolsTabId !== null ? (
+          <button
+            id="viewport-close-devtools"
+            type="button"
+            className="h-7 rounded-md px-2 text-xs text-zinc-200 hover:bg-zinc-800"
+            onClick={() => void openDevtools(devtoolsTabId)}
+          >
+            Close DevTools
+          </button>
+        ) : null}
+      </div>
+      </div>
+      {showMobileOptions ? (
+        <div
+          id="viewport-mobile-bar"
+          className="flex min-h-9 flex-wrap items-center justify-center gap-2 border-b border-zinc-800 px-2 py-1"
+        >
+          <button
+            id="viewport-cutout"
+            type="button"
+            aria-pressed={cutout}
+            disabled={!sized}
+            title="Cutout"
+            className={TOGGLE}
+            onClick={() => commit(width, height, !cutout, homeBar)}
+          >
+            Cutout
+          </button>
+          <button
+            id="viewport-home"
+            type="button"
+            aria-pressed={homeBar}
+            disabled={!sized}
+            title="Home bar"
+            className={TOGGLE}
+            onClick={() => commit(width, height, cutout, !homeBar)}
+          >
+            Home bar
+          </button>
+          <button
+            id="viewport-installed"
+            type="button"
+            aria-pressed={installed}
+            disabled={!sized}
+            title={installedTitle}
+            className={TOGGLE}
+            onClick={() => commit(width, height, cutout, homeBar, !installed)}
+          >
+            Installed
+          </button>
+          <button
+            id="viewport-keyboard"
+            type="button"
+            aria-pressed={keyboard}
+            disabled={!sized}
+            title={
+              keyboard
+                ? "Keyboard is on. Focusing a text field slides an iOS keyboard up, and the keys type into that field."
+                : "Show an iOS keyboard when a text field is focused."
+            }
+            className={TOGGLE}
+            onClick={() => commit(width, height, cutout, homeBar, installed, !keyboard)}
+          >
+            Keyboard
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -49,7 +49,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       aria-label={label}
       data-active={active ? "true" : undefined}
       className={cn(
-        "chrome-toolbar-button inline-flex size-8 shrink-0 items-center justify-center rounded-full text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:pointer-events-none disabled:opacity-35 [&_svg]:size-4",
+        "chrome-toolbar-button inline-flex size-8 shrink-0 items-center justify-center rounded-full text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100 disabled:pointer-events-none disabled:opacity-35 [&_svg]:size-4 user-select-none",
         focusRing,
         active && "bg-zinc-800 text-zinc-100",
         className,

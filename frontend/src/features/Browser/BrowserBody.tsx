@@ -7,8 +7,8 @@ import { SplitDivider } from "@/components/SplitDivider";
 import { VerticalTabs } from "../Tabs/VerticalTabs";
 import { PageLoading, pagePending, useShownPages } from "./PageLoading";
 import { ExtensionsToolbar } from "../Extensions/ExtensionsToolbar";
-import { ViewportBar } from "../DevTools/ViewportBar";
-import { ViewportHandles } from "../DevTools/ViewportHandles";
+import { ViewportBar } from "../DevTools/DevTools_ViewportBar";
+import { ViewportHandles } from "../DevTools/DevTools_ViewportHandles";
 
 type BrowserBodyProps = {
   snapshot: WindowTabsState;

@@ -46,6 +46,8 @@ type Hit = {
   keywords?: string;
   group: "Action" | "Tab" | "Recently closed" | "Workspace" | "Setting" | "Tool" | "Extension" | "Bookmark" | "History";
   run: () => Promise<unknown> | void;
+  /** Opens another popup in this one's place, which already dismisses the palette. */
+  replacesPopup?: boolean;
 };
 
 type Ranked = { hit: Hit; matches: readonly FuseResultMatch[] };
@@ -117,6 +119,25 @@ function Highlighted({ id, text, matches }: { id: string; text: string; matches:
   return <span id={id}>{parts}</span>;
 }
 
+/** Tools whose action opens a popup over the palette. The rest run and the palette closes. */
+function toolReplacesPalette(id: string, hasTab: boolean) {
+  switch (id) {
+    case "debug-hud":
+    case "present":
+    case "scripts":
+    case "rewrites":
+    case "clear-cache":
+      return false;
+    case "font-picker":
+    case "theme-picker":
+    case "style-picker":
+    case "network-speed":
+      return true;
+    default:
+      return hasTab;
+  }
+}
+
 /** Opens a ce://settings row, reusing an open settings tab. */
 async function openSetting(tabs: TabInfo[], id: string) {
   const url = `ce://settings?focus=${encodeURIComponent(id)}`;
@@ -149,8 +170,8 @@ export function CommandPalette() {
     const actions: Hit[] = [
       { id: "new-tab", title: "New tab", hint: "Ctrl+T", group: "Action", run: () => createTab() },
       { id: "ephemeral", title: "New ephemeral tab", hint: "InPrivate", group: "Action", run: () => createEphemeralTab() },
-      { id: "tab-search", title: "Search tabs", hint: "Ctrl+Shift+A", group: "Action", run: () => sendUiCommand("tab-search") },
-      { id: "shortcut-sheet", title: "Keyboard shortcut cheat sheet", hint: "Ctrl+/", group: "Action", run: () => sendUiCommand("shortcut-sheet") },
+      { id: "tab-search", title: "Search tabs", hint: "Ctrl+Shift+A", group: "Action", replacesPopup: true, run: () => sendUiCommand("tab-search") },
+      { id: "shortcut-sheet", title: "Keyboard shortcut cheat sheet", hint: "Ctrl+/", group: "Action", replacesPopup: true, run: () => sendUiCommand("shortcut-sheet") },
       { id: "group-by-site", title: "Group tabs by site", hint: "Tab groups", group: "Action", run: () => groupBySite() },
       { id: "bookmarks", title: "Bookmarks", hint: "ce://bookmarks", group: "Action", run: () => createTab("ce://bookmarks") },
       { id: "boards", title: "Boards", hint: "ce://boards", group: "Action", run: () => createTab("ce://boards") },
@@ -238,6 +259,7 @@ export function CommandPalette() {
       title: tool.name,
       hint: tool.description,
       group: "Tool" as const,
+      replacesPopup: toolReplacesPalette(tool.id, !!active),
       run: () => {
         if (tool.id === "debug-hud") {
           return debugToggleHud();
@@ -276,22 +298,18 @@ export function CommandPalette() {
     }));
     const extensionHits: Hit[] = extensions
       .filter((extension) => extension.enabled && (extension.popup || extension.sidePanel))
-      .map((extension) => ({
-        id: `extension-${extension.id}`,
-        title: extension.defaultTitle || extension.name,
-        hint: "Extension",
-        keywords: extension.description,
-        group: "Extension",
-        run: () => {
-          if (!extension.popup && extension.sidePanel) {
-            return openExtensionPanel(extension.id);
-          }
-          if (extensionOpenAs(settings, extension.id) === "panel") {
-            return openExtensionPanel(extension.id);
-          }
-          return openHere("extension", `id=${extension.id}`);
-        },
-      }));
+      .map((extension) => {
+        const asPanel = (!extension.popup && !!extension.sidePanel) || extensionOpenAs(settings, extension.id) === "panel";
+        return {
+          id: `extension-${extension.id}`,
+          title: extension.defaultTitle || extension.name,
+          hint: "Extension",
+          keywords: extension.description,
+          group: "Extension" as const,
+          replacesPopup: !asPanel,
+          run: () => (asPanel ? openExtensionPanel(extension.id) : openHere("extension", `id=${extension.id}`)),
+        };
+      });
     const pages: Hit[] = [
       ...flattenBookmarks(bookmarks).map((bookmark) => ({
         id: `bookmark-${bookmark.id}`,
@@ -406,13 +424,36 @@ export function CommandPalette() {
     if (!hit) {
       return;
     }
-    const opensPopup = hit.group === "Tool" || hit.group === "Extension" || hit.id === "tab-search" || hit.id === "shortcut-sheet";
-    const pending = Promise.resolve(hit.run());
-    if (!opensPopup) {
+    let pending: Promise<unknown>;
+    try {
+      pending = Promise.resolve(hit.run());
+    } catch {
+      pending = Promise.resolve();
+    }
+    if (!hit.replacesPopup) {
       void closePopup();
     }
     void pending.catch(() => undefined);
   };
+
+  const chooseRef = useRef(choose);
+  const rankedRef = useRef(ranked);
+  const selectedRef = useRef(selected);
+  chooseRef.current = choose;
+  rankedRef.current = ranked;
+  selectedRef.current = selected;
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || event.isComposing) {
+        return;
+      }
+      event.preventDefault();
+      chooseRef.current(rankedRef.current[selectedRef.current]?.hit);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   const applyFilter = (filter: PaletteFilter) => {
     const next = parsed.filter?.key === filter.key ? "" : `${filter.key} `;
@@ -449,9 +490,6 @@ export function CommandPalette() {
           } else if (event.key === "ArrowUp") {
             event.preventDefault();
             setSelected((index) => (ranked.length === 0 ? 0 : (index - 1 + ranked.length) % ranked.length));
-          } else if (event.key === "Enter") {
-            event.preventDefault();
-            choose(ranked[selected]?.hit);
           } else if (event.key === "Escape") {
             void closePopup();
           }

@@ -1989,6 +1989,25 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
     pin_profile_scheme(&core);
     attach_accelerators(app, &controller, Target::Page)?;
     let mut token = 0i64;
+    let zoom_app = app.clone();
+    unsafe {
+        controller.add_ZoomFactorChanged(
+            &ZoomFactorChangedEventHandler::create(Box::new(move |sender, _| {
+                let Some(controller) = sender else {
+                    return Ok(());
+                };
+                let mut factor = 0.0_f64;
+                if controller.ZoomFactor(&mut factor).is_err() {
+                    return Ok(());
+                }
+                // Ctrl++, Ctrl+- and Ctrl+scroll can change this factor without a menu click.
+                // The load-time snap back to 100% is ignored inside observe.
+                tabs::observe_controller_zoom(&zoom_app, id, factor);
+                Ok(())
+            })),
+            &mut token,
+        )?;
+    }
 
     unsafe {
         let history_app = app.clone();

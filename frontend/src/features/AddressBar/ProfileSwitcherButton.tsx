@@ -33,7 +33,7 @@ export function ProfileSwitcherButton() {
       onClick={(event) => void openPopup("profile-switcher", event.currentTarget)}
     >
       {profile?.icon ? (
-        <img id="address-profile-icon" src={profile.icon} alt="" className="size-5 rounded-md" />
+        <img id="address-profile-icon" src={profile.icon} alt="" className="size-5 rounded-md user-select-none" />
       ) : (
         <CircleUser id="address-profile-icon" aria-hidden />
       )}

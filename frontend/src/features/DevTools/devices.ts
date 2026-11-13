@@ -350,6 +350,11 @@ export function viewportEnvironment(
   };
 }
 
+/** Cutout, home bar, installed, and keyboard apply only while a side is under 768 CSS pixels. */
+export function viewportShowsMobileOptions(width: number, height: number) {
+  return (width > 0 && width < 768) || (height > 0 && height < 768);
+}
+
 export function pushViewport(
   width: number,
   height: number,
@@ -360,14 +365,19 @@ export function pushViewport(
 ) {
   const roundedWidth = Math.round(width);
   const roundedHeight = Math.round(height);
-  const environment = viewportEnvironment(roundedWidth, roundedHeight, installed, cutout, home);
+  const mobile = viewportShowsMobileOptions(roundedWidth, roundedHeight);
+  const nextCutout = mobile && cutout;
+  const nextHome = mobile && home;
+  const nextInstalled = mobile && installed;
+  const nextKeyboard = mobile && keyboard;
+  const environment = viewportEnvironment(roundedWidth, roundedHeight, nextInstalled, nextCutout, nextHome);
   return setViewport({
     width: roundedWidth,
     height: roundedHeight,
-    cutout,
-    homeBar: home,
-    installed,
-    keyboard,
+    cutout: nextCutout,
+    homeBar: nextHome,
+    installed: nextInstalled,
+    keyboard: nextKeyboard,
     insets: environment.insets,
     maxInsets: environment.maxInsets,
     cutoutStyle: environment.style,
