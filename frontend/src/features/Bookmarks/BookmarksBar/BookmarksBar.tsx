@@ -34,7 +34,7 @@ type BookmarksBarProps = {
 
 /** Gap, icon and width are in `em`, so they follow the text size setting. */
 const itemClass = cn(
-  "inline-flex max-w-[15em] shrink-0 items-center gap-[0.5em] rounded-md text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100",
+  "inline-flex max-w-[15em] shrink-0 items-center gap-[0.5em] rounded-md text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 max-w-fit",
   focusRing,
 );
 const iconClass = "shrink-0";
