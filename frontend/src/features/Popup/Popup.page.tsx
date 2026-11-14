@@ -23,6 +23,7 @@ import { BookmarksBarOverflow } from "../Bookmarks/BookmarksBar/BookmarksBarOver
 import { AdBlockerPopover } from "../BuiltInExtensions/ad-blocker/AdBlockerPopover";
 import { ExtractPopover } from "../BuiltInExtensions/automation/ExtractPopover";
 import { BoardImagesPopover } from "../BuiltInExtensions/boards/BoardImagesPopover";
+import { BoardDropPopover } from "../BuiltInExtensions/boards/popover/BoardDropPopover";
 import { BoardsPopover } from "../BuiltInExtensions/boards/popover/BoardsPopover";
 import { CommandPalette } from "../BuiltInExtensions/command-palette/CommandPalette";
 import { MediaGrid } from "../BuiltInExtensions/media/MediaGrid";
@@ -198,6 +199,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <BoardsPopover params={params} />;
     case "board-images":
       return <BoardImagesPopover params={params} />;
+    case "board-drop":
+      return <BoardDropPopover params={params} />;
     case "media-hub":
       return <MediaHub />;
     case "media-grid":

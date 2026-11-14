@@ -1888,6 +1888,11 @@ async fn import_board_items(
 }
 
 #[tauri::command]
+async fn paste_board_clipboard(app: AppHandle, board_id: String) -> Result<Vec<boards::Pin>, String> {
+    blocking(move || boards::paste_clipboard(&app, &board_id)).await
+}
+
+#[tauri::command]
 async fn open_pin_file(app: AppHandle, id: String) -> Result<(), String> {
     blocking(move || boards::open_pin_file(&app, &id)).await
 }
@@ -3256,6 +3261,7 @@ pub fn run() {
             copy_pin_image,
             save_pin_image,
             import_board_items,
+            paste_board_clipboard,
             open_pin_file,
             save_pin_file,
             find_deals,

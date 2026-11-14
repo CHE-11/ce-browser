@@ -96,11 +96,16 @@ type AddressBarProps = {
 
 const EMPTY_OMNIBOX: OmniboxState = { suggestions: [], selected: 0 };
 
-function addressText(tab: TabInfo | undefined) {
-  if (!tab || tab.url === "ce://newtab") {
+/** What the address field shows when the user is not in the middle of typing. */
+function committedAddress(url: string | undefined) {
+  if (!url || url === "ce://newtab") {
     return "";
   }
-  return tab.url;
+  return url;
+}
+
+function addressText(tab: TabInfo | undefined) {
+  return committedAddress(tab?.url);
 }
 
 /**
@@ -201,13 +206,42 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const restoreRef = useRef<{ text: string; editing: boolean } | null>(null);
   const dismissRef = useRef<() => void>(() => {});
   const completionRange = useRef<[number, number] | null>(null);
+  const caretRef = useRef<number | null>(null);
+  /** Uncommitted address text for each tab, until a search or Escape. */
+  const draftsRef = useRef(new Map<number, string>());
+  /** The tab on screen, so a switch can store its text before the next tab replaces it. */
+  const shownRef = useRef<{ id: number; url: string } | null>(
+    activeTab ? { id: activeTab.id, url: activeTab.url } : null,
+  );
+  const seenAddress = useRef<{ id: number | null; url: string | undefined }>({
+    id: activeId,
+    url: activeTab?.url,
+  });
   const [selectionTick, setSelectionTick] = useState(0);
 
+  const putDraft = (id: number, url: string, value: string) => {
+    if (value === committedAddress(url)) {
+      draftsRef.current.delete(id);
+    } else {
+      draftsRef.current.set(id, value);
+    }
+  };
+
   useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (!input) {
+      return;
+    }
     const range = completionRange.current;
-    if (range && inputRef.current) {
-      inputRef.current.setSelectionRange(range[0], range[1], "backward");
+    if (range) {
+      input.setSelectionRange(range[0], range[1], "backward");
       completionRange.current = null;
+      return;
+    }
+    const caret = caretRef.current;
+    if (caret !== null) {
+      input.setSelectionRange(caret, caret);
+      caretRef.current = null;
     }
   }, [text, selectionTick]);
 
@@ -243,10 +277,39 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   };
 
   useEffect(() => {
-    if (!editing) {
-      setText(addressText(activeTab));
+    const previous = seenAddress.current;
+    const nextUrl = activeTab?.url;
+    const sameTab = previous.id === activeId;
+    const urlChanged = previous.url !== nextUrl;
+    seenAddress.current = { id: activeId, url: nextUrl };
+    if (sameTab && urlChanged && activeId !== null && !editing) {
+      draftsRef.current.delete(activeId);
+      typedRef.current = "";
+      setText(committedAddress(nextUrl));
+      return;
     }
+    if (editing) {
+      return;
+    }
+    if (activeId !== null) {
+      const draft = draftsRef.current.get(activeId);
+      if (draft !== undefined && draft !== committedAddress(nextUrl)) {
+        typedRef.current = draft;
+        setText(draft);
+        return;
+      }
+    }
+    setText(committedAddress(nextUrl));
   }, [activeTab?.url, activeId, editing]);
+
+  useEffect(() => {
+    const live = new Set(snapshot.windowTabs.map((tab) => tab.id));
+    for (const id of draftsRef.current.keys()) {
+      if (!live.has(id)) {
+        draftsRef.current.delete(id);
+      }
+    }
+  }, [snapshot.windowTabs]);
 
   useEffect(() => {
     let closed = false;
@@ -277,18 +340,46 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   }, []);
 
   useLayoutEffect(() => {
-    const tab = activeRef.current;
+    const leaving = shownRef.current;
+    const arriving = activeRef.current;
     const input = inputRef.current;
-    if (tab?.url === "ce://newtab") {
-      const keep = (armRef.current || redirectKeys.current) && typedRef.current !== "";
-      setEditing(true);
-      if (!keep) {
-        typedRef.current = "";
-        setText("");
+    if (blurTimer.current !== null) {
+      window.clearTimeout(blurTimer.current);
+      blurTimer.current = null;
+    }
+    if (leaving && leaving.id !== arriving?.id) {
+      const gestureOnPrevious = (armRef.current || redirectKeys.current) && leaving.url !== "ce://newtab";
+      if (!gestureOnPrevious) {
+        putDraft(leaving.id, leaving.url, textRef.current);
       }
-      if (blurTimer.current !== null) {
-        window.clearTimeout(blurTimer.current);
-        blurTimer.current = null;
+    }
+    const typingAhead = armRef.current && typedRef.current !== "";
+    if (!(typingAhead && arriving?.url === "ce://newtab")) {
+      dismissRef.current();
+    }
+    shownRef.current = arriving ? { id: arriving.id, url: arriving.url } : null;
+
+    if (arriving?.url === "ce://newtab") {
+      setEditing(true);
+      if (typingAhead) {
+        putDraft(arriving.id, arriving.url, textRef.current);
+      } else {
+        const draft = draftsRef.current.get(arriving.id);
+        if (draft) {
+          typedRef.current = draft;
+          caretRef.current = draft.length;
+          setSelectionTick((tick) => tick + 1);
+          setText(draft);
+          if (input) {
+            input.value = draft;
+          }
+        } else {
+          typedRef.current = "";
+          setText("");
+          if (input) {
+            input.value = "";
+          }
+        }
       }
       input?.focus();
       const queued = pendingNav.current;
@@ -298,17 +389,35 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       if (queued) {
         redirectKeys.current = false;
         typedRef.current = "";
+        draftsRef.current.delete(arriving.id);
         setText(queued);
         setEditing(false);
         input?.blur();
-        void navigate(tab.id, queued);
+        void navigate(arriving.id, queued);
       }
       return;
     }
-    if (!armRef.current) {
-      setEditing(false);
+    armRef.current = false;
+    if (arriving) {
+      const draft = draftsRef.current.get(arriving.id);
+      const resting = committedAddress(arriving.url);
+      if (draft !== undefined && draft !== resting) {
+        typedRef.current = draft;
+        setText(draft);
+      } else {
+        typedRef.current = "";
+        setText(resting);
+      }
     }
+    setEditing(false);
   }, [activeId]);
+
+  useLayoutEffect(() => {
+    const tab = activeRef.current;
+    if (tab && shownRef.current?.id === tab.id) {
+      shownRef.current = { id: tab.id, url: tab.url };
+    }
+  });
 
   useEffect(() => {
     if (activeRef.current?.url !== "ce://newtab") {
@@ -328,6 +437,17 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     if (!force && (armRef.current || redirectKeys.current)) {
       input?.focus();
       return;
+    }
+    // The new tab is already showing. Focusing again must not leave the gesture armed,
+    // or the next tab switch keeps this field instead of that tab's address.
+    if (!force && activeRef.current?.url === "ce://newtab") {
+      input?.focus();
+      armRef.current = false;
+      return;
+    }
+    const current = activeRef.current;
+    if (current) {
+      putDraft(current.id, current.url, textRef.current);
     }
     armRef.current = true;
     redirectKeys.current = true;
@@ -450,6 +570,10 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       }
       if (target.kind === "answer") {
         typedRef.current = target.url;
+        const tab = activeRef.current;
+        if (tab && !((armRef.current || redirectKeys.current) && tab.url !== "ce://newtab")) {
+          putDraft(tab.id, tab.url, target.url);
+        }
         setText(target.url);
         setEditing(true);
         dismissSuggestions();
@@ -468,6 +592,9 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         pendingNav.current = target.url;
         dismissSuggestions();
         return;
+      }
+      if (activeRef.current) {
+        draftsRef.current.delete(activeRef.current.id);
       }
       finishEditing();
       if (target.kind === "url" && looksLikeUrl(target.url)) {
@@ -585,11 +712,16 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     const input = inputRef.current;
     const atEnd = !input || input.selectionStart === value.length;
     const completion = inserted && atEnd ? inlineCompletion(value, history, bookmarkLinks) : null;
+    const shown = completion ?? value;
+    const tab = activeRef.current;
+    if (tab && !((armRef.current || redirectKeys.current) && tab.url !== "ce://newtab")) {
+      putDraft(tab.id, tab.url, shown);
+    }
     if (completion) {
       completionRange.current = [value.length, completion.length];
       setSelectionTick((tick) => tick + 1);
     }
-    setText(completion ?? value);
+    setText(shown);
     setEditing(true);
     const suggestions = buildSuggestions(
       value,
@@ -705,6 +837,10 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     void sendOmniboxState(state);
     const suggestion = suggestions[next];
     if (suggestion.kind !== "search") {
+      const tab = activeRef.current;
+      if (tab && !((armRef.current || redirectKeys.current) && tab.url !== "ce://newtab")) {
+        putDraft(tab.id, tab.url, suggestion.url);
+      }
       setText(suggestion.url);
     }
   };
@@ -731,6 +867,10 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       if (omniboxRef.current.suggestions.length > 0) {
         dismissSuggestions();
       } else {
+        if (activeId !== null) {
+          draftsRef.current.delete(activeId);
+        }
+        typedRef.current = "";
         setText(addressText(activeTab));
         finishEditing();
       }
@@ -764,6 +904,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       void saveSettings({ ...settings, toolbarOrder: next });
     }
   };
+  const addressUncommitted = text !== addressText(activeTab);
   const secure = activeTab?.url.startsWith("https://");
   const insecure = activeTab?.url.startsWith("http://");
   const defaultZoom = !activeTab || activeTab.url.startsWith("ce://") ? 1 : (settings?.pageZoom ?? 100) / 100;
@@ -855,7 +996,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           editing && "ring-2",
         )}
       >
-        {editing || !activeTab || activeTab.url === "ce://newtab" ? (
+        {editing || addressUncommitted || !activeTab || activeTab.url === "ce://newtab" ? (
           <Search id="address-field-search" className="size-3.5 shrink-0 text-zinc-400" aria-hidden />
         ) : (
           <button

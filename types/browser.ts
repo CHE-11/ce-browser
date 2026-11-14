@@ -507,6 +507,7 @@ export type PopupKind =
   | "selection-translate"
   | "boards"
   | "board-images"
+  | "board-drop"
   | "theme-picker"
   | "style-picker"
   | "font-picker"

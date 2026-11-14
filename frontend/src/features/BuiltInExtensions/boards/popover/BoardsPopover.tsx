@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { CircleAlert, Crop, ExternalLink, Images, LayoutGrid, Link2, Monitor, MousePointerClick, RotateCcw, ScrollText } from "lucide-react";
+import { CircleAlert, ClipboardPaste, Crop, ExternalLink, Images, LayoutGrid, Link2, Monitor, MousePointerClick, RotateCcw, ScrollText, Trash2 } from "lucide-react";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import { PopupFrame } from "@/components/PopupFrame";
-import { closePopup, createTab, currentWindowLabel, movePins, requestPageTool } from "@/lib/browser-client";
+import { closePopup, createTab, currentWindowLabel, deletePins, movePins, pasteBoardClipboard, requestPageTool } from "@/lib/browser-client";
 import type { PageToolRequest } from "@type/browser";
 
 import { ActionTile, PopoverHeader } from "../../PopoverParts";
@@ -28,6 +28,9 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
   const { boards, loaded } = useBoards();
   const [boardId, setBoardId] = useState(params.get("board") ?? "");
   const [showResult, setShowResult] = useState(status !== null);
+  const [pasting, setPasting] = useState(false);
+  const [pasteError, setPasteError] = useState("");
+  const [pasted, setPasted] = useState<URLSearchParams | null>(null);
 
   useEffect(() => {
     if (!loaded) {
@@ -40,6 +43,21 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
       return boards.lastBoardId ?? boards.boards[0]?.id ?? "";
     });
   }, [loaded, boards]);
+
+  const paste = () => {
+    setPasting(true);
+    setPasteError("");
+    void pasteBoardClipboard(boardId)
+      .then((pins) => {
+        const next = new URLSearchParams();
+        next.set("status", "saved");
+        next.set("pin", pins[0]?.id ?? "");
+        next.set("board", pins[0]?.boardId ?? boardId);
+        setPasted(next);
+      })
+      .catch((reason: unknown) => setPasteError(errorText(reason)))
+      .finally(() => setPasting(false));
+  };
 
   const send = (action: BoardsAction) => {
     void requestPageTool({
@@ -55,7 +73,7 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
   };
 
   return (
-    <PopupFrame id="boards-popover" width={340} maxHeight={680} ready={loaded}>
+    <PopupFrame id="boards-popover" width={340} maxHeight={760} ready={loaded}>
       <PopoverHeader
         id="boards-header"
         icon={<LayoutGrid aria-hidden />}
@@ -67,7 +85,9 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
           </IconButton>
         }
       />
-      {showResult && status ? (
+      {pasted ? (
+        <SaveResult params={pasted} onAgain={() => setPasted(null)} />
+      ) : showResult && status ? (
         <SaveResult params={params} onAgain={() => setShowResult(false)} />
       ) : (
         <div id="boards-form" className="flex flex-col gap-2 px-3 pb-3">
@@ -119,6 +139,19 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
             hint="Pick one or more images"
             onClick={() => send("images")}
           />
+          <ActionTile
+            id="boards-paste"
+            disabled={pasting}
+            icon={<ClipboardPaste aria-hidden />}
+            label="Paste from clipboard"
+            hint={pasting ? "Pasting…" : "Image, file, or link"}
+            onClick={paste}
+          />
+          {pasteError ? (
+            <p id="boards-paste-error" className="text-xs text-amber-300">
+              {pasteError}
+            </p>
+          ) : null}
         </div>
       )}
     </PopupFrame>
@@ -131,8 +164,23 @@ function SaveResult({ params, onAgain }: { params: URLSearchParams; onAgain: () 
   const pinId = params.get("pin");
   const [boardId, setBoardId] = useState(params.get("board") ?? "");
   const [moveError, setMoveError] = useState("");
+  const [removing, setRemoving] = useState(false);
   const thumbnail = useThumbnail(failed ? null : pinId);
   const board = boards.boards.find((item) => item.id === boardId);
+
+  const remove = () => {
+    if (!pinId || removing) {
+      return;
+    }
+    setRemoving(true);
+    setMoveError("");
+    void deletePins([pinId])
+      .then(() => onAgain())
+      .catch((reason: unknown) => {
+        setMoveError(errorText(reason));
+        setRemoving(false);
+      });
+  };
 
   const changeBoard = (next: string) => {
     if (!pinId || next === boardId) {
@@ -176,17 +224,25 @@ function SaveResult({ params, onAgain }: { params: URLSearchParams; onAgain: () 
           ) : null}
         </>
       )}
-      <div id="boards-result-actions" className="flex gap-2">
-        {failed ? null : (
-          <Button id="boards-result-open" variant="primary" className="flex-1" onClick={() => openBoardsPage(boardId || undefined)}>
-            <ExternalLink id="boards-result-open-icon" className="size-4" aria-hidden />
-            Open board
+      <div id="boards-result-actions" className="flex flex-col gap-2">
+        {failed || !pinId ? null : (
+          <Button id="boards-result-delete" variant="destructiveOutline" disabled={removing} onClick={remove}>
+            <Trash2 id="boards-result-delete-icon" className="size-4" aria-hidden />
+            {removing ? "Deleting…" : "Delete"}
           </Button>
         )}
-        <Button id="boards-result-again" className="flex-1" onClick={onAgain}>
-          <RotateCcw id="boards-result-again-icon" className="size-4" aria-hidden />
-          {failed ? "Try again" : "Save another"}
-        </Button>
+        <div id="boards-result-actions-row" className="flex gap-2">
+          {failed ? null : (
+            <Button id="boards-result-open" variant="primary" className="flex-1" disabled={removing} onClick={() => openBoardsPage(boardId || undefined)}>
+              <ExternalLink id="boards-result-open-icon" className="size-4" aria-hidden />
+              Open board
+            </Button>
+          )}
+          <Button id="boards-result-again" className="flex-1" disabled={removing} onClick={onAgain}>
+            <RotateCcw id="boards-result-again-icon" className="size-4" aria-hidden />
+            {failed ? "Try again" : "Save another"}
+          </Button>
+        </div>
       </div>
     </div>
   );

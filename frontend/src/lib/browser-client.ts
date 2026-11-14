@@ -551,6 +551,28 @@ export function importBoardItems(boardId: string, items: BoardImportItem[]) {
   return invoke<Pin[]>("import_board_items", { boardId, items });
 }
 
+/** Saves the copied image, files, or links onto a board. An empty `boardId` uses the last board. */
+export function pasteBoardClipboard(boardId: string) {
+  return invoke<Pin[]>("paste_board_clipboard", { boardId });
+}
+
+/** The boards drop popover is under the pointer, or the drag left it, or it closed itself. */
+export type BoardDropState = "over" | "idle" | "done";
+
+export type BoardDropSignal = {
+  window: string;
+  state: BoardDropState;
+};
+
+/** Tells the toolbar button whether the drop popover still has the drag. */
+export function sendBoardDropSignal(state: BoardDropState) {
+  return emit("board-drop-signal", { window: currentWindowLabel(), state } satisfies BoardDropSignal);
+}
+
+export function onBoardDropSignal(handler: (signal: BoardDropSignal) => void): Promise<UnlistenFn> {
+  return listen<BoardDropSignal>("board-drop-signal", (event) => handler(event.payload));
+}
+
 export function openPinFile(id: string) {
   return invoke<void>("open_pin_file", { id });
 }
