@@ -60,6 +60,7 @@ export function TabRowsView({ snapshot, rows, orientation, compact, drag }: TabR
             onContextMenu={(event) => openTabMenu(event, tab, multi(tab.id))}
             onClose={() => closeTabOrSelection(tab.id, multi(tab.id))}
             onDragStart={() => drag.start(tab.id)}
+            onDrag={drag.track}
             onDragEnd={drag.end}
             onDragOver={(event) => drag.over(event, index)}
           />

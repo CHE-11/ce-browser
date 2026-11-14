@@ -123,7 +123,9 @@ import type {
   FontPreview,
   ThemePreview,
   WindowsColorScheme,
+  TabDragHover,
   TabGroupColor,
+  TabStripLayout,
   TabsSnapshot,
   UserStyles,
 } from "../../../types/browser";
@@ -223,20 +225,47 @@ export function detachTab(id: number) {
   return invoke<void>("detach_tab", { id });
 }
 
-/** Outer edge of this browser window in CSS pixels, for drag-out hit testing. */
-export async function windowOuterBounds() {
+/** Releases a dragged tab at a screen point. A tab strip there takes it. Anywhere else opens a window. */
+export function dropTab(id: number, x: number, y: number) {
+  return invoke<void>("drop_tab", { id, x, y });
+}
+
+/** Remembers where this window's tab strip is, in screen CSS pixels. */
+export function reportTabStrip(label: string, layout: TabStripLayout) {
+  return invoke<void>("report_tab_strip", { label, layout });
+}
+
+/** Drops a window's strip from hit testing. The strip unmounted, or the window closed. */
+export function forgetTabStrip(label: string) {
+  return invoke<void>("forget_tab_strip", { label });
+}
+
+/** Tells every window where a tab drag is, so the strip under the pointer can show a gap. */
+export function sendTabDragHover(hover: TabDragHover) {
+  return emit("tab-drag-hover", hover);
+}
+
+export function onTabDragHover(handler: (hover: TabDragHover) => void): Promise<UnlistenFn> {
+  return listen<TabDragHover>("tab-drag-hover", (event) => handler(event.payload));
+}
+
+/** Top-left of this window's client area in screen CSS pixels. Drag points use the same space. */
+export async function windowClientOrigin() {
   const appWindow = getCurrentWindow();
-  const [position, size, scale] = await Promise.all([
-    appWindow.outerPosition(),
-    appWindow.outerSize(),
-    appWindow.scaleFactor(),
-  ]);
-  return {
-    x: position.x / scale,
-    y: position.y / scale,
-    width: size.width / scale,
-    height: size.height / scale,
-  };
+  const [position, scale] = await Promise.all([appWindow.innerPosition(), appWindow.scaleFactor()]);
+  return { x: position.x / scale, y: position.y / scale };
+}
+
+/** Fires when this window moves or its scale changes, so a reported strip rect can be refreshed. */
+export function onWindowGeometry(handler: () => void) {
+  const appWindow = getCurrentWindow();
+  return Promise.all([appWindow.onMoved(() => handler()), appWindow.onScaleChanged(() => handler())]).then(
+    (unlistens) => () => {
+      for (const unlisten of unlistens) {
+        unlisten();
+      }
+    },
+  );
 }
 
 export function pinTab(id: number) {

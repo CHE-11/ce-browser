@@ -627,6 +627,22 @@ async fn detach_tab(app: AppHandle, id: u32) -> Result<(), String> {
     tabs::detach_tab(&app, id)
 }
 
+/// A dragged tab was released at a screen point. A strip there takes it. Anywhere else opens a window.
+#[tauri::command]
+async fn drop_tab(app: AppHandle, id: u32, x: f64, y: f64) -> Result<(), String> {
+    tabs::drop_tab(&app, id, x, y)
+}
+
+#[tauri::command]
+async fn report_tab_strip(label: String, layout: tabs::TabStripLayout) {
+    tabs::report_tab_strip(&label, layout);
+}
+
+#[tauri::command]
+async fn forget_tab_strip(label: String) {
+    tabs::forget_tab_strip(&label);
+}
+
 #[tauri::command]
 async fn open_in_window(app: AppHandle, url: String) -> Result<(), String> {
     tabs::open_url_window(&app, &url)
@@ -1888,7 +1904,10 @@ async fn import_board_items(
 }
 
 #[tauri::command]
-async fn paste_board_clipboard(app: AppHandle, board_id: String) -> Result<Vec<boards::Pin>, String> {
+async fn paste_board_clipboard(
+    app: AppHandle,
+    board_id: String,
+) -> Result<Vec<boards::Pin>, String> {
     blocking(move || boards::paste_clipboard(&app, &board_id)).await
 }
 
@@ -3017,6 +3036,9 @@ pub fn run() {
             allow_certificate,
             move_tab,
             detach_tab,
+            drop_tab,
+            report_tab_strip,
+            forget_tab_strip,
             open_in_window,
             pin_tab,
             unpin_tab,

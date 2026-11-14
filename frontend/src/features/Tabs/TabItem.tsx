@@ -9,6 +9,7 @@ import { tabProblemTitle, type HeavyTab } from "@/lib/tab-alert";
 import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
 import { TAB_SIZE, horizontalTabHeight, tabItemStyle } from "@/lib/tab-size";
 import { useSettings } from "@/lib/use-browser";
+import { TAB_DRAG_TYPE } from "@/lib/tab-drag";
 import { hoverTab, leaveTab } from "@/lib/tab-hover";
 import { useTabUnderPointer } from "@/lib/tab-pointer";
 import { useStickyAudio } from "@/lib/use-sticky-audio";
@@ -37,6 +38,7 @@ type TabItemProps = {
   onContextMenu: (event: MouseEvent) => void;
   onClose: () => void;
   onDragStart: () => void;
+  onDrag: (event: DragEvent) => void;
   onDragEnd: (event: DragEvent) => void;
   onDragOver: (event: DragEvent) => void;
 };
@@ -55,6 +57,7 @@ export function TabItem({
   onContextMenu,
   onClose,
   onDragStart,
+  onDrag,
   onDragEnd,
   onDragOver,
 }: TabItemProps) {
@@ -210,9 +213,11 @@ export function TabItem({
       onContextMenu={onContextMenu}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData(TAB_DRAG_TYPE, String(tab.id));
         event.dataTransfer.setData("text/plain", tab.url);
         onDragStart();
       }}
+      onDrag={onDrag}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
     >

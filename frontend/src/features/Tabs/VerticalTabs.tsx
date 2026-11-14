@@ -39,7 +39,7 @@ export const VerticalTabs = forwardRef<HTMLElement, VerticalTabsProps>(function 
   pageRules.current = rules;
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
-  const drag = useTabDrag(snapshot.tabs, "y");
+  const drag = useTabDrag(snapshot.tabs, "y", "vertical-tabs");
   const shown = useTabMotion(snapshot, drag.dragging !== null);
   const rows = useMemo(
     () => buildTabRows(shown.tabs, shown.groups, shown.activeId, shown.split),

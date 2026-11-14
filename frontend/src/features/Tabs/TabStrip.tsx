@@ -42,7 +42,7 @@ function useOverflow(element: HTMLElement | null) {
 export function TabStrip({ snapshot }: TabStripProps) {
   const settings = useSettings();
   const workspacesEnabled = settings?.workspacesEnabled !== false;
-  const drag = useTabDrag(snapshot.tabs, "x");
+  const drag = useTabDrag(snapshot.tabs, "x", "tab-strip");
   const shown = useTabMotion(snapshot, drag.dragging !== null);
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
   const overflowing = useOverflow(scroller);

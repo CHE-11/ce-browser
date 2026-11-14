@@ -1348,7 +1348,10 @@ fn links_in_text(text: &str) -> Vec<String> {
     let mut urls = Vec::new();
     for token in text.split_whitespace() {
         let token = token.trim_matches(|character: char| {
-            matches!(character, '<' | '>' | '"' | '\'' | '(' | ')' | ',' | ';' | '.')
+            matches!(
+                character,
+                '<' | '>' | '"' | '\'' | '(' | ')' | ',' | ';' | '.'
+            )
         });
         let lower = token.to_ascii_lowercase();
         if (lower.starts_with("http://") || lower.starts_with("https://"))

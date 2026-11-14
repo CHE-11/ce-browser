@@ -2572,14 +2572,134 @@ fn allocate_window(app: &AppHandle) -> String {
     })
 }
 
+/// One tab's place in a strip, in screen CSS pixels along the strip axis.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TabStripSlot {
+    pub index: usize,
+    pub start: f64,
+    pub end: f64,
+}
+
+/// Where a window's tab strip is on screen, so a dragged tab can land on it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TabStripLayout {
+    /// `x` across the top strip, `y` down the sidebar.
+    pub axis: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub slots: Vec<TabStripSlot>,
+}
+
+fn strip_layouts() -> &'static Mutex<HashMap<String, TabStripLayout>> {
+    static LAYOUTS: OnceLock<Mutex<HashMap<String, TabStripLayout>>> = OnceLock::new();
+    LAYOUTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn report_tab_strip(window: &str, mut layout: TabStripLayout) {
+    layout.slots.sort_by(|left, right| {
+        left.start
+            .partial_cmp(&right.start)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    if let Ok(mut layouts) = strip_layouts().lock() {
+        layouts.insert(window.to_string(), layout);
+    }
+}
+
+pub fn forget_tab_strip(window: &str) {
+    if let Ok(mut layouts) = strip_layouts().lock() {
+        layouts.remove(window);
+    }
+}
+
+/// Strip index under a screen point, or `None` when the point misses the strip.
+fn strip_index(layout: &TabStripLayout, x: f64, y: f64) -> Option<usize> {
+    let horizontal = layout.axis != "y";
+    let (along, cross, origin, span, cross_origin, cross_span) = if horizontal {
+        (x, y, layout.x, layout.width, layout.y, layout.height)
+    } else {
+        (y, x, layout.y, layout.height, layout.x, layout.width)
+    };
+    if along < origin
+        || along > origin + span
+        || cross < cross_origin
+        || cross > cross_origin + cross_span
+    {
+        return None;
+    }
+    for slot in &layout.slots {
+        if along < (slot.start + slot.end) / 2.0 {
+            return Some(slot.index);
+        }
+    }
+    Some(layout.slots.last().map(|slot| slot.index + 1).unwrap_or(0))
+}
+
+fn strip_at(x: f64, y: f64) -> Option<(String, usize)> {
+    let layouts = strip_layouts().lock().ok()?;
+    let mut best: Option<(String, usize, f64)> = None;
+    for (window, layout) in layouts.iter() {
+        let Some(index) = strip_index(layout, x, y) else {
+            continue;
+        };
+        let area = (layout.width * layout.height).abs();
+        match &best {
+            Some((_, _, best_area)) if area >= *best_area => {}
+            _ => best = Some((window.clone(), index, area)),
+        }
+    }
+    best.map(|(window, index, _)| (window, index))
+}
+
+/// A dragged tab was released at a screen point, in CSS pixels.
+/// The strip under the point takes it. Anywhere else opens a new window.
+pub fn drop_tab(app: &AppHandle, id: u32, x: f64, y: f64) -> Result<(), String> {
+    let source =
+        with_state(app, |state| state.tab_window(id)).ok_or("That tab is no longer open.")?;
+    if let Some((window, index)) = strip_at(x, y) {
+        if window == source {
+            return Ok(());
+        }
+        if app.get_window(&window).is_some() {
+            return move_tab_to_window(app, id, &window, index);
+        }
+        forget_tab_strip(&window);
+    }
+    detach_tab_at(app, id, Some((x, y)))
+}
+
+/// Moves a tab into a window that is already open, at a strip index. An empty source window closes.
+pub fn move_tab_to_window(
+    app: &AppHandle,
+    id: u32,
+    target: &str,
+    index: usize,
+) -> Result<(), String> {
+    let source =
+        with_state(app, |state| state.tab_window(id)).ok_or("That tab is no longer open.")?;
+    if source == target {
+        move_tab(app, id, index);
+        return Ok(());
+    }
+    if app.get_window(target).is_none() {
+        return Err("That window is no longer open.".to_string());
+    }
+    deliver_tab(app, id, target, index, false)
+}
+
 /// Moves a tab into a new browser window. An empty source window closes.
 pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
-    let (source, alone) = with_state(app, |state| {
-        let source = state.tab_window(id)?;
-        let alone = state.indexes_in(&source).len() <= 1;
-        Some((source, alone))
-    })
-    .ok_or("That tab is no longer open.")?;
+    detach_tab_at(app, id, None)
+}
+
+/// `at` is the drop point in screen CSS pixels. The new window opens under that point.
+fn detach_tab_at(app: &AppHandle, id: u32, at: Option<(f64, f64)>) -> Result<(), String> {
+    let source =
+        with_state(app, |state| state.tab_window(id)).ok_or("That tab is no longer open.")?;
     let label = allocate_window(app);
     if let Err(error) = create_browser_window(app, &label) {
         with_state(app, |state| {
@@ -2587,46 +2707,94 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
         });
         return Err(error);
     }
-    if let (Some(source_window), Some(created)) = (app.get_window(&source), app.get_window(&label))
+    if let Some((x, y)) = at {
+        if let Some(created) = app.get_window(&label) {
+            let _ = created.set_position(LogicalPosition::new(x - 72.0, y - 18.0));
+        }
+    } else if let (Some(source_window), Some(created)) =
+        (app.get_window(&source), app.get_window(&label))
         && let Ok(position) = source_window.outer_position()
     {
         let _ = created.set_position(PhysicalPosition::new(position.x + 48, position.y + 48));
     }
+    deliver_tab(app, id, &label, 0, true)
+}
+
+/// Moves `id` onto `label`. `new_window` keeps the tab's workspace and shows it there.
+/// Joining a window that is already open puts the tab in that window's current workspace.
+fn deliver_tab(
+    app: &AppHandle,
+    id: u32,
+    label: &str,
+    index: usize,
+    new_window: bool,
+) -> Result<(), String> {
+    let (source, alone) = with_state(app, |state| {
+        let source = state.tab_window(id)?;
+        let alone = state.indexes_in(&source).len() <= 1;
+        Some((source, alone))
+    })
+    .ok_or("That tab is no longer open.")?;
+    if source == label {
+        move_tab(app, id, index);
+        return Ok(());
+    }
     crate::peek::close(app, &source);
+    if !new_window {
+        crate::peek::close(app, label);
+    }
     let (next, drop_dock) = with_state(app, |state| {
         let next = state
             .strip_indexes(&source)
             .into_iter()
-            .find(|index| state.tabs[*index].info.id != id)
-            .map(|index| state.tabs[index].info.id);
+            .find(|at| state.tabs[*at].info.id != id)
+            .map(|at| state.tabs[at].info.id);
         state.end_split_with(id);
-        let mut workspace = DEFAULT_WORKSPACE.to_string();
+        let tab_workspace = state
+            .tabs
+            .iter()
+            .find(|tab| tab.info.id == id)
+            .map(|tab| tab.info.workspace.clone())
+            .unwrap_or_else(|| DEFAULT_WORKSPACE.to_string());
+        if new_window && let Some(chrome) = state.chrome_mut(label) {
+            chrome.workspace = tab_workspace.clone();
+        }
+        let workspace = if new_window {
+            tab_workspace
+        } else {
+            state.workspace_of(label)
+        };
         if let Some(tab) = state.tab_mut(id) {
-            tab.info.window = label.clone();
-            tab.info.group_id = None;
-            workspace = tab.info.workspace.clone();
+            tab.info.window = label.to_string();
+            tab.info.workspace = workspace;
+            tab.info.changed = false;
+            tab.info.last_active = now_ms();
         }
         if state.chrome(&source).and_then(|chrome| chrome.bookmarks) == Some(id) {
             if let Some(chrome) = state.chrome_mut(&source) {
                 chrome.bookmarks = None;
             }
-            if let Some(chrome) = state.chrome_mut(&label) {
+            if let Some(chrome) = state.chrome_mut(label) {
                 chrome.bookmarks = Some(id);
             }
-        }
-        if let Some(chrome) = state.chrome_mut(&label) {
-            chrome.workspace = workspace;
         }
         let drop_dock = state.chrome_mut(&source).is_some_and(|chrome| {
             chrome.viewports.remove(&id);
             chrome.viewport_quiet.remove(&id);
             chrome.devtools.release(id)
         });
-        state.normalize_groups();
+        state.selected.retain(|item| *item != id);
+        if state.anchor == Some(id) {
+            state.anchor = None;
+        }
+        for chrome in &mut state.windows {
+            chrome.active_by_workspace.retain(|_, tab_id| *tab_id != id);
+        }
         if state.active_of(&source) == Some(id) {
             state.set_window_active(&source, next);
         }
-        state.set_window_active(&label, Some(id));
+        state.set_window_active(label, Some(id));
+        state.relocate(id, index);
         (next, drop_dock)
     });
     // Closing the source window destroys webviews Tauri still owns, so the last tab is
@@ -2656,6 +2824,7 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
     }
     let source_empty = with_state(app, |state| state.indexes_in(&source).is_empty());
     if source_empty {
+        forget_tab_strip(&source);
         crate::popup::forget(app, &source);
         with_state(app, |state| {
             state.windows.retain(|window| window.label != source);
@@ -2686,7 +2855,10 @@ pub fn detach_tab(app: &AppHandle, id: u32) -> Result<(), String> {
     if with_state(app, |state| state.chrome(&source).is_some()) {
         let _ = ensure_bookmarks_host(app, &source);
     }
-    let _ = ensure_bookmarks_host(app, &label);
+    let _ = ensure_bookmarks_host(app, label);
+    if !new_window && let Some(window) = app.get_window(label) {
+        let _ = window.set_focus();
+    }
     emit_tabs(app);
     Ok(())
 }
@@ -2723,6 +2895,7 @@ pub fn discard_window(app: &AppHandle, label: &str) {
             .collect::<Vec<_>>()
     });
     let _ = close_many(app, &ids, "batch", None);
+    forget_tab_strip(label);
     crate::popup::forget(app, label);
     crate::undo::close_window(app, label);
     with_state(app, |state| {
@@ -9919,5 +10092,54 @@ mod tests {
         assert_eq!(entry.tabs[0].url, "https://a.example");
         assert!(entry.group.is_none());
         assert_eq!(entry.tabs[0].workspace, "");
+    }
+
+    #[test]
+    fn a_point_on_a_strip_picks_the_tab_gap_under_it() {
+        let layout = TabStripLayout {
+            axis: "x".to_string(),
+            x: 10.0,
+            y: 0.0,
+            width: 300.0,
+            height: 40.0,
+            slots: vec![
+                TabStripSlot {
+                    index: 0,
+                    start: 20.0,
+                    end: 100.0,
+                },
+                TabStripSlot {
+                    index: 1,
+                    start: 100.0,
+                    end: 180.0,
+                },
+                TabStripSlot {
+                    index: 2,
+                    start: 180.0,
+                    end: 260.0,
+                },
+            ],
+        };
+        assert_eq!(strip_index(&layout, 5.0, 10.0), None);
+        assert_eq!(strip_index(&layout, 30.0, 50.0), None);
+        assert_eq!(strip_index(&layout, 40.0, 10.0), Some(0));
+        assert_eq!(strip_index(&layout, 70.0, 10.0), Some(1));
+        assert_eq!(strip_index(&layout, 150.0, 10.0), Some(2));
+        assert_eq!(strip_index(&layout, 250.0, 10.0), Some(3));
+        let sidebar = TabStripLayout {
+            axis: "y".to_string(),
+            x: 0.0,
+            y: 40.0,
+            width: 48.0,
+            height: 200.0,
+            slots: vec![TabStripSlot {
+                index: 0,
+                start: 50.0,
+                end: 90.0,
+            }],
+        };
+        assert_eq!(strip_index(&sidebar, 10.0, 60.0), Some(0));
+        assert_eq!(strip_index(&sidebar, 10.0, 120.0), Some(1));
+        assert_eq!(strip_index(&sidebar, 80.0, 60.0), None);
     }
 }

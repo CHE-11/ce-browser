@@ -49,6 +49,34 @@ export type TabInfo = {
   automated: boolean;
 };
 
+/** One tab's place in a strip, in screen CSS pixels along the strip axis. */
+export type TabStripSlot = {
+  /** Strip index, the way `moveTab` counts it. */
+  index: number;
+  start: number;
+  end: number;
+};
+
+/** Where a window's tab strip is on screen, so a dragged tab can land on it. */
+export type TabStripLayout = {
+  /** `x` for the top strip, `y` for the sidebar. */
+  axis: "x" | "y";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  slots: TabStripSlot[];
+};
+
+/** Pointer position while a tab is dragged, in screen CSS pixels. `id` is null when the drag ends. */
+export type TabDragHover = {
+  id: number | null;
+  x: number;
+  y: number;
+  /** Later events replace earlier ones. */
+  token: number;
+};
+
 export type TabFailureKind = "crashed" | "offline" | "dns" | "certificate" | "timeout" | "refused" | "other";
 
 export type TabFailure = {
