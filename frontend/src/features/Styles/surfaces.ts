@@ -1,23 +1,36 @@
-import { BOOKMARKS_BAR_ALIGN_OPTIONS } from "@/lib/bookmarks-bar-align";
+import { bookmarksBarAlign, BOOKMARKS_BAR_ALIGN_OPTIONS } from "@/lib/bookmarks-bar-align";
+import {
+  BOOKMARK_DIVIDER_LINE_OPTIONS,
+  BOOKMARK_DIVIDER_SHAPE_OPTIONS,
+  bookmarkDividerLine,
+  bookmarkDividerShape,
+} from "@/lib/bookmark-divider";
 import { CHROME_LIMITS, type ChromeKey } from "@/lib/chrome-metrics";
 import { TAB_SIZE } from "@/lib/tab-size";
-import type { BookmarksBarAlign } from "@type/browser";
+import type { BrowserSettings } from "@type/browser";
 
 export type StyleControl = {
   key: ChromeKey;
   label: string;
   hint: string;
-  unit: "rem" | "px";
+  unit: "rem" | "px" | "%";
   min: number;
   max: number;
   step: number;
 };
 
+export type StyleChoiceKey =
+  | "bookmarksBarAlign"
+  | "bookmarksBarDividerLine"
+  | "bookmarksBarDividerShape"
+  | "bookmarkDividerLine"
+  | "bookmarkDividerShape";
+
 export type StyleChoice = {
-  key: "bookmarksBarAlign";
+  key: StyleChoiceKey;
   label: string;
   hint: string;
-  options: { value: BookmarksBarAlign; label: string }[];
+  options: { value: string; label: string }[];
 };
 
 export type StyleSurface = {
@@ -38,6 +51,43 @@ function rem(key: ChromeKey, label: string, hint: string, limits: { min: number;
 
 function px(key: ChromeKey, label: string, hint: string, limits: { min: number; max: number }): StyleControl {
   return { key, label, hint, unit: "px", min: limits.min, max: limits.max, step: 1 };
+}
+
+function percent(key: ChromeKey, label: string, hint: string, limits: { min: number; max: number }): StyleControl {
+  return { key, label, hint, unit: "%", min: limits.min, max: limits.max, step: 1 };
+}
+
+const LINE_OPTIONS = BOOKMARK_DIVIDER_LINE_OPTIONS;
+const SHAPE_OPTIONS = BOOKMARK_DIVIDER_SHAPE_OPTIONS;
+
+export function styleChoiceValue(settings: BrowserSettings, key: StyleChoiceKey) {
+  switch (key) {
+    case "bookmarksBarAlign":
+      return bookmarksBarAlign(settings.bookmarksBarAlign);
+    case "bookmarksBarDividerLine":
+      return bookmarkDividerLine(settings.bookmarksBarDividerLine);
+    case "bookmarksBarDividerShape":
+      return bookmarkDividerShape(settings.bookmarksBarDividerShape);
+    case "bookmarkDividerLine":
+      return bookmarkDividerLine(settings.bookmarkDividerLine);
+    case "bookmarkDividerShape":
+      return bookmarkDividerShape(settings.bookmarkDividerShape);
+  }
+}
+
+export function withStyleChoice(settings: BrowserSettings, key: StyleChoiceKey, value: string): BrowserSettings {
+  switch (key) {
+    case "bookmarksBarAlign":
+      return { ...settings, bookmarksBarAlign: bookmarksBarAlign(value) };
+    case "bookmarksBarDividerLine":
+      return { ...settings, bookmarksBarDividerLine: bookmarkDividerLine(value) };
+    case "bookmarksBarDividerShape":
+      return { ...settings, bookmarksBarDividerShape: bookmarkDividerShape(value) };
+    case "bookmarkDividerLine":
+      return { ...settings, bookmarkDividerLine: bookmarkDividerLine(value) };
+    case "bookmarkDividerShape":
+      return { ...settings, bookmarkDividerShape: bookmarkDividerShape(value) };
+  }
 }
 
 const text = CHROME_LIMITS.text;
@@ -91,6 +141,30 @@ export const STYLE_SURFACES: StyleSurface[] = [
     ],
   },
   {
+    id: "bar-divider",
+    label: "Bar divider",
+    hint: "The vertical line between items on the bookmarks bar.",
+    choices: [
+      {
+        key: "bookmarksBarDividerLine",
+        label: "Line",
+        hint: "Solid, dashed, dotted, or two parallel lines.",
+        options: LINE_OPTIONS,
+      },
+      {
+        key: "bookmarksBarDividerShape",
+        label: "Shape",
+        hint: "Square ends, rounded ends, or a pill.",
+        options: SHAPE_OPTIONS,
+      },
+    ],
+    controls: [
+      rem("bookmarksBarDividerPadding", "Padding", "Space on each side of the line, in rem.", pad),
+      px("bookmarksBarDividerThickness", "Thickness", "Width of the line, in pixels. A double line uses at least 3.", CHROME_LIMITS.dividerThickness),
+      percent("bookmarksBarDividerLength", "Length", "How much of the bar height the line fills.", CHROME_LIMITS.dividerLength),
+    ],
+  },
+  {
     id: "bookmark-folders",
     label: "Bookmark folders",
     hint: "Rows in a folder menu and the overflow menu.",
@@ -98,6 +172,34 @@ export const STYLE_SURFACES: StyleSurface[] = [
       rem("bookmarkFolderTextSize", "Text", TEXT, text),
       rem("bookmarkFolderPadding", "Padding", SIDE, pad),
       rem("bookmarkFolderIconSize", "Icon", "Favicon and folder icon, in rem.", icon),
+    ],
+  },
+  {
+    id: "folder-divider",
+    label: "Folder divider",
+    hint: "The horizontal line in bookmark folders, the overflow menu, and the bookmarks manager. A label sits in the middle of the line.",
+    choices: [
+      {
+        key: "bookmarkDividerLine",
+        label: "Line",
+        hint: "Solid, dashed, dotted, or two parallel lines.",
+        options: LINE_OPTIONS,
+      },
+      {
+        key: "bookmarkDividerShape",
+        label: "Shape",
+        hint: "Square ends, rounded ends, or a pill.",
+        options: SHAPE_OPTIONS,
+      },
+    ],
+    controls: [
+      rem("bookmarkDividerPaddingTop", "Top padding", "Space above a plain divider, in rem.", pad),
+      rem("bookmarkDividerPaddingBottom", "Bottom padding", "Space below a plain divider, in rem.", pad),
+      rem("bookmarkDividerLabelPaddingTop", "Label top padding", "Space above a divider that has a label, in rem.", pad),
+      rem("bookmarkDividerLabelPaddingBottom", "Label bottom padding", "Space below a divider that has a label, in rem.", pad),
+      rem("bookmarkDividerInset", "Inset", "Space at each end of the line, in rem.", CHROME_LIMITS.dividerInset),
+      px("bookmarkDividerThickness", "Thickness", "Width of the line, in pixels. A double line uses at least 3.", CHROME_LIMITS.dividerThickness),
+      percent("bookmarkDividerLength", "Length", "How much of the row the line fills.", CHROME_LIMITS.dividerLength),
     ],
   },
   {

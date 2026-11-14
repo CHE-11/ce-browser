@@ -1,3 +1,4 @@
+import { BookmarkDivider } from "@/components/BookmarkDivider";
 import { Button } from "@/components/Button";
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ContextMenu";
 import { Dialog } from "@/components/Dialog";
@@ -9,7 +10,8 @@ import { deleteBookmark, deleteBookmarks, moveBookmark, createTab, importBookmar
 import { cn } from "@/lib/cn";
 import { faviconKey, hostOf } from "@/lib/format";
 import { parseRoute, useRoute } from "@/lib/route";
-import { BookmarkDropPlace, useAppearanceFromSettings, useBookmarks, useSiteFavicons, findFolder, bookmarkRootsOf, bookmarkContains, BOOKMARK_DRAG_TYPE, bookmarkDropPlace, findBookmarkParent, listFolders } from "@/lib/use-browser";
+import { BOOKMARK_PAGE_DIVIDER_COLOR, horizontalDividerMetrics } from "@/lib/bookmark-divider";
+import { BookmarkDropPlace, useAppearanceFromSettings, useBookmarks, useSettings, useSiteFavicons, findFolder, bookmarkRootsOf, bookmarkContains, BOOKMARK_DRAG_TYPE, bookmarkDropPlace, findBookmarkParent, listFolders } from "@/lib/use-browser";
 import { ChevronRight, Columns3, Search, SearchX, LayoutGrid, List, Type, Plus, FolderOpen, FolderPlus, FolderInput, Trash2, ExternalLink, Folder, Group, Pencil, PencilLine, Link2, SeparatorHorizontal } from "lucide-react";
 import { useRef, useState, useEffect, useMemo, useCallback, type DragEvent, type MouseEvent } from "react";
 import { BookmarkHealthProgress, BookmarkHealthReport, BookmarkNode, BookmarkTree } from "../../../../types/browser";
@@ -26,6 +28,11 @@ type DropState = { id: string; place: BookmarkDropPlace };
 type BookmarkView = "columns" | "cards" | "list" | "headlines";
 
 const ROOT_FOLDERS = new Set(["bar", "other"]);
+
+type SearchHit = {
+  node: BookmarkNode;
+  folders: BookmarkNode[];
+};
 
 function folderPath(tree: BookmarkTree | null, id: string): BookmarkNode[] {
   if (!tree) {
@@ -48,6 +55,132 @@ function folderPath(tree: BookmarkTree | null, id: string): BookmarkNode[] {
     return null;
   };
   return walk(tree.bar, []) ?? walk(tree.other, []) ?? [];
+}
+
+function FolderPath({ id, folders, onOpen }: { id: string; folders: BookmarkNode[]; onOpen: (id: string) => void }) {
+  return (
+    <nav id={id} aria-label="Folder" title={folders.map((folder) => folder.title).join(" / ")} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden">
+      {folders.map((folder, index) => (
+        <span key={folder.id} id={`${id}-${folder.id}`} className="flex min-w-0 items-center gap-0.5">
+          {index > 0 ? <ChevronRight id={`${id}-${folder.id}-sep`} className="size-3 shrink-0 text-zinc-600" aria-hidden /> : null}
+          <button
+            id={`${id}-${folder.id}-button`}
+            type="button"
+            className={cn(
+              "truncate rounded px-1 py-0.5 text-xs hover:bg-zinc-800 hover:text-zinc-100",
+              index === folders.length - 1 ? "text-zinc-200" : "text-zinc-500",
+            )}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpen(folder.id);
+            }}
+          >
+            {folder.title}
+          </button>
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+function BookmarkSearchList({
+  hits,
+  picked,
+  drop,
+  axis,
+  onPick,
+  onContextMenu,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  onEdit,
+  onDelete,
+  onOpenFolder,
+}: {
+  hits: SearchHit[];
+  picked: string[];
+  drop: DropState | null;
+  axis: "x" | "y";
+  onPick: (event: MouseEvent, node: BookmarkNode, index: number, list: BookmarkNode[]) => void;
+  onContextMenu: (event: MouseEvent, node: BookmarkNode) => void;
+  onDragStart: (event: DragEvent, node: BookmarkNode) => void;
+  onDragEnd: () => void;
+  onDragOver: (event: DragEvent, node: BookmarkNode) => void;
+  onDrop: (event: DragEvent, node: BookmarkNode) => void;
+  onEdit: (node: BookmarkNode) => void;
+  onDelete: (node: BookmarkNode) => void;
+  onOpenFolder: (id: string) => void;
+}) {
+  const icons = useSiteFavicons(hits.map((hit) => hit.node.url));
+  const nodes = hits.map((hit) => hit.node);
+  return (
+    <div id="bookmarks-page-search-list" className="flex flex-col gap-1">
+      {hits.map((hit, index) => {
+        const node = hit.node;
+        const domId = `bookmarks-search-${node.id}`;
+        return (
+          <div
+            key={node.id}
+            id={domId}
+            draggable={!ROOT_FOLDERS.has(node.id)}
+            aria-selected={picked.includes(node.id)}
+            title={node.url ?? node.title}
+            className={cn(
+              "group flex cursor-default items-start gap-3 rounded-lg px-2 py-2 hover:bg-zinc-900",
+              picked.includes(node.id) && "bg-sky-950/50 ring-1 ring-sky-800",
+              dropChrome(drop, node.id, axis),
+            )}
+            onClick={(event) => onPick(event, node, index, nodes)}
+            onContextMenu={(event) => onContextMenu(event, node)}
+            onDragStart={(event) => onDragStart(event, node)}
+            onDragEnd={onDragEnd}
+            onDragOver={(event) => onDragOver(event, node)}
+            onDrop={(event) => onDrop(event, node)}
+          >
+            <FavIcon id={`${domId}-icon`} url={node.url ?? ""} src={cachedIcon(icons, node.url)} className="mt-0.5 size-4" />
+            <div id={`${domId}-copy`} className="min-w-0 flex-1">
+              <span id={`${domId}-title`} className="block truncate text-sm font-medium">
+                {node.title || node.url}
+              </span>
+              <span id={`${domId}-meta`} className="block truncate text-xs text-zinc-500">
+                {node.url ? hostOf(node.url) : ""}
+              </span>
+              <div id={`${domId}-path`} className="mt-1 flex min-w-0">
+                <FolderPath id={`${domId}-folders`} folders={hit.folders} onOpen={onOpenFolder} />
+              </div>
+            </div>
+            <span
+              id={`${domId}-actions`}
+              className="flex shrink-0 items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <IconButton id={`${domId}-edit`} label="Edit" className="size-7" onClick={() => onEdit(node)}>
+                <Pencil id={`${domId}-edit-icon`} aria-hidden />
+              </IconButton>
+              <IconButton id={`${domId}-delete`} label="Delete" className="size-7" onClick={() => onDelete(node)}>
+                <Trash2 id={`${domId}-delete-icon`} aria-hidden />
+              </IconButton>
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BookmarkSeparatorLine({ id, label }: { id: string; label?: string }) {
+  const metrics = horizontalDividerMetrics(useSettings());
+  return (
+    <BookmarkDivider
+      id={id}
+      orientation="horizontal"
+      metrics={metrics}
+      label={label}
+      color={BOOKMARK_PAGE_DIVIDER_COLOR}
+      className="min-w-0 flex-1"
+    />
+  );
 }
 
 function dropChrome(drop: DropState | null, id: string, axis: "x" | "y") {
@@ -138,26 +271,27 @@ export function BookmarksPage() {
     return () => window.removeEventListener("hashchange", onHash);
   }, [tree]);
 
-  const results = useMemo(() => {
+  const hits = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle || !tree) {
       return null;
     }
-    const found: BookmarkNode[] = [];
-    const walk = (node: BookmarkNode) => {
-      for (const child of node.children ?? []) {
+    const found: SearchHit[] = [];
+    const walk = (folder: BookmarkNode, trail: BookmarkNode[]) => {
+      const next = [...trail, folder];
+      for (const child of folder.children ?? []) {
         if (child.url && (child.title.toLowerCase().includes(needle) || child.url.toLowerCase().includes(needle))) {
-          found.push(child);
+          found.push({ node: child, folders: next });
         }
-        walk(child);
+        walk(child, next);
       }
     };
-    walk(tree.bar);
-    walk(tree.other);
+    walk(tree.bar, []);
+    walk(tree.other, []);
     return found;
   }, [query, tree]);
 
-  const rows = results ?? selected?.children ?? [];
+  const rows = hits ? hits.map((hit) => hit.node) : (selected?.children ?? []);
 
   useEffect(() => {
     setPicked([]);
@@ -308,6 +442,14 @@ export function BookmarksPage() {
     }
   };
 
+  const showFolder = (id: string) => {
+    setSelectedId(id);
+    setQuery("");
+    setEditor(null);
+    setPicked([]);
+    anchorId.current = null;
+  };
+
   const openRowMenu = (event: MouseEvent, node: BookmarkNode) => {
     event.preventDefault();
     if (!picked.includes(node.id)) {
@@ -410,7 +552,7 @@ export function BookmarksPage() {
         >
           Export
         </Button>
-        {selected && !results ? (
+        {selected && !hits ? (
           <>
             <IconButton id="bookmarks-page-add-link" label="Add bookmark" onClick={() => setEditor({ mode: "add-link", parentId: selected.id })}>
               <Plus id="bookmarks-page-add-link-icon" aria-hidden />
@@ -457,7 +599,7 @@ export function BookmarksPage() {
       ) : null}
       <div
         id="bookmarks-page-items"
-        className={cn("min-h-0 flex-1", view === "columns" && !results ? "overflow-hidden" : "overflow-y-auto p-3")}
+        className={cn("min-h-0 flex-1", view === "columns" && !hits ? "overflow-hidden" : "overflow-y-auto p-3")}
         onClick={(event) => {
           if (event.target === event.currentTarget) {
             setPicked([]);
@@ -469,7 +611,7 @@ export function BookmarksPage() {
           }
         }}
         onDrop={(event) => {
-          if (!selected || results || view === "columns") {
+          if (!selected || hits || view === "columns") {
             return;
           }
           const id = event.dataTransfer.getData(BOOKMARK_DRAG_TYPE);
@@ -481,7 +623,7 @@ export function BookmarksPage() {
           report(moveBookmark(id, selected.id));
         }}
       >
-        {view === "columns" && !results && tree ? (
+        {view === "columns" && !hits && tree ? (
           <BookmarkColumns
             roots={[tree.bar, tree.other]}
             path={path}
@@ -496,31 +638,31 @@ export function BookmarksPage() {
             onDropInto={dropIntoFolder}
             onClearPick={() => setPicked([])}
           />
-        ) : results ? (
-          <>
+        ) : hits ? (
+          <div id="bookmarks-page-results-wrap" className="mx-auto flex w-full max-w-[900px] flex-col">
             <p id="bookmarks-page-results" className="mb-2 text-xs text-zinc-500">
-              {results.length} results for “{query.trim()}”
+              {hits.length} results for “{query.trim()}”
             </p>
-            {rows.length === 0 ? (
+            {hits.length === 0 ? (
               <EmptyState id="bookmarks-page-empty" icon={SearchX} title="No bookmarks match that search" hint="Try part of the title or the address." />
             ) : (
-              <BookmarkGrid
-                rows={rows}
-                view={view === "columns" ? "list" : view}
-                axis={axis}
+              <BookmarkSearchList
+                hits={hits}
                 picked={picked}
                 drop={drop}
+                axis={axis}
                 onPick={pickRow}
                 onContextMenu={openRowMenu}
                 onDragStart={onDragStart}
                 onDragEnd={endDrag}
                 onDragOver={allowDrop}
                 onDrop={commitDrop}
-                onEdit={(node) => setEditor({ mode: "edit", node })}
+                onEdit={(node) => (node.separator ? setRenaming(node) : setEditor({ mode: "edit", node }))}
                 onDelete={(node) => void removeIds([node.id])}
+                onOpenFolder={showFolder}
               />
             )}
-          </>
+          </div>
         ) : !tree ? (
           <SkeletonRows id="bookmarks-page-loading" rows={6} icon className="p-1" />
         ) : rows.length === 0 ? (
@@ -543,7 +685,7 @@ export function BookmarksPage() {
             onDragEnd={endDrag}
             onDragOver={allowDrop}
             onDrop={commitDrop}
-            onEdit={(node) => setEditor({ mode: "edit", node })}
+            onEdit={(node) => (node.separator ? setRenaming(node) : setEditor({ mode: "edit", node }))}
             onDelete={(node) => void removeIds([node.id])}
           />
         )}
@@ -571,6 +713,20 @@ export function BookmarksPage() {
                   closeMenu();
                 }}
               />
+              {hits ? (
+                <ContextMenuItem
+                  id="bookmarks-menu-show-folder"
+                  icon={<Folder />}
+                  label="Open folder"
+                  onClick={() => {
+                    const parent = findBookmarkParent(tree, menu.node.id);
+                    if (parent) {
+                      showFolder(parent.parentId);
+                    }
+                    closeMenu();
+                  }}
+                />
+              ) : null}
             </>
           ) : bulkMenu ? null : (
             <>
@@ -618,7 +774,7 @@ export function BookmarksPage() {
               />
             </>
           )}
-          {bulkMenu || results || ROOT_FOLDERS.has(menu.node.id) ? null : (
+          {bulkMenu || hits || ROOT_FOLDERS.has(menu.node.id) ? null : (
             <ContextMenuItem
               id="bookmarks-menu-add-divider"
               icon={<SeparatorHorizontal />}
@@ -629,6 +785,17 @@ export function BookmarksPage() {
               }}
             />
           )}
+          {menu.node.separator && !bulkMenu ? (
+            <ContextMenuItem
+              id="bookmarks-menu-label"
+              icon={<PencilLine />}
+              label={menu.node.title.trim() ? "Edit label" : "Add label"}
+              onClick={() => {
+                setRenaming(menu.node);
+                closeMenu();
+              }}
+            />
+          ) : null}
           {menu.node.separator && !bulkMenu ? null : (
             <ContextMenuItem
               id="bookmarks-menu-move"
@@ -669,7 +836,9 @@ export function BookmarksPage() {
         <BookmarkDialog
           key={editor.mode === "edit" ? editor.node.id : editor.mode}
           editor={editor}
+          tree={tree}
           onClose={() => setEditor(null)}
+          onOpenFolder={showFolder}
           onSave={(title, url) => {
             const action =
               editor.mode === "edit"
@@ -872,7 +1041,8 @@ function BookmarkColumnRow({
       draggable={!ROOT_FOLDERS.has(node.id)}
       title={node.url ?? node.title}
       className={cn(
-        "mx-1 flex h-8 cursor-default items-center gap-2 rounded-md px-2 text-left select-none",
+        "mx-1 flex cursor-default items-center gap-2 rounded-md px-2 text-left select-none",
+        node.separator ? "min-h-8" : "h-8",
         active ? "bg-sky-950 text-sky-300" : "hover:bg-zinc-900",
         chosen && !active && "bg-sky-950/60 ring-1 ring-inset ring-sky-800",
         dropClass,
@@ -885,17 +1055,13 @@ function BookmarkColumnRow({
       onDrop={onDrop}
     >
       {node.separator ? (
-        <div id={`${domId}-line`} role="separator" className="h-px flex-1 bg-zinc-700" />
+        <BookmarkSeparatorLine id={`${domId}-line`} label={node.title} />
       ) : node.url ? (
         <FavIcon id={`${domId}-icon`} url={node.url} src={icon} className="size-4" />
       ) : (
         <Folder id={`${domId}-icon`} className="size-4 shrink-0 text-amber-400" aria-hidden />
       )}
-      {node.separator ? (
-        <span id={`${domId}-title`} className="shrink-0 text-xs text-zinc-500">
-          Divider
-        </span>
-      ) : (
+      {node.separator ? null : (
         <span id={`${domId}-title`} className="min-w-0 flex-1 truncate text-sm">
           {node.title || node.url}
         </span>
@@ -1011,9 +1177,12 @@ function BookmarkItem({
       title={node.url ?? node.title}
       className={cn(
         "group relative flex min-w-0 cursor-default items-center text-left",
-        view === "cards" && "h-[4.25rem] gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-3 shadow-sm hover:border-zinc-700 hover:shadow-md",
-        view === "list" && "h-10 gap-3 rounded-lg px-2 hover:bg-zinc-900",
-        view === "headlines" && "h-8 gap-2 rounded-md px-2 hover:bg-zinc-900",
+        view === "cards" && !node.separator && "h-[4.25rem] gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-3 shadow-sm hover:border-zinc-700 hover:shadow-md",
+        view === "cards" && node.separator && "min-h-10 gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-3",
+        view === "list" && !node.separator && "h-10 gap-3 rounded-lg px-2 hover:bg-zinc-900",
+        view === "list" && node.separator && "min-h-10 gap-3 rounded-lg px-2 hover:bg-zinc-900",
+        view === "headlines" && !node.separator && "h-8 gap-2 rounded-md px-2 hover:bg-zinc-900",
+        view === "headlines" && node.separator && "min-h-8 gap-2 rounded-md px-2 hover:bg-zinc-900",
         chosen && "bg-sky-950/50 ring-1 ring-sky-800",
         dropClass,
       )}
@@ -1025,17 +1194,13 @@ function BookmarkItem({
       onDrop={onDrop}
     >
       {node.separator ? (
-        <div id={`${domId}-line`} role="separator" className="h-px flex-1 bg-zinc-700" />
+        <BookmarkSeparatorLine id={`${domId}-line`} label={node.title} />
       ) : node.url ? (
         <FavIcon id={`${domId}-icon`} url={node.url} src={icon} className={view === "cards" ? "size-5" : "size-4"} />
       ) : (
         <Folder id={`${domId}-icon`} className={cn("shrink-0 text-amber-400", view === "cards" ? "size-5" : "size-4")} aria-hidden />
       )}
-      {node.separator ? (
-        <span id={`${domId}-title`} className="shrink-0 text-xs text-zinc-500">
-          Divider
-        </span>
-      ) : (
+      {node.separator ? null : (
         <span id={`${domId}-copy`} className="min-w-0 flex-1">
           <span id={`${domId}-title`} className={cn("block truncate", view === "headlines" ? "text-sm" : "text-sm font-medium")}>
             {node.title || node.url}
@@ -1047,13 +1212,18 @@ function BookmarkItem({
           )}
         </span>
       )}
-      {view === "headlines" || node.separator ? null : (
+      {view === "headlines" ? null : (
         <span
           id={`${domId}-actions`}
           className="flex shrink-0 items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100"
           onClick={(event) => event.stopPropagation()}
         >
-          {folder ? null : (
+          {node.separator ? (
+            <IconButton id={`${domId}-label`} label={node.title.trim() ? "Edit label" : "Add label"} className="size-7" onClick={onEdit}>
+              <PencilLine id={`${domId}-label-icon`} aria-hidden />
+            </IconButton>
+          ) : null}
+          {folder || node.separator ? null : (
             <IconButton id={`${domId}-edit`} label="Edit" className="size-7" onClick={onEdit}>
               <Pencil id={`${domId}-edit-icon`} aria-hidden />
             </IconButton>
@@ -1128,13 +1298,17 @@ function MoveDialog({ tree, ids, onClose, onMove }: MoveDialogProps) {
 
 type BookmarkDialogProps = {
   editor: EditorState;
+  tree: BookmarkTree | null;
   onClose: () => void;
+  onOpenFolder: (id: string) => void;
   onSave: (title: string, url: string) => void;
 };
 
-function BookmarkDialog({ editor, onClose, onSave }: BookmarkDialogProps) {
+function BookmarkDialog({ editor, tree, onClose, onOpenFolder, onSave }: BookmarkDialogProps) {
   const node = editor.mode === "edit" ? editor.node : null;
   const isLink = editor.mode === "add-link" || !!node?.url;
+  const parentId = editor.mode === "edit" ? (findBookmarkParent(tree, editor.node.id)?.parentId ?? null) : editor.parentId;
+  const folders = parentId ? folderPath(tree, parentId) : [];
   const [title, setTitle] = useState(node?.title ?? "");
   const [url, setUrl] = useState(node?.url ?? "https://");
   const valid = title.trim().length > 0 && (!isLink || url.trim().length > 0);
@@ -1174,6 +1348,15 @@ function BookmarkDialog({ editor, onClose, onSave }: BookmarkDialogProps) {
             />
           </label>
         ) : null}
+        {folders.length > 0 && parentId ? (
+          <div id="bookmark-dialog-folder" className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5">
+            <Folder id="bookmark-dialog-folder-icon" className="size-3.5 shrink-0 text-amber-400" aria-hidden />
+            <FolderPath id="bookmark-dialog-path" folders={folders} onOpen={onOpenFolder} />
+            <Button id="bookmark-dialog-open-folder" size="sm" variant="ghost" onClick={() => onOpenFolder(parentId)}>
+              Open folder
+            </Button>
+          </div>
+        ) : null}
         <div id="bookmark-dialog-actions" className="flex justify-end gap-2 pt-1">
           <Button id="bookmark-dialog-cancel" variant="ghost" onClick={onClose}>
             Cancel
@@ -1196,8 +1379,9 @@ type RenameDialogProps = {
 function RenameDialog({ node, onClose, onSave }: RenameDialogProps) {
   const [title, setTitle] = useState(node.title);
   const inputRef = useRef<HTMLInputElement>(null);
-  const valid = title.trim().length > 0;
-  const heading = !node.url && !node.separator ? "Rename folder" : "Rename bookmark";
+  const labeling = node.separator;
+  const valid = labeling || title.trim().length > 0;
+  const heading = labeling ? (node.title.trim() ? "Edit divider label" : "Add divider label") : !node.url ? "Rename folder" : "Rename bookmark";
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -1216,17 +1400,23 @@ function RenameDialog({ node, onClose, onSave }: RenameDialogProps) {
           }
         }}
       >
-        <label id="bookmark-rename-dialog-title-label" className="flex flex-col gap-1 text-xs text-zinc-400">
-          Name
+        <label id="bookmark-rename-dialog-name-label" className="flex flex-col gap-1 text-xs text-zinc-400">
+          {labeling ? "Label" : "Name"}
           <input
-            id="bookmark-rename-dialog-title"
+            id="bookmark-rename-dialog-name"
             ref={inputRef}
             autoFocus
             value={title}
+            placeholder={labeling ? "Optional" : undefined}
             onChange={(event) => setTitle(event.target.value)}
-            className="h-8 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-sky-500"
+            className="h-8 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-sky-500"
           />
         </label>
+        {labeling ? (
+          <p id="bookmark-rename-dialog-hint" className="text-xs text-zinc-500">
+            The words sit in the middle of the line. Leave this blank for a plain divider.
+          </p>
+        ) : null}
         <div id="bookmark-rename-dialog-actions" className="flex justify-end gap-2 pt-1">
           <Button id="bookmark-rename-dialog-cancel" variant="ghost" onClick={onClose}>
             Cancel

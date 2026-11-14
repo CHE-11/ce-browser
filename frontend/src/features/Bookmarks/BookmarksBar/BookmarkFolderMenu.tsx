@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ChevronRight, ExternalLink, Folder, Group } from "lucide-react";
+import { BookmarkDivider } from "@/components/BookmarkDivider";
 import { FavIcon } from "@/components/FavIcon";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "@/components/PopupFrame";
+import { horizontalDividerMetrics } from "@/lib/bookmark-divider";
 import {
   closePopup,
   closeSubmenus,
@@ -19,7 +21,7 @@ import { usePopupHost } from "@/lib/popup-host";
 import { useBookmarksState, useTabs, findFolder, useSiteFavicons, useSettingsState } from "@/lib/use-browser";
 import { BookmarkNode } from "@type/browser";
 import { openBookmarkLink } from "./BookmarksBar";
-import { type BookmarkMenuTarget } from "./BookmarksBarContextMenu";
+import { setDividerPlace, type BookmarkMenuTarget } from "./BookmarksBarContextMenu";
 
 
 type BookmarkFolderMenuProps = {
@@ -75,6 +77,7 @@ export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFol
   const children = folder?.children ?? [];
   const links = children.filter((node) => node.url);
   const icons = useSiteFavicons(children.map((node) => node.url));
+  const divider = horizontalDividerMetrics(settings);
   const prefix = `bookmark-folder-panel-${folderId}`;
   /** Folder whose submenu is open beside this one. */
   const [openChild, setOpenChild] = useState<string | null>(null);
@@ -189,13 +192,20 @@ export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFol
     openSubmenu(node, event.currentTarget, event.detail === 0);
   };
 
-  const openContext = (event: MouseEvent, node?: BookmarkNode) => {
+  const openContext = (event: MouseEvent, node?: BookmarkNode, index?: number) => {
     event.preventDefault();
     event.stopPropagation();
     cancelHover();
     setOpenChild(null);
     const params = new URLSearchParams({ parent: folderId, divider: "horizontal" });
-    if (node) {
+    const rows = children.map((child, childIndex) => ({
+      id: child.id,
+      index: childIndex,
+      elementId: rowId(child),
+    }));
+    const hit = node && index !== undefined ? { id: node.id, index } : null;
+    setDividerPlace(params, event, rows, "y", hit);
+    if (node && hit) {
       const kind = targetKind(node);
       params.set("target", node.id);
       params.set("kind", kind);
@@ -241,17 +251,17 @@ export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFol
             ) : null}
             {children.map((node, index) =>
               node.separator ? (
-                <div
+                <BookmarkDivider
                   key={node.id}
                   id={rowId(node)}
-                  role="separator"
-                  className={cn("flex h-3 shrink-0 items-center px-3", drag.dropChrome(node.id))}
+                  orientation="horizontal"
+                  metrics={divider}
+                  label={node.title}
+                  className={drag.dropChrome(node.id)}
                   onPointerEnter={(event) => hoverRow(null, event.currentTarget)}
-                  onContextMenu={(event) => openContext(event, node)}
+                  onContextMenu={(event) => openContext(event, node, index)}
                   {...drag.itemProps(node, index)}
-                >
-                  <div id={`${rowId(node)}-line`} className="h-px w-full bg-zinc-600" />
-                </div>
+                />
               ) : node.url ? (
                 <button
                   key={node.id}
@@ -262,7 +272,7 @@ export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFol
                   className={cn(rowClass, drag.dropChrome(node.id))}
                   style={rowStyle}
                   onPointerEnter={(event) => hoverRow(node, event.currentTarget)}
-                  onContextMenu={(event) => openContext(event, node)}
+                  onContextMenu={(event) => openContext(event, node, index)}
                   onClick={(event) => openLink(node.url ?? "", event)}
                   onAuxClick={(event) => {
                     if (event.button === 1) {
@@ -296,7 +306,7 @@ export function BookmarkFolderMenu({ folderId, dragOpened = false }: BookmarkFol
                   className={cn(rowClass, openChild === node.id && "bg-zinc-800", drag.dropChrome(node.id))}
                   style={rowStyle}
                   onPointerEnter={(event) => hoverRow(node, event.currentTarget)}
-                  onContextMenu={(event) => openContext(event, node)}
+                  onContextMenu={(event) => openContext(event, node, index)}
                   onClick={(event) => clickFolder(event, node)}
                   {...drag.itemProps(node, index)}
                 >

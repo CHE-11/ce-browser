@@ -299,6 +299,12 @@ pub fn add(
 pub fn update(app: &AppHandle, id: &str, title: &str, url: Option<String>) -> Result<(), String> {
     change(app, |tree| {
         let node = tree.find_mut(id).ok_or("That bookmark no longer exists.")?;
+        if node.separator {
+            node.title = title.trim().to_string();
+            node.url = None;
+            node.children = None;
+            return Ok(());
+        }
         node.title = title.trim().to_string();
         if !node.is_folder() {
             let url = url
@@ -470,7 +476,13 @@ fn write_folder(out: &mut String, folder: &BookmarkNode, depth: usize, toolbar: 
 
 fn write_node(out: &mut String, node: &BookmarkNode, depth: usize) {
     if node.separator {
-        out.push_str(&format!("{}<HR>\n", "    ".repeat(depth)));
+        let indent = "    ".repeat(depth);
+        let title = node.title.trim();
+        if title.is_empty() {
+            out.push_str(&format!("{indent}<HR>\n"));
+        } else {
+            out.push_str(&format!("{indent}<HR TITLE=\"{}\">\n", escape(title)));
+        }
         return;
     }
     match &node.url {
@@ -585,7 +597,7 @@ fn parse_html(text: &str) -> (BookmarkNode, Vec<BookmarkNode>, usize) {
         } else if tag == "hr" || tag.starts_with("hr ") || tag.starts_with("hr/") {
             let node = BookmarkNode {
                 id: new_id(),
-                title: String::new(),
+                title: attribute(raw_tag, "title").unwrap_or_default(),
                 url: None,
                 children: None,
                 separator: true,

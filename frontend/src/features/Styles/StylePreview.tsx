@@ -1,7 +1,9 @@
 import { ChevronRight, FileText, Folder, Globe, History, Plus, Search, Star, X } from "lucide-react";
 import type { BrowserSettings } from "@type/browser";
+import { BookmarkDivider } from "@/components/BookmarkDivider";
 import { IconButton } from "@/components/IconButton";
 import { Menu, MenuItem } from "@/components/Menu";
+import { horizontalDividerMetrics, verticalDividerMetrics } from "@/lib/bookmark-divider";
 import { bookmarkEditorFrameStyle, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { bookmarksBarAlign, bookmarksBarAlignClass } from "@/lib/bookmarks-bar-align";
 import {
@@ -49,8 +51,12 @@ function PreviewSurface({ surface, settings }: { surface: StyleSurface; settings
       return <TabMenuPreview settings={settings} />;
     case "bookmarks-bar":
       return <BookmarksBarPreview settings={settings} />;
+    case "bar-divider":
+      return <BarDividerPreview settings={settings} />;
     case "bookmark-folders":
       return <BookmarkFolderPreview settings={settings} />;
+    case "folder-divider":
+      return <FolderDividerPreview settings={settings} />;
     case "bookmark-menu":
       return <BookmarkMenuPreview settings={settings} />;
     case "bookmark-editor":
@@ -149,6 +155,35 @@ function BookmarksBarPreview({ settings }: { settings: BrowserSettings }) {
   );
 }
 
+function BarDividerPreview({ settings }: { settings: BrowserSettings }) {
+  const metrics = verticalDividerMetrics(settings);
+  const style = bookmarkItemStyle(
+    settings.bookmarksBarTextSize,
+    settings.bookmarksBarPadding,
+    { text: CHROME.bookmarksBarTextSize, padding: CHROME.bookmarksBarPadding },
+    { height: settings.bookmarksBarHeight },
+  );
+  const labels = ["News", "Work", "Maps"];
+  return (
+    <div
+      id="styles-preview-bar-divider"
+      className={cn(frameClass, "flex w-full items-center gap-1 bg-zinc-900 px-2")}
+      style={{ height: `${Math.max(settings.bookmarksBarHeight, 1.5) + 0.5}rem` }}
+    >
+      {labels.map((label, index) => (
+        <div id={`styles-preview-bar-divider-item-${index}`} key={label} className="contents">
+          {index > 0 ? (
+            <BookmarkDivider id={`styles-preview-bar-divider-rule-${index}`} orientation="vertical" metrics={metrics} />
+          ) : null}
+          <div id={`styles-preview-bar-divider-label-${index}`} className="inline-flex items-center rounded-md text-zinc-300" style={style}>
+            {label}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function BookmarkFolderPreview({ settings }: { settings: BrowserSettings }) {
   const style = bookmarkItemStyle(settings.bookmarkFolderTextSize, settings.bookmarkFolderPadding, {
     text: CHROME.bookmarkFolderTextSize,
@@ -166,6 +201,36 @@ function BookmarkFolderPreview({ settings }: { settings: BrowserSettings }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function FolderDividerPreview({ settings }: { settings: BrowserSettings }) {
+  const metrics = horizontalDividerMetrics(settings);
+  const style = bookmarkItemStyle(settings.bookmarkFolderTextSize, settings.bookmarkFolderPadding, {
+    text: CHROME.bookmarkFolderTextSize,
+    padding: CHROME.bookmarkFolderPadding,
+  });
+  const rows = ["Inbox", "Design notes"];
+  return (
+    <div id="styles-preview-folder-divider" className={cn(frameClass, "flex w-64 flex-col bg-zinc-900 p-1.5")}>
+      <div id="styles-preview-folder-divider-row-0" className="flex items-center rounded-md text-zinc-100" style={style}>
+        <span id="styles-preview-folder-divider-label-0" className="min-w-0 flex-1 truncate">
+          {rows[0]}
+        </span>
+      </div>
+      <BookmarkDivider id="styles-preview-folder-divider-plain" orientation="horizontal" metrics={metrics} />
+      <div id="styles-preview-folder-divider-row-1" className="flex items-center rounded-md text-zinc-100" style={style}>
+        <span id="styles-preview-folder-divider-label-1" className="min-w-0 flex-1 truncate">
+          {rows[1]}
+        </span>
+      </div>
+      <BookmarkDivider id="styles-preview-folder-divider-labeled" orientation="horizontal" metrics={metrics} label="Work" />
+      <div id="styles-preview-folder-divider-row-2" className="flex items-center rounded-md text-zinc-100" style={style}>
+        <span id="styles-preview-folder-divider-label-2" className="min-w-0 flex-1 truncate">
+          Travel
+        </span>
+      </div>
     </div>
   );
 }

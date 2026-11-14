@@ -66,6 +66,12 @@ pub const AGENT_PANEL_DEFAULT_WIDTH: u32 = 380;
 /// Height of the bookmark editor's place list, in rem.
 const LIST_HEIGHT_REM: (f32, f32) = (8.0, 64.0);
 const PALETTE_WIDTH_PX: (u32, u32) = (360, 880);
+/// Stroke of a bookmark divider, in CSS pixels.
+const DIVIDER_THICKNESS_PX: (f32, f32) = (1.0, 12.0);
+/// How much of the cross axis a bookmark divider fills, as a percent.
+const DIVIDER_LENGTH_PERCENT: (f32, f32) = (10.0, 100.0);
+/// Space at each end of a horizontal bookmark divider, in rem.
+const DIVIDER_INSET_REM: (f32, f32) = (0.0, 2.0);
 /// Fine-tune sizes and bookmarks bar alignment the Styles page copies from another profile. Theme, font, and zoom stay out.
 pub const STYLE_METRIC_KEYS: &[&str] = &[
     "tabWidth",
@@ -84,9 +90,24 @@ pub const STYLE_METRIC_KEYS: &[&str] = &[
     "bookmarksBarIconSize",
     "bookmarksBarHeight",
     "bookmarksBarAlign",
+    "bookmarksBarDividerPadding",
+    "bookmarksBarDividerThickness",
+    "bookmarksBarDividerLength",
+    "bookmarksBarDividerLine",
+    "bookmarksBarDividerShape",
     "bookmarkFolderTextSize",
     "bookmarkFolderPadding",
     "bookmarkFolderIconSize",
+    "bookmarkDividerPadding",
+    "bookmarkDividerPaddingTop",
+    "bookmarkDividerPaddingBottom",
+    "bookmarkDividerLabelPaddingTop",
+    "bookmarkDividerLabelPaddingBottom",
+    "bookmarkDividerInset",
+    "bookmarkDividerThickness",
+    "bookmarkDividerLength",
+    "bookmarkDividerLine",
+    "bookmarkDividerShape",
     "bookmarksBarMenuTextSize",
     "bookmarksBarMenuPadding",
     "bookmarksBarMenuIconSize",
@@ -426,9 +447,55 @@ pub struct BrowserSettings {
     /// Minimum height of a bookmarks bar item, in rem.
     #[serde(default = "default_bookmarks_bar_height")]
     pub bookmarks_bar_height: f32,
+    /// Space on each side of a vertical divider on the bookmarks bar, in rem.
+    #[serde(default = "default_bar_divider_padding")]
+    pub bookmarks_bar_divider_padding: f32,
+    /// Width of a vertical divider on the bookmarks bar, in CSS pixels.
+    #[serde(default = "default_bar_divider_thickness")]
+    pub bookmarks_bar_divider_thickness: f32,
+    /// How much of the bar height a vertical divider fills, as a percent.
+    #[serde(default = "default_bar_divider_length")]
+    pub bookmarks_bar_divider_length: f32,
+    /// `solid`, `dashed`, `dotted`, or `double`.
+    #[serde(default = "default_divider_line")]
+    pub bookmarks_bar_divider_line: String,
+    /// `square`, `round`, or `pill`.
+    #[serde(default = "default_divider_shape")]
+    pub bookmarks_bar_divider_shape: String,
     /// Icon in a bookmark folder menu, in rem.
     #[serde(default = "default_bookmark_folder_icon_size")]
     pub bookmark_folder_icon_size: f32,
+    /// Retired single padding above and below a plain horizontal divider.
+    /// Copied onto the top and bottom when those are missing.
+    #[serde(default = "default_folder_divider_padding")]
+    pub bookmark_divider_padding: f32,
+    /// Space above a plain horizontal divider, in rem. An older file uses `bookmarkDividerPadding`.
+    #[serde(default)]
+    pub bookmark_divider_padding_top: Option<f32>,
+    /// Space below a plain horizontal divider, in rem. An older file uses `bookmarkDividerPadding`.
+    #[serde(default)]
+    pub bookmark_divider_padding_bottom: Option<f32>,
+    /// Space above a horizontal divider that has a label, in rem.
+    #[serde(default)]
+    pub bookmark_divider_label_padding_top: Option<f32>,
+    /// Space below a horizontal divider that has a label, in rem.
+    #[serde(default)]
+    pub bookmark_divider_label_padding_bottom: Option<f32>,
+    /// Space at each end of a horizontal bookmark divider, in rem.
+    #[serde(default = "default_folder_divider_inset")]
+    pub bookmark_divider_inset: f32,
+    /// Width of a horizontal bookmark divider, in CSS pixels.
+    #[serde(default = "default_folder_divider_thickness")]
+    pub bookmark_divider_thickness: f32,
+    /// How much of the row a horizontal bookmark divider fills, as a percent.
+    #[serde(default = "default_folder_divider_length")]
+    pub bookmark_divider_length: f32,
+    /// `solid`, `dashed`, `dotted`, or `double`.
+    #[serde(default = "default_divider_line")]
+    pub bookmark_divider_line: String,
+    /// `square`, `round`, or `pill`.
+    #[serde(default = "default_divider_shape")]
+    pub bookmark_divider_shape: String,
     /// Icon in the bookmarks bar context menu, in rem.
     #[serde(default = "default_bookmarks_bar_menu_icon_size")]
     pub bookmarks_bar_menu_icon_size: f32,
@@ -1610,7 +1677,22 @@ impl Default for BrowserSettings {
             bookmarks_bar_menu_padding: default_menu_padding(),
             bookmarks_bar_icon_size: default_bookmarks_bar_icon_size(),
             bookmarks_bar_height: default_bookmarks_bar_height(),
+            bookmarks_bar_divider_padding: default_bar_divider_padding(),
+            bookmarks_bar_divider_thickness: default_bar_divider_thickness(),
+            bookmarks_bar_divider_length: default_bar_divider_length(),
+            bookmarks_bar_divider_line: default_divider_line(),
+            bookmarks_bar_divider_shape: default_divider_shape(),
             bookmark_folder_icon_size: default_bookmark_folder_icon_size(),
+            bookmark_divider_padding: default_folder_divider_padding(),
+            bookmark_divider_padding_top: None,
+            bookmark_divider_padding_bottom: None,
+            bookmark_divider_label_padding_top: None,
+            bookmark_divider_label_padding_bottom: None,
+            bookmark_divider_inset: default_folder_divider_inset(),
+            bookmark_divider_thickness: default_folder_divider_thickness(),
+            bookmark_divider_length: default_folder_divider_length(),
+            bookmark_divider_line: default_divider_line(),
+            bookmark_divider_shape: default_divider_shape(),
             bookmarks_bar_menu_icon_size: default_bookmarks_bar_menu_icon_size(),
             bookmarks_bar_menu_width: default_bookmarks_bar_menu_width(),
             bookmark_editor_text_size: default_bookmark_editor_text_size(),
@@ -1852,11 +1934,57 @@ impl BrowserSettings {
             HEIGHT_REM,
             defaults.bookmarks_bar_height,
         );
+        self.bookmarks_bar_divider_padding = rem_in(
+            self.bookmarks_bar_divider_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.bookmarks_bar_divider_padding,
+        );
+        self.bookmarks_bar_divider_thickness = px_in(
+            self.bookmarks_bar_divider_thickness,
+            DIVIDER_THICKNESS_PX,
+            defaults.bookmarks_bar_divider_thickness,
+        );
+        self.bookmarks_bar_divider_length = px_in(
+            self.bookmarks_bar_divider_length,
+            DIVIDER_LENGTH_PERCENT,
+            defaults.bookmarks_bar_divider_length,
+        );
+        self.bookmarks_bar_divider_line = divider_line(&self.bookmarks_bar_divider_line);
+        self.bookmarks_bar_divider_shape = divider_shape(&self.bookmarks_bar_divider_shape);
         self.bookmark_folder_icon_size = rem_in(
             self.bookmark_folder_icon_size,
             ICON_REM,
             defaults.bookmark_folder_icon_size,
         );
+        self.bookmark_divider_padding = rem_in(
+            self.bookmark_divider_padding,
+            BOOKMARK_PADDING_REM,
+            defaults.bookmark_divider_padding,
+        );
+        let plain = self.bookmark_divider_padding;
+        let labeled = default_folder_divider_label_padding();
+        self.bookmark_divider_padding_top = Some(optional_rem(self.bookmark_divider_padding_top, plain));
+        self.bookmark_divider_padding_bottom = Some(optional_rem(self.bookmark_divider_padding_bottom, plain));
+        self.bookmark_divider_label_padding_top = Some(optional_rem(self.bookmark_divider_label_padding_top, labeled));
+        self.bookmark_divider_label_padding_bottom =
+            Some(optional_rem(self.bookmark_divider_label_padding_bottom, labeled));
+        self.bookmark_divider_inset = rem_in(
+            self.bookmark_divider_inset,
+            DIVIDER_INSET_REM,
+            defaults.bookmark_divider_inset,
+        );
+        self.bookmark_divider_thickness = px_in(
+            self.bookmark_divider_thickness,
+            DIVIDER_THICKNESS_PX,
+            defaults.bookmark_divider_thickness,
+        );
+        self.bookmark_divider_length = px_in(
+            self.bookmark_divider_length,
+            DIVIDER_LENGTH_PERCENT,
+            defaults.bookmark_divider_length,
+        );
+        self.bookmark_divider_line = divider_line(&self.bookmark_divider_line);
+        self.bookmark_divider_shape = divider_shape(&self.bookmark_divider_shape);
         self.bookmarks_bar_menu_icon_size = rem_in(
             self.bookmarks_bar_menu_icon_size,
             ICON_REM,
@@ -2453,6 +2581,14 @@ pub fn overlay_style_metrics(
             object.insert((*key).to_string(), value.clone());
         }
     }
+    // An older profile stored one padding for a plain divider. Split it when that profile
+    // has not saved the separate top and bottom yet.
+    if !source.contains_key("bookmarkDividerPaddingTop") {
+        if let Some(padding) = source.get("bookmarkDividerPadding") {
+            object.insert("bookmarkDividerPaddingTop".to_string(), padding.clone());
+            object.insert("bookmarkDividerPaddingBottom".to_string(), padding.clone());
+        }
+    }
     serde_json::from_value(current)
         .map(BrowserSettings::normalize)
         .map_err(|_| "Settings could not be read.".to_string())
@@ -2714,6 +2850,71 @@ fn default_bookmarks_bar_icon_size() -> f32 {
 
 fn default_bookmarks_bar_height() -> f32 {
     1.5
+}
+
+fn default_bar_divider_padding() -> f32 {
+    0.375
+}
+
+fn default_bar_divider_thickness() -> f32 {
+    1.0
+}
+
+fn default_bar_divider_length() -> f32 {
+    67.0
+}
+
+fn default_divider_line() -> String {
+    "solid".into()
+}
+
+fn default_divider_shape() -> String {
+    "square".into()
+}
+
+fn default_folder_divider_padding() -> f32 {
+    0.375
+}
+
+fn default_folder_divider_label_padding() -> f32 {
+    0.5
+}
+
+fn optional_rem(value: Option<f32>, fallback: f32) -> f32 {
+    rem_in(value.unwrap_or(fallback), BOOKMARK_PADDING_REM, fallback)
+}
+
+fn default_folder_divider_inset() -> f32 {
+    0.75
+}
+
+fn default_folder_divider_thickness() -> f32 {
+    1.0
+}
+
+fn default_folder_divider_length() -> f32 {
+    100.0
+}
+
+fn divider_line(value: &str) -> String {
+    match value {
+        "dashed" | "dotted" | "double" => value.to_string(),
+        _ => default_divider_line(),
+    }
+}
+
+fn divider_shape(value: &str) -> String {
+    match value {
+        "round" | "pill" => value.to_string(),
+        _ => default_divider_shape(),
+    }
+}
+
+fn px_in(value: f32, range: (f32, f32), fallback: f32) -> f32 {
+    if !value.is_finite() {
+        return fallback;
+    }
+    value.clamp(range.0, range.1).round()
 }
 
 fn default_bookmark_folder_icon_size() -> f32 {
@@ -3532,6 +3733,58 @@ mod tests {
         assert_eq!(custom.bookmarks_bar_text_size, 0.6);
         assert_eq!(custom.bookmarks_bar_padding, 1.5);
         assert_eq!(custom.bookmark_folder_text_size, 0.5);
+    }
+
+    #[test]
+    fn bookmark_divider_styles_default_and_reject_unknown() {
+        let older: super::BrowserSettings =
+            serde_json::from_str(r#"{"searchEngine":"bing"}"#).expect("settings parse");
+        let older = older.normalize();
+        assert_eq!(older.bookmarks_bar_divider_padding, 0.375);
+        assert_eq!(older.bookmarks_bar_divider_thickness, 1.0);
+        assert_eq!(older.bookmarks_bar_divider_length, 67.0);
+        assert_eq!(older.bookmarks_bar_divider_line, "solid");
+        assert_eq!(older.bookmarks_bar_divider_shape, "square");
+        assert_eq!(older.bookmark_divider_padding, 0.375);
+        assert_eq!(older.bookmark_divider_padding_top, Some(0.375));
+        assert_eq!(older.bookmark_divider_padding_bottom, Some(0.375));
+        assert_eq!(older.bookmark_divider_label_padding_top, Some(0.5));
+        assert_eq!(older.bookmark_divider_label_padding_bottom, Some(0.5));
+
+        let shared: super::BrowserSettings =
+            serde_json::from_str(r#"{"bookmarkDividerPadding":1}"#).expect("settings parse");
+        let shared = shared.normalize();
+        assert_eq!(shared.bookmark_divider_padding_top, Some(1.0));
+        assert_eq!(shared.bookmark_divider_padding_bottom, Some(1.0));
+        assert_eq!(shared.bookmark_divider_label_padding_top, Some(0.5));
+
+        let split: super::BrowserSettings = serde_json::from_str(
+            r#"{"bookmarkDividerPadding":1,"bookmarkDividerPaddingTop":0.2,"bookmarkDividerPaddingBottom":0.8,"bookmarkDividerLabelPaddingTop":0.6,"bookmarkDividerLabelPaddingBottom":0.25}"#,
+        )
+        .expect("settings parse");
+        let split = split.normalize();
+        assert_eq!(split.bookmark_divider_padding_top, Some(0.2));
+        assert_eq!(split.bookmark_divider_padding_bottom, Some(0.8));
+        assert_eq!(split.bookmark_divider_label_padding_top, Some(0.6));
+        assert_eq!(split.bookmark_divider_label_padding_bottom, Some(0.25));
+        assert_eq!(older.bookmark_divider_inset, 0.75);
+        assert_eq!(older.bookmark_divider_thickness, 1.0);
+        assert_eq!(older.bookmark_divider_length, 100.0);
+        assert_eq!(older.bookmark_divider_line, "solid");
+        assert_eq!(older.bookmark_divider_shape, "square");
+
+        let bad: super::BrowserSettings = serde_json::from_str(
+            r#"{"bookmarksBarDividerLine":"wavy","bookmarksBarDividerShape":"star","bookmarkDividerLine":"double","bookmarkDividerShape":"pill","bookmarkDividerThickness":0,"bookmarksBarDividerLength":500,"bookmarkDividerInset":9}"#,
+        )
+        .expect("settings parse");
+        let bad = bad.normalize();
+        assert_eq!(bad.bookmarks_bar_divider_line, "solid");
+        assert_eq!(bad.bookmarks_bar_divider_shape, "square");
+        assert_eq!(bad.bookmark_divider_line, "double");
+        assert_eq!(bad.bookmark_divider_shape, "pill");
+        assert_eq!(bad.bookmark_divider_thickness, 1.0);
+        assert_eq!(bad.bookmarks_bar_divider_length, 100.0);
+        assert_eq!(bad.bookmark_divider_inset, 2.0);
     }
 
     #[test]

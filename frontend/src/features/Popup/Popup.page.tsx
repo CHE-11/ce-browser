@@ -134,6 +134,15 @@ function UnknownPopup() {
   );
 }
 
+function menuIndex(params: URLSearchParams) {
+  const raw = params.get("index");
+  if (!raw) {
+    return null;
+  }
+  const index = Number(raw);
+  return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
 function bookmarkMenuTarget(params: URLSearchParams): BookmarkMenuTarget | null {
   const id = params.get("target");
   if (!id) {
@@ -162,6 +171,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
           parentId={params.get("parent") || "bar"}
           divider={params.get("divider") === "horizontal" ? "horizontal" : "vertical"}
           target={bookmarkMenuTarget(params)}
+          anchorId={params.get("anchor")}
+          index={menuIndex(params)}
         />
       );
     case "bookmarks-bar-overflow":

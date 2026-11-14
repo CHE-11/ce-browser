@@ -2,7 +2,8 @@ import { PopupMenu, PopupMenuItem, PopupMenuSeparator, PopupFrame } from "@/comp
 import { openPopup, addBookmark, closePopup, closeThisPopup, createTab, deleteBookmark, getSettings, openFolderAsGroup, openInWindow, saveSettings } from "@/lib/browser-client";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
 import { CHROME, metric } from "@/lib/chrome-metrics";
-import { useSettings } from "@/lib/use-browser";
+import { findFolder, useBookmarksState, useSettings } from "@/lib/use-browser";
+import { BookmarkTree } from "@type/browser";
 import { AppWindow, ExternalLink, FolderPlus, Group, Library, PencilLine, Pin, Plus, SeparatorHorizontal, SeparatorVertical, Trash2 } from "lucide-react";
 
 type DividerOrientation = "vertical" | "horizontal";
@@ -15,13 +16,83 @@ export type BookmarkMenuTarget = {
 
 const PROTECTED_FOLDERS = new Set(["bar", "other"]);
 
+type DividerAnchor = { id: string; index: number };
+
 type BookmarksBarMenuItemsProps = {
   idPrefix: string;
   parentId: string;
   divider: DividerOrientation;
   target?: BookmarkMenuTarget | null;
+  /** Bookmark the new divider sits against. Empty space uses the nearest row. */
+  anchorId?: string | null;
+  /** Index used when the anchor is gone, or the folder was empty. */
+  index?: number | null;
   onDone: () => void;
 };
+
+/** The row closest to the pointer, so a click on empty space still has a place. */
+export function nearestBookmarkAnchor(
+  event: { clientX: number; clientY: number },
+  rows: { id: string; index: number; elementId: string }[],
+  axis: "x" | "y",
+): DividerAnchor | null {
+  const point = axis === "y" ? event.clientY : event.clientX;
+  let best: (DividerAnchor & { distance: number }) | null = null;
+  for (const row of rows) {
+    const element = document.getElementById(row.elementId);
+    if (!element) {
+      continue;
+    }
+    const box = element.getBoundingClientRect();
+    const start = axis === "y" ? box.top : box.left;
+    const end = axis === "y" ? box.bottom : box.right;
+    const distance = Math.abs(point - (start + end) / 2);
+    if (!best || distance < best.distance) {
+      best = { id: row.id, index: row.index, distance };
+    }
+  }
+  return best ? { id: best.id, index: best.index } : null;
+}
+
+/** Records where a divider should land. `hit` is the row under the pointer. */
+export function setDividerPlace(
+  params: URLSearchParams,
+  event: { clientX: number; clientY: number },
+  rows: { id: string; index: number; elementId: string }[],
+  axis: "x" | "y",
+  hit?: DividerAnchor | null,
+) {
+  const place = hit ?? nearestBookmarkAnchor(event, rows, axis);
+  if (!place) {
+    params.set("index", "0");
+    return;
+  }
+  params.set("anchor", place.id);
+  params.set("index", String(place.index));
+}
+
+function dividerInsertIndex(
+  tree: BookmarkTree | null,
+  parentId: string,
+  anchorId: string | null,
+  fallback: number | null,
+  after: boolean,
+) {
+  const folder = findFolder(tree, parentId);
+  if (!folder) {
+    const index = Math.max(0, fallback ?? 0);
+    return after ? index + 1 : index;
+  }
+  const children = folder.children ?? [];
+  if (anchorId) {
+    const at = children.findIndex((child) => child.id === anchorId);
+    if (at >= 0) {
+      return after ? at + 1 : at;
+    }
+  }
+  const index = Math.max(0, Math.min(children.length, fallback ?? children.length));
+  return after ? Math.min(children.length, index + 1) : index;
+}
 
 /** Top-left of this menu. The add and rename forms replace it there. */
 const MENU_CORNER = { x: 0, y: 0 };
@@ -49,8 +120,17 @@ function pinKey(url: string) {
   return trimmed.slice(0, -1);
 }
 
-export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, target, onDone }: BookmarksBarMenuItemsProps) {
+export function BookmarksBarContextMenuItems({
+  idPrefix,
+  parentId,
+  divider,
+  target,
+  anchorId = null,
+  index = null,
+  onDone,
+}: BookmarksBarMenuItemsProps) {
   const settings = useSettings();
+  const { tree } = useBookmarksState();
   const itemStyle = bookmarkItemStyle(
     settings?.bookmarksBarMenuTextSize,
     settings?.bookmarksBarMenuPadding,
@@ -62,11 +142,14 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, targ
     void openPopup("bookmark-add", MENU_CORNER, { params: params.toString() });
   };
 
-  const addDivider = () => {
-    void addBookmark(parentId, "", null, undefined, true).then(onDone);
+  const addDivider = (after: boolean) => {
+    const at = dividerInsertIndex(tree, parentId, anchorId, index, after);
+    void addBookmark(parentId, "", null, at, true).catch(() => undefined);
   };
 
   const vertical = divider === "vertical";
+  const beforeLabel = vertical ? "Add vertical divider before" : "Add divider above";
+  const afterLabel = vertical ? "Add vertical divider after" : "Add divider below";
   const canDelete = !!target && !PROTECTED_FOLDERS.has(target.id);
   const canRename = !!target && target.kind !== "separator" && !PROTECTED_FOLDERS.has(target.id);
   const linkUrl = target?.kind === "link" ? target.url?.trim() : "";
@@ -138,11 +221,18 @@ export function BookmarksBarContextMenuItems({ idPrefix, parentId, divider, targ
       />
       <PopupMenuSeparator id={`${idPrefix}-separator`} />
       <PopupMenuItem
-        id={`${idPrefix}-add-divider`}
+        id={`${idPrefix}-add-divider-before`}
         icon={vertical ? <SeparatorVertical /> : <SeparatorHorizontal />}
-        label={vertical ? "Add vertical divider" : "Add horizontal divider"}
+        label={beforeLabel}
         style={itemStyle}
-        onClick={addDivider}
+        onClick={() => addDivider(false)}
+      />
+      <PopupMenuItem
+        id={`${idPrefix}-add-divider-after`}
+        icon={vertical ? <SeparatorVertical /> : <SeparatorHorizontal />}
+        label={afterLabel}
+        style={itemStyle}
+        onClick={() => addDivider(true)}
       />
       {target?.kind === "folder" ? (
         <>
@@ -194,9 +284,11 @@ type BookmarksBarMenuProps = {
   parentId: string;
   divider: DividerOrientation;
   target?: BookmarkMenuTarget | null;
+  anchorId?: string | null;
+  index?: number | null;
 };
 
-export function BookmarksBarContextMenu({ parentId, divider, target }: BookmarksBarMenuProps) {
+export function BookmarksBarContextMenu({ parentId, divider, target, anchorId, index }: BookmarksBarMenuProps) {
   const settings = useSettings();
   return (
     <PopupFrame id="bookmarks-bar-menu" width={metric(settings?.bookmarksBarMenuWidth, CHROME.bookmarksBarMenuWidth)}>
@@ -205,6 +297,8 @@ export function BookmarksBarContextMenu({ parentId, divider, target }: Bookmarks
         parentId={parentId}
         divider={divider}
         target={target}
+        anchorId={anchorId}
+        index={index}
         onDone={() => void closePopup()}
       />
     </PopupFrame>

@@ -22,7 +22,7 @@ export function presetPatch(factor: number): Pick<BrowserSettings, ChromeKey> {
       continue;
     }
     const scaled = Math.min(control.max, Math.max(control.min, CHROME[key] * factor));
-    patch[key] = control.unit === "px" ? Math.round(scaled) : Math.round(scaled * 10000) / 10000;
+    patch[key] = control.unit === "rem" ? Math.round(scaled * 10000) / 10000 : Math.round(scaled);
   }
   return patch;
 }

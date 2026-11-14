@@ -3,6 +3,7 @@ import type { BookmarkTree, BrowserSettings, DownloadItem, ExtensionInfo, Histor
 import type { WindowTabsState } from "@/lib/use-browser";
 import { FindBar } from "@/components/FindBar";
 import { SyncToast } from "@/components/SyncToast";
+import { verticalDividerMetrics } from "@/lib/bookmark-divider";
 import { AddressBar } from "../AddressBar/AddressBar";
 import { BookmarksBar } from "../Bookmarks/BookmarksBar/BookmarksBar";
 import { HostBookmarksBar } from "../Extensions/HostBookmarksBar";
@@ -85,6 +86,7 @@ export function BrowserHeader({
           height={settings?.bookmarksBarHeight}
           folderIcons={settings?.bookmarksBarFolderIcons ?? true}
           align={settings?.bookmarksBarAlign}
+          divider={verticalDividerMetrics(settings)}
         />
       ) : null}
       {findToken !== null && activeTab ? (

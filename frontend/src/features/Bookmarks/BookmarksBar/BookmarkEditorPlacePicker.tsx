@@ -1,10 +1,12 @@
+import { BookmarkDivider } from "@/components/BookmarkDivider";
 import { FavIcon } from "@/components/FavIcon";
+import { BOOKMARK_DIVIDER_COLOR, horizontalDividerMetrics } from "@/lib/bookmark-divider";
 import { bookmarkItemStyle } from "@/lib/bookmark-size";
 import { focusRow } from "@/lib/focus-ring";
 import { faviconKey } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { CHROME, CHROME_LIMITS } from "@/lib/chrome-metrics";
-import { findFolder, useSiteFavicons } from "@/lib/use-browser";
+import { findFolder, useSettings, useSiteFavicons } from "@/lib/use-browser";
 import { BookmarkNode, BookmarkTree } from "@type/browser";
 import { ChevronRight } from "lucide-react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode, type RefObject } from "react";
@@ -303,15 +305,23 @@ function LinkRow({ node, depth, parentId, index }: { node: BookmarkNode; depth: 
 
 function DividerRow({ node, depth, parentId, index }: { node: BookmarkNode; depth: number; parentId: string; index: number }) {
   const { rowStyle, onRowMenu } = usePlace();
+  const metrics = horizontalDividerMetrics(useSettings());
   return (
     <div
       id={`bookmark-place-${node.id}`}
-      title="Divider"
+      title={node.title.trim() || "Divider"}
       className="flex w-full items-center rounded-md"
-      style={placedStyle(depth, rowStyle)}
+      style={{ ...placedStyle(depth, rowStyle), paddingBlock: 0 }}
       onContextMenu={(event) => showRowMenu(event, onRowMenu, node, parentId, index)}
     >
-      <span id={`bookmark-place-${node.id}-rule`} className="h-px w-full bg-zinc-700" />
+      <BookmarkDivider
+        id={`bookmark-place-${node.id}-rule`}
+        orientation="horizontal"
+        metrics={metrics}
+        label={node.title}
+        color={BOOKMARK_DIVIDER_COLOR}
+        className="min-w-0 flex-1"
+      />
     </div>
   );
 }

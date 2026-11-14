@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ChevronRight, ExternalLink, Folder } from "lucide-react";
+import { BookmarkDivider } from "@/components/BookmarkDivider";
 import { FavIcon } from "@/components/FavIcon";
 import { PopupFrame, PopupMenu, PopupMenuItem, PopupMenuSeparator } from "@/components/PopupFrame";
+import { horizontalDividerMetrics } from "@/lib/bookmark-divider";
 import { closePopup, closeSubmenus, closeThisPopup, createTab, openPopup } from "@/lib/browser-client";
 import { BOOKMARK_DROP_END, useBookmarkDrag } from "@/lib/bookmark-drag";
 import { BOOKMARK_SIZE, bookmarkItemStyle } from "@/lib/bookmark-size";
@@ -12,7 +14,7 @@ import { usePopupHost } from "@/lib/popup-host";
 import { useBookmarksState, useTabs, useSiteFavicons, useSettingsState } from "@/lib/use-browser";
 import { BookmarkNode } from "@type/browser";
 import { openBookmarkLink } from "./BookmarksBar";
-import { BookmarkMenuTarget } from "./BookmarksBarContextMenu";
+import { setDividerPlace, type BookmarkMenuTarget } from "./BookmarksBarContextMenu";
 
 
 type BookmarksBarOverflowProps = {
@@ -67,6 +69,7 @@ export function BookmarksBarOverflow({ ids }: BookmarksBarOverflowProps) {
   const barIndex = new Map(barChildren.map((node, index) => [node.id, index]));
   const links = nodes.filter((node) => node.url);
   const icons = useSiteFavicons(nodes.map((node) => node.url));
+  const divider = horizontalDividerMetrics(settings);
   const prefix = "bookmarks-bar-overflow-panel";
   /** Folder whose submenu is open beside this one. */
   const [openChild, setOpenChild] = useState<string | null>(null);
@@ -183,7 +186,15 @@ export function BookmarksBarOverflow({ ids }: BookmarksBarOverflowProps) {
     cancelHover();
     setOpenChild(null);
     const params = new URLSearchParams({ parent: "bar", divider: "horizontal" });
-    if (node) {
+    const rows = nodes.map((child) => ({
+      id: child.id,
+      index: barIndex.get(child.id) ?? 0,
+      elementId: rowId(child),
+    }));
+    const index = node ? barIndex.get(node.id) : undefined;
+    const hit = node && index !== undefined ? { id: node.id, index } : null;
+    setDividerPlace(params, event, rows, "y", hit);
+    if (node && hit) {
       const kind = targetKind(node);
       params.set("target", node.id);
       params.set("kind", kind);
@@ -230,17 +241,17 @@ export function BookmarksBarOverflow({ ids }: BookmarksBarOverflowProps) {
             {nodes.map((node) => {
               const index = barIndex.get(node.id) ?? 0;
               return node.separator ? (
-                <div
+                <BookmarkDivider
                   key={node.id}
                   id={rowId(node)}
-                  role="separator"
-                  className={cn("flex h-3 shrink-0 items-center px-3", drag.dropChrome(node.id))}
+                  orientation="horizontal"
+                  metrics={divider}
+                  label={node.title}
+                  className={drag.dropChrome(node.id)}
                   onPointerEnter={(event) => hoverRow(null, event.currentTarget)}
                   onContextMenu={(event) => openContext(event, node)}
                   {...drag.itemProps(node, index)}
-                >
-                  <div id={`${rowId(node)}-line`} className="h-px w-full bg-zinc-600" />
-                </div>
+                />
               ) : node.url ? (
                 <button
                   key={node.id}

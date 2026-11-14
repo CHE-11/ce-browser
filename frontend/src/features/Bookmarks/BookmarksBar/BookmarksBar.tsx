@@ -1,9 +1,11 @@
 import { useLayoutEffect, useRef, useState, type DragEvent, type MouseEvent, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { ChevronsRight, Folder } from "lucide-react";
+import { BookmarkDivider } from "@/components/BookmarkDivider";
 import { FavIcon } from "@/components/FavIcon";
 import { closePopup, createTab, moveBookmark, navigate, openPopup } from "@/lib/browser-client";
 import { BOOKMARK_DROP_END, isBookmarkDrag, useBookmarkDrag } from "@/lib/bookmark-drag";
+import { bookmarkDividerKey, type BookmarkDividerMetrics } from "@/lib/bookmark-divider";
 import { BOOKMARK_SIZE, bookmarkItemStyle, bookmarkLabelStyle } from "@/lib/bookmark-size";
 import { bookmarksBarAlign, bookmarksBarAlignClass } from "@/lib/bookmarks-bar-align";
 import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
@@ -12,6 +14,7 @@ import { focusRing } from "@/lib/focus-ring";
 import { faviconKey } from "@/lib/format";
 import { BOOKMARK_DRAG_TYPE, useSiteFavicons } from "@/lib/use-browser";
 import { BookmarkTree, BookmarkNode, type BookmarksBarAlign } from "@type/browser";
+import { setDividerPlace } from "./BookmarksBarContextMenu";
 
 type BookmarksBarProps = {
   tree: BookmarkTree | null;
@@ -30,6 +33,8 @@ type BookmarksBarProps = {
   folderIcons?: boolean;
   /** Where the folders and bookmarks sit in the bar. */
   align?: BookmarksBarAlign | string | null;
+  /** Vertical line between bar items. */
+  divider: BookmarkDividerMetrics;
 };
 
 /** Gap, icon and width are in `em`, so they follow the text size setting. */
@@ -77,11 +82,12 @@ function useFittedCount(
   iconSize: number,
   height: number,
   folderIcons: boolean,
+  dividerKey: string,
   dropMarker: boolean,
   slotRef: RefObject<HTMLDivElement | null>,
   chevronRef: RefObject<HTMLButtonElement | null>,
 ) {
-  const signature = `${textSize ?? ""}|${padding ?? ""}|${iconSize}|${height}|${folderIcons ? 1 : 0}|${items.map(itemSignature).join("\n")}`;
+  const signature = `${dividerKey}|${textSize ?? ""}|${padding ?? ""}|${iconSize}|${height}|${folderIcons ? 1 : 0}|${items.map(itemSignature).join("\n")}`;
   const widths = useRef(new Map<string, number>());
   const fontsApplied = useRef("");
   const itemsRef = useRef(items);
@@ -199,7 +205,7 @@ export function openBookmarkLink(url: string, activeId: number | null, event?: M
   }
 }
 
-export function BookmarksBar({ tree, activeId, activePinned = false, textSize, padding, iconSize, height, folderIcons = true, align }: BookmarksBarProps) {
+export function BookmarksBar({ tree, activeId, activePinned = false, textSize, padding, iconSize, height, folderIcons = true, align, divider }: BookmarksBarProps) {
   const items = tree?.bar.children ?? [];
   const icons = useSiteFavicons(items.map((node) => node.url));
   const icon = metric(iconSize, CHROME.bookmarksBarIconSize);
@@ -239,7 +245,18 @@ export function BookmarksBar({ tree, activeId, activePinned = false, textSize, p
   });
 
   const dropMarker = drag.drop?.id === BOOKMARK_DROP_END;
-  const visibleCount = useFittedCount(items, textSize, padding, icon, barHeight, folderIcons, dropMarker, slotRef, chevronRef);
+  const visibleCount = useFittedCount(
+    items,
+    textSize,
+    padding,
+    icon,
+    barHeight,
+    folderIcons,
+    bookmarkDividerKey(divider),
+    dropMarker,
+    slotRef,
+    chevronRef,
+  );
   const shown = items.slice(0, visibleCount);
 
   const openFolder = (event: MouseEvent<HTMLElement>, node: BookmarkNode) => {
@@ -265,11 +282,18 @@ export function BookmarksBar({ tree, activeId, activePinned = false, textSize, p
     });
   };
 
-  const openBarMenu = (event: MouseEvent, node?: BookmarkNode) => {
+  const openBarMenu = (event: MouseEvent, node?: BookmarkNode, index?: number) => {
     event.preventDefault();
     event.stopPropagation();
     const params = new URLSearchParams({ parent: "bar", divider: "vertical" });
-    if (node && node.id !== "bar" && node.id !== "other") {
+    const rows = items.map((item, itemIndex) => ({
+      id: item.id,
+      index: itemIndex,
+      elementId: `bookmarks-bar-${item.id}`,
+    }));
+    const hit = node && index !== undefined ? { id: node.id, index } : null;
+    setDividerPlace(params, event, rows, "x", hit);
+    if (node && hit) {
       const kind = node.separator ? "separator" : node.url ? "link" : "folder";
       params.set("target", node.id);
       params.set("kind", kind);
@@ -317,19 +341,16 @@ export function BookmarksBar({ tree, activeId, activePinned = false, textSize, p
         ) : null}
         {shown.map((node, index) =>
           node.separator ? (
-            <div
+            <BookmarkDivider
               key={node.id}
               id={`bookmarks-bar-${node.id}`}
               data-bar-item={node.id}
-              role="separator"
-              aria-orientation="vertical"
-              title="Divider"
-              className={cn("flex w-3 shrink-0 items-center justify-center self-stretch", drag.dropChrome(node.id))}
-              onContextMenu={(event) => openBarMenu(event, node)}
+              orientation="vertical"
+              metrics={divider}
+              className={drag.dropChrome(node.id)}
+              onContextMenu={(event) => openBarMenu(event, node, index)}
               {...drag.itemProps(node, index)}
-            >
-              <div id={`bookmarks-bar-${node.id}-line`} className="h-2/3 w-px bg-zinc-600" />
-            </div>
+            />
           ) : node.url ? (
             <button
               key={node.id}
@@ -339,7 +360,7 @@ export function BookmarksBar({ tree, activeId, activePinned = false, textSize, p
               title={`${node.title}\n${node.url}`}
               className={cn(itemClass, drag.dropChrome(node.id))}
               style={itemStyle}
-              onContextMenu={(event) => openBarMenu(event, node)}
+              onContextMenu={(event) => openBarMenu(event, node, index)}
               onClick={(event) => {
                 if (drag.dragged.current) {
                   drag.dragged.current = false;
@@ -376,7 +397,7 @@ export function BookmarksBar({ tree, activeId, activePinned = false, textSize, p
               aria-haspopup="menu"
               className={cn(itemClass, drag.dropChrome(node.id))}
               style={itemStyle}
-              onContextMenu={(event) => openBarMenu(event, node)}
+              onContextMenu={(event) => openBarMenu(event, node, index)}
               onClick={(event) => openFolder(event, node)}
               {...drag.itemProps(node, index)}
             >

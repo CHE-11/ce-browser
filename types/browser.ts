@@ -805,6 +805,12 @@ export type ToolbarSide = "top" | "right" | "bottom" | "left";
 /** Where folders and bookmarks sit on the bookmarks bar. */
 export type BookmarksBarAlign = "left" | "center" | "right";
 
+/** Stroke of a bookmark divider. */
+export type BookmarkDividerLine = "solid" | "dashed" | "dotted" | "double";
+
+/** Ends of a bookmark divider. */
+export type BookmarkDividerShape = "square" | "round" | "pill";
+
 /** Where a tool or extension is shown. Both can be set. Both clear means unpinned. */
 export type ToolbarPlacement = {
   /** Shown next to the address bar. */
@@ -848,8 +854,38 @@ export type BrowserSettings = {
   bookmarksBarIconSize: number;
   /** Minimum height of a bookmarks bar item, in rem. */
   bookmarksBarHeight: number;
+  /** Space on each side of a vertical divider on the bookmarks bar, in rem. */
+  bookmarksBarDividerPadding: number;
+  /** Width of a vertical divider on the bookmarks bar, in CSS pixels. */
+  bookmarksBarDividerThickness: number;
+  /** How much of the bar height a vertical divider fills, as a percent. */
+  bookmarksBarDividerLength: number;
+  /** Stroke of a vertical divider on the bookmarks bar. */
+  bookmarksBarDividerLine: BookmarkDividerLine;
+  /** Ends of a vertical divider on the bookmarks bar. */
+  bookmarksBarDividerShape: BookmarkDividerShape;
   /** Icon in a bookmark folder menu, in rem. */
   bookmarkFolderIconSize: number;
+  /** Retired single padding above and below a plain horizontal divider. */
+  bookmarkDividerPadding: number;
+  /** Space above a plain horizontal divider, in rem. */
+  bookmarkDividerPaddingTop: number;
+  /** Space below a plain horizontal divider, in rem. */
+  bookmarkDividerPaddingBottom: number;
+  /** Space above a horizontal divider that has a label, in rem. */
+  bookmarkDividerLabelPaddingTop: number;
+  /** Space below a horizontal divider that has a label, in rem. */
+  bookmarkDividerLabelPaddingBottom: number;
+  /** Space at each end of a horizontal bookmark divider, in rem. */
+  bookmarkDividerInset: number;
+  /** Width of a horizontal bookmark divider, in CSS pixels. */
+  bookmarkDividerThickness: number;
+  /** How much of the row a horizontal bookmark divider fills, as a percent. */
+  bookmarkDividerLength: number;
+  /** Stroke of a horizontal bookmark divider. */
+  bookmarkDividerLine: BookmarkDividerLine;
+  /** Ends of a horizontal bookmark divider. */
+  bookmarkDividerShape: BookmarkDividerShape;
   /** Icon in the bookmarks bar context menu, in rem. */
   bookmarksBarMenuIconSize: number;
   /** Width of the bookmarks bar context menu, in CSS pixels at 100% UI size. */

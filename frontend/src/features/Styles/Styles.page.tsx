@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { RotateCcw } from "lucide-react";
-import type { BookmarksBarAlign, BrowserSettings } from "@type/browser";
+import type { BrowserSettings } from "@type/browser";
 import { Button } from "@/components/Button";
 import { PageShell } from "@/components/PageShell";
-import { bookmarksBarAlign } from "@/lib/bookmarks-bar-align";
 import { CHROME, type ChromeKey } from "@/lib/chrome-metrics";
 import { saveSettings } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
@@ -12,23 +11,23 @@ import { useRoute } from "@/lib/route";
 import { useSettings } from "@/lib/use-browser";
 import { CopyStyleDialog } from "./CopyStyleDialog";
 import { StylePreview } from "./StylePreview";
-import { STYLE_SURFACES, styleSurface, type StyleChoice, type StyleControl } from "./surfaces";
+import { STYLE_SURFACES, styleChoiceValue, styleSurface, withStyleChoice, type StyleChoice, type StyleChoiceKey, type StyleControl } from "./surfaces";
 
 const SAVE_DELAY_MS = 150;
 
 function formatMetric(value: number, unit: StyleControl["unit"]) {
-  if (unit === "px") {
-    return String(Math.round(value));
+  if (unit === "rem") {
+    return String(Math.round(value * 10000) / 10000);
   }
-  return String(Math.round(value * 10000) / 10000);
+  return String(Math.round(value));
 }
 
 function clampMetric(value: number, control: StyleControl) {
   const next = Math.min(control.max, Math.max(control.min, value));
-  if (control.unit === "px") {
-    return Math.round(next);
+  if (control.unit === "rem") {
+    return Math.round(next * 10000) / 10000;
   }
-  return Math.round(next * 10000) / 10000;
+  return Math.round(next);
 }
 
 export function StylesPage() {
@@ -93,20 +92,20 @@ export function StylesPage() {
     commit({ ...draft, [key]: value });
   };
 
-  const changeAlign = (value: BookmarksBarAlign) => {
+  const changeChoice = (key: StyleChoiceKey, value: string) => {
     if (!draft) {
       return;
     }
-    commit({ ...draft, bookmarksBarAlign: value });
+    commit(withStyleChoice(draft, key, value));
   };
 
   const resetSurface = () => {
     if (!draft) {
       return;
     }
-    const next = { ...draft };
+    let next = { ...draft };
     for (const choice of surface.choices ?? []) {
-      next[choice.key] = choice.options[0].value;
+      next = withStyleChoice(next, choice.key, choice.options[0].value);
     }
     for (const control of surface.controls) {
       next[control.key] = CHROME[control.key];
@@ -179,8 +178,8 @@ export function StylesPage() {
                   <ChoiceControl
                     key={choice.key}
                     choice={choice}
-                    value={bookmarksBarAlign(draft[choice.key])}
-                    onChange={changeAlign}
+                    value={styleChoiceValue(draft, choice.key)}
+                    onChange={(value) => changeChoice(choice.key, value)}
                   />
                 ))}
                 {surface.controls.map((control) => (
@@ -226,8 +225,8 @@ function ChoiceControl({
   onChange,
 }: {
   choice: StyleChoice;
-  value: BookmarksBarAlign;
-  onChange: (value: BookmarksBarAlign) => void;
+  value: string;
+  onChange: (value: string) => void;
 }) {
   const id = `styles-choice-${choice.key}`;
   return (
@@ -240,7 +239,15 @@ function ChoiceControl({
       <p id={`${id}-hint`} className="mb-2 text-xs text-zinc-500">
         {choice.hint}
       </p>
-      <div id={`${id}-options`} role="radiogroup" aria-label={choice.label} className="grid grid-cols-3 gap-0.5 rounded-md border border-zinc-700 p-0.5">
+      <div
+        id={`${id}-options`}
+        role="radiogroup"
+        aria-label={choice.label}
+        className={cn(
+          "grid gap-0.5 rounded-md border border-zinc-700 p-0.5",
+          choice.options.length > 3 ? "grid-cols-2" : "grid-cols-3",
+        )}
+      >
         {choice.options.map((option) => (
           <button
             key={option.value}
