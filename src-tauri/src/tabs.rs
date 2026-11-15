@@ -51,7 +51,12 @@ pub const GROUP_COLORS: &[&str] = &[
 ///
 /// `browser_args` adds the debugging port the docked inspector loads from.
 /// Edge's PDF viewer (`msPdfOOUI`) stays enabled so a local PDF opens in that viewer.
-const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
+///
+/// `AcceptCHFrame` is the HTTP/2 client-hint notice Google sends before the first byte.
+/// WebView2 aborts that navigation so it can send the hints, then the follow-up never
+/// starts, and mail.google.com and cloud.google.com stay blank. With the frame ignored,
+/// the first response is kept. Later requests still learn hints from `Accept-CH`.
+const WEBVIEW_BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msSmartScreenProtection,AcceptCHFrame --autoplay-policy=no-user-gesture-required";
 /// Logical px between the two split panes. The browser UI shows through it as the divider.
 const SPLIT_GAP: f64 = 6.0;
 /// Share of the page area kept for pages when developer tools are docked. The tools take the rest.
@@ -4465,15 +4470,16 @@ fn hold_page(app: &AppHandle, id: u32) {
     }
 }
 
-/// The document was parsed, but the load event never arrived. Show the page.
-/// `url` is the address at DOMContentLoaded, so a newer navigation is left alone.
+/// The document was parsed, but the load event has not arrived. Show the page.
+/// `url` is the document address. A newer document is left alone. A hash change,
+/// which Gmail applies as soon as the document exists, is still this page.
 pub fn release_settled_page(app: &AppHandle, id: u32, url: &str) {
     let window = with_state(app, |state| {
         let tab = state.tab_mut(id)?;
         if !tab.info.loading
             || tab.info.failure.is_some()
             || tab.info.progress < 70
-            || tab.info.url != url
+            || !same_document(&tab.info.url, url)
         {
             return None;
         }
@@ -9543,6 +9549,7 @@ mod tests {
         assert!(!args.contains("remote-allow-origins"));
         assert!(!debugging_args(None).contains("remote-debugging"));
         assert!(!WEBVIEW_BROWSER_ARGS.contains("remote-debugging"));
+        assert!(WEBVIEW_BROWSER_ARGS.contains("AcceptCHFrame"));
     }
 
     #[test]

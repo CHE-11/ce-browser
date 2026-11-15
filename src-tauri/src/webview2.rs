@@ -2572,16 +2572,17 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
             core2.add_DOMContentLoaded(
                 &DOMContentLoadedEventHandler::create(Box::new(move |sender, _| {
                     tabs::set_progress(&dom_app, id, 70);
-                    // Gmail's document is ready here, but its load event can stay pending
-                    // (splash images and a late stylesheet). Show the page instead of
-                    // leaving the tab on the spinner.
-                    let url = tabs::tab_page_url(&dom_app, id).unwrap_or_default();
-                    if !url.is_empty() {
-                        let app = dom_app.clone();
-                        std::thread::spawn(move || {
-                            std::thread::sleep(Duration::from_secs(3));
-                            tabs::release_settled_page(&app, id, &url);
-                        });
+                    // Gmail and Cloud Console keep the load event pending after the document
+                    // is parsed. The page stays parked off screen until that event, so show
+                    // this document now. Moving the view waits for the callback to return.
+                    if let Some(core) = &sender {
+                        let source = read_pwstr(|value| core.Source(value));
+                        if source.starts_with("http://") || source.starts_with("https://") {
+                            let app = dom_app.clone();
+                            std::thread::spawn(move || {
+                                tabs::release_settled_page(&app, id, &source);
+                            });
+                        }
                     }
                     if let Some(core) = sender {
                         probe_page_scheme(&dom_app, id, &core);
@@ -2700,6 +2701,7 @@ fn early_slots() -> &'static Mutex<HashMap<u32, EarlyScriptSlot>> {
 
 /// Drops the document-start script id for a tab whose webview is going away.
 pub fn forget_early_script(id: u32) {
+    custom_agents().lock().expect("custom user agent").remove(&id);
     early_slots()
         .lock()
         .expect("adblock early script")
@@ -3009,7 +3011,7 @@ fn attach_adblock(
                     crate::adblock::page_started(&navigation_app, id, &uri);
                     tabs::paint_document_background(&navigation_app, id, &uri);
                     if let Some(core) = sender {
-                        apply_page_settings(&navigation_app, &core, &uri);
+                        apply_page_settings(&navigation_app, &core, id, &uri);
                         sync_early_script(&core, id);
                     }
                 }
@@ -3826,8 +3828,20 @@ fn apply_referrer(
     }
 }
 
+fn custom_agents() -> &'static Mutex<HashSet<u32>> {
+    static IDS: std::sync::OnceLock<Mutex<HashSet<u32>>> = std::sync::OnceLock::new();
+    IDS.get_or_init(Default::default)
+}
+
+/// An empty agent restores the host string. Calling it when the host string is already
+/// in use clears the client hints Google needs, and the navigation then restarts until
+/// it gives up. A site rule that set its own agent still has to be cleared afterwards.
+fn should_apply_user_agent(agent: &str, custom_active: bool) -> bool {
+    !agent.is_empty() || custom_active
+}
+
 /// Sets the user agent and whether JavaScript runs for the page that is about to load.
-fn apply_page_settings(app: &AppHandle, core: &ICoreWebView2, url: &str) {
+fn apply_page_settings(app: &AppHandle, core: &ICoreWebView2, id: u32, url: &str) {
     let agent = crate::page_rules::user_agent_for(app, url);
     let enabled = crate::page_rules::scripts_enabled(app, url);
     unsafe {
@@ -3836,8 +3850,24 @@ fn apply_page_settings(app: &AppHandle, core: &ICoreWebView2, url: &str) {
         };
         let _ = settings.SetIsScriptEnabled(enabled);
         if let Some(agent) = agent {
+            let apply = should_apply_user_agent(
+                &agent,
+                custom_agents()
+                    .lock()
+                    .expect("custom user agent")
+                    .contains(&id),
+            );
+            if !apply {
+                return;
+            }
             if let Ok(settings) = settings.cast::<ICoreWebView2Settings2>() {
-                let _ = settings.SetUserAgent(&HSTRING::from(agent));
+                let _ = settings.SetUserAgent(&HSTRING::from(&agent));
+                let mut custom = custom_agents().lock().expect("custom user agent");
+                if agent.is_empty() {
+                    custom.remove(&id);
+                } else {
+                    custom.insert(id);
+                }
             }
         }
     }
@@ -5347,6 +5377,13 @@ mod tests {
             super::strip_webview_user_agent(agent),
             "Mozilla/5.0 Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0"
         );
+    }
+
+    #[test]
+    fn an_empty_user_agent_is_applied_only_to_clear_a_custom_one() {
+        assert!(!super::should_apply_user_agent("", false));
+        assert!(super::should_apply_user_agent("", true));
+        assert!(super::should_apply_user_agent("Mozilla/5.0", false));
     }
 
     #[test]
