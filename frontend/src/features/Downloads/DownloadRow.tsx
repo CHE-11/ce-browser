@@ -306,6 +306,7 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
             type="button"
             disabled={!completed}
             title={nameTitle}
+            style={{cursor: 'pointer'}}
             className={cn(
               "block max-w-full truncate text-left",
               compact ? downloadsTextClass : "text-sm",
