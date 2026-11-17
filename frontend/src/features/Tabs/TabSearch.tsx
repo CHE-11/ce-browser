@@ -6,12 +6,13 @@ import { PopupFrame } from "@/components/PopupFrame";
 import { activateTab, closePopup, closeTab, restoreClosed } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { hostOf } from "@/lib/format";
-import { tabProblemTitle, useHeavyTabs } from "@/lib/tab-alert";
+import { tabNotificationTitle, tabProblemTitle, useHeavyTabs } from "@/lib/tab-alert";
 import { groupColorClasses } from "@/lib/tab-rows";
 import { relativeTime } from "@/lib/time";
 import { useRecentlyClosed, useTabs } from "@/lib/use-browser";
 import type { ClosedEntry, TabInfo } from "@type/browser";
 import { TabAlertDot } from "./TabAlertDot";
+import { TabErrorBorder } from "./TabErrorBorder";
 
 type Row =
   | { kind: "tab"; key: string; tab: TabInfo; workspace: string }
@@ -146,6 +147,7 @@ export function TabSearch({ params }: TabSearchProps) {
               lastWorkspace = row.workspace;
             }
             const problem = row.kind === "tab" ? tabProblemTitle(row.tab, heavy.get(row.tab.id) ?? null) : null;
+            const notification = row.kind === "tab" ? tabNotificationTitle(row.tab) : null;
             return (
               <div id={`tab-search-row-${row.key}`} key={row.key}>
                 {heading ? (
@@ -158,19 +160,24 @@ export function TabSearch({ params }: TabSearchProps) {
                     id={`tab-search-${row.key}`}
                     role="option"
                     aria-selected={index === selected}
-                    aria-label={problem ? `${row.tab.title || row.tab.url}, ${problem}` : undefined}
+                    aria-label={
+                      problem || notification
+                        ? `${row.tab.title || row.tab.url}${problem ? `, ${problem}` : ""}${notification ? `, ${notification}` : ""}`
+                        : undefined
+                    }
                     data-index={index}
                     className={cn(
-                      "group flex h-10 w-full cursor-default items-center gap-3 rounded-lg px-2.5 text-left text-sm",
+                      "group relative flex h-10 w-full cursor-default items-center gap-3 rounded-lg px-2.5 text-left text-sm",
                       index === selected ? "bg-zinc-800" : "hover:bg-zinc-800/60",
                     )}
                     onMouseEnter={() => setSelected(index)}
                     onClick={() => choose(row)}
                   >
+                    {problem ? <TabErrorBorder id={`tab-search-${row.key}-error`} title={problem} className="inset-x-2" /> : null}
                     <span id={`tab-search-${row.key}-icon-wrap`} className="relative inline-flex shrink-0">
                       <FavIcon id={`tab-search-${row.key}-icon`} url={row.tab.url} src={row.tab.favicon} />
-                      {problem ? (
-                        <TabAlertDot id={`tab-search-${row.key}-alert`} title={problem} className="-right-0.5 -top-0.5 ring-zinc-900" />
+                      {notification ? (
+                        <TabAlertDot id={`tab-search-${row.key}-notification`} title={notification} className="-right-0.5 -top-0.5 ring-zinc-900" />
                       ) : null}
                     </span>
                     <span id={`tab-search-${row.key}-text`} className="min-w-0 flex-1">

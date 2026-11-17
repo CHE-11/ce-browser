@@ -6,7 +6,7 @@ type TabAlertDotProps = {
   className?: string;
 };
 
-/** Red mark on a tab that crashed, hung, logged errors, or is using a lot of memory. */
+/** Red mark on a tab that has a new site notification, such as mail or a message. */
 export function TabAlertDot({ id, title, className }: TabAlertDotProps) {
   return (
     <span

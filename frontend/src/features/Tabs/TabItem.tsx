@@ -5,7 +5,7 @@ import { setTabsMuted, selectTabRange, toggleTabSelection, activateTab } from "@
 import { accentTint } from "@/lib/accent";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
-import { tabProblemTitle, type HeavyTab } from "@/lib/tab-alert";
+import { tabNotificationTitle, tabProblemTitle, type HeavyTab } from "@/lib/tab-alert";
 import { CHROME, metric, remBox } from "@/lib/chrome-metrics";
 import { TAB_SIZE, horizontalTabHeight, tabItemStyle } from "@/lib/tab-size";
 import { useSettings } from "@/lib/use-browser";
@@ -16,6 +16,7 @@ import { useStickyAudio } from "@/lib/use-sticky-audio";
 import { groupColorClasses } from "@/lib/tab-rows";
 import { TabInfo } from "@type/browser";
 import { TabAlertDot } from "./TabAlertDot";
+import { TabErrorBorder } from "./TabErrorBorder";
 
 /** These palettes already separate the strip (zinc-950) from the active tab. The rest keep those two steps too close. */
 const QUIET_TAB_THEMES = new Set(["nord", "fog", "solarized"]);
@@ -88,6 +89,7 @@ export function TabItem({
   const underPointer = useTabUnderPointer();
   const closeShown = underPointer.tabId === tab.id;
   const alert = tabProblemTitle(tab, heavy);
+  const notification = tabNotificationTitle(tab);
   const accentFill = accent && active ? accentTint(accent, 0.28) : undefined;
   const chromeTab = !vertical && active;
   const backgroundColor =
@@ -143,8 +145,8 @@ export function TabItem({
       data-tab-id={tab.id}
       role="tab"
       aria-selected={selected}
-      aria-label={`${tab.title || tab.url}${tab.sleeping ? ", asleep" : ""}${tab.audible ? ", playing sound" : ""}${tab.automated ? ", automated" : ""}${alert ? `, ${alert}` : ""}`}
-      title={!hoverPreview && alert ? alert : undefined}
+      aria-label={`${tab.title || tab.url}${tab.sleeping ? ", asleep" : ""}${tab.audible ? ", playing sound" : ""}${tab.automated ? ", automated" : ""}${alert ? `, ${alert}` : ""}${notification ? `, ${notification}` : ""}`}
+      title={!hoverPreview && (alert || notification) ? [alert, notification].filter(Boolean).join(" · ") : undefined}
       draggable
       tabIndex={0}
       onMouseEnter={(event) => {
@@ -249,6 +251,7 @@ export function TabItem({
           )}
         />
       ) : null}
+      {alert ? <TabErrorBorder id={`${domId}-error`} title={alert} /> : null}
       <span id={`${domId}-icon-wrap`} className="relative inline-flex shrink-0">
         {tab.failure ? (
           <TriangleAlert id={`${domId}-failed`} className="shrink-0 text-amber-400" style={remBox(iconSize)} aria-label="Page failed to load" />
@@ -269,10 +272,10 @@ export function TabItem({
           />
         ) : null}
         {compact ? audioButton : null}
-        {alert ? (
+        {notification ? (
           <TabAlertDot
-            id={`${domId}-alert`}
-            title={alert}
+            id={`${domId}-notification`}
+            title={notification}
             className={compact && showAudio ? "-left-0.5 -top-0.5" : "-right-0.5 -top-0.5"}
           />
         ) : null}

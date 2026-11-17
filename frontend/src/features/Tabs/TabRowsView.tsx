@@ -1,6 +1,6 @@
 
 import { openTabMenu, closeTabOrSelection } from "@/lib/tab-actions";
-import { groupProblemTitle, useHeavyTabs } from "@/lib/tab-alert";
+import { groupNotificationTitle, groupProblemTitle, useHeavyTabs } from "@/lib/tab-alert";
 import { useTabDrag } from "@/lib/tab-drag";
 import { TabRow } from "@/lib/tab-rows";
 import { WindowTabsState } from "@/lib/use-browser";
@@ -34,6 +34,7 @@ export function TabRowsView({ snapshot, rows, orientation, compact, drag }: TabR
               orientation={orientation}
               compact={compact}
               alert={row.group.collapsed ? groupProblemTitle(row.tabs, heavy, snapshot.activeId) : null}
+              notification={row.group.collapsed ? groupNotificationTitle(row.tabs, snapshot.activeId) : null}
             />
           );
         }

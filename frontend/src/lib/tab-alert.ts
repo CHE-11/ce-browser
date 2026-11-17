@@ -34,7 +34,7 @@ function failureReason(failure: TabFailure) {
   }
 }
 
-/** Why a tab should show a red dot. Empty when the tab is fine. */
+/** Why a tab should show a red line along its bottom edge. Empty when the tab is fine. */
 export function tabProblemTitle(tab: ProblemTab, heavy: HeavyTab | null) {
   const reasons: string[] = [];
   if (tab.unresponsive) {
@@ -51,6 +51,28 @@ export function tabProblemTitle(tab: ProblemTab, heavy: HeavyTab | null) {
     reasons.push(heavy.shared ? `Using ${amount}, shared with other tabs` : `Using ${amount}`);
   }
   return reasons.length > 0 ? reasons.join(" · ") : null;
+}
+
+/** Tooltip for the red dot when a site notification is waiting on this tab. */
+export function tabNotificationTitle(tab: Pick<TabInfo, "notified">) {
+  return tab.notified ? "New notification" : null;
+}
+
+/** Notification text for tabs a collapsed group is hiding. The active tab stays in the strip. */
+export function groupNotificationTitle(tabs: TabInfo[], activeId: number | null) {
+  const notes = tabs.flatMap((tab) => {
+    if (tab.id === activeId || !tab.notified) {
+      return [];
+    }
+    return [`${tab.title || tab.url}: New notification`];
+  });
+  if (notes.length === 0) {
+    return null;
+  }
+  if (notes.length <= 3) {
+    return notes.join("\n");
+  }
+  return `${notes.length} tabs have a new notification`;
 }
 
 /** Problem text for tabs a collapsed group is hiding. The active tab stays in the strip. */

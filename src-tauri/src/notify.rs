@@ -193,6 +193,10 @@ fn show(
     if incoming {
         allow_playback(app, tab);
     }
+    let marked = app.clone();
+    tauri::async_runtime::spawn(async move {
+        crate::tabs::note_notification(&marked, tab);
+    });
     true
 }
 

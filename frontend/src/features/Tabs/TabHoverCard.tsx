@@ -5,7 +5,7 @@ import { PopupFrame } from "@/components/PopupFrame";
 import { closePopup, tabMemory, tabThumbnail } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { formatBytes, hostOf } from "@/lib/format";
-import { HIGH_TAB_MEMORY, tabProblemTitle } from "@/lib/tab-alert";
+import { HIGH_TAB_MEMORY, tabNotificationTitle, tabProblemTitle } from "@/lib/tab-alert";
 import { groupColorClasses, groupLabel } from "@/lib/tab-rows";
 import { useTabs } from "@/lib/use-browser";
 
@@ -74,6 +74,7 @@ export function TabHoverCard({ tabId }: TabHoverCardProps) {
 
   const heavy = memory !== null && memory >= HIGH_TAB_MEMORY;
   const problem = tabProblemTitle(tab, null);
+  const notification = tabNotificationTitle(tab);
   const state = sleeping
     ? tab.sleepSaved > 0
       ? `Asleep, about ${formatBytes(tab.sleepSaved)} saved`
@@ -121,6 +122,11 @@ export function TabHoverCard({ tabId }: TabHoverCardProps) {
           {problem ? (
             <span id="tab-hover-problem" className="text-red-400">
               {problem}
+            </span>
+          ) : null}
+          {notification ? (
+            <span id="tab-hover-notification" className="text-red-400">
+              {notification}
             </span>
           ) : null}
           {tab.audible ? <Volume2 id="tab-hover-audible" className="size-3 text-sky-400" aria-label="Playing sound" /> : null}

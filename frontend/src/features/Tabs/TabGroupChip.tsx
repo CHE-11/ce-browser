@@ -6,6 +6,7 @@ import { cn } from "../../lib/cn";
 import { focusRing } from "../../lib/focus-ring";
 import { groupColorClasses, groupLabel } from "../../lib/tab-rows";
 import { TabAlertDot } from "./TabAlertDot";
+import { TabErrorBorder } from "./TabErrorBorder";
 
 type TabGroupChipProps = {
   group: TabGroup;
@@ -15,11 +16,13 @@ type TabGroupChipProps = {
   compact: boolean;
   /** Problems on tabs this collapsed group is hiding. */
   alert: string | null;
+  /** Site notifications on tabs this collapsed group is hiding. */
+  notification: string | null;
 };
 
 const HOVER_DELAY = 300;
 
-export function TabGroupChip({ group, tabs, orientation, compact, alert }: TabGroupChipProps) {
+export function TabGroupChip({ group, tabs, orientation, compact, alert, notification }: TabGroupChipProps) {
   const domId = `tab-group-${group.id}`;
   const colors = groupColorClasses(group.color);
   const label = groupLabel(group, tabs.length);
@@ -55,9 +58,9 @@ export function TabGroupChip({ group, tabs, orientation, compact, alert }: TabGr
     <button
       id={domId}
       type="button"
-      title={`${label}\nClick to ${group.collapsed ? "expand" : "collapse"}. Right-click for options.${alert ? `\n${alert}` : ""}`}
+      title={`${label}\nClick to ${group.collapsed ? "expand" : "collapse"}. Right-click for options.${alert ? `\n${alert}` : ""}${notification ? `\n${notification}` : ""}`}
       aria-expanded={!group.collapsed}
-      aria-label={`${label}, ${group.collapsed ? "collapsed" : "expanded"} tab group${alert ? `. ${alert.replaceAll("\n", ". ")}` : ""}`}
+      aria-label={`${label}, ${group.collapsed ? "collapsed" : "expanded"} tab group${alert ? `. ${alert.replaceAll("\n", ". ")}` : ""}${notification ? `. ${notification.replaceAll("\n", ". ")}` : ""}`}
       className={cn(
         "relative flex shrink-0 select-none items-center gap-1.5 rounded-md text-xs font-medium transition-[color,background-color,max-width] duration-200",
         focusRing,
@@ -85,7 +88,8 @@ export function TabGroupChip({ group, tabs, orientation, compact, alert }: TabGr
       onMouseLeave={clearHover}
     >
       <span id={`${domId}-swatch`} className={cn("size-2 shrink-0 rounded-full", colors.swatch)} />
-      {alert ? <TabAlertDot id={`${domId}-alert`} title={alert} className="-right-1 -top-1" /> : null}
+      {alert ? <TabErrorBorder id={`${domId}-error`} title={alert} className="inset-x-1.5" /> : null}
+      {notification ? <TabAlertDot id={`${domId}-notification`} title={notification} className="-right-1 -top-1" /> : null}
       {compact ? null : (
         <>
           <span id={`${domId}-label`} className="min-w-0 flex-1 truncate text-left">

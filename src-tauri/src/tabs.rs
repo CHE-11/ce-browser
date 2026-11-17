@@ -99,6 +99,8 @@ pub struct TabInfo {
     pub ephemeral: bool,
     /// Page errors since the last navigation. Not written into the session.
     pub errors: u32,
+    /// A site notification arrived since this tab was last selected. Not written into the session.
+    pub notified: bool,
     /// The page stopped answering. Not written into the session.
     pub unresponsive: bool,
     /// `#rrggbb` from the site's theme color or favicon. Not written into the session.
@@ -1377,6 +1379,7 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                     changed: false,
                     ephemeral: tab.ephemeral,
                     errors: 0,
+                    notified: false,
                     unresponsive: false,
                     accent: None,
                     site: String::new(),
@@ -2773,6 +2776,7 @@ fn deliver_tab(
             tab.info.window = label.to_string();
             tab.info.workspace = workspace;
             tab.info.changed = false;
+            tab.info.notified = false;
             tab.info.last_active = now_ms();
         }
         if state.chrome(&source).and_then(|chrome| chrome.bookmarks) == Some(id) {
@@ -4290,6 +4294,22 @@ pub fn note_error(app: &AppHandle, id: u32) {
     });
 }
 
+/// Marks a background tab that just raised a site notification. Selecting the tab clears it.
+pub fn note_notification(app: &AppHandle, id: u32) {
+    let changed = with_state(app, |state| {
+        let index = state.index_of(id)?;
+        let window = state.tabs[index].info.window.clone();
+        if state.active_of(&window) == Some(id) || state.tabs[index].info.notified {
+            return Some(false);
+        }
+        state.tabs[index].info.notified = true;
+        Some(true)
+    });
+    if changed == Some(true) {
+        emit_tabs(app);
+    }
+}
+
 pub fn set_theme_color(app: &AppHandle, id: u32, raw: &str) {
     let color = crate::accent::parse_color(raw);
     update(app, id, move |tab| {
@@ -4800,6 +4820,7 @@ fn set_active(app: &AppHandle, id: u32, collapse: bool) -> Result<(), String> {
         state.set_window_active(&window, Some(id));
         if let Some(tab) = state.tab_mut(id) {
             tab.info.changed = false;
+            tab.info.notified = false;
             tab.info.last_active = now_ms();
         }
         if collapse {
@@ -9632,6 +9653,7 @@ mod tests {
                 changed: false,
                 ephemeral: false,
                 errors: 0,
+                notified: false,
                 unresponsive: false,
                 accent: None,
                 site: String::new(),

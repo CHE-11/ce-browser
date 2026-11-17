@@ -1,12 +1,13 @@
 import { Moon, Volume2, VolumeX } from "lucide-react";
 import { activateTab, closePopup } from "../../lib/browser-client";
 import { cn } from "../../lib/cn";
-import { tabProblemTitle, useHeavyTabs } from "../../lib/tab-alert";
+import { tabNotificationTitle, tabProblemTitle, useHeavyTabs } from "../../lib/tab-alert";
 import { groupColorClasses, groupLabel } from "../../lib/tab-rows";
 import { useTabs } from "../../lib/use-browser";
 import { FavIcon } from "../../components/FavIcon";
 import { PopupFrame } from "../../components/PopupFrame";
 import { TabAlertDot } from "./TabAlertDot";
+import { TabErrorBorder } from "./TabErrorBorder";
 
 type TabGroupFlyoutProps = {
   groupId: number;
@@ -32,15 +33,20 @@ export function TabGroupFlyout({ groupId }: TabGroupFlyoutProps) {
             </div>
             {tabs.map((tab) => {
               const problem = tabProblemTitle(tab, heavy.get(tab.id) ?? null);
+              const notification = tabNotificationTitle(tab);
               return (
                 <button
                   key={tab.id}
                   id={`tab-group-flyout-tab-${tab.id}`}
                   type="button"
-                  title={problem ?? undefined}
-                  aria-label={problem ? `${tab.title || tab.url}, ${problem}` : undefined}
+                  title={[problem, notification].filter(Boolean).join(" · ") || undefined}
+                  aria-label={
+                    problem || notification
+                      ? `${tab.title || tab.url}${problem ? `, ${problem}` : ""}${notification ? `, ${notification}` : ""}`
+                      : undefined
+                  }
                   className={cn(
-                    "flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm text-zinc-200 hover:bg-zinc-800",
+                    "relative flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left text-sm text-zinc-200 hover:bg-zinc-800",
                     tab.id === snapshot.activeId && "bg-zinc-800",
                     tab.sleeping && "opacity-60",
                   )}
@@ -48,10 +54,11 @@ export function TabGroupFlyout({ groupId }: TabGroupFlyoutProps) {
                     void activateTab(tab.id).finally(() => void closePopup());
                   }}
                 >
+                  {problem ? <TabErrorBorder id={`tab-group-flyout-tab-${tab.id}-error`} title={problem} className="inset-x-2" /> : null}
                   <span id={`tab-group-flyout-tab-${tab.id}-icon-wrap`} className="relative inline-flex shrink-0">
                     <FavIcon id={`tab-group-flyout-tab-${tab.id}-icon`} url={tab.url} src={tab.favicon} />
-                    {problem ? (
-                      <TabAlertDot id={`tab-group-flyout-tab-${tab.id}-alert`} title={problem} className="-right-0.5 -top-0.5 ring-zinc-900" />
+                    {notification ? (
+                      <TabAlertDot id={`tab-group-flyout-tab-${tab.id}-notification`} title={notification} className="-right-0.5 -top-0.5 ring-zinc-900" />
                     ) : null}
                   </span>
                   <span id={`tab-group-flyout-tab-${tab.id}-title`} className="min-w-0 flex-1 truncate">

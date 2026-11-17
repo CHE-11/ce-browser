@@ -31,6 +31,8 @@ export type TabInfo = {
   ephemeral: boolean;
   /** Page errors since the last navigation. */
   errors: number;
+  /** A site notification arrived since this tab was last selected. */
+  notified: boolean;
   /** The page stopped answering. Cleared on the next navigation, or once it recovers. */
   unresponsive: boolean;
   /** `#rrggbb` from the site's theme color or favicon. */
