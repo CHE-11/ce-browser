@@ -107,6 +107,15 @@ function PanelColumn({ panel }: { panel: SidePanelInfo }) {
                 <ChevronsRight id={`panel-dock-${id}-expand-icon`} className="size-3.5" aria-hidden />
               )}
             </button>
+            <button
+              id={`panel-dock-${id}-close`}
+              type="button"
+              className="flex size-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              aria-label={`Close ${panel.title}`}
+              onClick={() => void closeSidePanel(panel.id)}
+            >
+              <X id={`panel-dock-${id}-close-icon`} className="size-3.5" aria-hidden />
+            </button>
           </div>
 
           <button
