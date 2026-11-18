@@ -2989,13 +2989,16 @@ fn attach_adblock(
                     args.SetResponse(&response)?;
                     return Ok(());
                 }
-                // A service worker fetch that has its headers read comes back as a cache miss,
-                // and Gmail then drops the icon. Blocking already happened above.
+                // Reading request headers marks them modified. A modified request skips the
+                // HTTP cache, so a service worker's `respondWith` fails with `ERR_CACHE_MISS`
+                // and the page stays blank until a reload bypasses that cache. Blocking
+                // already happened above. Google's own navigations are left untouched for
+                // the same reason: mail.google.com and www.google.com paint only after a
+                // cache-bypassing refresh when their document request was modified.
                 if !service_worker_request(&args) {
-                    let hints = client_hints_matter(context);
-                    let referrer = hints
-                        || crate::page_rules::control_for(&request_app, &page).referrer
-                            != "default";
+                    let hints = client_hints_matter(context) && !site_keeps_its_cache(&uri);
+                    let referrer = crate::page_rules::control_for(&request_app, &page).referrer
+                        != "default";
                     if hints || referrer {
                         if let Ok(request) = args.Request() {
                             if let Ok(headers) = request.Headers() {
@@ -3538,7 +3541,9 @@ fn form_escape(value: &str) -> String {
 /// `GetHeader` marks the request modified. A modified request skips the HTTP cache, so
 /// Gmail's service worker fails the icon with `ERR_CACHE_MISS` and the picture never paints.
 /// Scripts and documents still need the WebView2 brand removed: Prime Video's player CDN
-/// answers 403 when `Sec-CH-UA` names it.
+/// answers 403 when `Sec-CH-UA` names it. Google's own hosts are excluded separately by
+/// `site_keeps_its_cache`, because modifying those requests is what makes the page need a
+/// hard refresh.
 fn client_hints_matter(context: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> bool {
     !matches!(
         context,
@@ -3551,6 +3556,37 @@ fn client_hints_matter(context: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> bool {
             | COREWEBVIEW2_WEB_RESOURCE_CONTEXT_PING
             | COREWEBVIEW2_WEB_RESOURCE_CONTEXT_CSP_VIOLATION_REPORT
     )
+}
+
+/// Hosts whose service worker serves the page from cache. Modifying the request makes
+/// that lookup miss, and the next ordinary visit is broken again.
+fn site_keeps_its_cache(url: &str) -> bool {
+    let Ok(url) = url::Url::parse(url) else {
+        return false;
+    };
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    const SUFFIXES: &[&str] = &[
+        "google.com",
+        "gmail.com",
+        "youtube.com",
+        "youtube-nocookie.com",
+        "ytimg.com",
+        "googlevideo.com",
+        "gstatic.com",
+        "googleapis.com",
+        "googleusercontent.com",
+        "ggpht.com",
+        "withgoogle.com",
+    ];
+    SUFFIXES.iter().any(|suffix| {
+        host == *suffix
+            || host
+                .strip_suffix(suffix)
+                .is_some_and(|rest| rest.ends_with('.'))
+    })
 }
 
 /// The fetch a service worker makes for a cached icon. Touching it breaks `respondWith`.
@@ -5392,6 +5428,26 @@ mod tests {
         assert!(super::client_hints_matter(
             COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH
         ));
+    }
+
+    #[test]
+    fn google_pages_keep_the_request_that_their_cache_was_stored_with() {
+        assert!(super::site_keeps_its_cache("https://www.google.com/"));
+        assert!(super::site_keeps_its_cache("https://mail.google.com/mail/u/0/"));
+        assert!(super::site_keeps_its_cache(
+            "https://docs.google.com/document/d/1"
+        ));
+        assert!(super::site_keeps_its_cache(
+            "https://www.gstatic.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png"
+        ));
+        assert!(super::site_keeps_its_cache(
+            "https://ssl.gstatic.com/ui/v1/icons/mail/rfr/logo_gmail_lockup_default_1x_r5.png"
+        ));
+        assert!(!super::site_keeps_its_cache(
+            "https://www.primevideo.com/"
+        ));
+        assert!(!super::site_keeps_its_cache("https://google.com.evil.test/"));
+        assert!(!super::site_keeps_its_cache("not a url"));
     }
 
     #[test]

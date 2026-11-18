@@ -6069,6 +6069,7 @@ pub fn navigate(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
     crate::automation::recorder::note_navigate(app, id, &display);
     // ce:// pages share one document and differ only in the hash. WebView2 reports no load for
     // a hash change, so marking one as loading would leave the tab parked and spinning.
+    let opening_zoom = page_zoom_for(app, &display);
     let current = with_state(app, |state| {
         state.tab_mut(id).map(|tab| tab.info.url.clone())
     });
@@ -6086,6 +6087,13 @@ pub fn navigate(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
             // A failed page is parked once the failure is cleared. A page already on screen
             // stays up, so a search or a link does not uncover the full-page loader.
             tab.blank_next = tab.info.failure.is_some() && tab.painted && !in_page;
+            // The address is written before the load event, so the load handler sees no
+            // change and would keep the previous site's zoom. Pick the new site's zoom now.
+            if let Some(zoom) =
+                zoom_for_navigation(&tab.info.url, &display, tab.info.zoom, opening_zoom)
+            {
+                tab.info.zoom = zoom;
+            }
         }
         tab.info.url = display.clone();
         tab.info.loading = !in_page || tab.webview.is_none();
@@ -6700,7 +6708,16 @@ pub fn observe_controller_zoom(app: &AppHandle, id: u32, factor: f64) {
     }) else {
         return;
     };
-    if is_extension_url(&url) || zoom_factor_is_document_reset(current, factor) {
+    if is_extension_url(&url) {
+        return;
+    }
+    // The document load puts the webview back to 100% after the load handler already
+    // applied the site zoom. Putting it back here is what makes the saved zoom stick
+    // on the first paint. A reload used to be the only later call that won that race.
+    if zoom_factor_is_document_reset(current, factor) {
+        if let Some(webview) = page_view(app, id) {
+            let _ = webview.set_zoom(current);
+        }
         return;
     }
     let next = nearest_page_zoom(current, factor);
