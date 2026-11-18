@@ -10,9 +10,9 @@ type HostToolbarButtonProps = {
 };
 
 export function HostToolbarButton({ extension, idPrefix }: HostToolbarButtonProps) {
-  const { hostPanel } = useTabs();
+  const { sidePanels } = useTabs();
   const domId = `${idPrefix}-host-${extension.id.replace(/[^a-z0-9]+/g, "-")}`;
-  const active = hostPanel === extension.id;
+  const active = sidePanels.some((panel) => panel.extensionId === extension.id);
   return (
     <IconButton
       id={domId}

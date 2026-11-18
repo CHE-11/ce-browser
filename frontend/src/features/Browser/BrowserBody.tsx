@@ -9,6 +9,7 @@ import { PageLoading, pagePending, useShownPages } from "./PageLoading";
 import { ExtensionsToolbar } from "../Extensions/ExtensionsToolbar";
 import { ViewportBar } from "../DevTools/DevTools_ViewportBar";
 import { ViewportHandles } from "../DevTools/DevTools_ViewportHandles";
+import { PanelDock } from "@/components/PanelDock";
 import { dockedPanels, pagesColumnStyle } from "../DevTools/page-column";
 
 type BrowserBodyProps = {
@@ -39,7 +40,7 @@ export function BrowserBody({
   extensions,
 }: BrowserBodyProps) {
   const devtools = snapshot.devtools;
-  const panels = dockedPanels(snapshot.sidePanelWidth, snapshot.sidePanelEdge);
+  const panels = dockedPanels(snapshot.sidePanels);
   const pagesColumn = pagesColumnStyle(panels, devtools?.visible ? devtools.ratio : null);
   // The device bar belongs to the tab whose DevTools is open. Other tabs stay full size.
   const showViewportBar = devtools != null && (devtools.visible || snapshot.viewport != null);
@@ -53,6 +54,7 @@ export function BrowserBody({
         <ExtensionsToolbar ref={toolbarRef} side="left" activeTab={activeTab} extensions={extensions} settings={settings} />
       ) : null}
       <div id="browser-page-area" className="relative flex min-w-0 flex-1 items-center justify-center bg-zinc-950">
+        {snapshot.fullscreen ? null : <PanelDock panels={snapshot.sidePanels} />}
         <div id="browser-pages" className="absolute inset-y-0" style={pagesColumn}>
           {showViewportBar ? (
             <ViewportBar

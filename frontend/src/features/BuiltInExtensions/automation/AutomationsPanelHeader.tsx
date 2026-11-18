@@ -1,6 +1,6 @@
-import { Circle, SquareArrowOutUpRight, Workflow, X } from "lucide-react";
+import { Circle, SquareArrowOutUpRight, Workflow } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
-import { openAutomations, toggleAutomationPanel } from "@/lib/browser-client";
+import { openAutomations } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 
 export type AutomationsPanelView = "flows" | "recording" | "runs";
@@ -25,9 +25,6 @@ export function AutomationsPanelHeader({ view, flowCount, runCount, recordedStep
         </h1>
         <IconButton id="automations-panel-open" label="Open the Automations page" className="size-7" onClick={() => void openAutomations()}>
           <SquareArrowOutUpRight id="automations-panel-open-icon" aria-hidden />
-        </IconButton>
-        <IconButton id="automations-panel-close" label="Close the automations panel" className="size-7" onClick={() => void toggleAutomationPanel(false)}>
-          <X id="automations-panel-close-icon" aria-hidden />
         </IconButton>
       </header>
       <div id="automations-panel-views" className="flex gap-1 px-3 pb-2">

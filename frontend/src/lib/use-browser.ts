@@ -33,6 +33,7 @@ import {
   onPageRulesChanged,
   onScriptingChanged,
   onSettingsChanged,
+  onSidePanelsLayout,
   onTabsChanged,
   onUpdateStatus,
   siteFavicons,
@@ -131,8 +132,28 @@ function currentWindowLabel() {
   }
 }
 
+function subscribeTabs(handler: (snapshot: TabsSnapshot) => void): Promise<UnlistenFn> {
+  const tabs = onTabsChanged(handler);
+  const layout = onSidePanelsLayout((next) => {
+    const current = liveSlot<TabsSnapshot>("tabs").value;
+    if (!current) {
+      return;
+    }
+    handler({
+      ...current,
+      windows: (current.windows ?? []).map((window) =>
+        window.label === next.label ? { ...window, sidePanels: next.sidePanels } : window,
+      ),
+    });
+  });
+  return Promise.all([tabs, layout]).then(([stopTabs, stopLayout]) => () => {
+    stopTabs();
+    stopLayout();
+  });
+}
+
 export function useTabs() {
-  const live = useLiveValue("tabs", listTabs, onTabsChanged);
+  const live = useLiveValue("tabs", listTabs, subscribeTabs);
   const snapshot = live.value ?? EMPTY_TABS;
   const label = currentWindowLabel();
   const mine = snapshot.windows?.find((item) => item.label === label);
@@ -162,6 +183,7 @@ export function useTabs() {
     hostPanel: mine?.hostPanel ?? "",
     sidePanelWidth: mine?.sidePanelWidth ?? 0,
     sidePanelEdge: mine?.sidePanelEdge === "left" || mine?.sidePanelEdge === "right" ? mine.sidePanelEdge : "",
+    sidePanels: mine?.sidePanels ?? [],
     groups,
     selectedIds: selectedIds.length > 0 ? selectedIds : activeId === null ? [] : [activeId],
     loaded: live.loaded,

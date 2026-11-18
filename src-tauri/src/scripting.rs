@@ -78,7 +78,14 @@ pub struct PageScript {
     pub id: String,
     pub name: String,
     pub domain: String,
-    /// `javascript`, `typescript`, or `python`.
+    /// Full page address, without a hash or a trailing slash.
+    #[serde(default)]
+    pub url: String,
+    /// `domain` runs on the whole site. `url` runs only on `url`.
+    /// Older files omit this and run on the whole domain.
+    #[serde(default = "default_scope")]
+    pub scope: String,
+    /// `javascript`, `typescript`, `python`, or `css`.
     pub language: String,
     pub enabled: bool,
     pub run_on_load: bool,
@@ -93,6 +100,8 @@ impl Default for PageScript {
             id: String::new(),
             name: String::new(),
             domain: String::new(),
+            url: String::new(),
+            scope: default_scope(),
             language: "javascript".into(),
             enabled: true,
             run_on_load: false,
@@ -196,7 +205,6 @@ pub fn injection(app: &AppHandle, url: &str) -> String {
     if app.try_state::<ScriptState>().is_none() {
         return String::new();
     }
-    let host = settings::sleep_site_key(url);
     let file = get(app);
     let javascript: Vec<Value> = file
         .scripts
@@ -207,7 +215,7 @@ pub fn injection(app: &AppHandle, url: &str) -> String {
                 && script.language != "python"
                 && script.language != "css"
                 && !script.compiled.is_empty()
-                && domain_matches(&host, &script.domain)
+                && script_matches(script, url)
         })
         .map(|script| {
             json!({
@@ -224,7 +232,7 @@ pub fn injection(app: &AppHandle, url: &str) -> String {
                     && script.run_on_load
                     && script.language == "python"
                     && !script.source.is_empty()
-                    && domain_matches(&host, &script.domain)
+                    && script_matches(script, url)
             })
             .map(|script| {
                 json!({
@@ -244,7 +252,7 @@ pub fn injection(app: &AppHandle, url: &str) -> String {
                 && script.run_on_load
                 && script.language == "css"
                 && !script.compiled.is_empty()
-                && domain_matches(&host, &script.domain)
+                && script_matches(script, url)
         })
         .map(|script| {
             json!({
@@ -324,8 +332,9 @@ pub fn run(
     if cancelled() {
         return Ok(stopped_run());
     }
-    let value = match webview2::evaluate_until(&webview, &program, timeout, "The script", cancelled)
-    {
+    // Wait for the page to actually finish. Bailing out when stop is requested reports
+    // success while a JavaScript loop is still running.
+    let value = match webview2::evaluate(&webview, &program, timeout, "The script") {
         Ok(value) => value,
         Err(_) if cancelled() => return Ok(read_stopped(&webview)),
         Err(error) => return Err(error),
@@ -337,8 +346,12 @@ pub fn run(
     Ok(run)
 }
 
-/// Cancels the run identified by `run_id`. The page task rejects, timers and fetches it
-/// started are cleared, and a stuck JavaScript loop is terminated.
+/// Cancels the run identified by `run_id`.
+///
+/// `Runtime.terminateExecution` has to go out before any other page script. A stop hook
+/// queued first runs at the next safepoint, returns, and the JavaScript loop resumes.
+/// The hook is sent twice because that termination can consume the next script when the
+/// page was idle.
 pub fn stop(app: &AppHandle, tab_id: u32, run_id: u64) -> Result<(), String> {
     if run_id != 0 {
         CANCEL_RUN.store(run_id, Ordering::SeqCst);
@@ -346,9 +359,6 @@ pub fn stop(app: &AppHandle, tab_id: u32, run_id: u64) -> Result<(), String> {
     let Some(webview) = tabs::page_view(app, tab_id) else {
         return Ok(());
     };
-    if webview2::evaluate(&webview, STOP_JS, Duration::from_millis(400), "Stop").is_ok() {
-        return Ok(());
-    }
     let _ = webview2::call_cdp_json(
         &webview,
         "Runtime.terminateExecution",
@@ -356,7 +366,9 @@ pub fn stop(app: &AppHandle, tab_id: u32, run_id: u64) -> Result<(), String> {
         Duration::from_secs(2),
         "Stop",
     );
-    let _ = webview2::evaluate(&webview, STOP_JS, Duration::from_secs(2), "Stop");
+    if webview2::evaluate(&webview, STOP_JS, Duration::from_secs(2), "Stop").is_err() {
+        let _ = webview2::evaluate(&webview, STOP_JS, Duration::from_secs(2), "Stop");
+    }
     Ok(())
 }
 
@@ -639,7 +651,19 @@ const SCRIPT_CONTROL: &str = r#"(() => {
     }
     rejectStop();
   };
+  const restore = function () {
+    if (slot.stop === halt) slot.stop = null;
+    globalThis.setTimeout = orig.setTimeout;
+    globalThis.clearTimeout = orig.clearTimeout;
+    globalThis.setInterval = orig.setInterval;
+    globalThis.clearInterval = orig.clearInterval;
+    globalThis.requestAnimationFrame = orig.requestAnimationFrame;
+    globalThis.cancelAnimationFrame = orig.cancelAnimationFrame;
+    globalThis.fetch = orig.fetch;
+    XMLHttpRequest.prototype.send = xhrSend;
+  };
   slot.stop = halt;
+  slot.restore = restore;
   globalThis.setTimeout = function (fn, delay) {
     if (state.stopped) return 0;
     const args = Array.prototype.slice.call(arguments, 2);
@@ -713,23 +737,15 @@ const SCRIPT_CONTROL: &str = r#"(() => {
       const text = error && error.stack ? String(error.stack) : String(error);
       return text.slice(0, 8000);
     },
-    restore: function () {
-      if (slot.stop === halt) slot.stop = null;
-      globalThis.setTimeout = orig.setTimeout;
-      globalThis.clearTimeout = orig.clearTimeout;
-      globalThis.setInterval = orig.setInterval;
-      globalThis.clearInterval = orig.clearInterval;
-      globalThis.requestAnimationFrame = orig.requestAnimationFrame;
-      globalThis.cancelAnimationFrame = orig.cancelAnimationFrame;
-      globalThis.fetch = orig.fetch;
-      XMLHttpRequest.prototype.send = xhrSend;
-    },
+    restore: restore,
   };
 })()"#;
 
 const STOP_JS: &str = r#"(() => {
   const slot = globalThis.__ceScriptRun;
-  if (slot && typeof slot.stop === "function") slot.stop();
+  if (!slot) return false;
+  if (typeof slot.stop === "function") slot.stop();
+  if (typeof slot.restore === "function") slot.restore();
   return true;
 })()"#;
 
@@ -930,6 +946,8 @@ fn normalize_script(mut script: PageScript) -> Result<PageScript, String> {
     if script.domain.is_empty() {
         return Err("Choose a site for this script.".into());
     }
+    script.url = crate::page_rules::page_address(&script.url);
+    script.scope = canonical_scope(&script.scope, &script.url);
     if script.source.len() > MAX_CODE || script.compiled.len() > MAX_CODE {
         return Err(format!("A script can hold up to {} KB.", MAX_CODE / 1024));
     }
@@ -941,6 +959,19 @@ fn normalize_script(mut script: PageScript) -> Result<PageScript, String> {
     }
     script.id = script_id(&script.id, &script.name);
     Ok(script)
+}
+
+fn default_scope() -> String {
+    "domain".into()
+}
+
+/// `url` only sticks when the script has an address. Anything else runs on the domain.
+fn canonical_scope(scope: &str, url: &str) -> String {
+    if scope.trim().eq_ignore_ascii_case("url") && !url.is_empty() {
+        "url".into()
+    } else {
+        default_scope()
+    }
 }
 
 fn canonical_language(language: &str) -> String {
@@ -975,6 +1006,21 @@ pub fn domain_matches(host: &str, domain: &str) -> bool {
     !domain.is_empty() && (host == domain || host.ends_with(&format!(".{domain}")))
 }
 
+/// A domain script matches the host and its subdomains. A url script matches that address only.
+fn script_matches(script: &PageScript, url: &str) -> bool {
+    let host = settings::sleep_site_key(url);
+    if !domain_matches(&host, &script.domain) {
+        return false;
+    }
+    if script.scope == "url" {
+        let address = crate::page_rules::page_address(url);
+        let stored = crate::page_rules::page_address(&script.url);
+        !stored.is_empty() && address == stored
+    } else {
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{PageScript, ScriptFile, domain_matches};
@@ -1000,6 +1046,60 @@ mod tests {
         assert!(!script.run_on_load);
         assert_eq!(script.compiled, "return 1");
         assert_eq!(script.domain, "shop.example");
+        assert!(script.url.is_empty());
+        assert_eq!(script.scope, "domain");
+    }
+
+    #[test]
+    fn a_url_script_matches_only_that_address() {
+        let domain_script = PageScript {
+            domain: "example.com".into(),
+            url: "https://example.com/a".into(),
+            scope: "domain".into(),
+            ..PageScript::default()
+        };
+        let url_script = super::normalize_script(PageScript {
+            domain: "example.com".into(),
+            url: "https://example.com/a/#part".into(),
+            scope: "url".into(),
+            source: "1".into(),
+            ..PageScript::default()
+        })
+        .expect("script");
+        assert_eq!(url_script.url, "https://example.com/a");
+        assert!(super::script_matches(
+            &domain_script,
+            "https://example.com/b"
+        ));
+        assert!(super::script_matches(
+            &domain_script,
+            "https://news.example.com/a"
+        ));
+        assert!(super::script_matches(&url_script, "https://example.com/a"));
+        assert!(super::script_matches(&url_script, "https://example.com/a/"));
+        assert!(super::script_matches(
+            &url_script,
+            "https://example.com/a#section"
+        ));
+        assert!(!super::script_matches(&url_script, "https://example.com/b"));
+        assert!(!super::script_matches(&url_script, "https://other.com/a"));
+    }
+
+    #[test]
+    fn a_url_scope_without_an_address_runs_on_the_domain() {
+        let script = PageScript {
+            domain: "example.com".into(),
+            scope: "url".into(),
+            source: "1".into(),
+            ..PageScript::default()
+        };
+        let normalized = super::normalize_script(script).expect("script");
+        assert_eq!(normalized.scope, "domain");
+        assert!(normalized.url.is_empty());
+        assert!(super::script_matches(
+            &normalized,
+            "https://example.com/anywhere"
+        ));
     }
 
     #[test]
@@ -1008,6 +1108,8 @@ mod tests {
             id: "py".into(),
             name: "Title".into(),
             domain: "example.com".into(),
+            url: String::new(),
+            scope: "domain".into(),
             language: "python".into(),
             enabled: true,
             run_on_load: true,
@@ -1025,6 +1127,8 @@ mod tests {
             id: "look".into(),
             name: "Look".into(),
             domain: "example.com".into(),
+            url: String::new(),
+            scope: "domain".into(),
             language: "css".into(),
             enabled: true,
             run_on_load: true,

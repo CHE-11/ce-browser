@@ -48,8 +48,8 @@ export function ViewportBar({ width, height, cutout, homeBar, installed, keyboar
   const barRef = useRef<HTMLDivElement>(null);
   const widthFocused = useRef(false);
   const heightFocused = useRef(false);
-  const { sidePanelWidth, sidePanelEdge, devtools } = useTabs();
-  const panels = dockedPanels(sidePanelWidth, sidePanelEdge);
+  const { sidePanels, devtools } = useTabs();
+  const panels = dockedPanels(sidePanels);
   const devtoolsRatio = devtools?.visible ? devtools.ratio : null;
   const layout = useRef({ panels, devtoolsRatio });
   layout.current = { panels, devtoolsRatio };

@@ -17,13 +17,12 @@ use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
 use crate::{paths, settings, tabs, webview2};
 
-/// CSS pixels kept for the page when the panel grows.
-const MIN_PAGE: f64 = 320.0;
 /// The agent column stops here. The automations column may grow to half the page instead.
 const AGENT_MAX: f64 = 720.0;
 
 struct Drag {
     window: String,
+    id: String,
     /// How far the pointer sits to the right of the edge being dragged, in CSS pixels.
     grab: Option<f64>,
     edge: tabs::PanelEdge,
@@ -31,10 +30,12 @@ struct Drag {
     max: f64,
     /// Width kept when the pointer reading is unusable.
     fallback: f64,
+    reorder: bool,
 }
 
-/// Limits for one drag of the side column.
+/// Limits for one drag of a docked panel.
 pub struct ColumnDrag {
+    pub id: String,
     pub edge: tabs::PanelEdge,
     pub min: f64,
     pub max: f64,
@@ -63,7 +64,7 @@ impl Drop for ResizeGuard {
 }
 
 /// Opens or closes the agent panel in `window`. `open` forces a state. Returns whether it is open.
-/// The automations panel uses the same column, so opening this one parks that one.
+/// Other docked panels stay where they are.
 pub fn toggle(app: &AppHandle, window: &str, open: Option<bool>) -> Result<bool, String> {
     toggle_kind(app, window, tabs::SidePanel::Agent, open, true)
 }
@@ -95,25 +96,30 @@ fn toggle_kind(
     open: Option<bool>,
     focus: bool,
 ) -> Result<bool, String> {
-    let showing =
-        tabs::side_panel(app, window) == kind && tabs::agent_panel_width(app, window) > 0.0;
+    let id = kind.dock_id();
+    let showing = tabs::dock_contains(app, window, id);
     let want = open.unwrap_or(!showing);
     if want {
         ensure_kind(app, window, kind)?;
-        tabs::set_side_panel(
+        let min = panel_min(kind);
+        tabs::open_dock_panel(
             app,
             window,
-            kind,
+            id,
+            kind.title(),
+            tabs::PanelEdge::Right,
             fitted_width(app, window, kind, saved_width(app)),
+            min,
+            true,
         );
-        if focus {
+        if focus && tabs::dock_expanded(app, window, id) {
             let label = panel_label(window, kind);
             if let Some(view) = app.get_webview(&label) {
                 let _ = view.set_focus();
             }
         }
     } else {
-        tabs::set_side_panel(app, window, tabs::SidePanel::None, 0.0);
+        tabs::close_dock_panel(app, window, id);
     }
     Ok(want)
 }
@@ -122,8 +128,9 @@ fn panel_label(window: &str, kind: tabs::SidePanel) -> String {
     match kind {
         tabs::SidePanel::Automations => tabs::automation_panel_label(window),
         tabs::SidePanel::Scripting => tabs::scripting_panel_label(window),
-        tabs::SidePanel::Host => tabs::host_panel_label(window),
-        tabs::SidePanel::Agent | tabs::SidePanel::None => tabs::agent_panel_label(window),
+        tabs::SidePanel::Host | tabs::SidePanel::Agent | tabs::SidePanel::None => {
+            tabs::agent_panel_label(window)
+        }
     }
 }
 
@@ -158,11 +165,14 @@ const SCRIPTING_MIN: f64 = 480.0;
 
 /// Saved column width, limited to what this panel may take in `window`.
 fn fitted_width(app: &AppHandle, window: &str, kind: tabs::SidePanel, width: f64) -> f64 {
+    let others = tabs::other_columns(app, window, kind.dock_id());
     let Some(geom) = geometry(app, window) else {
         let cap = if wide_column(kind) { 8192.0 } else { AGENT_MAX };
         return width.clamp(panel_min(kind), cap);
     };
-    let span = (geom.client - geom.right.max(0.0) - geom.left.max(0.0) - MIN_PAGE).max(0.0);
+    let span = (geom.client - geom.right.max(0.0) - geom.left.max(0.0) - others
+        - tabs::PANEL_PAGE_MIN)
+        .max(0.0);
     let floor = f64::from(settings::AGENT_PANEL_WIDTH_PX.0);
     let min = panel_min(kind).min(span.max(floor));
     width_for_edge(
@@ -175,6 +185,8 @@ fn fitted_width(app: &AppHandle, window: &str, kind: tabs::SidePanel, width: f64
         column_max(kind, &geom),
         tabs::PanelEdge::Right,
         width.max(min),
+        0.0,
+        others,
     )
 }
 
@@ -190,30 +202,52 @@ fn wide_column(kind: tabs::SidePanel) -> bool {
     kind == tabs::SidePanel::Automations || kind == tabs::SidePanel::Scripting
 }
 
+fn wide_id(id: &str) -> bool {
+    id == tabs::AUTOMATIONS_PANEL_ID || id == tabs::SCRIPTING_PANEL_ID
+}
+
 /// Automations and scripting may cover half the area the page and the column share.
 /// The agent panel stays narrower.
 fn column_max(kind: tabs::SidePanel, geom: &Geom) -> f64 {
-    if !wide_column(kind) {
+    column_max_id(kind.dock_id(), geom)
+}
+
+fn column_max_id(id: &str, geom: &Geom) -> f64 {
+    if id == tabs::AGENT_PANEL_ID {
         return AGENT_MAX;
     }
     let span = (geom.client - geom.right.max(0.0) - geom.left.max(0.0)).max(0.0);
-    span * 0.5
+    if wide_id(id) {
+        span * 0.5
+    } else {
+        span.max(AGENT_MAX)
+    }
 }
 
-/// Follows the left button and resizes `window`'s open panel until the button comes up.
+/// Follows the left button and resizes the agent panel until the button comes up.
 pub fn track_resize(app: &AppHandle, window: &str) -> Result<(), String> {
-    let max = geometry(app, window)
-        .map(|geom| column_max(tabs::side_panel(app, window), &geom))
-        .unwrap_or(AGENT_MAX);
+    track_panel_resize(app, window, tabs::AGENT_PANEL_ID)
+}
+
+/// Follows the left button and resizes the docked panel `id`.
+pub fn track_panel_resize(app: &AppHandle, window: &str, id: &str) -> Result<(), String> {
+    let Some(entry) = tabs::dock_entry(app, window, id) else {
+        return Ok(());
+    };
+    if entry.collapsed || !entry.resizable {
+        return Ok(());
+    }
+    let (min, max, remember, fallback) = resize_limits(app, window, id, &entry);
     match track_column(
         app,
         window,
         ColumnDrag {
-            edge: tabs::PanelEdge::Right,
-            min: f64::from(settings::AGENT_PANEL_WIDTH_PX.0),
+            id: id.to_string(),
+            edge: entry.edge,
+            min,
             max,
-            remember_agent: true,
-            fallback: f64::from(settings::AGENT_PANEL_DEFAULT_WIDTH),
+            remember_agent: remember,
+            fallback,
         },
     ) {
         Ok(_) => Ok(()),
@@ -222,9 +256,66 @@ pub fn track_resize(app: &AppHandle, window: &str) -> Result<(), String> {
     }
 }
 
+fn resize_limits(app: &AppHandle, window: &str, id: &str, entry: &tabs::DockEntry) -> (f64, f64, bool, f64) {
+    if let Some(extension) = tabs::extension_id_of(id) {
+        let (min, max, fallback) = crate::host_extensions::extension_panel_limits(app, extension)
+            .unwrap_or((entry.min, 8192.0, entry.width));
+        return (min, max.max(min), false, fallback);
+    }
+    let max = geometry(app, window)
+        .map(|geom| column_max_id(id, &geom))
+        .unwrap_or(AGENT_MAX);
+    let min = if id == tabs::SCRIPTING_PANEL_ID {
+        SCRIPTING_MIN
+    } else {
+        f64::from(settings::AGENT_PANEL_WIDTH_PX.0)
+    };
+    (
+        min,
+        max.max(min),
+        id == tabs::AGENT_PANEL_ID,
+        entry.width,
+    )
+}
+
+/// Follows the pointer and reorders `id` among the panels on its edge.
+pub fn track_reorder(app: &AppHandle, window: &str, id: &str) -> Result<(), String> {
+    let Some(entry) = tabs::dock_entry(app, window, id) else {
+        return Ok(());
+    };
+    if RESIZING.swap(true, Ordering::AcqRel) {
+        return Ok(());
+    }
+    let _guard = ResizeGuard;
+    {
+        let mut slot = DRAG.lock().expect("panel reorder");
+        *slot = Some(Drag {
+            window: window.to_string(),
+            id: id.to_string(),
+            grab: None,
+            edge: entry.edge,
+            min: entry.min,
+            max: entry.width,
+            fallback: entry.width,
+            reorder: true,
+        });
+    }
+    request_frame(app);
+    while left_down() {
+        thread::sleep(Duration::from_millis(16));
+        request_frame(app);
+    }
+    let started = Instant::now();
+    while FRAME.load(Ordering::Acquire) && started.elapsed() < Duration::from_millis(500) {
+        thread::sleep(Duration::from_millis(4));
+    }
+    tabs::emit_tabs(app);
+    Ok(())
+}
+
 /// Follows the pointer until the left button comes up. Returns the width that was applied.
 pub fn track_column(app: &AppHandle, window: &str, drag: ColumnDrag) -> Result<f64, String> {
-    if tabs::agent_panel_width(app, window) <= 0.0 {
+    if tabs::dock_panel_width(app, window, &drag.id) <= 0.0 {
         return Err(PANEL_CLOSED.into());
     }
     if RESIZING.swap(true, Ordering::AcqRel) {
@@ -235,11 +326,13 @@ pub fn track_column(app: &AppHandle, window: &str, drag: ColumnDrag) -> Result<f
         let mut slot = DRAG.lock().expect("panel resize");
         *slot = Some(Drag {
             window: window.to_string(),
+            id: drag.id.clone(),
             grab: None,
             edge: drag.edge,
             min: drag.min,
             max: drag.max,
             fallback: drag.fallback,
+            reorder: false,
         });
     }
     request_frame(app);
@@ -264,16 +357,18 @@ pub fn track_column(app: &AppHandle, window: &str, drag: ColumnDrag) -> Result<f
             .map_err(|_| "The panel resize did not finish.".to_string())?;
     }
     tabs::emit_tabs(app);
-    Ok(tabs::agent_panel_width(app, window))
+    Ok(tabs::dock_panel_width(app, window, &drag.id))
 }
 
-/// Sets the open panel to `width` CSS pixels and remembers it for the next open.
-pub fn set_width(app: &AppHandle, window: &str, width: f64) -> Result<(), String> {
-    let Some(width) = clamped_width(app, window, width) else {
+/// Sets one expanded panel to `width` CSS pixels. The agent panel's width is also saved in settings.
+pub fn set_width(app: &AppHandle, window: &str, id: &str, width: f64) -> Result<(), String> {
+    let Some(width) = clamped_width(app, window, id, width) else {
         return Ok(());
     };
-    if let Some(applied) = tabs::resize_agent_panel(app, window, width) {
-        remember(app, applied);
+    if let Some(applied) = tabs::resize_dock_panel(app, window, id, width) {
+        if id == tabs::AGENT_PANEL_ID {
+            remember(app, applied);
+        }
         tabs::emit_tabs(app);
     }
     Ok(())
@@ -289,7 +384,7 @@ fn remember_current(app: &AppHandle) {
     let Some(window) = window else {
         return;
     };
-    let width = tabs::agent_panel_width(app, &window);
+    let width = tabs::dock_panel_width(app, &window, tabs::AGENT_PANEL_ID);
     if width > 0.0 {
         remember(app, width);
     }
@@ -324,7 +419,7 @@ fn request_frame(app: &AppHandle) {
 }
 
 fn apply_drag(app: &AppHandle) {
-    let (window, edge, min, max, fallback) = {
+    let (window, id, edge, min, max, fallback, reorder) = {
         let Ok(drag) = DRAG.lock() else {
             return;
         };
@@ -333,22 +428,30 @@ fn apply_drag(app: &AppHandle) {
         };
         (
             drag.window.clone(),
+            drag.id.clone(),
             drag.edge,
             drag.min,
             drag.max,
             drag.fallback,
+            drag.reorder,
         )
     };
+    if reorder {
+        apply_reorder(app, &window, &id, edge);
+        return;
+    }
     let Some(geom) = geometry(app, &window) else {
         return;
     };
     let Some(cursor) = cursor_x(&geom) else {
         return;
     };
-    let current = tabs::agent_panel_width(app, &window);
+    let current = tabs::dock_panel_width(app, &window, &id);
     if current <= 0.0 {
         return;
     }
+    let outer = tabs::outer_columns(app, &window, &id);
+    let others = tabs::other_columns(app, &window, &id);
     let grab = {
         let Ok(mut drag) = DRAG.lock() else {
             return;
@@ -359,11 +462,11 @@ fn apply_drag(app: &AppHandle) {
         if state.grab.is_none() {
             state.grab = Some(match edge {
                 tabs::PanelEdge::Right => {
-                    let left = geom.client - geom.right - current;
+                    let left = geom.client - geom.right - outer - current;
                     cursor - left
                 }
                 tabs::PanelEdge::Left => {
-                    let panel_right = geom.left + current;
+                    let panel_right = geom.left + outer + current;
                     cursor - panel_right
                 }
             });
@@ -380,22 +483,83 @@ fn apply_drag(app: &AppHandle) {
         max,
         edge,
         fallback,
+        outer,
+        others,
     );
-    tabs::resize_agent_panel(app, &window, next);
+    tabs::resize_dock_panel(app, &window, &id, next);
 }
 
-fn clamped_width(app: &AppHandle, window: &str, width: f64) -> Option<f64> {
-    if tabs::agent_panel_width(app, window) <= 0.0 {
+fn apply_reorder(app: &AppHandle, window: &str, id: &str, edge: tabs::PanelEdge) {
+    let Some(geom) = geometry(app, window) else {
+        return;
+    };
+    let Some(cursor) = cursor_x(&geom) else {
+        return;
+    };
+    let panels = tabs::dock_panels(app, window);
+    let others: Vec<&tabs::DockEntry> = panels
+        .iter()
+        .filter(|entry| entry.edge == edge && entry.id != id)
+        .collect();
+    if others.is_empty() {
+        return;
+    }
+    let centers = edge_centers(edge, &others, &geom);
+    let index = match edge {
+        tabs::PanelEdge::Right => centers.iter().filter(|center| **center < cursor).count(),
+        tabs::PanelEdge::Left => centers.iter().filter(|center| **center > cursor).count(),
+    };
+    tabs::reorder_dock_panel(app, window, id, index);
+}
+
+/// Centers of `others` in nearest-to-page order, in CSS pixels from the window's left.
+fn edge_centers(edge: tabs::PanelEdge, others: &[&tabs::DockEntry], geom: &Geom) -> Vec<f64> {
+    match edge {
+        tabs::PanelEdge::Right => {
+            let sum: f64 = others.iter().map(|entry| tabs::column_width(entry)).sum();
+            let mut x = geom.client - geom.right.max(0.0) - sum;
+            let mut centers = Vec::with_capacity(others.len());
+            for entry in others {
+                let width = tabs::column_width(entry);
+                centers.push(x + width / 2.0);
+                x += width;
+            }
+            centers
+        }
+        tabs::PanelEdge::Left => {
+            let mut x = geom.left.max(0.0);
+            let mut from_far = Vec::with_capacity(others.len());
+            for entry in others.iter().rev() {
+                let width = tabs::column_width(entry);
+                from_far.push(x + width / 2.0);
+                x += width;
+            }
+            from_far.reverse();
+            from_far
+        }
+    }
+}
+
+fn clamped_width(app: &AppHandle, window: &str, id: &str, width: f64) -> Option<f64> {
+    if tabs::dock_panel_width(app, window, id) <= 0.0 {
         return None;
     }
     let geom = geometry(app, window)?;
-    Some(width_beside_pointer(
+    let others = tabs::other_columns(app, window, id);
+    let outer = tabs::outer_columns(app, window, id);
+    let max = column_max_id(id, &geom);
+    Some(width_for_edge(
         geom.client,
         geom.left,
         geom.right,
-        geom.client - geom.right - width,
+        geom.client - geom.right - outer - width,
         0.0,
-        column_max(tabs::side_panel(app, window), &geom),
+        f64::from(settings::AGENT_PANEL_WIDTH_PX.0),
+        max,
+        tabs::PanelEdge::Right,
+        width,
+        outer,
+        others,
     ))
 }
 
@@ -438,6 +602,7 @@ fn left_down() -> bool {
 
 /// Panel width when the pointer is `cursor` CSS pixels from the window's left edge.
 /// `grab` is how far that pointer sits to the right of the panel's left edge.
+#[cfg(test)]
 fn width_beside_pointer(
     client: f64,
     left: f64,
@@ -456,6 +621,8 @@ fn width_beside_pointer(
         max,
         tabs::PanelEdge::Right,
         f64::from(settings::AGENT_PANEL_DEFAULT_WIDTH),
+        0.0,
+        0.0,
     )
 }
 
@@ -470,6 +637,8 @@ fn width_for_edge(
     max: f64,
     edge: tabs::PanelEdge,
     fallback: f64,
+    outer: f64,
+    others: f64,
 ) -> f64 {
     let min = if min.is_finite() {
         min.max(0.0)
@@ -494,12 +663,12 @@ fn width_for_edge(
     }
     let raw = match edge {
         tabs::PanelEdge::Right => {
-            let panel_right = client - right.max(0.0);
+            let panel_right = client - right.max(0.0) - outer.max(0.0);
             panel_right - (cursor - grab)
         }
-        tabs::PanelEdge::Left => (cursor - grab) - left.max(0.0),
+        tabs::PanelEdge::Left => (cursor - grab) - left.max(0.0) - outer.max(0.0),
     };
-    let room = client - right.max(0.0) - left.max(0.0) - MIN_PAGE;
+    let room = client - right.max(0.0) - left.max(0.0) - others.max(0.0) - tabs::PANEL_PAGE_MIN;
     let cap = room.min(max).max(min);
     if !raw.is_finite() {
         return fallback.clamp(min, cap);
@@ -586,6 +755,52 @@ pub fn open_scripting_window(app: &AppHandle, owner: &str) -> Result<(), String>
     Ok(())
 }
 
+/// Reopens the dock saved in the session. Missing extensions are skipped.
+pub fn restore_dock(app: &AppHandle, panels: &[tabs::DockRecord]) {
+    for panel in panels {
+        let id = panel.id.as_str();
+        let width = if panel.width.is_finite() && panel.width >= 1.0 {
+            panel.width
+        } else {
+            saved_width(app)
+        };
+        let opened = if let Some(kind) = builtin_kind(id) {
+            ensure_kind(app, tabs::WINDOW, kind).is_ok()
+                && {
+                    tabs::open_dock_panel(
+                        app,
+                        tabs::WINDOW,
+                        id,
+                        kind.title(),
+                        tabs::PanelEdge::Right,
+                        width,
+                        panel_min(kind),
+                        true,
+                    );
+                    true
+                }
+        } else if let Some(extension) = tabs::extension_id_of(id) {
+            let edge = tabs::parse_panel_edge(&panel.edge);
+            crate::host_extensions::reopen_extension_panel(app, tabs::WINDOW, extension, edge, width)
+                .is_ok()
+        } else {
+            false
+        };
+        if opened && panel.collapsed {
+            tabs::set_dock_collapsed(app, tabs::WINDOW, id, true);
+        }
+    }
+}
+
+fn builtin_kind(id: &str) -> Option<tabs::SidePanel> {
+    match id {
+        tabs::AGENT_PANEL_ID => Some(tabs::SidePanel::Agent),
+        tabs::AUTOMATIONS_PANEL_ID => Some(tabs::SidePanel::Automations),
+        tabs::SCRIPTING_PANEL_ID => Some(tabs::SidePanel::Scripting),
+        _ => None,
+    }
+}
+
 /// Closes the popped-out scripting window so the process can exit with the last browser window.
 pub fn close_scripting_window(app: &AppHandle) {
     if let Some(window) = app.get_window(SCRIPTING_WINDOW) {
@@ -654,6 +869,8 @@ mod tests {
                 720.0,
                 crate::tabs::PanelEdge::Left,
                 360.0,
+                0.0,
+                0.0,
             ),
             400.0
         );
@@ -668,6 +885,8 @@ mod tests {
                 720.0,
                 crate::tabs::PanelEdge::Left,
                 360.0,
+                0.0,
+                0.0,
             ),
             400.0
         );

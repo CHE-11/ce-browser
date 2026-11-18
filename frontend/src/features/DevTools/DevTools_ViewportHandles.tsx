@@ -124,8 +124,8 @@ export function ViewportHandles({ width, height, cutout, homeBar, installed, key
   const drag = useRef<{ id: HandleId; x: number; y: number; width: number; height: number } | null>(null);
   const pending = useRef<{ width: number; height: number } | null>(null);
   const frame = useRef<number | null>(null);
-  const { sidePanelWidth, sidePanelEdge, devtools } = useTabs();
-  const panels = dockedPanels(sidePanelWidth, sidePanelEdge);
+  const { sidePanels, devtools } = useTabs();
+  const panels = dockedPanels(sidePanels);
   const devtoolsRatio = devtools?.visible ? devtools.ratio : null;
   const layout = useRef({ panels, devtoolsRatio });
   layout.current = { panels, devtoolsRatio };

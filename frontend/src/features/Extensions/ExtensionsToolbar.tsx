@@ -6,7 +6,7 @@ import { builtinTool } from "@features/BuiltInExtensions/builtin";
 import { HostToolbarButton } from "@/features/Extensions/HostToolbarButton";
 import { openExtensionPanel, openPopup, saveSettings } from "@/lib/browser-client";
 import { extensionOpenAs } from "@/lib/extension-open";
-import { useHostExtensions, useSettings } from "@/lib/use-browser";
+import { useHostExtensions, useSettings, useTabs } from "@/lib/use-browser";
 import { cn } from "@/lib/cn";
 import {
   openToolbarPinMenu,
@@ -32,12 +32,16 @@ type ExtensionToolbarButtonProps = {
 
 export function ExtensionToolbarButton({ extension, idPrefix }: ExtensionToolbarButtonProps) {
   const settings = useSettings();
+  const { sidePanels } = useTabs();
   const domId = `${idPrefix}-extension-${extension.id}`;
   const label = extension.defaultTitle || extension.name;
+  const active = sidePanels.some((panel) => panel.extensionId === extension.id);
   return (
     <IconButton
       id={domId}
       label={label}
+      active={active}
+      aria-pressed={active}
       onClick={(event) => {
         if (extension.popup && extensionOpenAs(settings, extension.id) === "panel") {
           void openExtensionPanel(extension.id);

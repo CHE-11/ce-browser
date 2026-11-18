@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AppWindow, ChevronsLeft, ChevronsRight, CircleStop, PanelLeftClose, PanelLeftOpen, Play, Plus, Save, SquareCode, Trash2, X } from "lucide-react";
-import type { PageScript, ScriptLanguage, ScriptRun } from "@type/browser";
+import type { PageScript, ScriptLanguage, ScriptRun, ScriptScope } from "@type/browser";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
@@ -10,24 +10,18 @@ import {
   closeWindow,
   openScriptingWindow,
   pyodideReady,
-  resizeAgentPanel,
   runPageScript,
   savePageScript,
   stopPageScript,
-  setAgentPanelWidth,
-  toggleScriptingPanel,
 } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
-import { useAppearanceState, useScripting, useSettings, useTabs } from "@/lib/use-browser";
-import { siteKey } from "../page-controls/site";
+import { useAppearanceState, useScripting, useTabs } from "@/lib/use-browser";
+import { pageAddress, siteKey } from "../page-controls/site";
 import { compileSource } from "./compile";
 import { ScriptingConsole, type ConsoleLine } from "./ScriptingConsole";
 import { ScriptingEditor, type ScriptingEditorHandle } from "./ScriptingEditor";
 
-const MIN_PANEL_WIDTH = 280;
-const MAX_PANEL_WIDTH = 8192;
-const DEFAULT_PANEL_WIDTH = 480;
 const LAYOUT_KEY = "ce-scripting-layout";
 
 type Pane = { size: number; collapsed: boolean; expanded: boolean };
@@ -69,15 +63,13 @@ function clock(date: Date) {
 const fieldClass =
   "h-7 min-w-0 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-xs text-zinc-100 outline-none focus:border-sky-500";
 
-function clampPanelWidth(width: number) {
-  return Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
-}
-
-function blank(domain: string): PageScript {
+function blank(domain: string, url: string): PageScript {
   return {
     id: "",
     name: "",
     domain,
+    url,
+    scope: "domain",
     language: "javascript",
     enabled: true,
     runOnLoad: false,
@@ -88,6 +80,17 @@ function blank(domain: string): PageScript {
 
 function matches(domain: string, script: PageScript) {
   return domain !== "" && (domain === script.domain || domain.endsWith(`.${script.domain}`));
+}
+
+/** Path and query of a stored address, for the script list and the scope control. */
+function pageLabel(url: string) {
+  try {
+    const parsed = new URL(url);
+    const path = `${parsed.pathname}${parsed.search}`;
+    return path === "" || path === "/" ? parsed.hostname : path;
+  } catch {
+    return url;
+  }
 }
 
 let lineId = 1;
@@ -113,16 +116,12 @@ function linesFrom(input: string, result: ScriptRun): ConsoleLine[] {
 /** Editor and console for scripts saved against the site in the current tab. */
 export function ScriptingPanelPage() {
   useAppearanceState();
-  const settings = useSettings();
   const tabs = useTabs();
   const file = useScripting();
   const editor = useRef<ScriptingEditorHandle>(null);
   const runId = useRef(0);
   const runTab = useRef(0);
   const stopRequested = useRef(false);
-  const width = settings?.agentPanelWidth ?? DEFAULT_PANEL_WIDTH;
-  const resizing = useRef(false);
-  const [resizingPanel, setResizingPanel] = useState(false);
   const [draft, setDraft] = useState<PageScript | null>(null);
   const [lines, setLines] = useState<ConsoleLine[]>([]);
   const [busy, setBusy] = useState(false);
@@ -133,6 +132,7 @@ export function ScriptingPanelPage() {
 
   const active = tabs.windowTabs.find((tab) => tab.id === tabs.activeId);
   const domain = siteKey(active?.url);
+  const address = pageAddress(active?.url);
   const scripts = useMemo(
     () => (file?.scripts ?? []).filter((script) => matches(domain, script)),
     [file, domain],
@@ -169,9 +169,9 @@ export function ScriptingPanelPage() {
     }
     const saved = file.scripts.find((script) => script.id === draft.id);
     if (!saved) {
-      setDraft(domain ? blank(domain) : null);
+      setDraft(domain ? blank(domain, address) : null);
     }
-  }, [file, draft?.id, domain]);
+  }, [file, draft?.id, domain, address]);
 
   const select = (script: PageScript) => {
     setStatus(null);
@@ -186,7 +186,12 @@ export function ScriptingPanelPage() {
     setStatus(null);
     const compiled = await compileSource(next.language, next.source);
     const before = new Set((file?.scripts ?? []).map((script) => script.id));
-    const saved = await savePageScript({ ...next, domain, compiled });
+    const saved = await savePageScript({
+      ...next,
+      domain: next.domain || domain,
+      url: next.url || address,
+      compiled,
+    });
     const current = saved.scripts.find((script) => script.id === next.id)
       ?? saved.scripts.find((script) => !before.has(script.id))
       ?? null;
@@ -278,17 +283,21 @@ export function ScriptingPanelPage() {
     }
   };
 
-  const onResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || resizing.current) {
+  const setScope = (scope: ScriptScope) => {
+    if (!draft) {
       return;
     }
-    event.preventDefault();
-    resizing.current = true;
-    setResizingPanel(true);
-    void resizeAgentPanel().finally(() => {
-      resizing.current = false;
-      setResizingPanel(false);
-    });
+    if (scope === "url") {
+      if (!address) {
+        setStatus("Open a page to limit this script to its address.");
+        return;
+      }
+      setStatus(null);
+      setDraft({ ...draft, scope: "url", url: address });
+      return;
+    }
+    setStatus(null);
+    setDraft({ ...draft, scope: "domain" });
   };
 
   const setPane = (key: keyof Layout, patch: Partial<Pane>) => {
@@ -298,51 +307,14 @@ export function ScriptingPanelPage() {
   const sidebarWidth = layout.sidebar.expanded ? Math.max(layout.sidebar.size, 320) : layout.sidebar.size;
   const poppedOut = getCurrentWindow().label === "popup-scripting";
 
-  const onResizeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step = event.shiftKey ? 64 : 16;
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      void setAgentPanelWidth(clampPanelWidth(width + step));
-    } else if (event.key === "ArrowRight") {
-      event.preventDefault();
-      void setAgentPanelWidth(clampPanelWidth(width - step));
-    } else if (event.key === "Home") {
-      event.preventDefault();
-      void setAgentPanelWidth(DEFAULT_PANEL_WIDTH);
-    }
-  };
-
   return (
-    <div
-      id="scripting-panel"
-      className={cn("relative flex h-screen flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100", resizingPanel && "cursor-col-resize select-none")}
-    >
-      {poppedOut ? null : (
-      <div
-        id="scripting-panel-resize"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize the scripting panel"
-        aria-valuemin={MIN_PANEL_WIDTH}
-        aria-valuemax={MAX_PANEL_WIDTH}
-        aria-valuenow={Math.round(width)}
-        tabIndex={0}
-        title="Drag to resize. Left and right arrows change the width."
-        className={cn(
-          "absolute inset-y-0 left-0 z-20 w-1.5 cursor-col-resize touch-none hover:bg-sky-500/40 focus-visible:bg-sky-500/40 focus-visible:outline-none",
-          focusRing,
-          resizingPanel && "bg-sky-500/50",
-        )}
-        onPointerDown={onResizePointerDown}
-        onKeyDown={onResizeKeyDown}
-      />
-      )}
+    <div id="scripting-panel" className="relative flex h-screen flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100">
       <header id="scripting-panel-header" className="flex h-[var(--toolbar-height)] shrink-0 items-center gap-2 border-b border-zinc-800 pl-4 pr-2">
         <SquareCode id="scripting-panel-icon" className="size-4 text-sky-400" aria-hidden />
         <h1 id="scripting-panel-title" className="text-sm font-semibold">
           Scripting
         </h1>
-        <span id="scripting-panel-domain" className="min-w-0 flex-1 truncate text-xs text-zinc-500">
+        <span id="scripting-panel-domain" className="min-w-0 flex-1 truncate text-xs text-zinc-500" title={address || domain}>
           {domain || "No website"}
         </span>
         {pythonReady === false ? (
@@ -355,14 +327,11 @@ export function ScriptingPanelPage() {
             <AppWindow id="scripting-panel-popout-icon" aria-hidden />
           </IconButton>
         )}
-        <IconButton
-          id="scripting-panel-close"
-          label={poppedOut ? "Close this window" : "Close the scripting panel"}
-          className="size-7"
-          onClick={() => void (poppedOut ? closeWindow() : toggleScriptingPanel(false))}
-        >
-          <X id="scripting-panel-close-icon" aria-hidden />
-        </IconButton>
+        {poppedOut ? (
+          <IconButton id="scripting-panel-close" label="Close this window" className="size-7" onClick={() => void closeWindow()}>
+            <X id="scripting-panel-close-icon" aria-hidden />
+          </IconButton>
+        ) : null}
       </header>
       <div id="scripting-panel-body" className="flex min-h-0 flex-1">
         {layout.sidebar.collapsed ? (
@@ -379,7 +348,7 @@ export function ScriptingPanelPage() {
               type="button"
               disabled={!domain}
               className={cn("h-7 min-w-0 flex-1 rounded-md px-2 text-left text-xs text-sky-300 hover:bg-zinc-800 disabled:opacity-40", focusRing)}
-              onClick={() => select(blank(domain))}
+              onClick={() => select(blank(domain, address))}
             >
               <Plus id="scripting-new-icon" className="mr-1 inline size-3" aria-hidden />
               New script
@@ -414,10 +383,12 @@ export function ScriptingPanelPage() {
               key={script.id}
               type="button"
               aria-current={draft?.id === script.id ? "true" : undefined}
+              title={script.scope === "url" ? script.url : script.domain}
               className={cn(
                 "flex h-8 items-center gap-1.5 rounded-md px-2 text-left text-xs hover:bg-zinc-800",
                 focusRing,
                 draft?.id === script.id && "bg-zinc-800",
+                script.scope === "url" && script.url !== address && "opacity-50",
               )}
               onClick={() => select(script)}
             >
@@ -428,6 +399,11 @@ export function ScriptingPanelPage() {
               <span id={`scripting-item-${script.id}-name`} className="min-w-0 flex-1 truncate">
                 {script.name || "Script"}
               </span>
+              {script.scope === "url" ? (
+                <span id={`scripting-item-${script.id}-scope`} className="max-w-[45%] shrink-0 truncate text-[10px] text-zinc-500">
+                  {pageLabel(script.url)}
+                </span>
+              ) : null}
             </button>
           ))}
         </aside>
@@ -506,6 +482,52 @@ export function ScriptingPanelPage() {
                   <option id="scripting-language-python" value="python">Python</option>
                   <option id="scripting-language-css" value="css">CSS</option>
                 </select>
+                <div id="scripting-scope" role="group" aria-label="Where this script runs" className="flex h-7 overflow-hidden rounded-md border border-zinc-700">
+                  <button
+                    id="scripting-scope-domain"
+                    type="button"
+                    aria-pressed={draft.scope !== "url"}
+                    title={`Run on every page of ${draft.domain || domain}`}
+                    className={cn(
+                      "h-full px-2 text-[11px]",
+                      focusRing,
+                      draft.scope !== "url" ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900",
+                    )}
+                    onClick={() => setScope("domain")}
+                  >
+                    Domain
+                  </button>
+                  <button
+                    id="scripting-scope-url"
+                    type="button"
+                    aria-pressed={draft.scope === "url"}
+                    disabled={!address && draft.scope !== "url"}
+                    title={
+                      draft.scope !== "url"
+                        ? "Run only on this page"
+                        : draft.url === address
+                          ? draft.url
+                          : `Runs on ${draft.url}. Click to use this page instead.`
+                    }
+                    className={cn(
+                      "h-full px-2 text-[11px] disabled:opacity-40",
+                      focusRing,
+                      draft.scope === "url" ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900",
+                    )}
+                    onClick={() => setScope("url")}
+                  >
+                    URL
+                  </button>
+                </div>
+                {draft.scope === "url" ? (
+                  <span
+                    id="scripting-scope-address"
+                    className={cn("max-w-36 truncate text-[11px]", draft.url === address ? "text-zinc-500" : "text-amber-300")}
+                    title={draft.url === address ? draft.url : `${draft.url} — click URL to use this page`}
+                  >
+                    {pageLabel(draft.url)}
+                  </span>
+                ) : null}
                 <label id="scripting-enabled" className="flex items-center gap-1.5 text-[11px] text-zinc-400">
                   <Toggle
                     id="scripting-enabled-toggle"
@@ -521,7 +543,7 @@ export function ScriptingPanelPage() {
                     id="scripting-run-on-load-toggle"
                     size="sm"
                     checked={draft.runOnLoad}
-                    aria-label="Run when this site loads"
+                    aria-label={draft.scope === "url" ? "Run when this page loads" : "Run when this site loads"}
                     onChange={(runOnLoad) => setDraft({ ...draft, runOnLoad })}
                   />
                   On load
@@ -534,7 +556,7 @@ export function ScriptingPanelPage() {
                     variant="ghost"
                     onClick={() => {
                       void deletePageScript(draft.id)
-                        .then(() => setDraft(blank(domain)))
+                        .then(() => setDraft(blank(domain, address)))
                         .catch((reason: unknown) => setStatus(String(reason)));
                     }}
                   >

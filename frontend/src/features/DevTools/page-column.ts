@@ -6,13 +6,35 @@ export type DockedPanels = {
   right: number;
 };
 
-/** The side column, split onto the edge it occupies. Zero on both sides while it is closed. */
-export function dockedPanels(width: number, edge: string): DockedPanels {
-  if (!Number.isFinite(width) || width <= 0) {
-    return { left: 0, right: 0 };
+/** Collapsed rail width. Matches the native `PANEL_RAIL`. */
+export const PANEL_RAIL = 36;
+
+/** Header above an expanded panel webview. Matches the native `PANEL_HEADER`. */
+export const PANEL_HEADER = 32;
+
+type DockColumn = {
+  edge: string;
+  width: number;
+  collapsed: boolean;
+};
+
+/** Every docked column, split onto the edge it occupies. */
+export function dockedPanels(panels: DockColumn[] | undefined): DockedPanels {
+  let left = 0;
+  let right = 0;
+  for (const panel of panels ?? []) {
+    const width = panel.collapsed ? PANEL_RAIL : panel.width;
+    if (!Number.isFinite(width) || width <= 0) {
+      continue;
+    }
+    const size = Math.round(width);
+    if (panel.edge === "left") {
+      left += size;
+    } else {
+      right += size;
+    }
   }
-  const size = Math.round(width);
-  return edge === "left" ? { left: size, right: 0 } : { left: 0, right: size };
+  return { left, right };
 }
 
 /** Pages column in the page area: panel widths come off first, then the inspector takes its share. */

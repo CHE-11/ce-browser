@@ -20,7 +20,7 @@ function matchesQuery(script: PageScript, query: string) {
   if (!query) {
     return true;
   }
-  const haystack = `${script.name} ${script.domain} ${script.language} ${script.source}`.toLowerCase();
+  const haystack = `${script.name} ${script.domain} ${script.url} ${script.scope} ${script.language} ${script.source}`.toLowerCase();
   return haystack.includes(query.toLowerCase());
 }
 
@@ -86,8 +86,8 @@ export function ScriptsPage({ params }: ScriptsPageProps) {
                   {script.name || "Script"}
                 </span>
               </span>
-              <span id={`scripts-item-${script.id}-meta`} className="truncate pl-3.5 text-[11px] text-zinc-500">
-                {script.domain} · {LANGUAGE_LABEL[script.language]}
+              <span id={`scripts-item-${script.id}-meta`} className="truncate pl-3.5 text-[11px] text-zinc-500" title={script.scope === "url" ? script.url : script.domain}>
+                {script.domain} · {script.scope === "url" ? "This page" : "Domain"} · {LANGUAGE_LABEL[script.language]}
               </span>
             </button>
           ))}
@@ -101,10 +101,15 @@ export function ScriptsPage({ params }: ScriptsPageProps) {
                 {selected.name || "Script"}
               </h1>
               <p id="scripts-view-meta" className="text-xs text-zinc-500">
-                {selected.domain} · {LANGUAGE_LABEL[selected.language]} · {selected.enabled ? "On" : "Off"}
-                {selected.runOnLoad ? " · Runs when the site loads" : ""}
+                {selected.scope === "url" ? "This page" : "Entire domain"} · {selected.domain} · {LANGUAGE_LABEL[selected.language]} · {selected.enabled ? "On" : "Off"}
+                {selected.runOnLoad ? (selected.scope === "url" ? " · Runs when this page loads" : " · Runs when the site loads") : ""}
               </p>
             </div>
+            {selected.url ? (
+              <p id="scripts-view-url" className="truncate text-xs text-zinc-500" title={selected.url}>
+                {selected.url}
+              </p>
+            ) : null}
             <p id="scripts-hint" className="text-xs text-zinc-500">
               Open the Scripting panel beside this site to edit the script.
             </p>

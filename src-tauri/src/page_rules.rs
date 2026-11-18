@@ -628,7 +628,7 @@ fn snap_speed(value: f64) -> f64 {
 }
 
 /// http(s) address without a hash or a trailing slash. Empty for anything else.
-fn page_address(raw: &str) -> String {
+pub(crate) fn page_address(raw: &str) -> String {
     let Ok(mut url) = url::Url::parse(raw.trim()) else {
         return String::new();
     };

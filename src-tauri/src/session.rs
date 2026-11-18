@@ -21,6 +21,8 @@ pub struct SessionFile {
     pub split: Option<SessionSplitFile>,
     /// Recently closed tabs and groups, oldest first. Older files omit this.
     pub closed: Vec<tabs::ClosedEntry>,
+    /// Docked side panels for the main window. Older files omit this and start with none open.
+    pub side_panels: Vec<tabs::DockRecord>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -135,6 +137,7 @@ pub fn save_now(app: &AppHandle) -> Result<(), String> {
             .split
             .map(|(left, right, ratio)| SessionSplitFile { left, right, ratio }),
         closed: tabs::closed_for_session(app),
+        side_panels: tabs::saved_dock(app),
     };
     files::write_json(&paths::data_file(app, FILE), &file)
 }
@@ -155,6 +158,7 @@ pub fn shutdown(app: &AppHandle) {
 
 pub fn restore(app: &AppHandle) -> Result<(), String> {
     let mut file: SessionFile = files::read_json(&paths::data_file(app, FILE));
+    let side_panels = std::mem::take(&mut file.side_panels);
     tabs::restore_closed_list(app, std::mem::take(&mut file.closed));
     let restore_all = settings::get(app).startup == "restore";
     let workspaces = tabs::normalize_workspaces(file.workspaces);
@@ -194,6 +198,7 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
     if saved.is_empty() {
         let url = (!restore_all).then(|| tabs::home_url(app).to_string());
         tabs::create_tab(app, url, false, None)?;
+        crate::automation::panel::restore_dock(app, &side_panels);
         return tabs::ensure_bookmarks_host(app, tabs::WINDOW);
     }
     saved.sort_by_key(|tab| !tab.pinned);
@@ -257,6 +262,7 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
     if !restore_all {
         tabs::create_tab(app, Some(tabs::home_url(app).to_string()), false, None)?;
     }
+    crate::automation::panel::restore_dock(app, &side_panels);
     tabs::ensure_bookmarks_host(app, tabs::WINDOW)
 }
 

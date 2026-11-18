@@ -158,18 +158,31 @@ export type WindowTabs = {
   peekUrl: string | null;
   /** Fixed CSS size of the tab that has DevTools open. Null on every other tab. */
   viewport: PageViewport | null;
-  /** The agent panel is docked beside the pages. */
+  /** The agent panel is in the dock, including while its rail is collapsed. */
   agentPanel: boolean;
-  /** The automations panel is docked beside the pages. */
+  /** The automations panel is in the dock, including while its rail is collapsed. */
   automationPanel: boolean;
-  /** The scripting panel is docked beside the pages. */
+  /** The scripting panel is in the dock, including while its rail is collapsed. */
   scriptingPanel: boolean;
-  /** Host extension id docked beside the pages. Empty when another panel is open or the column is closed. */
+  /** First extension id in the dock. Empty when no extension panel is open. */
   hostPanel: string;
-  /** Width of the docked side column in CSS pixels. Zero when it is closed. */
+  /** Sum of the docked columns, in CSS pixels. Zero when the dock is closed. */
   sidePanelWidth: number;
-  /** Which side of the pages that column occupies. Empty when it is closed. */
+  /** `left` or `right` when every open column shares that side. Empty when the dock is closed or split across both sides. */
   sidePanelEdge: "" | "left" | "right";
+  /** Open panels, nearest to the page first within each edge. */
+  sidePanels: SidePanelInfo[];
+};
+
+/** One docked panel. `width` is the expanded column; a collapsed panel is a rail. */
+export type SidePanelInfo = {
+  id: string;
+  title: string;
+  edge: "left" | "right";
+  width: number;
+  collapsed: boolean;
+  extensionId: string;
+  resizable: boolean;
 };
 
 export type RewriteRule = {
@@ -441,12 +454,19 @@ export type UserScript = {
 
 export type ScriptLanguage = "javascript" | "typescript" | "python" | "css";
 
+/** `domain` runs on every page of the host. `url` runs only on the stored address. */
+export type ScriptScope = "domain" | "url";
+
 /** One script stored for a site in `scripting.json`. */
 export type PageScript = {
   id: string;
   name: string;
   /** Host without a leading `www.`. Subdomains of this host match too. */
   domain: string;
+  /** Full page address, without a hash or a trailing slash. */
+  url: string;
+  /** Where the script runs. Older files omit this and run on the whole domain. */
+  scope: ScriptScope;
   language: ScriptLanguage;
   enabled: boolean;
   /** Run again each time a matching page loads. */

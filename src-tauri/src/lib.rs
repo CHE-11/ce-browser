@@ -2656,7 +2656,63 @@ async fn resize_agent_panel(app: AppHandle, window: Window) -> Result<(), String
 
 #[tauri::command]
 async fn set_agent_panel_width(app: AppHandle, window: Window, width: f64) -> Result<(), String> {
-    automation::panel::set_width(&app, &browser_window(&window), width)
+    automation::panel::set_width(
+        &app,
+        &browser_window(&window),
+        tabs::AGENT_PANEL_ID,
+        width,
+    )
+}
+
+#[tauri::command]
+async fn collapse_side_panel(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    collapsed: Option<bool>,
+) -> Result<(), String> {
+    let window = browser_window(&window);
+    let next = collapsed.unwrap_or_else(|| {
+        !tabs::dock_entry(&app, &window, &id).is_some_and(|entry| entry.collapsed)
+    });
+    tabs::set_dock_collapsed(&app, &window, &id, next);
+    Ok(())
+}
+
+#[tauri::command]
+async fn close_side_panel(app: AppHandle, window: Window, id: String) -> Result<(), String> {
+    tabs::close_dock_panel(&app, &browser_window(&window), &id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn resize_side_panel(app: AppHandle, window: Window, id: String) -> Result<(), String> {
+    let window = browser_window(&window);
+    blocking(move || automation::panel::track_panel_resize(&app, &window, &id)).await
+}
+
+#[tauri::command]
+async fn reorder_side_panel(app: AppHandle, window: Window, id: String) -> Result<(), String> {
+    let window = browser_window(&window);
+    blocking(move || automation::panel::track_reorder(&app, &window, &id)).await
+}
+
+#[tauri::command]
+async fn nudge_side_panel(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    delta: f64,
+) -> Result<(), String> {
+    let window = browser_window(&window);
+    let current = tabs::dock_entry(&app, &window, &id)
+        .filter(|entry| !entry.collapsed)
+        .map(|entry| entry.width)
+        .unwrap_or(0.0);
+    if current <= 0.0 {
+        return Ok(());
+    }
+    automation::panel::set_width(&app, &window, &id, current + delta)
 }
 
 #[tauri::command]
@@ -3442,6 +3498,11 @@ pub fn run() {
             open_scripting_window,
             resize_agent_panel,
             set_agent_panel_width,
+            collapse_side_panel,
+            close_side_panel,
+            resize_side_panel,
+            reorder_side_panel,
+            nudge_side_panel,
             automation_secret_names,
             set_automation_secret,
             clear_automation_secret,

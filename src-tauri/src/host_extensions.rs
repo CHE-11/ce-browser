@@ -704,16 +704,21 @@ pub fn toggle_panel(app: &AppHandle, window: &str, id: &str) -> Result<bool, Str
     if panel_path.is_empty() {
         return Err("That extension has no side panel.".into());
     }
-    let showing = tabs::side_panel(app, window) == tabs::SidePanel::Host
-        && tabs::host_panel_extension(app, window) == id
-        && tabs::agent_panel_width(app, window) > 0.0;
-    if showing {
-        tabs::set_side_panel(app, window, tabs::SidePanel::None, 0.0);
+    let panel_id = tabs::extension_panel_id(&id);
+    if tabs::dock_contains(app, window, &panel_id) {
+        tabs::close_dock_panel(app, window, &panel_id);
         return Ok(false);
     }
+    show_host_panel(app, window, &loaded)?;
+    Ok(true)
+}
+
+fn show_host_panel(app: &AppHandle, window: &str, loaded: &Loaded) -> Result<(), String> {
+    let id = loaded.record.id.as_str();
+    let panel_path = loaded.manifest.panel_path();
     let layout = resolve_panel(&loaded.record, &loaded.manifest);
-    let url = file_url(&id, panel_path)?;
-    let label = tabs::host_panel_label(window);
+    let url = file_url(id, panel_path)?;
+    let label = tabs::host_panel_label(window, id);
     eprintln!("panel: open host extension {id} in {window} at {url}");
     ensure_child(app, window, &label, url.clone()).map_err(|error| {
         eprintln!("panel: {label} was not created: {error}");
@@ -725,17 +730,50 @@ pub fn toggle_panel(app: &AppHandle, window: &str, id: &str) -> Result<bool, Str
     } else {
         f64::from(layout.default_width)
     };
-    let width = fitted_panel_width(app, window, wanted, &layout);
+    let width = fitted_panel_width(app, window, wanted, &layout, id);
     // Place the column before navigating. The extension lays out against the size it
     // first sees, and a navigation started while the view is still parked often loses
     // to the initial about:blank load.
-    tabs::open_host_panel(app, window, &id, width, layout.edge);
+    tabs::open_host_panel(
+        app,
+        window,
+        id,
+        &loaded.manifest.name,
+        width,
+        layout.edge,
+        f64::from(layout.min_width),
+        layout.resizable,
+    );
     reveal_panel_document(app, &label, &url);
-    post_panel_chrome(app, window, &layout);
-    if let Some(view) = app.get_webview(&label) {
+    post_panel_chrome(app, &label, &layout);
+    if tabs::dock_expanded(app, window, &tabs::extension_panel_id(id))
+        && let Some(view) = app.get_webview(&label)
+    {
         let _ = view.set_focus();
     }
-    Ok(true)
+    Ok(())
+}
+
+/// Opens one extension panel from a restored session. Host folders win over store extensions.
+pub fn reopen_extension_panel(
+    app: &AppHandle,
+    window: &str,
+    id: &str,
+    edge: tabs::PanelEdge,
+    width: f64,
+) -> Result<(), String> {
+    if let Ok(mut loaded) = require_enabled(app, id) {
+        loaded.record.panel_side = match edge {
+            tabs::PanelEdge::Left => "left".to_string(),
+            tabs::PanelEdge::Right => "right".to_string(),
+        };
+        if width > 0.0 {
+            loaded.record.panel_width = width.round().clamp(0.0, u32::MAX as f64) as u32;
+        }
+        return show_host_panel(app, window, &loaded);
+    }
+    let url = crate::extensions::store_panel_url(app, id)?;
+    open_store_panel(app, window, id, url, edge, Some(width))
 }
 
 pub fn place_bookmarks_bar(app: &AppHandle, window: &str, x: f64, y: f64, width: f64, height: f64) {
@@ -1323,11 +1361,10 @@ fn remember_panel_target(label: &str, url: &str, fresh: bool) {
 }
 
 fn panel_column_open(app: &AppHandle, label: &str) -> bool {
-    let Some(window) = label.strip_prefix("cext-panel-") else {
+    let Some((window, id)) = tabs::split_host_panel_label(label) else {
         return false;
     };
-    tabs::side_panel(app, window) == tabs::SidePanel::Host
-        && tabs::agent_panel_width(app, window) > 0.0
+    tabs::dock_expanded(app, &window, &tabs::extension_panel_id(&id))
 }
 
 fn panel_bounds(view: &Webview) -> String {
@@ -1414,10 +1451,10 @@ fn check_panel_document(app: &AppHandle, label: &str) {
     let place = panel_bounds(&view);
     eprintln!("panel: check {label} at {place} url={current}");
     if panel_is_parked(&view)
-        && let Some(window) = label.strip_prefix("cext-panel-")
+        && let Some((window, _)) = tabs::split_host_panel_label(label)
     {
         eprintln!("panel: {label} is off screen while its column is open");
-        tabs::layout(app, window);
+        tabs::layout(app, &window);
     }
     if panel_document_ready(&current, &wanted) {
         repost_panel_chrome(app, label);
@@ -1599,25 +1636,21 @@ fn watch_panel_navigation(app: &AppHandle, view: &Webview, label: &str) {
 }
 
 fn repost_panel_chrome(app: &AppHandle, label: &str) {
-    let Some(window) = label.strip_prefix("cext-panel-") else {
+    let Some((_window, id)) = tabs::split_host_panel_label(label) else {
         return;
     };
-    let id = tabs::host_panel_extension(app, window);
-    if id.is_empty() {
-        return;
-    }
     if state(app).iter().any(|record| record.id == id) {
         let Ok(loaded) = require_enabled(app, &id) else {
             eprintln!("panel: {label} belongs to {id}, which is not enabled");
             return;
         };
         let layout = resolve_panel(&loaded.record, &loaded.manifest);
-        post_panel_chrome(app, window, &layout);
+        post_panel_chrome(app, label, &layout);
         return;
     }
     post_store_panel_chrome(
         app,
-        window,
+        label,
         store_panel_edge(app, &id),
         store_panel_resizable(app, &id),
     );
@@ -1644,8 +1677,8 @@ fn settle_panel_navigation(app: &AppHandle, label: &str, success: bool, code: &s
 
 /// The browser window a store popover or side panel belongs to.
 fn extension_surface_window(label: &str) -> String {
-    if let Some(window) = label.strip_prefix("cext-panel-") {
-        return window.to_string();
+    if let Some((window, _)) = tabs::split_host_panel_label(label) {
+        return window;
     }
     crate::popup::owner_of(label)
 }
@@ -1847,7 +1880,7 @@ fn open_called_side_panel(app: &AppHandle, label: &str) {
         return;
     };
     let window = surface_window(app, label);
-    if let Err(error) = open_store_panel(app, &window, &id, page, store_panel_edge(app, &id)) {
+    if let Err(error) = open_store_panel(app, &window, &id, page, store_panel_edge(app, &id), None) {
         eprintln!("panel: {error}");
     }
 }
@@ -1859,17 +1892,13 @@ fn apply_chrome_action(app: &AppHandle, label: &str, action: &str, side: &str) {
         apply_popup_chrome(app, label, action, side);
         return;
     }
-    if let Some(window) = label.strip_prefix("cext-panel-") {
-        let id = tabs::host_panel_extension(app, window);
-        if id.is_empty() {
-            return;
-        }
+    if let Some((window, id)) = tabs::split_host_panel_label(label) {
         if !state(app).iter().any(|record| record.id == id) {
-            apply_store_panel_chrome(app, window, &id, action, side);
+            apply_store_panel_chrome(app, &window, &id, action, side);
             return;
         }
         let result = if action == "close" {
-            toggle_panel(app, window, &id).map(|_| ())
+            toggle_panel(app, &window, &id).map(|_| ())
         } else if action == "side" {
             set_panel_layout(app, &id, side)
         } else {
@@ -2700,7 +2729,13 @@ fn panel_chrome_payload(loaded: &Loaded) -> Value {
     })
 }
 
-fn fitted_panel_width(app: &AppHandle, window: &str, wanted: f64, layout: &ResolvedPanel) -> f64 {
+fn fitted_panel_width(
+    app: &AppHandle,
+    window: &str,
+    wanted: f64,
+    layout: &ResolvedPanel,
+    extension_id: &str,
+) -> f64 {
     let min = if layout.resizable {
         f64::from(layout.min_width)
     } else {
@@ -2723,7 +2758,8 @@ fn fitted_panel_width(app: &AppHandle, window: &str, wanted: f64, layout: &Resol
     let (left, right) = tabs::page_insets(app, window)
         .map(|(_, left, right, _)| (left, right))
         .unwrap_or((0.0, 0.0));
-    let room = client - left.max(0.0) - right.max(0.0) - PAGE_RESERVE;
+    let others = tabs::other_columns(app, window, &tabs::extension_panel_id(extension_id));
+    let room = client - left.max(0.0) - right.max(0.0) - others - PAGE_RESERVE;
     let cap = if room.is_finite() {
         room.min(max).max(min)
     } else {
@@ -2751,7 +2787,7 @@ fn apply_popup_chrome(app: &AppHandle, label: &str, action: &str, side: &str) {
                 return;
             };
             if showing_store_panel(app, &window, &id) == side {
-                tabs::set_side_panel(app, &window, tabs::SidePanel::None, 0.0);
+                tabs::close_dock_panel(app, &window, &tabs::extension_panel_id(&id));
                 announce_popup_chrome(app, label);
                 return;
             }
@@ -2764,7 +2800,7 @@ fn apply_popup_chrome(app: &AppHandle, label: &str, action: &str, side: &str) {
             } else {
                 tabs::PanelEdge::Right
             };
-            if let Err(error) = open_store_panel(app, &window, &id, url, edge) {
+            if let Err(error) = open_store_panel(app, &window, &id, url, edge, None) {
                 eprintln!("panel: {error}");
             }
             crate::popup::close_level(app, label);
@@ -2784,7 +2820,7 @@ fn apply_popup_chrome(app: &AppHandle, label: &str, action: &str, side: &str) {
 
 fn apply_store_panel_chrome(app: &AppHandle, window: &str, id: &str, action: &str, side: &str) {
     if action == "close" {
-        tabs::set_side_panel(app, window, tabs::SidePanel::None, 0.0);
+        tabs::close_dock_panel(app, window, &tabs::extension_panel_id(id));
         return;
     }
     if action == "resize" {
@@ -2813,14 +2849,23 @@ fn apply_store_panel_chrome(app: &AppHandle, window: &str, id: &str, action: &st
         tabs::PanelEdge::Right
     };
     let width = store_panel_width(app, id);
-    tabs::open_host_panel(app, window, id, width, edge);
-    let label = tabs::host_panel_label(window);
+    let label = tabs::host_panel_label(window, id);
+    tabs::open_host_panel(
+        app,
+        window,
+        id,
+        &store_panel_title(app, id),
+        width,
+        edge,
+        f64::from(PANEL_MIN),
+        store_panel_resizable(app, id),
+    );
     if let Some(wanted) = panel_target_url(&label)
         && let Ok(url) = Url::parse(&wanted)
     {
         reveal_panel_document(app, &label, &url);
     }
-    post_store_panel_chrome(app, window, edge, store_panel_resizable(app, id));
+    post_store_panel_chrome(app, &label, edge, store_panel_resizable(app, id));
 }
 
 /// Opens a store extension's popup page in the side panel, or closes it when that panel is already showing.
@@ -2830,11 +2875,11 @@ pub fn toggle_store_extension_panel(
     id: &str,
 ) -> Result<bool, String> {
     if !showing_store_panel(app, window, id).is_empty() {
-        tabs::set_side_panel(app, window, tabs::SidePanel::None, 0.0);
+        tabs::close_dock_panel(app, window, &tabs::extension_panel_id(id));
         return Ok(false);
     }
     let url = crate::extensions::store_panel_url(app, id)?;
-    open_store_panel(app, window, id, url, store_panel_edge(app, id))?;
+    open_store_panel(app, window, id, url, store_panel_edge(app, id), None)?;
     Ok(true)
 }
 
@@ -2844,7 +2889,7 @@ pub fn place_store_extension_panel(app: &AppHandle, window: &str, id: &str) -> R
         return Ok(());
     }
     let url = crate::extensions::store_panel_url(app, id)?;
-    open_store_panel(app, window, id, url, store_panel_edge(app, id))?;
+    open_store_panel(app, window, id, url, store_panel_edge(app, id), None)?;
     Ok(())
 }
 
@@ -2900,6 +2945,7 @@ fn resize_store_panel(app: &AppHandle, window: &str, id: &str) {
         app,
         window,
         crate::automation::panel::ColumnDrag {
+            id: tabs::extension_panel_id(id),
             edge: store_panel_edge(app, id),
             min: f64::from(PANEL_MIN),
             max: f64::from(PANEL_MAX),
@@ -2936,25 +2982,77 @@ fn open_store_panel(
     id: &str,
     url: Url,
     edge: tabs::PanelEdge,
+    width_override: Option<f64>,
 ) -> Result<(), String> {
-    let label = tabs::host_panel_label(window);
+    let label = tabs::host_panel_label(window, id);
     eprintln!("panel: open store extension {id} in {window} at {url}");
     ensure_child(app, window, &label, url.clone()).map_err(|error| {
         eprintln!("panel: {label} was not created: {error}");
         error
     })?;
     remember_panel_target(&label, url.as_str(), true);
-    let width = store_panel_width(app, id);
-    tabs::open_host_panel(app, window, id, width, edge);
+    let width = width_override
+        .filter(|width| width.is_finite() && *width > 0.0)
+        .unwrap_or_else(|| store_panel_width(app, id));
+    tabs::open_host_panel(
+        app,
+        window,
+        id,
+        &store_panel_title(app, id),
+        width,
+        edge,
+        f64::from(PANEL_MIN),
+        store_panel_resizable(app, id),
+    );
     reveal_panel_document(app, &label, &url);
-    post_store_panel_chrome(app, window, edge, store_panel_resizable(app, id));
+    post_store_panel_chrome(app, &label, edge, store_panel_resizable(app, id));
     Ok(())
 }
 
-fn post_store_panel_chrome(app: &AppHandle, window: &str, edge: tabs::PanelEdge, resizable: bool) {
+fn store_panel_title(app: &AppHandle, id: &str) -> String {
+    crate::extensions::list(app)
+        .ok()
+        .and_then(|list| {
+            list.into_iter()
+                .find(|extension| extension.id == id)
+                .map(|extension| extension.name)
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| id.to_string())
+}
+
+/// Min, max, and fallback width for an extension panel drag. `None` when that panel cannot be resized.
+pub fn extension_panel_limits(app: &AppHandle, id: &str) -> Option<(f64, f64, f64)> {
+    if let Ok(loaded) = require_enabled(app, id) {
+        let layout = resolve_panel(&loaded.record, &loaded.manifest);
+        if !layout.resizable {
+            return None;
+        }
+        let fallback = if loaded.record.panel_width > 0 {
+            f64::from(loaded.record.panel_width)
+        } else {
+            f64::from(layout.default_width)
+        };
+        return Some((
+            f64::from(layout.min_width),
+            f64::from(layout.max_width),
+            fallback,
+        ));
+    }
+    if !store_panel_resizable(app, id) {
+        return None;
+    }
+    Some((
+        f64::from(PANEL_MIN),
+        f64::from(PANEL_MAX),
+        store_panel_width(app, id),
+    ))
+}
+
+fn post_store_panel_chrome(app: &AppHandle, label: &str, edge: tabs::PanelEdge, resizable: bool) {
     post_label(
         app,
-        &tabs::host_panel_label(window),
+        label,
         &json!({
             "type": "ce-panel",
             "side": if edge == tabs::PanelEdge::Left { "left" } else { "right" },
@@ -2975,16 +3073,13 @@ fn chrome_extension_id(url: &str) -> Option<String> {
 }
 
 fn showing_store_panel(app: &AppHandle, window: &str, id: &str) -> String {
-    if id.is_empty()
-        || tabs::side_panel(app, window) != tabs::SidePanel::Host
-        || tabs::host_panel_extension(app, window) != id
-        || tabs::agent_panel_width(app, window) <= 0.0
-    {
+    if id.is_empty() {
         return String::new();
     }
-    match tabs::host_panel_edge(app, window) {
-        tabs::PanelEdge::Left => "left".to_string(),
-        tabs::PanelEdge::Right => "right".to_string(),
+    match tabs::dock_entry(app, window, &tabs::extension_panel_id(id)).map(|entry| entry.edge) {
+        Some(tabs::PanelEdge::Left) => "left".to_string(),
+        Some(tabs::PanelEdge::Right) => "right".to_string(),
+        None => String::new(),
     }
 }
 
@@ -3006,10 +3101,10 @@ pub fn announce_popup_chrome(app: &AppHandle, label: &str) {
     );
 }
 
-fn post_panel_chrome(app: &AppHandle, window: &str, layout: &ResolvedPanel) {
+fn post_panel_chrome(app: &AppHandle, label: &str, layout: &ResolvedPanel) {
     post_label(
         app,
-        &tabs::host_panel_label(window),
+        label,
         &json!({
             "type": "ce-panel",
             "side": if layout.edge == tabs::PanelEdge::Left { "left" } else { "right" },
@@ -3019,9 +3114,14 @@ fn post_panel_chrome(app: &AppHandle, window: &str, layout: &ResolvedPanel) {
 }
 
 fn close_panels_for(app: &AppHandle, id: &str) {
+    let panel_id = tabs::extension_panel_id(id);
     for window in tabs::snapshot(app).windows {
-        if tabs::host_panel_extension(app, &window.label) == id {
-            tabs::set_side_panel(app, &window.label, tabs::SidePanel::None, 0.0);
+        if tabs::dock_contains(app, &window.label, &panel_id) {
+            tabs::close_dock_panel(app, &window.label, &panel_id);
+        }
+        let label = tabs::host_panel_label(&window.label, id);
+        if let Some(view) = app.get_webview(&label) {
+            let _ = view.close();
         }
     }
 }
@@ -3066,17 +3166,26 @@ fn apply_open_panel(app: &AppHandle, id: &str) {
         file_url(id, &panel_path).ok()
     };
     for window in tabs::snapshot(app).windows {
-        if tabs::host_panel_extension(app, &window.label) != id {
+        if !tabs::dock_contains(app, &window.label, &tabs::extension_panel_id(id)) {
             continue;
         }
-        let width = fitted_panel_width(app, &window.label, wanted, &layout);
-        tabs::open_host_panel(app, &window.label, id, width, layout.edge);
+        let width = fitted_panel_width(app, &window.label, wanted, &layout, id);
+        let label = tabs::host_panel_label(&window.label, id);
+        tabs::open_host_panel(
+            app,
+            &window.label,
+            id,
+            &loaded.manifest.name,
+            width,
+            layout.edge,
+            f64::from(layout.min_width),
+            layout.resizable,
+        );
         if let Some(url) = &url {
-            let label = tabs::host_panel_label(&window.label);
             remember_panel_target(&label, url.as_str(), false);
             reveal_panel_document(app, &label, url);
         }
-        post_panel_chrome(app, &window.label, &layout);
+        post_panel_chrome(app, &label, &layout);
     }
 }
 
@@ -3086,14 +3195,18 @@ fn resize_open_panel(app: &AppHandle, loaded: &Loaded) -> Result<Value, String> 
         return Err("This panel is not resizable.".into());
     }
     let window = tabs::focused_window(app);
-    if tabs::host_panel_extension(app, &window) != loaded.record.id {
+    if !tabs::dock_contains(app, &window, &tabs::extension_panel_id(&loaded.record.id)) {
         return Err("This extension's panel is not open.".into());
     }
+    let edge = tabs::dock_entry(app, &window, &tabs::extension_panel_id(&loaded.record.id))
+        .map(|entry| entry.edge)
+        .unwrap_or(layout.edge);
     let width = crate::automation::panel::track_column(
         app,
         &window,
         crate::automation::panel::ColumnDrag {
-            edge: layout.edge,
+            id: tabs::extension_panel_id(&loaded.record.id),
+            edge,
             min: f64::from(layout.min_width),
             max: f64::from(layout.max_width),
             remember_agent: false,
@@ -4738,9 +4851,12 @@ mod tests {
 
     #[test]
     fn a_store_panel_belongs_to_its_browser_window() {
-        assert_eq!(super::extension_surface_window("cext-panel-main"), "main");
         assert_eq!(
-            super::extension_surface_window("cext-panel-main-2"),
+            super::extension_surface_window("cext-panel-main--abcdef"),
+            "main"
+        );
+        assert_eq!(
+            super::extension_surface_window("cext-panel-main-2--abcdef"),
             "main-2"
         );
         assert_eq!(super::extension_surface_window("extpopup-main"), "main");

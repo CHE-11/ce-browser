@@ -1,8 +1,8 @@
-import { Bot, Brain, History, Plus, Settings, X } from "lucide-react";
+import { Bot, Brain, History, Plus, Settings } from "lucide-react";
 import type { AgentAccess, AgentAutonomy, TabInfo } from "@type/browser";
 import { IconButton } from "@/components/IconButton";
 import type { AccessToggle } from "@/lib/agent-access";
-import { activateTab, createTab, navigate, toggleAgentPanel } from "@/lib/browser-client";
+import { activateTab, createTab, navigate } from "@/lib/browser-client";
 import { AgentAutonomyPicker } from "./AgentAutonomyPicker";
 import { AgentChatSettingsMenu } from "./AgentChatSettingsMenu";
 
@@ -92,9 +92,6 @@ export function AgentHeader({
         </IconButton>
         <IconButton id="agent-panel-settings" label="AI/Agent settings" className="size-7" onClick={() => openAiSettings(tabs)}>
           <Settings id="agent-panel-settings-icon" aria-hidden />
-        </IconButton>
-        <IconButton id="agent-panel-close" label="Close the agent panel" className="size-7" onClick={() => void toggleAgentPanel(false)}>
-          <X id="agent-panel-close-icon" aria-hidden />
         </IconButton>
       </header>
       <div id="agent-panel-options" className="flex items-center justify-between gap-2 px-3 pb-2">

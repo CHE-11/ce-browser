@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Circle, ExternalLink, Plus, Square, Workflow } from "lucide-react";
 import type { Flow, FlowRun, FlowStep, TabInfo } from "@type/browser";
 import { Button } from "@/components/Button";
@@ -12,9 +12,7 @@ import {
   exportFlow,
   openAutomations,
   removeRecordedStep,
-  resizeAgentPanel,
   runFlow,
-  setAgentPanelWidth,
   setFlowPaused,
   startFlowRecording,
   stopFlowRecording,
@@ -23,21 +21,12 @@ import {
 import { cn } from "@/lib/cn";
 import { focusRow } from "@/lib/focus-ring";
 import { NEW_FLOW } from "@/lib/use-automations-route";
-import { useAppearanceState, useAutomations, useSettings, useTabs } from "@/lib/use-browser";
+import { useAppearanceState, useAutomations, useTabs } from "@/lib/use-browser";
 import { AutomationsPanelHeader, type AutomationsPanelView } from "./AutomationsPanelHeader";
 import { FlowContextMenu, type FlowAction } from "./FlowContextMenu";
 import { FlowEditor, type FlowEditorAction, type FlowEditorTab } from "./FlowEditor";
 import { blankFlow, statusDot, stepKindLabel, stepSummary } from "./flow-model";
 import { RunShotDialog, type RunShot } from "./RunShotDialog";
-
-const MIN_PANEL_WIDTH = 280;
-/** Keyboard resize asks for this much. The window still stops the column at half the page. */
-const MAX_PANEL_WIDTH = 8192;
-const DEFAULT_PANEL_WIDTH = 380;
-
-function clampPanelWidth(width: number) {
-  return Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
-}
 
 function pageTab(tab: TabInfo | undefined) {
   return tab && /^(https?|file):/i.test(tab.url) && !tab.automated ? tab : undefined;
@@ -53,12 +42,8 @@ function when(ms: number) {
 /** The docked column beside the pages: flows, a live recording, and recent runs. */
 export function AutomationsPanelPage() {
   useAppearanceState();
-  const settings = useSettings();
   const tabs = useTabs();
   const { snapshot } = useAutomations();
-  const width = settings?.agentPanelWidth ?? DEFAULT_PANEL_WIDTH;
-  const resizing = useRef(false);
-  const [resizingPanel, setResizingPanel] = useState(false);
   const [view, setView] = useState<AutomationsPanelView>("flows");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -130,33 +115,6 @@ export function AutomationsPanelPage() {
         finishLeave(next);
       }
     });
-  };
-
-  const onResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || resizing.current) {
-      return;
-    }
-    event.preventDefault();
-    resizing.current = true;
-    setResizingPanel(true);
-    void resizeAgentPanel().finally(() => {
-      resizing.current = false;
-      setResizingPanel(false);
-    });
-  };
-
-  const onResizeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step = event.shiftKey ? 64 : 16;
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      void setAgentPanelWidth(clampPanelWidth(width + step));
-    } else if (event.key === "ArrowRight") {
-      event.preventDefault();
-      void setAgentPanelWidth(clampPanelWidth(width - step));
-    } else if (event.key === "Home") {
-      event.preventDefault();
-      void setAgentPanelWidth(DEFAULT_PANEL_WIDTH);
-    }
   };
 
   const fail = (reason: unknown) => setNotice(reason instanceof Error ? reason.message : String(reason));
@@ -277,26 +235,9 @@ export function AutomationsPanelPage() {
   return (
     <div
       id="automations-panel"
-      className={cn("relative flex h-screen flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100", resizingPanel && "cursor-col-resize select-none")}
+      className="relative flex h-screen flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100"
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div
-        id="automations-panel-resize"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize the automations panel"
-        aria-valuemin={MIN_PANEL_WIDTH}
-        aria-valuemax={MAX_PANEL_WIDTH}
-        aria-valuenow={width}
-        tabIndex={0}
-        title="Drag to resize. Left and right arrows change the width."
-        className={cn(
-          "absolute inset-y-0 left-0 z-20 w-1.5 cursor-col-resize touch-none hover:bg-rose-500/40 focus-visible:bg-rose-500/40 focus-visible:outline-none",
-          resizingPanel && "bg-rose-500/50",
-        )}
-        onPointerDown={onResizePointerDown}
-        onKeyDown={onResizeKeyDown}
-      />
       <AutomationsPanelHeader
         view={view}
         flowCount={flows.length}

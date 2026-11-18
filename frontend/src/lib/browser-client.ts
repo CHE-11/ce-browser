@@ -87,6 +87,7 @@ import type {
   PageScript,
   PageTechnologies,
   ScriptFile,
+  SidePanelInfo,
   ScriptRun,
   PageToolRequest,
   SiteFavicon,
@@ -2255,6 +2256,37 @@ export function openScriptingWindow() {
 /** Follows the mouse until the button comes up and remembers the agent panel width. */
 export function resizeAgentPanel() {
   return invoke<void>("resize_agent_panel");
+}
+
+export function collapseSidePanel(id: string, collapsed?: boolean) {
+  return invoke<void>("collapse_side_panel", { id, collapsed: collapsed ?? null });
+}
+
+export function closeSidePanel(id: string) {
+  return invoke<void>("close_side_panel", { id });
+}
+
+/** Follows the mouse and resizes one docked panel. */
+export function resizeSidePanel(id: string) {
+  return invoke<void>("resize_side_panel", { id });
+}
+
+/** Follows the mouse and reorders one docked panel along its edge. */
+export function reorderSidePanel(id: string) {
+  return invoke<void>("reorder_side_panel", { id });
+}
+
+export function nudgeSidePanel(id: string, delta: number) {
+  return invoke<void>("nudge_side_panel", { id, delta });
+}
+
+export type SidePanelsLayout = {
+  label: string;
+  sidePanels: SidePanelInfo[];
+};
+
+export function onSidePanelsLayout(handler: (layout: SidePanelsLayout) => void): Promise<UnlistenFn> {
+  return listen<SidePanelsLayout>("side-panels-layout", (event) => handler(event.payload));
 }
 
 /** Sets the open agent panel width in CSS pixels and remembers it. */

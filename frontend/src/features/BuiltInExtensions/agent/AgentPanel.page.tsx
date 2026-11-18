@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Bot, Hand, Play, Square } from "lucide-react";
 import type { AgentAutonomy, BrowserSettings } from "@type/browser";
 import { Button } from "@/components/Button";
@@ -6,8 +6,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { withDefaults, type AccessToggle } from "@/lib/agent-access";
 import { parseAgentInput, type ComposerMode } from "@/lib/agent-commands";
 import { AI_INPUT_TOKENS, AI_OUTPUT_TOKENS } from "@/lib/ai/token-limits";
-import { agentMemorySave, resizeAgentPanel, saveSettings, setAgentPanelWidth } from "@/lib/browser-client";
-import { cn } from "@/lib/cn";
+import { agentMemorySave, saveSettings } from "@/lib/browser-client";
 import { useAgentStream } from "@/lib/use-agent-stream";
 import { isActiveRun, useAgentRun } from "@/lib/use-agent-run";
 import { useAppearanceState, useSettings, useTabs } from "@/lib/use-browser";
@@ -24,14 +23,6 @@ import { AgentResult } from "./AgentResult";
 import { AgentRunList } from "./AgentRunList";
 import { AgentTimeline } from "./AgentTimeline";
 import { formatTokens } from "./agent-styles";
-
-const MIN_PANEL_WIDTH = 280;
-const MAX_PANEL_WIDTH = 720;
-const DEFAULT_PANEL_WIDTH = 380;
-
-function clampPanelWidth(width: number) {
-  return Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, Math.round(width)));
-}
 
 /** Host of a web page without `www.`, or blank for other pages. */
 function siteOf(url: string) {
@@ -61,14 +52,11 @@ export function AgentPanelPage() {
   const { run, runs, activeTab } = agent;
   const active = isActiveRun(run);
   const stream = useAgentStream(active && run ? run.id : null);
-  const width = settings?.agentPanelWidth ?? DEFAULT_PANEL_WIDTH;
   const settingsRef = useRef(settings);
   const settingsWrites = useRef(0);
   if (settings && settingsWrites.current === 0) {
     settingsRef.current = settings;
   }
-  const resizing = useRef(false);
-  const [resizingPanel, setResizingPanel] = useState(false);
   const [view, setView] = useState<AgentPanelView>("run");
   const [notice, setNotice] = useState<string | null>(null);
   const [composerFocus, setComposerFocus] = useState(0);
@@ -113,33 +101,6 @@ export function AgentPanelPage() {
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [escapeRun]);
-
-  const onResizePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || resizing.current) {
-      return;
-    }
-    event.preventDefault();
-    resizing.current = true;
-    setResizingPanel(true);
-    void resizeAgentPanel().finally(() => {
-      resizing.current = false;
-      setResizingPanel(false);
-    });
-  };
-
-  const onResizeKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step = event.shiftKey ? 64 : 16;
-    if (event.key === "ArrowLeft") {
-      event.preventDefault();
-      void setAgentPanelWidth(clampPanelWidth(width + step));
-    } else if (event.key === "ArrowRight") {
-      event.preventDefault();
-      void setAgentPanelWidth(clampPanelWidth(width - step));
-    } else if (event.key === "Home") {
-      event.preventDefault();
-      void setAgentPanelWidth(DEFAULT_PANEL_WIDTH);
-    }
-  };
 
   const mode: ComposerMode = !run ? "start" : active ? "reply" : run.source === "agent" ? "followup" : "start";
   const showRunAutonomy = !!run && active && run.source === "agent";
@@ -205,26 +166,9 @@ export function AgentPanelPage() {
   return (
     <div
       id="agent-panel"
-      className={cn("relative flex h-screen flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100", resizingPanel && "cursor-col-resize select-none")}
+      className="relative flex h-screen flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100"
       onContextMenu={(event) => event.preventDefault()}
     >
-      <div
-        id="agent-panel-resize"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize the agent panel"
-        aria-valuemin={MIN_PANEL_WIDTH}
-        aria-valuemax={MAX_PANEL_WIDTH}
-        aria-valuenow={width}
-        tabIndex={0}
-        title="Drag to resize. Left and right arrows change the width."
-        className={cn(
-          "absolute inset-y-0 left-0 z-20 w-1.5 cursor-col-resize touch-none hover:bg-sky-500/40 focus-visible:bg-sky-500/40 focus-visible:outline-none",
-          resizingPanel && "bg-sky-500/50",
-        )}
-        onPointerDown={onResizePointerDown}
-        onKeyDown={onResizeKeyDown}
-      />
       <AgentHeader
         tabs={tabs.windowTabs}
         view={view}
