@@ -38,6 +38,8 @@ pub struct SessionTabFile {
     pub workspace: String,
     pub refresh_secs: u32,
     pub watch_changes: bool,
+    /// Panels open on this tab. Older files omit it.
+    pub side_panels: Vec<tabs::DockRecord>,
     /// Position in the file, so the split can find its tabs after pins are merged and sorted.
     #[serde(skip)]
     pub origin: Option<usize>,
@@ -116,6 +118,7 @@ pub fn save_now(app: &AppHandle) -> Result<(), String> {
                 workspace: tab.workspace,
                 refresh_secs: tab.refresh_secs,
                 watch_changes: tab.watch_changes,
+                side_panels: tab.side_panels,
                 origin: None,
             })
             .collect(),
@@ -234,6 +237,7 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
     } else {
         Vec::new()
     };
+    let per_tab = saved.iter().any(|tab| !tab.side_panels.is_empty());
     let restored = saved
         .into_iter()
         .map(|tab| tabs::SessionTab {
@@ -246,6 +250,7 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
             workspace: tab.workspace,
             refresh_secs: if restore_all { tab.refresh_secs } else { 0 },
             watch_changes: restore_all && tab.watch_changes,
+            side_panels: tab.side_panels,
         })
         .collect();
     tabs::restore(
@@ -262,7 +267,10 @@ pub fn restore(app: &AppHandle) -> Result<(), String> {
     if !restore_all {
         tabs::create_tab(app, Some(tabs::home_url(app).to_string()), false, None)?;
     }
-    crate::automation::panel::restore_dock(app, &side_panels);
+    // A file from before panels belonged to tabs keeps that dock on the tab that is showing.
+    if !per_tab {
+        crate::automation::panel::restore_dock(app, &side_panels);
+    }
     tabs::ensure_bookmarks_host(app, tabs::WINDOW)
 }
 
@@ -343,11 +351,23 @@ mod tests {
         assert!(file.groups.is_empty());
         assert!(file.split.is_none());
         assert!(file.closed.is_empty());
+        assert!(file.side_panels.is_empty());
+        assert!(file.tabs[0].side_panels.is_empty());
         assert!(
             crate::tabs::normalize_workspaces(file.workspaces)
                 .iter()
                 .any(|workspace| workspace.id == crate::tabs::DEFAULT_WORKSPACE)
         );
+    }
+
+    #[test]
+    fn a_tab_stores_its_own_panels() {
+        let file: SessionFile = serde_json::from_str(
+            r#"{"tabs":[{"url":"https://a.example","sidePanels":[{"id":"scripting","title":"Scripting","edge":"right","width":480,"collapsed":false}]}],"sidePanels":[{"id":"agent","title":"Agent","edge":"right","width":360,"collapsed":false}]}"#,
+        )
+        .expect("session parse");
+        assert_eq!(file.tabs[0].side_panels[0].id, "scripting");
+        assert_eq!(file.side_panels[0].id, "agent");
     }
 
     #[test]

@@ -755,7 +755,7 @@ pub fn open_scripting_window(app: &AppHandle, owner: &str) -> Result<(), String>
     Ok(())
 }
 
-/// Reopens the dock saved in the session. Missing extensions are skipped.
+/// Reopens the dock saved in the session onto the active tab. Missing extensions are skipped.
 pub fn restore_dock(app: &AppHandle, panels: &[tabs::DockRecord]) {
     for panel in panels {
         let id = panel.id.as_str();
@@ -793,6 +793,64 @@ pub fn restore_dock(app: &AppHandle, panels: &[tabs::DockRecord]) {
         };
         if opened && panel.collapsed {
             tabs::set_dock_collapsed(app, tabs::WINDOW, id, true);
+        }
+    }
+}
+
+/// Writes a restored tab's dock without opening those panels on whichever tab is active.
+pub fn install_tab_dock(app: &AppHandle, tab_id: u32, panels: &[tabs::DockRecord]) {
+    let entries = panels
+        .iter()
+        .filter_map(|panel| entry_from_record(app, panel))
+        .collect();
+    tabs::set_tab_panels(app, tab_id, entries);
+}
+
+fn entry_from_record(app: &AppHandle, record: &tabs::DockRecord) -> Option<tabs::DockEntry> {
+    let id = record.id.as_str();
+    if let Some(kind) = builtin_kind(id) {
+        let width = if record.width.is_finite() && record.width >= 1.0 {
+            record.width
+        } else {
+            saved_width(app)
+        };
+        return Some(tabs::DockEntry {
+            id: id.to_string(),
+            title: if record.title.is_empty() {
+                kind.title().to_string()
+            } else {
+                record.title.clone()
+            },
+            edge: tabs::PanelEdge::Right,
+            width,
+            collapsed: record.collapsed,
+            min: panel_min(kind),
+            resizable: true,
+        });
+    }
+    let extension = tabs::extension_id_of(id)?;
+    crate::host_extensions::restored_panel_entry(app, extension, record)
+}
+
+/// Creates a panel webview when the active tab's dock needs one that this window does not have yet.
+pub fn prepare_active_panels(app: &AppHandle, window: &str) {
+    for entry in tabs::dock_panels(app, window) {
+        if let Some(kind) = builtin_kind(&entry.id) {
+            let _ = ensure_kind(app, window, kind);
+        } else if let Some(extension) = tabs::extension_id_of(&entry.id) {
+            let _ = crate::host_extensions::ensure_panel_view(app, window, extension);
+        }
+    }
+}
+
+/// Loads an extension panel document after its column has a real size.
+pub fn reveal_active_panels(app: &AppHandle, window: &str) {
+    for entry in tabs::dock_panels(app, window) {
+        if entry.collapsed {
+            continue;
+        }
+        if let Some(extension) = tabs::extension_id_of(&entry.id) {
+            crate::host_extensions::reveal_panel_if_needed(app, window, extension);
         }
     }
 }

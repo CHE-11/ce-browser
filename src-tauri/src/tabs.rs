@@ -368,6 +368,8 @@ struct Tab {
     accent_locked: bool,
     /// Resident bookmarks page parked off the strip. The webview stays loaded.
     shelf: bool,
+    /// Side panels open on this tab. Switching tabs shows that tab's dock and leaves this one in place.
+    panels: Vec<DockEntry>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -553,8 +555,6 @@ struct WindowChrome {
     ui_right: f64,
     /// Height of the status bar. Zero when it is hidden.
     ui_bottom: f64,
-    /// Panels beside the pages. Order within an edge is nearest to the page first.
-    panels: Vec<DockEntry>,
     fullscreen: bool,
     /// Toast view drawn over the bottom of the pages. Menus open and close without touching it.
     toast: Option<String>,
@@ -588,7 +588,6 @@ impl WindowChrome {
             ui_left: 0.0,
             ui_right: 0.0,
             ui_bottom: 0.0,
-            panels: Vec::new(),
             fullscreen: false,
             toast: None,
             shown: Vec::new(),
@@ -890,6 +889,24 @@ impl TabsState {
         }
     }
 
+    /// Dock shown beside the pages: the active tab's panels. Another tab keeps its own list.
+    fn active_panels(&self, window: &str) -> &[DockEntry] {
+        let Some(id) = self.active_of(window) else {
+            return &[];
+        };
+        self.tabs
+            .iter()
+            .find(|tab| tab.info.id == id)
+            .map(|tab| tab.panels.as_slice())
+            .unwrap_or(&[])
+    }
+
+    fn active_panels_mut(&mut self, window: &str) -> Option<&mut Vec<DockEntry>> {
+        let id = self.active_of(window)?;
+        let index = self.index_of(id)?;
+        Some(&mut self.tabs[index].panels)
+    }
+
     fn snapshot(&self) -> TabsSnapshot {
         let main = self.chrome(WINDOW);
         TabsSnapshot {
@@ -907,35 +924,44 @@ impl TabsState {
             selected_ids: self.selection_in_order(None),
             can_reopen: !self.closed.is_empty(),
             fullscreen: main.is_some_and(|chrome| chrome.fullscreen),
-            windows: self
-                .windows
-                .iter()
-                .map(|chrome| WindowTabs {
-                    label: chrome.label.clone(),
-                    active_id: chrome.active,
-                    fullscreen: chrome.fullscreen,
-                    workspace: chrome.workspace.clone(),
-                    split: chrome.split.map(|split| SplitInfo {
-                        left: split.left,
-                        right: split.right,
-                        ratio: split.ratio,
-                    }),
-                    devtools: published_devtools(chrome),
-                    peek_url: None,
-                    viewport: published_viewport(chrome),
-                    agent_panel: dock_contains_id(chrome, AGENT_PANEL_ID),
-                    automation_panel: dock_contains_id(chrome, AUTOMATIONS_PANEL_ID),
-                    scripting_panel: dock_contains_id(chrome, SCRIPTING_PANEL_ID),
-                    host_panel: chrome
-                        .panels
+            windows: {
+                let mut listed = Vec::with_capacity(self.windows.len());
+                for index in 0..self.windows.len() {
+                    let active = self.windows[index].active;
+                    let panels = self
+                        .tabs
                         .iter()
-                        .find_map(|entry| extension_id_of(&entry.id).map(str::to_string))
-                        .unwrap_or_default(),
-                    side_panel_width: side_panel_width(chrome),
-                    side_panel_edge: side_panel_edge(chrome),
-                    side_panels: published_panels(chrome),
-                })
-                .collect(),
+                        .find(|tab| Some(tab.info.id) == active)
+                        .map(|tab| tab.panels.clone())
+                        .unwrap_or_default();
+                    let chrome = &self.windows[index];
+                    listed.push(WindowTabs {
+                        label: chrome.label.clone(),
+                        active_id: chrome.active,
+                        fullscreen: chrome.fullscreen,
+                        workspace: chrome.workspace.clone(),
+                        split: chrome.split.map(|split| SplitInfo {
+                            left: split.left,
+                            right: split.right,
+                            ratio: split.ratio,
+                        }),
+                        devtools: published_devtools(chrome),
+                        peek_url: None,
+                        viewport: published_viewport(chrome),
+                        agent_panel: dock_contains_id(&panels, AGENT_PANEL_ID),
+                        automation_panel: dock_contains_id(&panels, AUTOMATIONS_PANEL_ID),
+                        scripting_panel: dock_contains_id(&panels, SCRIPTING_PANEL_ID),
+                        host_panel: panels
+                            .iter()
+                            .find_map(|entry| extension_id_of(&entry.id).map(str::to_string))
+                            .unwrap_or_default(),
+                        side_panel_width: side_panel_width(chrome.fullscreen, &panels),
+                        side_panel_edge: side_panel_edge(chrome.fullscreen, &panels),
+                        side_panels: published_panels(chrome.fullscreen, &panels),
+                    });
+                }
+                listed
+            },
             groups: self.groups.clone(),
             workspaces: self.workspaces.clone(),
         }
@@ -1474,6 +1500,7 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
                 content_mark: None,
                 accent_locked: false,
                 shelf: tab.shelf,
+                panels: Vec::new(),
             },
         );
         state.normalize_groups();
@@ -4919,7 +4946,7 @@ fn set_active(app: &AppHandle, id: u32, collapse: bool) -> Result<(), String> {
     if let Some(partner) = partner {
         ensure_webview(app, partner)?;
     }
-    place_pages(app, &window, false);
+    place_pages(app, &window, true);
     emit_tabs(app);
     apply_device_chrome(app, &window);
     focus_active(app, &window);
@@ -5233,7 +5260,9 @@ fn place_pages(app: &AppHandle, window: &str, resize: bool) {
             let _ = webview.set_position(parked_position());
         }
     }
+    crate::automation::panel::prepare_active_panels(app, window);
     place_side_panel(app, window, position, page_size, scale);
+    crate::automation::panel::reveal_active_panels(app, window);
     apply_audio(app, window);
     if !wake.is_empty() || dock_clamped {
         emit_tabs(app);
@@ -5487,7 +5516,7 @@ fn close_tab_inner(app: &AppHandle, id: u32) -> Result<Option<ClosedTab>, String
         Ok(())
     };
     // Move the replacement on screen before the closed view is destroyed.
-    place_pages(app, &window, false);
+    place_pages(app, &window, was_active);
     retire_webview(app, label);
     ensured?;
     emit_tabs(app);
@@ -5999,7 +6028,7 @@ fn shelf_bookmarks(app: &AppHandle, id: u32) -> Result<(), String> {
         if let Some(next) = next {
             ensure_webview(app, next)?;
         }
-        place_pages(app, &window, false);
+        place_pages(app, &window, true);
         focus_active(app, &window);
     } else {
         place_pages(app, &window, false);
@@ -7517,10 +7546,11 @@ pub fn set_ui_insets(app: &AppHandle, window: &str, top: f64, left: f64, right: 
 /// left of the tool strip, and above the status bar, or the whole window in fullscreen.
 fn page_rect(app: &AppHandle, window_label: &str) -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
     let (ui_height, ui_left, ui_right, ui_bottom, fullscreen) = with_state(app, |state| {
+        let panels = state.active_panels(window_label).to_vec();
         state
             .chrome(window_label)
             .map(|chrome| {
-                let (panel_left, panel_right) = panel_insets(chrome);
+                let (panel_left, panel_right) = panel_insets(chrome.fullscreen, &panels);
                 (
                     chrome.ui_height,
                     chrome.ui_left + panel_left,
@@ -7606,8 +7636,8 @@ pub fn parse_panel_edge(side: &str) -> PanelEdge {
     }
 }
 
-fn dock_contains_id(chrome: &WindowChrome, id: &str) -> bool {
-    chrome.panels.iter().any(|entry| entry.id == id)
+fn dock_contains_id(panels: &[DockEntry], id: &str) -> bool {
+    panels.iter().any(|entry| entry.id == id)
 }
 
 fn fallback_title(id: &str) -> String {
@@ -7619,12 +7649,11 @@ fn fallback_title(id: &str) -> String {
     }
 }
 
-fn published_panels(chrome: &WindowChrome) -> Vec<SidePanelInfo> {
-    if chrome.fullscreen {
+fn published_panels(fullscreen: bool, panels: &[DockEntry]) -> Vec<SidePanelInfo> {
+    if fullscreen {
         return Vec::new();
     }
-    chrome
-        .panels
+    panels
         .iter()
         .map(|entry| SidePanelInfo {
             id: entry.id.clone(),
@@ -7653,13 +7682,13 @@ pub fn column_width(entry: &DockEntry) -> f64 {
     }
 }
 
-fn side_panel_width(chrome: &WindowChrome) -> f64 {
-    let (left, right) = panel_insets(chrome);
+fn side_panel_width(fullscreen: bool, panels: &[DockEntry]) -> f64 {
+    let (left, right) = panel_insets(fullscreen, panels);
     left + right
 }
 
-fn side_panel_edge(chrome: &WindowChrome) -> String {
-    let (left, right) = panel_insets(chrome);
+fn side_panel_edge(fullscreen: bool, panels: &[DockEntry]) -> String {
+    let (left, right) = panel_insets(fullscreen, panels);
     if left > 0.0 && right > 0.0 {
         String::new()
     } else if left > 0.0 {
@@ -7671,13 +7700,13 @@ fn side_panel_edge(chrome: &WindowChrome) -> String {
     }
 }
 
-fn panel_insets(chrome: &WindowChrome) -> (f64, f64) {
-    if chrome.fullscreen {
+fn panel_insets(fullscreen: bool, panels: &[DockEntry]) -> (f64, f64) {
+    if fullscreen {
         return (0.0, 0.0);
     }
     let mut left = 0.0;
     let mut right = 0.0;
-    for entry in &chrome.panels {
+    for entry in panels {
         let width = column_width(entry);
         match entry.edge {
             PanelEdge::Left => left += width,
@@ -7691,28 +7720,23 @@ fn panel_insets(chrome: &WindowChrome) -> (f64, f64) {
 pub fn other_columns(app: &AppHandle, window: &str, except_id: &str) -> f64 {
     with_state(app, |state| {
         state
-            .chrome(window)
-            .map(|chrome| {
-                chrome
-                    .panels
-                    .iter()
-                    .filter(|entry| entry.id != except_id)
-                    .map(column_width)
-                    .sum()
-            })
-            .unwrap_or(0.0)
+            .active_panels(window)
+            .iter()
+            .filter(|entry| entry.id != except_id)
+            .map(column_width)
+            .sum()
     })
 }
 
 /// Columns on the same edge that sit further from the page than `id`.
 pub fn outer_columns(app: &AppHandle, window: &str, id: &str) -> f64 {
     with_state(app, |state| {
-        let chrome = state.chrome(window)?;
-        let entry = chrome.panels.iter().find(|entry| entry.id == id)?;
+        let panels = state.active_panels(window);
+        let entry = panels.iter().find(|entry| entry.id == id)?;
         let edge = entry.edge;
         let mut seen = false;
         let mut sum = 0.0;
-        for panel in chrome.panels.iter().filter(|panel| panel.edge == edge) {
+        for panel in panels.iter().filter(|panel| panel.edge == edge) {
             if panel.id == id {
                 seen = true;
                 continue;
@@ -7729,8 +7753,20 @@ pub fn outer_columns(app: &AppHandle, window: &str, id: &str) -> f64 {
 pub fn dock_entry(app: &AppHandle, window: &str, id: &str) -> Option<DockEntry> {
     with_state(app, |state| {
         state
-            .chrome(window)
-            .and_then(|chrome| chrome.panels.iter().find(|entry| entry.id == id).cloned())
+            .active_panels(window)
+            .iter()
+            .find(|entry| entry.id == id)
+            .cloned()
+    })
+}
+
+/// True when any tab in `window` has `id` open, including one that is not on screen.
+pub fn window_has_panel(app: &AppHandle, window: &str, id: &str) -> bool {
+    with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .any(|tab| tab.info.window == window && tab.panels.iter().any(|entry| entry.id == id))
     })
 }
 
@@ -7743,31 +7779,31 @@ pub fn dock_expanded(app: &AppHandle, window: &str, id: &str) -> bool {
     dock_entry(app, window, id).is_some_and(|entry| !entry.collapsed)
 }
 
+fn dock_record(entry: &DockEntry) -> DockRecord {
+    DockRecord {
+        id: entry.id.clone(),
+        title: if entry.title.is_empty() {
+            fallback_title(&entry.id)
+        } else {
+            entry.title.clone()
+        },
+        edge: match entry.edge {
+            PanelEdge::Left => "left".to_string(),
+            PanelEdge::Right => "right".to_string(),
+        },
+        width: entry.width,
+        collapsed: entry.collapsed,
+    }
+}
+
+/// The main window's visible dock. Older sessions stored this on the file instead of each tab.
 pub fn saved_dock(app: &AppHandle) -> Vec<DockRecord> {
     with_state(app, |state| {
         state
-            .chrome(WINDOW)
-            .map(|chrome| {
-                chrome
-                    .panels
-                    .iter()
-                    .map(|entry| DockRecord {
-                        id: entry.id.clone(),
-                        title: if entry.title.is_empty() {
-                            fallback_title(&entry.id)
-                        } else {
-                            entry.title.clone()
-                        },
-                        edge: match entry.edge {
-                            PanelEdge::Left => "left".to_string(),
-                            PanelEdge::Right => "right".to_string(),
-                        },
-                        width: entry.width,
-                        collapsed: entry.collapsed,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+            .active_panels(WINDOW)
+            .iter()
+            .map(dock_record)
+            .collect()
     })
 }
 
@@ -7815,7 +7851,7 @@ fn squeeze_panels(panels: &mut [DockEntry], incoming: &str, span: f64) {
     }
 }
 
-/// Adds `id` beside the pages, or brings it back if it is already docked. Other panels stay open.
+/// Adds `id` to the active tab's dock, or brings it back if that tab already has it. Other panels stay open.
 pub fn open_dock_panel(
     app: &AppHandle,
     window: &str,
@@ -7834,9 +7870,9 @@ pub fn open_dock_panel(
     let min = if min.is_finite() { min.max(1.0) } else { 1.0 };
     let span = content_span(app, window);
     with_state(app, |state| {
-        let chrome = state.chrome_mut(window)?;
-        if let Some(index) = chrome.panels.iter().position(|entry| entry.id == id) {
-            let mut entry = chrome.panels.remove(index);
+        let panels = state.active_panels_mut(window)?;
+        if let Some(index) = panels.iter().position(|entry| entry.id == id) {
+            let mut entry = panels.remove(index);
             entry.title = if title.is_empty() {
                 fallback_title(id)
             } else {
@@ -7847,9 +7883,9 @@ pub fn open_dock_panel(
             entry.collapsed = false;
             entry.min = min;
             entry.resizable = resizable;
-            chrome.panels.push(entry);
+            panels.push(entry);
         } else {
-            chrome.panels.push(DockEntry {
+            panels.push(DockEntry {
                 id: id.to_string(),
                 title: if title.is_empty() {
                     fallback_title(id)
@@ -7864,7 +7900,7 @@ pub fn open_dock_panel(
             });
         }
         if let Some(span) = span {
-            squeeze_panels(&mut chrome.panels, id, span);
+            squeeze_panels(panels, id, span);
         }
         Some(())
     });
@@ -7872,13 +7908,13 @@ pub fn open_dock_panel(
     emit_tabs(app);
 }
 
-/// Removes one panel. The others keep their place.
+/// Removes one panel from the active tab. The same panel on another tab stays open.
 pub fn close_dock_panel(app: &AppHandle, window: &str, id: &str) {
     let removed = with_state(app, |state| {
-        let chrome = state.chrome_mut(window)?;
-        let before = chrome.panels.len();
-        chrome.panels.retain(|entry| entry.id != id);
-        (chrome.panels.len() != before).then_some(())
+        let panels = state.active_panels_mut(window)?;
+        let before = panels.len();
+        panels.retain(|entry| entry.id != id);
+        (panels.len() != before).then_some(())
     });
     if removed.is_some() {
         layout(app, window);
@@ -7886,12 +7922,94 @@ pub fn close_dock_panel(app: &AppHandle, window: &str, id: &str) {
     }
 }
 
+/// Drops `id` from every tab in `window`. Used when an extension panel can no longer be shown.
+pub fn clear_dock_panel(app: &AppHandle, window: &str, id: &str) -> bool {
+    let removed = with_state(app, |state| {
+        let mut removed = false;
+        for tab in state
+            .tabs
+            .iter_mut()
+            .filter(|tab| tab.info.window == window)
+        {
+            let before = tab.panels.len();
+            tab.panels.retain(|entry| entry.id != id);
+            removed |= tab.panels.len() != before;
+        }
+        removed
+    });
+    if removed {
+        layout(app, window);
+        emit_tabs(app);
+    }
+    removed
+}
+
+/// Updates `id` on every tab in `window` that already has it open. Does not open it on a tab that doesn't.
+pub fn revise_dock_panel(
+    app: &AppHandle,
+    window: &str,
+    id: &str,
+    edge: PanelEdge,
+    width: f64,
+    min: f64,
+    resizable: bool,
+) -> bool {
+    let width = if width.is_finite() {
+        width.max(min)
+    } else {
+        min
+    };
+    let min = if min.is_finite() { min.max(1.0) } else { 1.0 };
+    let span = content_span(app, window);
+    let changed = with_state(app, |state| {
+        let mut changed = false;
+        for tab in state
+            .tabs
+            .iter_mut()
+            .filter(|tab| tab.info.window == window)
+        {
+            let Some(entry) = tab.panels.iter_mut().find(|entry| entry.id == id) else {
+                continue;
+            };
+            entry.edge = edge;
+            entry.width = width;
+            entry.min = min;
+            entry.resizable = resizable;
+            changed = true;
+        }
+        if changed && let Some(span) = span {
+            let on_screen = state
+                .active_panels(window)
+                .iter()
+                .any(|entry| entry.id == id);
+            if on_screen && let Some(panels) = state.active_panels_mut(window) {
+                squeeze_panels(panels, id, span);
+            }
+        }
+        changed
+    });
+    if changed {
+        layout(app, window);
+        emit_tabs(app);
+    }
+    changed
+}
+
+/// Replaces one tab's dock without showing it. Restore uses this before the tab is selected.
+pub fn set_tab_panels(app: &AppHandle, id: u32, panels: Vec<DockEntry>) {
+    with_state(app, |state| {
+        if let Some(tab) = state.tab_mut(id) {
+            tab.panels = panels;
+        }
+    });
+}
+
 pub fn set_dock_collapsed(app: &AppHandle, window: &str, id: &str, collapsed: bool) {
     let span = content_span(app, window);
     let changed = with_state(app, |state| {
-        let chrome = state.chrome_mut(window)?;
+        let panels = state.active_panels_mut(window)?;
         {
-            let Some(entry) = chrome.panels.iter_mut().find(|entry| entry.id == id) else {
+            let Some(entry) = panels.iter_mut().find(|entry| entry.id == id) else {
                 return None;
             };
             if entry.collapsed == collapsed {
@@ -7900,7 +8018,7 @@ pub fn set_dock_collapsed(app: &AppHandle, window: &str, id: &str, collapsed: bo
             entry.collapsed = collapsed;
         }
         if !collapsed && let Some(span) = span {
-            squeeze_panels(&mut chrome.panels, id, span);
+            squeeze_panels(panels, id, span);
         }
         Some(())
     });
@@ -7913,27 +8031,25 @@ pub fn set_dock_collapsed(app: &AppHandle, window: &str, id: &str, collapsed: bo
 /// Moves one panel along its edge. `index` counts from the page outward among the panels that stay.
 pub fn reorder_dock_panel(app: &AppHandle, window: &str, id: &str, index: usize) -> bool {
     let changed = with_state(app, |state| {
-        let chrome = state.chrome_mut(window)?;
-        let current = chrome.panels.iter().position(|entry| entry.id == id)?;
-        let edge = chrome.panels[current].edge;
-        let current_index = chrome
-            .panels
+        let panels = state.active_panels_mut(window)?;
+        let current = panels.iter().position(|entry| entry.id == id)?;
+        let edge = panels[current].edge;
+        let current_index = panels
             .iter()
             .filter(|entry| entry.edge == edge)
             .position(|entry| entry.id == id)?;
         if current_index == index {
             return Some(false);
         }
-        let entry = chrome.panels.remove(current);
-        let slots: Vec<usize> = chrome
-            .panels
+        let entry = panels.remove(current);
+        let slots: Vec<usize> = panels
             .iter()
             .enumerate()
             .filter(|(_, panel)| panel.edge == edge)
             .map(|(slot, _)| slot)
             .collect();
-        let insert_at = slots.get(index).copied().unwrap_or(chrome.panels.len());
-        chrome.panels.insert(insert_at, entry);
+        let insert_at = slots.get(index).copied().unwrap_or(panels.len());
+        panels.insert(insert_at, entry);
         Some(true)
     });
     if changed == Some(true) {
@@ -7988,11 +8104,10 @@ fn place_side_panel(
     scale: f64,
 ) {
     let (fullscreen, panels) = with_state(app, |state| {
-        state
-            .chrome(window)
-            .map(|chrome| (chrome.fullscreen, chrome.panels.clone()))
-    })
-    .unwrap_or((false, Vec::new()));
+        let fullscreen = state.chrome(window).is_some_and(|chrome| chrome.fullscreen);
+        let panels = state.active_panels(window).to_vec();
+        (fullscreen, panels)
+    });
     let mut placed = HashSet::new();
     if !fullscreen {
         place_edge(
@@ -8157,12 +8272,7 @@ pub fn dock_panel_width(app: &AppHandle, window: &str, id: &str) -> f64 {
 }
 
 pub fn dock_panels(app: &AppHandle, window: &str) -> Vec<DockEntry> {
-    with_state(app, |state| {
-        state
-            .chrome(window)
-            .map(|chrome| chrome.panels.clone())
-            .unwrap_or_default()
-    })
+    with_state(app, |state| state.active_panels(window).to_vec())
 }
 
 /// Moves one expanded panel to `width` CSS pixels without emitting the tab snapshot.
@@ -8172,9 +8282,8 @@ pub fn resize_dock_panel(app: &AppHandle, window: &str, id: &str, width: f64) ->
         return None;
     }
     let applied = with_state(app, |state| {
-        let chrome = state.chrome_mut(window)?;
-        let entry = chrome
-            .panels
+        let panels = state.active_panels_mut(window)?;
+        let entry = panels
             .iter_mut()
             .find(|entry| entry.id == id && !entry.collapsed)?;
         let next = width.max(entry.min);
@@ -8199,8 +8308,11 @@ struct DockLayoutEvent {
 }
 
 pub fn emit_dock_layout(app: &AppHandle, window: &str) {
-    let side_panels =
-        with_state(app, |state| state.chrome(window).map(published_panels)).unwrap_or_default();
+    let side_panels = with_state(app, |state| {
+        let fullscreen = state.chrome(window).is_some_and(|chrome| chrome.fullscreen);
+        let panels = state.active_panels(window).to_vec();
+        published_panels(fullscreen, &panels)
+    });
     let _ = app.emit(
         "side-panels-layout",
         DockLayoutEvent {
@@ -8539,6 +8651,7 @@ fn place_toast(app: &AppHandle, window_label: &str) {
     let _ = webview.set_position(position);
 }
 
+/// One tab as it was when the session was saved.
 pub struct SessionTab {
     pub url: String,
     pub title: String,
@@ -8549,6 +8662,8 @@ pub struct SessionTab {
     pub workspace: String,
     pub refresh_secs: u32,
     pub watch_changes: bool,
+    /// Panels that were open on this tab. Older sessions leave this empty.
+    pub side_panels: Vec<DockRecord>,
 }
 
 pub struct SessionState {
@@ -8588,6 +8703,7 @@ pub fn session_tabs(app: &AppHandle) -> SessionState {
                 workspace: tab.info.workspace.clone(),
                 refresh_secs: tab.info.refresh_secs,
                 watch_changes: tab.info.watch_changes,
+                side_panels: tab.panels.iter().map(dock_record).collect(),
             })
             .collect();
         let active = state.active_of(WINDOW).and_then(position);
@@ -8657,6 +8773,9 @@ pub fn restore(app: &AppHandle, restored: RestoreState) -> Result<(), String> {
             entry.info.refresh_secs = refresh_secs;
             entry.info.watch_changes = watch_changes;
         });
+        if !tab.side_panels.is_empty() {
+            crate::automation::panel::install_tab_dock(app, id, &tab.side_panels);
+        }
         memberships.push((id, tab.group_id));
         ids.push(id);
     }
@@ -10149,6 +10268,7 @@ mod tests {
             content_mark: None,
             accent_locked: false,
             shelf: false,
+            panels: Vec::new(),
         }
     }
 
@@ -10407,6 +10527,48 @@ mod tests {
 
         chrome.devtools.tabs.remove(&2);
         assert!(shown_viewport(&chrome).is_none());
+    }
+
+    #[test]
+    fn each_tab_keeps_its_own_side_panels() {
+        let mut state = state(
+            vec![
+                tab(1, None, DEFAULT_WORKSPACE),
+                tab(2, None, DEFAULT_WORKSPACE),
+            ],
+            &[],
+        );
+        state.tabs[0].panels.push(DockEntry {
+            id: SCRIPTING_PANEL_ID.into(),
+            title: "Scripting".into(),
+            edge: PanelEdge::Right,
+            width: 480.0,
+            collapsed: false,
+            min: 480.0,
+            resizable: true,
+        });
+        state.tabs[1].panels.push(DockEntry {
+            id: AGENT_PANEL_ID.into(),
+            title: "Agent".into(),
+            edge: PanelEdge::Right,
+            width: 360.0,
+            collapsed: true,
+            min: 280.0,
+            resizable: true,
+        });
+        state.windows[0].active = Some(1);
+        let showing = state.snapshot();
+        assert_eq!(showing.windows[0].side_panels[0].id, SCRIPTING_PANEL_ID);
+        assert!(showing.windows[0].scripting_panel);
+        assert!(!showing.windows[0].agent_panel);
+
+        state.windows[0].active = Some(2);
+        let showing = state.snapshot();
+        assert_eq!(showing.windows[0].side_panels[0].id, AGENT_PANEL_ID);
+        assert!(showing.windows[0].agent_panel);
+        assert!(showing.windows[0].side_panels[0].collapsed);
+        assert!(!showing.windows[0].scripting_panel);
+        assert_eq!(state.tabs[0].panels[0].id, SCRIPTING_PANEL_ID);
     }
 
     #[test]

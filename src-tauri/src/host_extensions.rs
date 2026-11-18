@@ -777,6 +777,110 @@ pub fn reopen_extension_panel(
     open_store_panel(app, window, id, url, edge, Some(width))
 }
 
+/// Creates the extension panel webview when this window does not have one yet.
+pub fn ensure_panel_view(app: &AppHandle, window: &str, extension_id: &str) -> Result<(), String> {
+    let label = tabs::host_panel_label(window, extension_id);
+    if app.get_webview(&label).is_some() && panel_target_url(&label).is_some() {
+        return Ok(());
+    }
+    let url = panel_document_url(app, extension_id)?;
+    ensure_child(app, window, &label, url.clone())?;
+    remember_panel_target(&label, url.as_str(), false);
+    Ok(())
+}
+
+/// Navigates an expanded extension panel that is still on the blank document it was created with.
+pub fn reveal_panel_if_needed(app: &AppHandle, window: &str, extension_id: &str) {
+    let panel_id = tabs::extension_panel_id(extension_id);
+    if !tabs::dock_expanded(app, window, &panel_id) {
+        return;
+    }
+    let label = tabs::host_panel_label(window, extension_id);
+    let Some(wanted) = panel_target_url(&label) else {
+        return;
+    };
+    let Some(view) = app.get_webview(&label) else {
+        return;
+    };
+    let current = view
+        .url()
+        .map(|current| current.to_string())
+        .unwrap_or_default();
+    if panel_document_ready(&current, &wanted) {
+        return;
+    }
+    if panel_loads()
+        .lock()
+        .ok()
+        .is_some_and(|loads| loads.get(&label).is_some_and(|load| load.waiting))
+    {
+        return;
+    }
+    let Ok(url) = Url::parse(&wanted) else {
+        return;
+    };
+    reveal_panel_document(app, &label, &url);
+    if let Ok(loaded) = require_enabled(app, extension_id) {
+        let layout = resolve_panel(&loaded.record, &loaded.manifest);
+        post_panel_chrome(app, &label, &layout);
+    } else if let Some(entry) = tabs::dock_entry(app, window, &panel_id) {
+        post_store_panel_chrome(app, &label, entry.edge, entry.resizable);
+    }
+}
+
+/// A dock entry for a restored extension panel. `None` when that extension is gone.
+pub fn restored_panel_entry(
+    app: &AppHandle,
+    extension_id: &str,
+    record: &tabs::DockRecord,
+) -> Option<tabs::DockEntry> {
+    let title = if record.title.is_empty() {
+        None
+    } else {
+        Some(record.title.clone())
+    };
+    let width = (record.width.is_finite() && record.width >= 1.0).then_some(record.width);
+    let edge = tabs::parse_panel_edge(&record.edge);
+    if let Ok(loaded) = require_enabled(app, extension_id) {
+        if loaded.manifest.panel_path().is_empty() {
+            return None;
+        }
+        let layout = resolve_panel(&loaded.record, &loaded.manifest);
+        return Some(tabs::DockEntry {
+            id: tabs::extension_panel_id(extension_id),
+            title: title.unwrap_or(loaded.manifest.name),
+            edge,
+            width: width.unwrap_or(f64::from(layout.default_width)),
+            collapsed: record.collapsed,
+            min: f64::from(layout.min_width).max(1.0),
+            resizable: layout.resizable,
+        });
+    }
+    if crate::extensions::store_panel_url(app, extension_id).is_err() {
+        return None;
+    }
+    Some(tabs::DockEntry {
+        id: tabs::extension_panel_id(extension_id),
+        title: title.unwrap_or_else(|| store_panel_title(app, extension_id)),
+        edge,
+        width: width.unwrap_or_else(|| store_panel_width(app, extension_id)),
+        collapsed: record.collapsed,
+        min: f64::from(PANEL_MIN),
+        resizable: store_panel_resizable(app, extension_id),
+    })
+}
+
+fn panel_document_url(app: &AppHandle, extension_id: &str) -> Result<Url, String> {
+    if let Ok(loaded) = require_enabled(app, extension_id) {
+        let path = loaded.manifest.panel_path();
+        if path.is_empty() {
+            return Err("That extension has no side panel.".into());
+        }
+        return file_url(extension_id, path);
+    }
+    crate::extensions::store_panel_url(app, extension_id)
+}
+
 pub fn place_bookmarks_bar(app: &AppHandle, window: &str, x: f64, y: f64, width: f64, height: f64) {
     let label = format!("cext-bar-{window}");
     let Some(view) = bookmarks_view(app, window) else {
@@ -2888,10 +2992,7 @@ fn apply_store_panel_chrome(app: &AppHandle, window: &str, id: &str, action: &st
         let label = tabs::host_panel_label(window, id);
         if crate::extension_popouts::opened_recently(id, POPOUT_HANDOFF) {
             eprintln!("panel: {label} kept open while its popout is showing");
-            held_panels()
-                .lock()
-                .expect("held panels")
-                .insert(label);
+            held_panels().lock().expect("held panels").insert(label);
             return;
         }
         tabs::close_dock_panel(app, window, &tabs::extension_panel_id(id));
@@ -2928,6 +3029,27 @@ fn apply_store_panel_chrome(app: &AppHandle, window: &str, id: &str, action: &st
     };
     let width = store_panel_width(app, id);
     let label = tabs::host_panel_label(window, id);
+    let panel_id = tabs::extension_panel_id(id);
+    if tabs::window_has_panel(app, window, &panel_id) {
+        tabs::revise_dock_panel(
+            app,
+            window,
+            &panel_id,
+            edge,
+            width,
+            f64::from(PANEL_MIN),
+            store_panel_resizable(app, id),
+        );
+    }
+    if tabs::dock_contains(app, window, &panel_id) {
+        if let Some(wanted) = panel_target_url(&label)
+            && let Ok(url) = Url::parse(&wanted)
+        {
+            reveal_panel_document(app, &label, &url);
+        }
+        post_store_panel_chrome(app, &label, edge, store_panel_resizable(app, id));
+        return;
+    }
     tabs::open_host_panel(
         app,
         window,
@@ -3300,9 +3422,7 @@ fn post_panel_chrome(app: &AppHandle, label: &str, layout: &ResolvedPanel) {
 fn close_panels_for(app: &AppHandle, id: &str) {
     let panel_id = tabs::extension_panel_id(id);
     for window in tabs::snapshot(app).windows {
-        if tabs::dock_contains(app, &window.label, &panel_id) {
-            tabs::close_dock_panel(app, &window.label, &panel_id);
-        }
+        tabs::clear_dock_panel(app, &window.label, &panel_id);
         let label = tabs::host_panel_label(&window.label, id);
         if let Some(view) = app.get_webview(&label) {
             let _ = view.close();
@@ -3368,21 +3488,24 @@ fn apply_open_panel(app: &AppHandle, id: &str) {
         file_url(id, &panel_path).ok()
     };
     for window in tabs::snapshot(app).windows {
-        if !tabs::dock_contains(app, &window.label, &tabs::extension_panel_id(id)) {
+        let panel_id = tabs::extension_panel_id(id);
+        if !tabs::window_has_panel(app, &window.label, &panel_id) {
             continue;
         }
         let width = fitted_panel_width(app, &window.label, wanted, &layout, id);
-        let label = tabs::host_panel_label(&window.label, id);
-        tabs::open_host_panel(
+        tabs::revise_dock_panel(
             app,
             &window.label,
-            id,
-            &loaded.manifest.name,
-            width,
+            &panel_id,
             layout.edge,
+            width,
             f64::from(layout.min_width),
             layout.resizable,
         );
+        if !tabs::dock_expanded(app, &window.label, &panel_id) {
+            continue;
+        }
+        let label = tabs::host_panel_label(&window.label, id);
         if let Some(url) = &url {
             remember_panel_target(&label, url.as_str(), false);
             reveal_panel_document(app, &label, url);
