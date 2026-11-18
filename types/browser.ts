@@ -162,8 +162,14 @@ export type WindowTabs = {
   agentPanel: boolean;
   /** The automations panel is docked beside the pages. */
   automationPanel: boolean;
+  /** The scripting panel is docked beside the pages. */
+  scriptingPanel: boolean;
   /** Host extension id docked beside the pages. Empty when another panel is open or the column is closed. */
   hostPanel: string;
+  /** Width of the docked side column in CSS pixels. Zero when it is closed. */
+  sidePanelWidth: number;
+  /** Which side of the pages that column occupies. Empty when it is closed. */
+  sidePanelEdge: "" | "left" | "right";
 };
 
 export type RewriteRule = {
@@ -431,6 +437,38 @@ export type UserScript = {
   hosts: string[];
   css: string;
   js: string;
+};
+
+export type ScriptLanguage = "javascript" | "typescript" | "python" | "css";
+
+/** One script stored for a site in `scripting.json`. */
+export type PageScript = {
+  id: string;
+  name: string;
+  /** Host without a leading `www.`. Subdomains of this host match too. */
+  domain: string;
+  language: ScriptLanguage;
+  enabled: boolean;
+  /** Run again each time a matching page loads. */
+  runOnLoad: boolean;
+  source: string;
+  /** JavaScript emitted for JavaScript and TypeScript. The stylesheet for CSS. Empty for Python. */
+  compiled: string;
+};
+
+export type ScriptFile = {
+  scripts: PageScript[];
+};
+
+export type ScriptLog = {
+  level: string;
+  text: string;
+};
+
+export type ScriptRun = {
+  logs: ScriptLog[];
+  value: string | null;
+  error: string | null;
 };
 
 export type PageRules = {

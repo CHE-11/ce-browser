@@ -226,8 +226,14 @@ pub struct WindowTabs {
     pub agent_panel: bool,
     /// The automations panel is docked beside the pages.
     pub automation_panel: bool,
+    /// The scripting panel is docked beside the pages.
+    pub scripting_panel: bool,
     /// Host extension id docked in the side column. Empty when that column is closed or used by a built-in panel.
     pub host_panel: String,
+    /// Width of the docked side column in CSS pixels. Zero when it is closed.
+    pub side_panel_width: f64,
+    /// `left` or `right` while that column is open. Empty when it is closed.
+    pub side_panel_edge: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -419,6 +425,7 @@ pub enum SidePanel {
     None,
     Agent,
     Automations,
+    Scripting,
     /// A host extension panel. The extension id lives on the window chrome.
     Host,
 }
@@ -857,11 +864,15 @@ impl TabsState {
                     agent_panel: chrome.side == SidePanel::Agent && chrome.agent_panel > 0.0,
                     automation_panel: chrome.side == SidePanel::Automations
                         && chrome.agent_panel > 0.0,
+                    scripting_panel: chrome.side == SidePanel::Scripting
+                        && chrome.agent_panel > 0.0,
                     host_panel: if chrome.side == SidePanel::Host && chrome.agent_panel > 0.0 {
                         chrome.host_extension.clone()
                     } else {
                         String::new()
                     },
+                    side_panel_width: side_panel_width(chrome),
+                    side_panel_edge: side_panel_edge(chrome),
                 })
                 .collect(),
             groups: self.groups.clone(),
@@ -7491,6 +7502,12 @@ pub fn automation_panel_label(window: &str) -> String {
     format!("{AUTOMATION_PANEL_PREFIX}{window}")
 }
 
+pub const SCRIPTING_PANEL_PREFIX: &str = "scripting-";
+
+pub fn scripting_panel_label(window: &str) -> String {
+    format!("{SCRIPTING_PANEL_PREFIX}{window}")
+}
+
 pub fn is_fullscreen(app: &AppHandle, window: &str) -> bool {
     with_state(app, |state| {
         state.chrome(window).is_some_and(|chrome| chrome.fullscreen)
@@ -7548,6 +7565,22 @@ pub fn open_host_panel(
     emit_tabs(app);
 }
 
+fn side_panel_width(chrome: &WindowChrome) -> f64 {
+    let (left, right) = panel_insets(chrome);
+    left + right
+}
+
+fn side_panel_edge(chrome: &WindowChrome) -> String {
+    let (left, right) = panel_insets(chrome);
+    if left > 0.0 {
+        "left".to_string()
+    } else if right > 0.0 {
+        "right".to_string()
+    } else {
+        String::new()
+    }
+}
+
 fn panel_insets(chrome: &WindowChrome) -> (f64, f64) {
     if chrome.fullscreen || chrome.agent_panel <= 0.0 {
         return (0.0, 0.0);
@@ -7600,6 +7633,16 @@ fn place_side_panel(
         app,
         &automation_panel_label(window),
         show == SidePanel::Automations,
+        position,
+        page_size,
+        scale,
+        width,
+        PanelEdge::Right,
+    );
+    place_column(
+        app,
+        &scripting_panel_label(window),
+        show == SidePanel::Scripting,
         position,
         page_size,
         scale,
@@ -9427,6 +9470,33 @@ pub fn note_content(app: &AppHandle, id: u32, mark: &str) -> bool {
         }
         changed
     })
+}
+
+/// Runs saved page scripts again in every open http(s) tab.
+pub fn reinject_scripting(app: &AppHandle) {
+    if app.try_state::<Tabs>().is_none() {
+        return;
+    }
+    let pages = with_state(app, |state| {
+        state
+            .tabs
+            .iter()
+            .filter_map(|tab| {
+                let label = tab.webview.clone()?;
+                (tab.info.url.starts_with("http://") || tab.info.url.starts_with("https://"))
+                    .then(|| (label, tab.info.url.clone()))
+            })
+            .collect::<Vec<_>>()
+    });
+    for (label, url) in pages {
+        let script = crate::scripting::injection(app, &url);
+        if script.is_empty() {
+            continue;
+        }
+        if let Some(webview) = app.get_webview(&label) {
+            let _ = webview.eval(script);
+        }
+    }
 }
 
 /// Runs the page-control script again in every open http(s) tab.

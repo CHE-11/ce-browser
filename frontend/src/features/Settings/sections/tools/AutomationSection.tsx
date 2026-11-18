@@ -9,14 +9,18 @@ import {
   automationSecretNames,
   clearAutomationSecret,
   copyText,
+  listAiModels,
   mcpStatus,
   onMcpChanged,
   openAutomations,
   regenerateMcpToken,
   setAutomationSecret,
 } from "@/lib/browser-client";
+import { remoteProvider } from "@/lib/ai/ai-providers";
+import { useAiModels } from "@/lib/ai/useAiModels";
 import { SETTINGS_SECTIONS } from "../../settings-sections";
 import { errorText, inputClass, matchesQuery, Row, Section, useReportMatch, useSettingVisible, type SettingsSectionProps } from "../../SettingsControls";
+import { AiModelPicker } from "./AiModelPicker";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-automation")!;
 const mcpSection = SETTINGS_SECTIONS.find((item) => item.id === "settings-mcp")!;
@@ -76,6 +80,10 @@ const MCP_TEXT = {
 
 export function AutomationSection({ settings, query, onUpdate, onError, onMatch }: SettingsSectionProps) {
   const automation = settings.automation;
+  const provider = settings.aiProvider;
+  const remote = remoteProvider(provider);
+  const fetched = useAiModels(provider, remote);
+  const [localModels, setLocalModels] = useState<string[]>([]);
   const aiBlockedSites = settings.aiBlockedSites ?? [];
   const visible = matchesQuery(
     query,
@@ -93,19 +101,34 @@ export function AutomationSection({ settings, query, onUpdate, onError, onMatch 
     return null;
   }
 
+  const refreshLocal = () => {
+    void listAiModels()
+      .then(setLocalModels)
+      .catch(() => setLocalModels([]));
+  };
+  const fallbackModel = settings.aiProviders[provider]?.model ?? "";
+
   return (
     <Section id={section.id} title={section.title}>
       <Row id="settings-automation-enabled" setting="automation.enabled" label={TEXT.enabled} hint={TEXT.enabledHint}>
         <Toggle id="settings-automation-enabled-toggle" checked={automation.enabled} onChange={(enabled) => update({ enabled })} />
       </Row>
-      <Row id="settings-automation-model" setting="automation.agentModel" label={TEXT.model} hint={TEXT.modelHint}>
-        <input
-          id="settings-automation-model-input"
-          className={inputClass}
+      <Row
+        id="settings-automation-model"
+        setting="automation.agentModel"
+        label={TEXT.model}
+        hint={remote && fetched.error ? `${TEXT.modelHint} ${fetched.error}` : TEXT.modelHint}
+      >
+        <AiModelPicker
+          id="settings-automation-model"
           value={automation.agentModel}
-          placeholder={settings.aiProviders[settings.aiProvider]?.model || "Model from AI/Agent settings"}
-          spellCheck={false}
-          onChange={(event) => update({ agentModel: event.target.value })}
+          models={remote ? fetched.models : localModels}
+          loading={remote && fetched.loading}
+          remote={remote}
+          blankLabel={fallbackModel ? `AI/Agent model (${fallbackModel})` : "Model from AI/Agent settings"}
+          onChange={(agentModel) => update({ agentModel })}
+          onRefresh={remote ? fetched.refresh : refreshLocal}
+          onFocus={remote ? undefined : refreshLocal}
         />
       </Row>
       <Row id="settings-automation-steps" setting="automation.maxSteps" label={TEXT.steps} hint={TEXT.stepsHint}>

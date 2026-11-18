@@ -10,6 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@astral-sh/ruff-wasm-web": "^0.17.5",
+    "@biomejs/js-api": "^6.1.0",
+    "@biomejs/wasm-web": "2.6.8",
     "@fontsource-variable/bricolage-grotesque": "^5.3.0",
     "@fontsource-variable/exo-2": "^5.3.0",
     "@fontsource-variable/fira-code": "^5.3.0",
@@ -38,11 +41,13 @@
     "clsx": "^2.1.1",
     "fuse.js": "^7.5.0",
     "lucide-react": "^0.545.0",
+    "monaco-editor": "^0.57.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^3.3.1"
+    "tailwind-merge": "^3.3.1",
+    "typescript": "~6.0.3"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4",
@@ -51,7 +56,6 @@
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^6.0.2",
     "tailwindcss": "^4",
-    "typescript": "~6.0.3",
     "vite": "^8.0.16"
   }
 }

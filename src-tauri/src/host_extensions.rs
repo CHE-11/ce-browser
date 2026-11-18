@@ -3519,6 +3519,7 @@ pub fn attach_webview(app: &AppHandle, webview: &Webview) {
 
 /// Maps package folders and installs `window.ce` on a webview that already has a core.
 pub fn prepare_core(app: &AppHandle, core: &ICoreWebView2, label: &str) {
+    crate::scripting::map_pyodide(app, core);
     sync_mappings(app, core, label);
     ensure_bridge(core, label);
     sync_content_script(app, core, label);

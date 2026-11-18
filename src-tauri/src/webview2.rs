@@ -2701,7 +2701,10 @@ fn early_slots() -> &'static Mutex<HashMap<u32, EarlyScriptSlot>> {
 
 /// Drops the document-start script id for a tab whose webview is going away.
 pub fn forget_early_script(id: u32) {
-    custom_agents().lock().expect("custom user agent").remove(&id);
+    custom_agents()
+        .lock()
+        .expect("custom user agent")
+        .remove(&id);
     early_slots()
         .lock()
         .expect("adblock early script")
@@ -3049,6 +3052,14 @@ fn attach_adblock(
                 let injection = crate::page_rules::injection(&content_app, &source);
                 if !injection.is_empty() {
                     let script = HSTRING::from(injection);
+                    let _ = core.ExecuteScript(
+                        &script,
+                        None::<&ICoreWebView2ExecuteScriptCompletedHandler>,
+                    );
+                }
+                let page_scripts = crate::scripting::injection(&content_app, &source);
+                if !page_scripts.is_empty() {
+                    let script = HSTRING::from(page_scripts);
                     let _ = core.ExecuteScript(
                         &script,
                         None::<&ICoreWebView2ExecuteScriptCompletedHandler>,

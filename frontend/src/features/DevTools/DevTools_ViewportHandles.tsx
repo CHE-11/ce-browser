@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { useTabs } from "@/lib/use-browser";
 import { pushViewport } from "./devices";
+import { dockedPanels, pageBox, type PageBox } from "./page-column";
 
 type ViewportHandlesProps = {
   width: number;
@@ -122,32 +124,41 @@ export function ViewportHandles({ width, height, cutout, homeBar, installed, key
   const drag = useRef<{ id: HandleId; x: number; y: number; width: number; height: number } | null>(null);
   const pending = useRef<{ width: number; height: number } | null>(null);
   const frame = useRef<number | null>(null);
-  const [area, setArea] = useState({ width: 0, height: 0 });
+  const { sidePanelWidth, sidePanelEdge, devtools } = useTabs();
+  const panels = dockedPanels(sidePanelWidth, sidePanelEdge);
+  const devtoolsRatio = devtools?.visible ? devtools.ratio : null;
+  const layout = useRef({ panels, devtoolsRatio });
+  layout.current = { panels, devtoolsRatio };
+  const [area, setArea] = useState<PageBox>({ left: 0, width: 0, height: 0 });
   const [bar, setBar] = useState(BAR);
   const [live, setLive] = useState<{ width: number; height: number } | null>(null);
   areaRef.current = area;
 
   useEffect(() => {
     const pages = rootRef.current?.parentElement;
-    if (!pages) {
+    const pageArea = pages?.parentElement;
+    if (!pages || !pageArea) {
       return;
     }
     const measure = () => {
       const rect = pages.getBoundingClientRect();
+      const areaRect = pageArea.getBoundingClientRect();
+      const { panels: docked, devtoolsRatio: ratio } = layout.current;
       const barNode = document.getElementById("viewport-bar");
       const barHeight = barNode ? Math.round(barNode.getBoundingClientRect().height) : BAR;
       setBar(Math.max(BAR, barHeight));
-      setArea({ width: rect.width, height: rect.height });
+      setArea(pageBox(areaRect, rect, docked, ratio));
     };
     measure();
     const observer = new ResizeObserver(measure);
+    observer.observe(pageArea);
     observer.observe(pages);
     const barNode = document.getElementById("viewport-bar");
     if (barNode) {
       observer.observe(barNode);
     }
     return () => observer.disconnect();
-  }, []);
+  }, [devtoolsRatio, panels.left, panels.right]);
 
   useEffect(() => {
     if (live && !drag.current && live.width === width && live.height === height) {
@@ -201,7 +212,8 @@ export function ViewportHandles({ width, height, cutout, homeBar, installed, key
   };
 
   const shown = live ?? { width, height };
-  const box = deviceFrame(shown.width, shown.height, area.width, area.height, bar);
+  const fitted = deviceFrame(shown.width, shown.height, area.width, area.height, bar);
+  const box = { ...fitted, x: fitted.x + area.left };
   if (area.width <= 0 || area.height <= 0) {
     return <div id="viewport-handles" ref={rootRef} className="pointer-events-none absolute inset-0" />;
   }

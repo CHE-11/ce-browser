@@ -16,9 +16,14 @@ export default defineConfig(() => ({
       { find: "@lib", replacement: path.resolve(rootDir, "src/lib") },
       { find: "@type", replacement: path.resolve(rootDir, "../types") },
       { find: "@", replacement: path.resolve(rootDir, "src") },
+      { find: "monaco-editor.css", replacement: path.resolve(rootDir, "node_modules/monaco-editor/min/vs/editor/editor.main.css") },
     ],
   },
   clearScreen: false,
+  // Prebundling these pulls Monaco features in without their services, and breaks Biome's wasm URL.
+  optimizeDeps: {
+    exclude: ["monaco-editor", "@biomejs/wasm-web"],
+  },
   server: {
     port: 1420,
     strictPort: true,

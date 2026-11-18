@@ -9,7 +9,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use tauri::webview::Color;
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewUrl};
+use tauri::window::WindowBuilder;
+use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, PhysicalPosition, WebviewUrl};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
@@ -82,6 +83,11 @@ pub fn show_automations(app: &AppHandle, window: &str) -> Result<(), String> {
     toggle_kind(app, window, tabs::SidePanel::Automations, Some(true), false).map(|_| ())
 }
 
+/// Opens or closes the scripting panel in `window`. `open` forces a state. Returns whether it is open.
+pub fn toggle_scripting(app: &AppHandle, window: &str, open: Option<bool>) -> Result<bool, String> {
+    toggle_kind(app, window, tabs::SidePanel::Scripting, open, true)
+}
+
 fn toggle_kind(
     app: &AppHandle,
     window: &str,
@@ -115,6 +121,7 @@ fn toggle_kind(
 fn panel_label(window: &str, kind: tabs::SidePanel) -> String {
     match kind {
         tabs::SidePanel::Automations => tabs::automation_panel_label(window),
+        tabs::SidePanel::Scripting => tabs::scripting_panel_label(window),
         tabs::SidePanel::Host => tabs::host_panel_label(window),
         tabs::SidePanel::Agent | tabs::SidePanel::None => tabs::agent_panel_label(window),
     }
@@ -131,6 +138,12 @@ fn ensure_kind(app: &AppHandle, window: &str, kind: tabs::SidePanel) -> Result<(
             &tabs::automation_panel_label(window),
             "automations-panel",
         ),
+        tabs::SidePanel::Scripting => ensure_view(
+            app,
+            window,
+            &tabs::scripting_panel_label(window),
+            "scripting-panel",
+        ),
         tabs::SidePanel::Host => Ok(()),
         tabs::SidePanel::None => Ok(()),
     }
@@ -140,24 +153,47 @@ fn saved_width(app: &AppHandle) -> f64 {
     settings::get(app).agent_panel_width as f64
 }
 
+/// The scripting editor needs more than the agent column's usual width.
+const SCRIPTING_MIN: f64 = 480.0;
+
 /// Saved column width, limited to what this panel may take in `window`.
 fn fitted_width(app: &AppHandle, window: &str, kind: tabs::SidePanel, width: f64) -> f64 {
     let Some(geom) = geometry(app, window) else {
-        return width.clamp(f64::from(settings::AGENT_PANEL_WIDTH_PX.0), AGENT_MAX);
+        let cap = if wide_column(kind) { 8192.0 } else { AGENT_MAX };
+        return width.clamp(panel_min(kind), cap);
     };
-    width_beside_pointer(
+    let span = (geom.client - geom.right.max(0.0) - geom.left.max(0.0) - MIN_PAGE).max(0.0);
+    let floor = f64::from(settings::AGENT_PANEL_WIDTH_PX.0);
+    let min = panel_min(kind).min(span.max(floor));
+    width_for_edge(
         geom.client,
         geom.left,
         geom.right,
         geom.client - geom.right - width,
         0.0,
+        min,
         column_max(kind, &geom),
+        tabs::PanelEdge::Right,
+        width.max(min),
     )
 }
 
-/// Automations may cover half the area the page and the column share. The agent panel stays narrower.
+fn panel_min(kind: tabs::SidePanel) -> f64 {
+    if kind == tabs::SidePanel::Scripting {
+        SCRIPTING_MIN
+    } else {
+        f64::from(settings::AGENT_PANEL_WIDTH_PX.0)
+    }
+}
+
+fn wide_column(kind: tabs::SidePanel) -> bool {
+    kind == tabs::SidePanel::Automations || kind == tabs::SidePanel::Scripting
+}
+
+/// Automations and scripting may cover half the area the page and the column share.
+/// The agent panel stays narrower.
 fn column_max(kind: tabs::SidePanel, geom: &Geom) -> f64 {
-    if kind != tabs::SidePanel::Automations {
+    if !wide_column(kind) {
         return AGENT_MAX;
     }
     let span = (geom.client - geom.right.max(0.0) - geom.left.max(0.0)).max(0.0);
@@ -227,6 +263,7 @@ pub fn track_column(app: &AppHandle, window: &str, drag: ColumnDrag) -> Result<f
             .recv_timeout(Duration::from_secs(2))
             .map_err(|_| "The panel resize did not finish.".to_string())?;
     }
+    tabs::emit_tabs(app);
     Ok(tabs::agent_panel_width(app, window))
 }
 
@@ -237,6 +274,7 @@ pub fn set_width(app: &AppHandle, window: &str, width: f64) -> Result<(), String
     };
     if let Some(applied) = tabs::resize_agent_panel(app, window, width) {
         remember(app, applied);
+        tabs::emit_tabs(app);
     }
     Ok(())
 }
@@ -490,6 +528,69 @@ fn ensure_view(app: &AppHandle, window: &str, label: &str, page: &str) -> Result
         .map_err(|error| error.to_string())?;
     webview2::attach_panel_hooks(app, &view);
     Ok(())
+}
+
+const SCRIPTING_WINDOW: &str = "popup-scripting";
+
+/// Opens the scripting panel in its own window. A second request brings that window forward.
+pub fn open_scripting_window(app: &AppHandle, owner: &str) -> Result<(), String> {
+    if let Some(existing) = app.get_window(SCRIPTING_WINDOW) {
+        let _ = existing.unminimize();
+        let _ = existing.show();
+        let _ = existing.set_focus();
+    } else {
+        let window = WindowBuilder::new(app, SCRIPTING_WINDOW)
+            .title("Scripting")
+            .inner_size(960.0, 720.0)
+            .min_inner_size(640.0, 420.0)
+            .resizable(true)
+            .decorations(true)
+            .focused(true)
+            .shadow(true)
+            .build()
+            .map_err(|error| error.to_string())?;
+        crate::profiles::apply_window_icon(app, &window);
+        if let Some(owner_window) = app.get_window(owner)
+            && let Ok(position) = owner_window.outer_position()
+        {
+            let _ = window.set_position(PhysicalPosition::new(position.x + 48, position.y + 48));
+        }
+        let url = paths::internal_url(app, "scripting-panel");
+        let host = app.clone();
+        let view = tabs::base_builder(app, SCRIPTING_WINDOW, WebviewUrl::External(url))
+            .auto_resize()
+            .disable_drag_drop_handler()
+            .background_color(tabs::popup_surface_color(app))
+            .focused(true)
+            .on_new_window(move |url, features| tabs::new_window(&host, None, url, features));
+        let size = match window.inner_size() {
+            Ok(size) => size,
+            Err(error) => {
+                let _ = window.close();
+                return Err(error.to_string());
+            }
+        };
+        let webview = match window.add_child(view, PhysicalPosition::new(0, 0), size) {
+            Ok(webview) => webview,
+            Err(error) => {
+                let _ = window.close();
+                return Err(error.to_string());
+            }
+        };
+        webview2::attach_panel_hooks(app, &webview);
+        let _ = window.set_focus();
+    }
+    if tabs::is_browser_label(owner) {
+        let _ = toggle_scripting(app, owner, Some(false));
+    }
+    Ok(())
+}
+
+/// Closes the popped-out scripting window so the process can exit with the last browser window.
+pub fn close_scripting_window(app: &AppHandle) {
+    if let Some(window) = app.get_window(SCRIPTING_WINDOW) {
+        let _ = window.close();
+    }
 }
 
 #[cfg(test)]

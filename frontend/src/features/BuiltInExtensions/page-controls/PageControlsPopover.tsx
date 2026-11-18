@@ -369,7 +369,7 @@ export function PageControlsPopover({ params }: PageControlsPopoverProps) {
               void createTab(`ce://scripts?host=${encodeURIComponent(host)}`).finally(() => closePopup());
             }}
           >
-            Site scripts
+            Scripts
           </button>
         </div>
         {error ? (

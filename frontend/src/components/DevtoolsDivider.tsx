@@ -4,6 +4,9 @@ import { setDevtoolsRatio } from "../lib/browser-client";
 type DevtoolsDividerProps = {
   /** Share of the page area the pages keep. Matches the dock column in the native layout. */
   ratio: number;
+  /** Docked side column already taken off the page area, in CSS pixels. */
+  panelLeft: number;
+  panelRight: number;
 };
 
 const PANEL_MIN = 0.1;
@@ -23,7 +26,7 @@ function ratioLimits(areaWidth: number) {
  * Drawn in the browser UI, which shows through the gap between the page and the docked tools.
  * Sits in the page area, so the percentage is the whole page area, not the pages column.
  */
-export function DevtoolsDivider({ ratio: dockRatio }: DevtoolsDividerProps) {
+export function DevtoolsDivider({ ratio: dockRatio, panelLeft, panelRight }: DevtoolsDividerProps) {
   const [dragRatio, setDragRatio] = useState<number | null>(null);
   const frame = useRef<number | null>(null);
   const pending = useRef<number | null>(null);
@@ -45,11 +48,12 @@ export function DevtoolsDivider({ ratio: dockRatio }: DevtoolsDividerProps) {
 
   const ratioAt = (event: PointerEvent<HTMLDivElement>) => {
     const area = event.currentTarget.parentElement?.getBoundingClientRect();
-    if (!area || area.width <= 0) {
+    const width = area ? area.width - panelLeft - panelRight : 0;
+    if (!area || width <= 0) {
       return ratio;
     }
-    const limits = ratioLimits(area.width);
-    const next = (event.clientX - area.left) / area.width;
+    const limits = ratioLimits(width);
+    const next = (event.clientX - area.left - panelLeft) / width;
     return Math.min(limits.max, Math.max(limits.min, next));
   };
 
@@ -61,7 +65,7 @@ export function DevtoolsDivider({ ratio: dockRatio }: DevtoolsDividerProps) {
       aria-label="Resize developer tools. Double-click to reset."
       title="Drag to resize. Double-click to reset."
       className="group absolute inset-y-0 z-10 flex w-1.5 cursor-col-resize justify-center"
-      style={{ left: `calc(${ratio * 100}% - 3px)` }}
+      style={{ left: `calc(${panelLeft}px + (100% - ${panelLeft + panelRight}px) * ${ratio} - 3px)` }}
       onPointerDown={(event) => {
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);

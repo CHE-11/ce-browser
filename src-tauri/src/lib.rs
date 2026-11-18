@@ -51,6 +51,7 @@ mod profile_icons;
 mod profiles;
 mod recording;
 mod rewrite;
+mod scripting;
 mod secrets;
 mod session;
 mod settings;
@@ -1630,6 +1631,41 @@ fn delete_user_script(app: AppHandle, id: String) -> Result<page_rules::PageRule
 }
 
 #[tauri::command]
+fn get_scripting(app: AppHandle) -> scripting::ScriptFile {
+    scripting::get(&app)
+}
+
+#[tauri::command]
+fn save_page_script(
+    app: AppHandle,
+    script: scripting::PageScript,
+) -> Result<scripting::ScriptFile, String> {
+    scripting::save_script(&app, script)
+}
+
+#[tauri::command]
+fn delete_page_script(app: AppHandle, id: String) -> Result<scripting::ScriptFile, String> {
+    scripting::delete_script(&app, &id)
+}
+
+#[tauri::command]
+fn pyodide_ready(app: AppHandle) -> bool {
+    scripting::pyodide_ready(&app)
+}
+
+#[tauri::command]
+async fn run_page_script(
+    app: AppHandle,
+    tab_id: u32,
+    language: String,
+    source: String,
+    expression: Option<bool>,
+) -> Result<scripting::ScriptRun, String> {
+    let expression = expression.unwrap_or(false);
+    blocking(move || scripting::run(&app, tab_id, &language, &source, expression)).await
+}
+
+#[tauri::command]
 async fn start_zapper(app: AppHandle, id: u32) -> Result<(), String> {
     tabs::run_zapper(&app, id)
 }
@@ -2592,6 +2628,20 @@ async fn toggle_automation_panel(
 }
 
 #[tauri::command]
+async fn toggle_scripting_panel(
+    app: AppHandle,
+    window: Window,
+    open: Option<bool>,
+) -> Result<bool, String> {
+    automation::panel::toggle_scripting(&app, &browser_window(&window), open)
+}
+
+#[tauri::command]
+async fn open_scripting_window(app: AppHandle, window: Window) -> Result<(), String> {
+    automation::panel::open_scripting_window(&app, &browser_window(&window))
+}
+
+#[tauri::command]
 async fn resize_agent_panel(app: AppHandle, window: Window) -> Result<(), String> {
     let window = browser_window(&window);
     blocking(move || automation::panel::track_resize(&app, &window)).await
@@ -2886,6 +2936,7 @@ pub fn run() {
             }
             settings::init(&handle);
             page_rules::init(&handle);
+            scripting::init(&handle);
             rewrite::init(&handle);
             privacy::init(&handle);
             keywords::init(&handle);
@@ -3239,6 +3290,11 @@ pub fn run() {
             update_site_control,
             save_user_script,
             delete_user_script,
+            get_scripting,
+            save_page_script,
+            delete_page_script,
+            pyodide_ready,
+            run_page_script,
             start_zapper,
             start_inspector,
             translation_active,
@@ -3374,6 +3430,8 @@ pub fn run() {
             agent_show_tab,
             toggle_agent_panel,
             toggle_automation_panel,
+            toggle_scripting_panel,
+            open_scripting_window,
             resize_agent_panel,
             set_agent_panel_width,
             automation_secret_names,

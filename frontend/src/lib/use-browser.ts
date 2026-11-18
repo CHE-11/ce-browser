@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import type { BookmarkNode, BookmarkTree, BrowserSettings, ClosedEntry, PageRules, TabsSnapshot } from "../../../types/browser";
+import type { BookmarkNode, BookmarkTree, BrowserSettings, ClosedEntry, PageRules, ScriptFile, TabsSnapshot } from "../../../types/browser";
 import { applyFontPreview, applyThemePreview, publishAppearance, publishFont } from "./appearance";
 import { applyChromeMetrics } from "./chrome-metrics";
 import {
@@ -12,6 +12,7 @@ import {
   onAutomationsChanged,
   currentWindowLabel as browserWindowLabel,
   getPageRules,
+  getScripting,
   getSettings,
   onFontPreview,
   onThemePreview,
@@ -30,6 +31,7 @@ import {
   onHostExtensionsChanged,
   onHistoryChanged,
   onPageRulesChanged,
+  onScriptingChanged,
   onSettingsChanged,
   onTabsChanged,
   onUpdateStatus,
@@ -156,7 +158,10 @@ export function useTabs() {
     peekUrl: mine?.peekUrl ?? null,
     agentPanel: mine?.agentPanel ?? false,
     automationPanel: mine?.automationPanel ?? false,
+    scriptingPanel: mine?.scriptingPanel ?? false,
     hostPanel: mine?.hostPanel ?? "",
+    sidePanelWidth: mine?.sidePanelWidth ?? 0,
+    sidePanelEdge: mine?.sidePanelEdge === "left" || mine?.sidePanelEdge === "right" ? mine.sidePanelEdge : "",
     groups,
     selectedIds: selectedIds.length > 0 ? selectedIds : activeId === null ? [] : [activeId],
     loaded: live.loaded,
@@ -338,6 +343,10 @@ export function useSettingsState() {
 
 export function usePageRules(): PageRules | null {
   return useLiveValue("page-rules", getPageRules, onPageRulesChanged).value;
+}
+
+export function useScripting(): ScriptFile | null {
+  return useLiveValue("scripting", getScripting, onScriptingChanged).value;
 }
 
 export function useSettings(): BrowserSettings | null {

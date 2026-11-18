@@ -64,10 +64,24 @@ export function AgentPanelPage() {
   const [resizingPanel, setResizingPanel] = useState(false);
   const [view, setView] = useState<AgentPanelView>("run");
   const [notice, setNotice] = useState<string | null>(null);
+  const [composerFocus, setComposerFocus] = useState(0);
 
   useEffect(() => {
     document.title = run ? `Agent · ${run.goal.slice(0, 40)}` : "Agent";
   }, [run]);
+
+  useEffect(() => {
+    if (composerFocus === 0) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const input = document.getElementById("agent-composer-input");
+      if (input instanceof HTMLTextAreaElement) {
+        input.focus();
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [composerFocus]);
 
   const stopRef = useRef(agent.stop);
   stopRef.current = agent.stop;
@@ -196,6 +210,7 @@ export function AgentPanelPage() {
         onNewTask={() => {
           setView("run");
           agent.newTask();
+          setComposerFocus((token) => token + 1);
         }}
         autonomy={autonomy}
         autonomyFor={showRunAutonomy ? "run" : "next"}

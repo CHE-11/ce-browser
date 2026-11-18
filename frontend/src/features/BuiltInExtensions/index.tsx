@@ -23,7 +23,7 @@ import { FontPickerButton } from "./font-picker/FontPickerButton";
 import { NetworkButton } from "./network/NetworkButton";
 import { NetworkSpeedButton } from "./network-speed/NetworkSpeedButton";
 import { RewritesButton } from "./rewrites/RewritesButton";
-import { ScriptsButton } from "./scripts/ScriptsButton";
+import { ScriptingButton } from "./scripting/ScriptingButton";
 import { StylePickerButton } from "./style-picker/StylePickerButton";
 import { ThemePickerButton } from "./theme-picker/ThemePickerButton";
 
@@ -56,8 +56,8 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <NetworkButton activeTab={activeTab} />;
     case "network-speed":
       return <NetworkSpeedButton />;
-    case "scripts":
-      return <ScriptsButton activeTab={activeTab} />;
+    case "scripting":
+      return <ScriptingButton />;
     case "rewrites":
       return <RewritesButton />;
     case "theme-picker":

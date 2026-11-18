@@ -9,6 +9,7 @@ import { PageLoading, pagePending, useShownPages } from "./PageLoading";
 import { ExtensionsToolbar } from "../Extensions/ExtensionsToolbar";
 import { ViewportBar } from "../DevTools/DevTools_ViewportBar";
 import { ViewportHandles } from "../DevTools/DevTools_ViewportHandles";
+import { dockedPanels, pagesColumnStyle } from "../DevTools/page-column";
 
 type BrowserBodyProps = {
   snapshot: WindowTabsState;
@@ -38,7 +39,8 @@ export function BrowserBody({
   extensions,
 }: BrowserBodyProps) {
   const devtools = snapshot.devtools;
-  const pagesWidth = devtools?.visible ? `calc(${devtools.ratio * 100}% - 3px)` : "100%";
+  const panels = dockedPanels(snapshot.sidePanelWidth, snapshot.sidePanelEdge);
+  const pagesColumn = pagesColumnStyle(panels, devtools?.visible ? devtools.ratio : null);
   // The device bar belongs to the tab whose DevTools is open. Other tabs stay full size.
   const showViewportBar = devtools != null && (devtools.visible || snapshot.viewport != null);
   const shown = useShownPages(snapshot.tabs);
@@ -51,7 +53,7 @@ export function BrowserBody({
         <ExtensionsToolbar ref={toolbarRef} side="left" activeTab={activeTab} extensions={extensions} settings={settings} />
       ) : null}
       <div id="browser-page-area" className="relative flex min-w-0 flex-1 items-center justify-center bg-zinc-950">
-        <div id="browser-pages" className="absolute inset-y-0 left-0" style={{ width: pagesWidth }}>
+        <div id="browser-pages" className="absolute inset-y-0" style={pagesColumn}>
           {showViewportBar ? (
             <ViewportBar
               width={snapshot.viewport?.width ?? 0}
@@ -94,7 +96,9 @@ export function BrowserBody({
                 : null}
           {splitShown && split ? <SplitDivider split={split} activeId={snapshot.activeId} /> : null}
         </div>
-        {devtools?.visible ? <DevtoolsDivider ratio={devtools.ratio} /> : null}
+        {devtools?.visible ? (
+          <DevtoolsDivider ratio={devtools.ratio} panelLeft={panels.left} panelRight={panels.right} />
+        ) : null}
       </div>
       <div id="find-results-slot" className="contents" />
       {showToolStrip && toolSide === "right" ? (

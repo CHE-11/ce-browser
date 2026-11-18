@@ -22,6 +22,7 @@ import {
   startFlowRecording,
   toggleAgentPanel,
   toggleAutomationPanel,
+  toggleScriptingPanel,
   switchWorkspace,
   zoomTab,
 } from "@/lib/browser-client";
@@ -130,7 +131,6 @@ function toolReplacesPalette(id: string, hasTab: boolean) {
   switch (id) {
     case "debug-hud":
     case "present":
-    case "scripts":
     case "rewrites":
     case "clear-cache":
       return false;
@@ -187,7 +187,7 @@ export function CommandPalette() {
       { id: "settings", title: "Settings", hint: "ce://settings", group: "Action", run: () => openSetting(snapshot.windowTabs, "settings-profiles") },
       { id: "styles", title: "Styles", hint: "ce://styles", group: "Action", run: () => createTab("ce://styles") },
       { id: "extensions", title: "Extensions", hint: "ce://extensions", group: "Action", run: () => createTab("ce://extensions") },
-      { id: "scripts", title: "Site scripts", hint: "ce://scripts", group: "Action", run: () => createTab("ce://scripts") },
+      { id: "scripts", title: "Scripts", hint: "ce://scripts", group: "Action", keywords: "scripting css javascript typescript python", run: () => createTab("ce://scripts") },
       { id: "permissions", title: "Permissions", hint: "ce://permissions", group: "Action", run: () => createTab("ce://permissions") },
       { id: "shortcuts", title: "Keyboard shortcuts", hint: "ce://shortcuts", group: "Action", run: () => createTab("ce://shortcuts") },
       { id: "rewrites", title: "Request rules", hint: "ce://rewrites", group: "Action", run: () => createTab("ce://rewrites") },
@@ -196,6 +196,7 @@ export function CommandPalette() {
       { id: "find-all", title: "Find in all tabs", hint: "Ctrl+Shift+F", group: "Action", run: () => sendUiCommand("find-all") },
       { id: "agent-panel", title: "Agent", hint: "Ctrl+Shift+Y", group: "Action", keywords: "ai automate browser task", run: () => toggleAgentPanel(true) },
       { id: "automations-panel", title: "Automations panel", hint: "Beside the page", group: "Action", keywords: "flows record macros", run: () => toggleAutomationPanel(true) },
+      { id: "scripting-panel", title: "Scripting", hint: "Beside the page", group: "Action", keywords: "javascript typescript python css console editor", run: () => toggleScriptingPanel(true) },
       { id: "automations", title: "Automations", hint: "ce://automations", group: "Action", keywords: "flows macros schedule datasets rpa", run: () => createTab("ce://automations") },
       {
         id: "vertical",
@@ -274,10 +275,6 @@ export function CommandPalette() {
         }
         if (tool.id === "present") {
           return togglePresent();
-        }
-        if (tool.id === "scripts") {
-          const host = active ? siteKey(active.url) : "";
-          return createTab(host ? `ce://scripts?host=${encodeURIComponent(host)}` : "ce://scripts");
         }
         if (tool.id === "rewrites") {
           return createTab("ce://rewrites");

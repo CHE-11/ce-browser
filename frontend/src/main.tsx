@@ -27,6 +27,7 @@ import { PopupPage } from "./features/Popup/Popup.page";
 import { PrintEditorPage } from "./features/BuiltInExtensions/print-to-pdf/PrintEditor.page";
 import { ReaderPage } from "./features/BuiltInExtensions/reader/Reader.page";
 import { ScriptsPage } from "./features/BuiltInExtensions/scripts/Scripts.page";
+import { ScriptingPanelPage } from "./features/BuiltInExtensions/scripting/ScriptingPanel.page";
 import { RewritesPage } from "./features/BuiltInExtensions/rewrites/Rewrites.page";
 import { ShortcutsPage } from "./features/Shortcuts/Shortcuts.page";
 import { StoragePage } from "./features/Storage/Storage.page";
@@ -121,6 +122,8 @@ function App() {
       return <AgentPanelPage />;
     case "automations-panel":
       return <AutomationsPanelPage />;
+    case "scripting-panel":
+      return <ScriptingPanelPage />;
     case "automations":
       return <AutomationsPage params={route.params} />;
     case "debug-hud":

@@ -2150,6 +2150,7 @@ pub(crate) const PROFILE_FILES: &[&str] = &[
     "window.json",
     "styles.css",
     "site-controls.json",
+    "scripting.json",
     "permissions.json",
     "containers.json",
     "keywords.json",

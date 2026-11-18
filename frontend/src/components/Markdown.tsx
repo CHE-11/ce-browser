@@ -1,14 +1,63 @@
-import { memo, useId } from "react";
+import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { Check, Copy } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { createTab } from "@/lib/browser-client";
+import { copyText, createTab } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
+import { focusRing } from "@/lib/focus-ring";
 
 type MarkdownProps = {
   id: string;
   text: string;
   className?: string;
 };
+
+function CodeBlock({ id, children }: { id: string; children: ReactNode }) {
+  const pre = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+    const timer = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  const onCopy = () => {
+    const text = (pre.current?.textContent ?? "").replace(/\n$/, "");
+    void copyText(text).then(() => setCopied(true));
+  };
+
+  return (
+    <div id={`${id}-block`} className="relative my-1.5">
+      <button
+        id={`${id}-copy`}
+        type="button"
+        aria-label={copied ? "Copied" : "Copy code"}
+        title={copied ? "Copied" : "Copy"}
+        className={cn(
+          "absolute top-1.5 right-1.5 z-10 inline-flex size-6 items-center justify-center rounded bg-zinc-900/80 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
+          focusRing,
+        )}
+        onClick={onCopy}
+      >
+        {copied ? (
+          <Check id={`${id}-copy-icon`} className="size-3.5 text-emerald-400" aria-hidden />
+        ) : (
+          <Copy id={`${id}-copy-icon`} className="size-3.5" aria-hidden />
+        )}
+      </button>
+      <pre
+        id={id}
+        ref={pre}
+        className="overflow-x-auto rounded-md bg-zinc-950 p-2 pr-9 text-xs ring-1 ring-zinc-800 [&_code]:bg-transparent [&_code]:p-0"
+      >
+        {children}
+      </pre>
+    </div>
+  );
+}
 
 function components(prefix: string): Components {
   let count = 0;
@@ -75,11 +124,7 @@ function components(prefix: string): Components {
         {children}
       </code>
     ),
-    pre: ({ children }) => (
-      <pre id={next("pre")} className="my-1.5 overflow-x-auto rounded-md bg-zinc-950 p-2 text-xs ring-1 ring-zinc-800 [&_code]:bg-transparent [&_code]:p-0">
-        {children}
-      </pre>
-    ),
+    pre: ({ children }) => <CodeBlock id={next("pre")}>{children}</CodeBlock>,
     table: ({ children }) => (
       <div id={next("table-wrap")} className="my-1.5 overflow-x-auto">
         <table id={next("table")} className="w-full border-collapse text-xs">
@@ -116,9 +161,10 @@ function components(prefix: string): Components {
 /** Markdown from the model, without raw HTML. Links open in a new tab. */
 export const Markdown = memo(function Markdown({ id, text, className }: MarkdownProps) {
   const prefix = `${id}-${useId().replace(/:/g, "")}`;
+  const markdownComponents = useMemo(() => components(prefix), [prefix]);
   return (
     <div id={id} className={cn("break-words text-sm leading-relaxed [overflow-wrap:anywhere]", className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components(prefix)}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
         {text}
       </ReactMarkdown>
     </div>

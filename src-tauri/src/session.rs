@@ -142,6 +142,7 @@ pub fn save_now(app: &AppHandle) -> Result<(), String> {
 /// Stops the debounced writer so a late save cannot run after the window is gone.
 pub fn shutdown(app: &AppHandle) {
     crate::privacy::close_windows(app);
+    crate::automation::panel::close_scripting_window(app);
     crate::page_errors::note_exiting();
     crate::undo::finish_all(app);
     let _ = save_now(app);

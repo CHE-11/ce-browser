@@ -84,7 +84,10 @@ import type {
   PresentTool,
   CameraLayout,
   PageRules,
+  PageScript,
   PageTechnologies,
+  ScriptFile,
+  ScriptRun,
   PageToolRequest,
   SiteFavicon,
   SiteInfo,
@@ -1851,6 +1854,30 @@ export function onPageRulesChanged(handler: (rules: PageRules) => void): Promise
   return listen<PageRules>("page-rules-changed", (event) => handler(event.payload));
 }
 
+export function getScripting() {
+  return invoke<ScriptFile>("get_scripting");
+}
+
+export function savePageScript(script: PageScript) {
+  return invoke<ScriptFile>("save_page_script", { script });
+}
+
+export function deletePageScript(id: string) {
+  return invoke<ScriptFile>("delete_page_script", { id });
+}
+
+export function onScriptingChanged(handler: (file: ScriptFile) => void): Promise<UnlistenFn> {
+  return listen<ScriptFile>("scripting-changed", (event) => handler(event.payload));
+}
+
+export function pyodideReady() {
+  return invoke<boolean>("pyodide_ready");
+}
+
+export function runPageScript(tabId: number, language: string, source: string, expression = false) {
+  return invoke<ScriptRun>("run_page_script", { tabId, language, source, expression });
+}
+
 export function getSettings() {
   return invoke<BrowserSettings>("get_settings");
 }
@@ -2202,6 +2229,16 @@ export function toggleAgentPanel(open?: boolean) {
 /** Opens or closes the automations panel beside this window's pages. `open` forces a state. */
 export function toggleAutomationPanel(open?: boolean) {
   return invoke<boolean>("toggle_automation_panel", { open: open ?? null });
+}
+
+/** Opens or closes the scripting panel beside this window's pages. `open` forces a state. */
+export function toggleScriptingPanel(open?: boolean) {
+  return invoke<boolean>("toggle_scripting_panel", { open: open ?? null });
+}
+
+/** Opens the scripting panel in its own window and closes the docked one. */
+export function openScriptingWindow() {
+  return invoke<void>("open_scripting_window");
 }
 
 /** Follows the mouse until the button comes up and remembers the agent panel width. */

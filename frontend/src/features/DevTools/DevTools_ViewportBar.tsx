@@ -1,7 +1,9 @@
 import { Laptop, Maximize2, RotateCw, Scaling, Smartphone, Tablet } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { clearViewport, openDevtools, setViewportBar } from "@/lib/browser-client";
+import { useTabs } from "@/lib/use-browser";
 import { DEVICE_GROUPS, DEVICES, deviceFor, pushViewport, viewportEnvironment, viewportShowsMobileOptions } from "./devices";
+import { dockedPanels, pageBox } from "./page-column";
 
 type ViewportBarProps = {
   width: number;
@@ -24,8 +26,8 @@ function presetFor(width: number, height: number) {
 }
 
 /**
- * Sits in the page column, above the real page view. The native webview is placed below this bar
- * at the chosen CSS size, so device preview is the page itself.
+ * Sits above the real page view. Docked panels are taken off the page width first, so the tools
+ * center over the page. The native webview is placed below this bar at the chosen CSS size.
  */
 /** Matches the device bar height the page view is placed under. */
 const BAR_HEIGHT = 36;
@@ -46,7 +48,13 @@ export function ViewportBar({ width, height, cutout, homeBar, installed, keyboar
   const barRef = useRef<HTMLDivElement>(null);
   const widthFocused = useRef(false);
   const heightFocused = useRef(false);
+  const { sidePanelWidth, sidePanelEdge, devtools } = useTabs();
+  const panels = dockedPanels(sidePanelWidth, sidePanelEdge);
+  const devtoolsRatio = devtools?.visible ? devtools.ratio : null;
+  const layout = useRef({ panels, devtoolsRatio });
+  layout.current = { panels, devtoolsRatio };
   const [frame, setFrame] = useState({ width: 0, height: 0 });
+  const [column, setColumn] = useState<{ left: number; width: number } | null>(null);
   const [draftWidth, setDraftWidth] = useState("");
   const [draftHeight, setDraftHeight] = useState("");
   const preset = presetFor(width, height);
@@ -55,16 +63,21 @@ export function ViewportBar({ width, height, cutout, homeBar, installed, keyboar
   useEffect(() => {
     const bar = barRef.current;
     const pages = bar?.parentElement;
-    if (!bar || !pages) {
+    const area = pages?.parentElement;
+    if (!bar || !pages || !area) {
       return;
     }
     let reported = 0;
     const measure = () => {
-      const rect = pages.getBoundingClientRect();
+      const pagesRect = pages.getBoundingClientRect();
+      const areaRect = area.getBoundingClientRect();
+      const { panels: docked, devtoolsRatio: ratio } = layout.current;
+      const box = pageBox(areaRect, pagesRect, docked, ratio);
       const barHeight = Math.max(BAR_HEIGHT, Math.round(bar.getBoundingClientRect().height));
+      setColumn({ left: box.left, width: box.width });
       setFrame({
-        width: Math.max(0, Math.round(rect.width)),
-        height: Math.max(0, Math.round(rect.height - barHeight)),
+        width: Math.max(0, Math.round(box.width)),
+        height: Math.max(0, Math.round(box.height - barHeight)),
       });
       if (Math.abs(reported - barHeight) >= 1) {
         reported = barHeight;
@@ -73,10 +86,11 @@ export function ViewportBar({ width, height, cutout, homeBar, installed, keyboar
     };
     measure();
     const observer = new ResizeObserver(measure);
+    observer.observe(area);
     observer.observe(pages);
     observer.observe(bar);
     return () => observer.disconnect();
-  }, []);
+  }, [devtoolsRatio, panels.left, panels.right]);
 
   useEffect(() => {
     const shownWidth = full ? frame.width : width;
@@ -135,7 +149,12 @@ export function ViewportBar({ width, height, cutout, homeBar, installed, keyboar
     : `Mobile web app installed on ${identity}. Full screen, with a status bar, cutout, and safe-area insets instead of a browser page.`;
 
   return (
-    <div id="viewport-bar" ref={barRef} className="absolute inset-x-0 top-0 z-20 bg-zinc-950">
+    <div
+      id="viewport-bar"
+      ref={barRef}
+      className={column ? "absolute top-0 z-20 bg-zinc-950" : "absolute inset-x-0 top-0 z-20 bg-zinc-950"}
+      style={column ? { left: column.left, width: column.width } : undefined}
+    >
       <div
         id="viewport-controls"
         className="grid min-h-9 grid-cols-[1fr_auto_1fr] items-center border-b border-zinc-800 py-1"
