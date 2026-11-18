@@ -195,6 +195,13 @@ export function BookmarksBarContextMenuItems({
             onClick={() => void createTab(linkUrl).finally(onDone)}
           />
           <PopupMenuItem
+            id={`${idPrefix}-open-background`}
+            icon={<ExternalLink />}
+            label="Open in background tab"
+            style={itemStyle}
+            onClick={() => void createTab(linkUrl, true).finally(() => closeThisPopup())}
+          />
+          <PopupMenuItem
             id={`${idPrefix}-open-window`}
             icon={<AppWindow />}
             label="Open in new window"
