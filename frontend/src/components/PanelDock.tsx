@@ -92,7 +92,23 @@ function PanelColumn({ panel }: { panel: SidePanelInfo }) {
     >
       {panel.collapsed ? (
         <div id={`panel-dock-${id}-rail`} className="flex h-full w-full flex-col items-center gap-2 py-2">
-          <GripButton id={`panel-dock-${id}-grip`} label={`Reorder ${panel.title}`} onPointerDown={onGrip} />
+          <div id={`panel-dock-${id}-grip-expand-wrap`} className="flex flex-col items-center gap-1">
+            <GripButton id={`panel-dock-${id}-grip`} label={`Reorder ${panel.title}`} onPointerDown={onGrip} />
+            <button
+              id={`panel-dock-${id}-expand`}
+              type="button"
+              className="flex size-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+              aria-label={`Collapse ${panel.title}`}
+              onClick={() => void collapseSidePanel(panel.id, false)}
+            >
+              {panel.edge === "right" ? (
+                <ChevronsLeft id={`panel-dock-${id}-expand-icon`} className="size-3.5" aria-hidden />
+              ) : (
+                <ChevronsRight id={`panel-dock-${id}-expand-icon`} className="size-3.5" aria-hidden />
+              )}
+            </button>
+          </div>
+
           <button
             id={`panel-dock-${id}-expand`}
             type="button"
