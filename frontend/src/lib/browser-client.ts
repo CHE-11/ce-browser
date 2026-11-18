@@ -1874,8 +1874,19 @@ export function pyodideReady() {
   return invoke<boolean>("pyodide_ready");
 }
 
-export function runPageScript(tabId: number, language: string, source: string, expression = false) {
-  return invoke<ScriptRun>("run_page_script", { tabId, language, source, expression });
+export function runPageScript(
+  tabId: number,
+  language: string,
+  source: string,
+  expression = false,
+  runId = 0,
+) {
+  return invoke<ScriptRun>("run_page_script", { tabId, language, source, expression, runId });
+}
+
+/** Interrupts a run started with the same `runId`. */
+export function stopPageScript(tabId: number, runId: number) {
+  return invoke<void>("stop_page_script", { tabId, runId });
 }
 
 export function getSettings() {

@@ -3,9 +3,8 @@ import type { AgentAccess, AgentAutonomy, TabInfo } from "@type/browser";
 import { IconButton } from "@/components/IconButton";
 import type { AccessToggle } from "@/lib/agent-access";
 import { activateTab, createTab, navigate, toggleAgentPanel } from "@/lib/browser-client";
-import { AgentAccessMenu } from "./AgentAccessMenu";
 import { AgentAutonomyPicker } from "./AgentAutonomyPicker";
-import { AgentModelPicker } from "./AgentModelPicker";
+import { AgentChatSettingsMenu } from "./AgentChatSettingsMenu";
 
 const AI_SETTINGS_URL = "ce://settings?focus=settings-ai";
 
@@ -31,10 +30,14 @@ type Props = {
   /** Says whether the autonomy applies to the run on show or to the next task. */
   autonomyFor: "run" | "next";
   onAutonomy: (autonomy: AgentAutonomy) => void;
-  /** Hidden while a run works, since its model is fixed. */
-  model: string | null;
+  /** Saved agent model. Blank uses the provider model. */
+  model: string;
   modelFallback: string;
   onModel: (model: string) => void;
+  inputTokens: number;
+  outputTokens: number;
+  onInputTokens: (value: number) => void;
+  onOutputTokens: (value: number) => void;
   access: AgentAccess;
   onAccess: (access: AgentAccess) => void;
   currentSite: string;
@@ -54,6 +57,10 @@ export function AgentHeader({
   model,
   modelFallback,
   onModel,
+  inputTokens,
+  outputTokens,
+  onInputTokens,
+  onOutputTokens,
   access,
   onAccess,
   currentSite,
@@ -90,16 +97,24 @@ export function AgentHeader({
           <X id="agent-panel-close-icon" aria-hidden />
         </IconButton>
       </header>
-      <div id="agent-panel-options" className="flex items-center gap-2 px-3 pb-2">
+      <div id="agent-panel-options" className="flex items-center justify-between gap-2 px-3 pb-2">
+        <AgentChatSettingsMenu
+          id="agent-panel-chat-settings"
+          model={model}
+          modelFallback={modelFallback}
+          onModel={onModel}
+          inputTokens={inputTokens}
+          outputTokens={outputTokens}
+          onInputTokens={onInputTokens}
+          onOutputTokens={onOutputTokens}
+          access={access}
+          onAccess={onAccess}
+          scope={autonomyFor}
+          currentSite={currentSite}
+          blockedBySettings={accessBlocked}
+        />
         <AgentAutonomyPicker id="agent-panel-autonomy" value={autonomy} onChange={onAutonomy} />
-        <AgentAccessMenu id="agent-panel-access" access={access} onChange={onAccess} scope={autonomyFor} currentSite={currentSite} blockedBySettings={accessBlocked} />
-        {model !== null ? (
-          <AgentModelPicker id="agent-panel-model" className="flex-1" value={model} fallback={modelFallback} onChange={onModel} />
-        ) : (
-          <span id="agent-panel-options-note" className="min-w-0 flex-1 truncate text-[11px] text-zinc-500">
-            {autonomyFor === "run" ? "Applies to this run now" : ""}
-          </span>
-        )}
+
       </div>
     </div>
   );

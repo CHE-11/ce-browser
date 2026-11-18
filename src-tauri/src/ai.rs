@@ -578,6 +578,217 @@ pub fn transport_error(endpoint: &str, message: &str) -> String {
     "Couldn't reach the assistant.".into()
 }
 
+/// About four characters to a token. A screenshot counts as this many tokens.
+const IMAGE_TOKENS: u32 = 1_600;
+/// Claude thinking spends the reply budget before any answer is written.
+const THINKING_OUTPUT_FLOOR: u64 = 8_192;
+
+fn text_tokens(text: &str) -> u32 {
+    let chars = text.chars().count();
+    ((chars + 3) / 4) as u32
+}
+
+fn limit_text(text: &str, tokens: u32) -> String {
+    let max_chars = (tokens as usize).saturating_mul(4);
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max_chars.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+fn token_budget(value: u32, min: u32, max: u32, fallback: u32) -> u32 {
+    if value == 0 {
+        fallback
+    } else {
+        value.clamp(min, max)
+    }
+}
+
+fn input_budget(settings: &settings::BrowserSettings) -> u32 {
+    token_budget(
+        settings.ai_max_input_tokens,
+        settings::AI_INPUT_TOKENS_MIN,
+        settings::AI_INPUT_TOKENS_MAX,
+        settings::AI_INPUT_TOKENS_DEFAULT,
+    )
+}
+
+fn output_budget(settings: &settings::BrowserSettings) -> u32 {
+    token_budget(
+        settings.ai_max_output_tokens,
+        settings::AI_OUTPUT_TOKENS_MIN,
+        settings::AI_OUTPUT_TOKENS_MAX,
+        settings::AI_OUTPUT_TOKENS_DEFAULT,
+    )
+}
+
+/// Keeps the instructions and shortens the user text so the prompt fits the budget.
+fn fit_prompt(system: &str, user: &str, budget: u32) -> (String, String) {
+    let budget = budget.max(32);
+    if text_tokens(system) + text_tokens(user) <= budget {
+        return (system.to_string(), user.to_string());
+    }
+    let system_budget = (budget / 4).max(32).min(budget.saturating_sub(32));
+    let system = if text_tokens(system) > system_budget {
+        limit_text(system, system_budget)
+    } else {
+        system.to_string()
+    };
+    let user_budget = budget.saturating_sub(text_tokens(&system)).max(16);
+    (system, limit_text(user, user_budget))
+}
+
+fn part_tokens(part: &ChatPart) -> u32 {
+    match part {
+        ChatPart::Text(text) => text_tokens(text),
+        ChatPart::Image { .. } => IMAGE_TOKENS,
+    }
+}
+
+fn message_tokens(message: &ChatMessage) -> u32 {
+    match message {
+        ChatMessage::User(parts) | ChatMessage::ToolResult { parts, .. } => {
+            parts.iter().map(part_tokens).sum()
+        }
+        ChatMessage::Assistant { text, calls } => {
+            text_tokens(text)
+                + calls
+                    .iter()
+                    .map(|call| text_tokens(&call.name) + text_tokens(&call.arguments.to_string()))
+                    .sum::<u32>()
+        }
+    }
+}
+
+fn chat_tokens(system: &str, messages: &[ChatMessage]) -> u32 {
+    text_tokens(system) + messages.iter().map(message_tokens).sum::<u32>()
+}
+
+fn shrink_text(text: &mut String, excess: &mut u32, floor: u32) {
+    let tokens = text_tokens(text);
+    if *excess == 0 || tokens <= floor {
+        return;
+    }
+    let keep = tokens.saturating_sub(*excess).max(floor);
+    let next = limit_text(text, keep);
+    *excess = excess.saturating_sub(tokens.saturating_sub(text_tokens(&next)));
+    *text = next;
+}
+
+fn message_parts(message: &mut ChatMessage) -> Option<&mut Vec<ChatPart>> {
+    match message {
+        ChatMessage::User(parts) | ChatMessage::ToolResult { parts, .. } => Some(parts),
+        ChatMessage::Assistant { .. } => None,
+    }
+}
+
+/// Shortens the oldest text, then drops the oldest screenshots, until the chat fits.
+fn fit_messages(system: &str, messages: &mut [ChatMessage], budget: u32) -> String {
+    let budget = budget.max(32);
+    let mut system = system.to_string();
+    let mut excess = chat_tokens(&system, messages).saturating_sub(budget);
+    if excess == 0 {
+        return system;
+    }
+    let last = messages.len().saturating_sub(1);
+    for message in messages.iter_mut() {
+        if excess == 0 {
+            break;
+        }
+        match message {
+            ChatMessage::Assistant { text, .. } => shrink_text(text, &mut excess, 16),
+            ChatMessage::User(parts) | ChatMessage::ToolResult { parts, .. } => {
+                for part in parts.iter_mut() {
+                    if let ChatPart::Text(text) = part {
+                        shrink_text(text, &mut excess, 16);
+                    }
+                }
+            }
+        }
+    }
+    for message in messages.iter_mut() {
+        if excess == 0 {
+            break;
+        }
+        let Some(parts) = message_parts(message) else {
+            continue;
+        };
+        parts.retain(|part| {
+            if excess == 0 || !matches!(part, ChatPart::Image { .. }) {
+                return true;
+            }
+            excess = excess.saturating_sub(IMAGE_TOKENS);
+            false
+        });
+    }
+    for message in messages.iter_mut().take(last) {
+        if excess == 0 {
+            break;
+        }
+        match message {
+            ChatMessage::Assistant { text, .. } => shrink_text(text, &mut excess, 1),
+            ChatMessage::User(parts) | ChatMessage::ToolResult { parts, .. } => {
+                for part in parts.iter_mut() {
+                    if let ChatPart::Text(text) = part {
+                        shrink_text(text, &mut excess, 1);
+                    }
+                }
+            }
+        }
+    }
+    shrink_text(&mut system, &mut excess, 16);
+    if excess > 0
+        && let Some(message) = messages.last_mut()
+    {
+        match message {
+            ChatMessage::Assistant { text, .. } => shrink_text(text, &mut excess, 1),
+            ChatMessage::User(parts) | ChatMessage::ToolResult { parts, .. } => {
+                for part in parts.iter_mut() {
+                    if let ChatPart::Text(text) = part {
+                        shrink_text(text, &mut excess, 1);
+                    }
+                }
+            }
+        }
+    }
+    system
+}
+
+/// Writes the reply cap. Newer OpenAI models reject `max_tokens`.
+fn apply_output_limit(provider: &str, model: &str, max_output: u32, body: &mut Value) {
+    if provider == "openai" && uses_max_completion_tokens(model) {
+        if let Some(object) = body.as_object_mut() {
+            object.remove("max_tokens");
+        }
+        body["max_completion_tokens"] = json!(max_output);
+        return;
+    }
+    if let Some(object) = body.as_object_mut() {
+        object.remove("max_completion_tokens");
+    }
+    body["max_tokens"] = json!(max_output);
+}
+
+/// `o1` and `gpt-5` and later take `max_completion_tokens` instead of `max_tokens`.
+fn uses_max_completion_tokens(model: &str) -> bool {
+    let id = model_family(model).to_ascii_lowercase();
+    if reasoning_model(&id) {
+        return true;
+    }
+    let Some(rest) = id.strip_prefix("gpt-") else {
+        return false;
+    };
+    let major: u32 = rest
+        .chars()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<String>()
+        .parse()
+        .unwrap_or(0);
+    major >= 5
+}
+
 /// One chat completion. `model` overrides the provider model when it is not blank.
 pub fn complete(
     app: &AppHandle,
@@ -606,11 +817,13 @@ pub fn complete(
     if !key.is_empty() && url.contains(&key) {
         return Err("Couldn't reach the assistant.".into());
     }
+    let (system, user) = fit_prompt(system, user, input_budget(current));
     let mut body = if provider == "claude" {
-        anthropic_body(&model, system, user, json_only)
+        anthropic_body(&model, &system, &user, json_only)
     } else {
-        openai_body(&model, system, user, json_only)
+        openai_body(&model, &system, &user, json_only)
     };
+    apply_output_limit(provider, &model, output_budget(current), &mut body);
     attach_thinking(provider, &model, &slot_thinking(current), &mut body);
     let text = send(provider, &url, &endpoint, &key, &body, timeout)?;
     let value: Value =
@@ -1017,15 +1230,15 @@ fn tool_request(
     if !key.is_empty() && url.contains(&key) {
         return Err("Couldn't reach the assistant.".into());
     }
+    let mut messages = messages.to_vec();
+    let system = fit_messages(system, &mut messages, input_budget(current));
     let mut body = if provider == "claude" {
-        anthropic_tools_body(&model, system, messages, tools)
+        anthropic_tools_body(&model, &system, &messages, tools)
     } else {
-        openai_tools_body(&model, system, messages, tools)
+        openai_tools_body(&model, &system, &messages, tools)
     };
+    apply_output_limit(provider, &model, output_budget(current), &mut body);
     attach_tool_thinking(provider, &model, &slot_thinking(current), &mut body);
-    if provider == "claude" && body["max_tokens"].as_u64().unwrap_or(0) < TOOL_MAX_TOKENS as u64 {
-        body["max_tokens"] = json!(TOOL_MAX_TOKENS);
-    }
     Ok(ToolRequest {
         provider,
         url,
@@ -1440,7 +1653,10 @@ fn attach_thinking(provider: &str, model: &str, thinking: &str, body: &mut Value
     }
     if provider == "claude" {
         body["output_config"] = json!({ "effort": thinking });
-        body["max_tokens"] = json!(8_192);
+        let current = body["max_tokens"].as_u64().unwrap_or(0);
+        if current < THINKING_OUTPUT_FLOOR {
+            body["max_tokens"] = json!(THINKING_OUTPUT_FLOOR);
+        }
         return;
     }
     body["reasoning_effort"] = json!(thinking);
@@ -1581,11 +1797,12 @@ fn read_body(response: ureq::Response) -> Result<String, String> {
 mod tests {
     use super::{
         ChatMessage, ChatPart, ToolCall, ToolSpec, Usage, anthropic_body, anthropic_text,
-        anthropic_tool_reply, anthropic_tools_body, attach_thinking, attach_tool_thinking,
-        chat_tools_require_reasoning_none, chat_url, claude_models_url, http_error, messages_url,
+        anthropic_tool_reply, anthropic_tools_body, apply_output_limit, attach_thinking,
+        attach_tool_thinking, chat_tokens, chat_tools_require_reasoning_none, chat_url,
+        claude_models_url, fit_messages, fit_prompt, http_error, messages_url,
         model_accepts_thinking, model_ids, model_page, models_url, openai_body, openai_text,
         openai_tool_reply, openai_tools_body, read_anthropic_stream, read_openai_stream,
-        recent_text_models, text_chat_model, transport_error,
+        recent_text_models, text_chat_model, text_tokens, transport_error,
     };
 
     fn tool_history() -> (Vec<ChatMessage>, Vec<ToolSpec>) {
@@ -1909,6 +2126,11 @@ mod tests {
         assert!(untouched.get("output_config").is_none());
         assert_eq!(untouched["max_tokens"], 1024);
 
+        let mut raised = anthropic_body("claude-sonnet-5-5", "sys", "user", false);
+        raised["max_tokens"] = serde_json::json!(16_000);
+        attach_thinking("claude", "claude-sonnet-5-5", "low", &mut raised);
+        assert_eq!(raised["max_tokens"], 16_000);
+
         assert!(chat_tools_require_reasoning_none("gpt-6-sol"));
         assert!(chat_tools_require_reasoning_none("gpt-6-sol-20261106"));
         assert!(chat_tools_require_reasoning_none("gpt-6-luna"));
@@ -1929,6 +2151,73 @@ mod tests {
         let mut plain = openai_body("gpt-6-sol", "sys", "user", false);
         attach_thinking("openai", "gpt-6-sol", "high", &mut plain);
         assert_eq!(plain["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn token_limits_shorten_old_input_and_set_the_reply_cap() {
+        let long = "word ".repeat(100);
+        let (system, user) = fit_prompt("Be brief.", &long, 40);
+        assert!(text_tokens(&system) + text_tokens(&user) <= 40);
+        assert!(user.ends_with('…'));
+        assert_eq!(system, "Be brief.");
+
+        let mut messages = vec![
+            ChatMessage::User(vec![ChatPart::Text(long.clone())]),
+            ChatMessage::User(vec![ChatPart::Text("newest question".into())]),
+        ];
+        let system = fit_messages("instructions", &mut messages, 80);
+        assert!(chat_tokens(&system, &messages) <= 80);
+        match &messages[1] {
+            ChatMessage::User(parts) => match &parts[0] {
+                ChatPart::Text(text) => assert_eq!(text, "newest question"),
+                ChatPart::Image { .. } => panic!("expected text"),
+            },
+            _ => panic!("expected a user message"),
+        }
+
+        let mut with_images = vec![
+            ChatMessage::User(vec![ChatPart::Image {
+                media_type: "image/jpeg".into(),
+                data: "AA".into(),
+            }]),
+            ChatMessage::User(vec![
+                ChatPart::Image {
+                    media_type: "image/jpeg".into(),
+                    data: "BB".into(),
+                },
+                ChatPart::Text("now".into()),
+            ]),
+        ];
+        let system = fit_messages("s", &mut with_images, 2_000);
+        assert!(chat_tokens(&system, &with_images) <= 2_000);
+        match &with_images[0] {
+            ChatMessage::User(parts) => assert!(parts.is_empty()),
+            _ => panic!("expected a user message"),
+        }
+        match &with_images[1] {
+            ChatMessage::User(parts) => {
+                assert!(matches!(parts[0], ChatPart::Image { .. }));
+            }
+            _ => panic!("expected a user message"),
+        }
+
+        let mut openai = openai_body("gpt-4o-mini", "sys", "user", false);
+        apply_output_limit("openai", "gpt-4o-mini", 512, &mut openai);
+        assert_eq!(openai["max_tokens"], 512);
+        assert!(openai.get("max_completion_tokens").is_none());
+
+        let mut gpt5 = openai_body("gpt-5.4", "sys", "user", false);
+        apply_output_limit("openai", "gpt-5.4", 512, &mut gpt5);
+        assert_eq!(gpt5["max_completion_tokens"], 512);
+        assert!(gpt5.get("max_tokens").is_none());
+
+        let mut claude = anthropic_body("claude-sonnet-5-5", "sys", "user", false);
+        apply_output_limit("claude", "claude-sonnet-5-5", 2_048, &mut claude);
+        assert_eq!(claude["max_tokens"], 2_048);
+
+        let mut local = openai_body("llama3.2", "sys", "user", false);
+        apply_output_limit("local", "llama3.2", 1_024, &mut local);
+        assert_eq!(local["max_tokens"], 1_024);
     }
 
     #[test]

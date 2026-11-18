@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { Bot, Hand, Play, Square } from "lucide-react";
-import type { AgentAutonomy } from "@type/browser";
+import type { AgentAutonomy, BrowserSettings } from "@type/browser";
 import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/EmptyState";
 import { withDefaults, type AccessToggle } from "@/lib/agent-access";
 import { parseAgentInput, type ComposerMode } from "@/lib/agent-commands";
-import { agentMemorySave, resizeAgentPanel, setAgentPanelWidth } from "@/lib/browser-client";
+import { AI_INPUT_TOKENS, AI_OUTPUT_TOKENS } from "@/lib/ai/token-limits";
+import { agentMemorySave, resizeAgentPanel, saveSettings, setAgentPanelWidth } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { useAgentStream } from "@/lib/use-agent-stream";
 import { isActiveRun, useAgentRun } from "@/lib/use-agent-run";
@@ -22,6 +23,7 @@ import { AgentPlan } from "./AgentPlan";
 import { AgentResult } from "./AgentResult";
 import { AgentRunList } from "./AgentRunList";
 import { AgentTimeline } from "./AgentTimeline";
+import { formatTokens } from "./agent-styles";
 
 const MIN_PANEL_WIDTH = 280;
 const MAX_PANEL_WIDTH = 720;
@@ -60,6 +62,11 @@ export function AgentPanelPage() {
   const active = isActiveRun(run);
   const stream = useAgentStream(active && run ? run.id : null);
   const width = settings?.agentPanelWidth ?? DEFAULT_PANEL_WIDTH;
+  const settingsRef = useRef(settings);
+  const settingsWrites = useRef(0);
+  if (settings && settingsWrites.current === 0) {
+    settingsRef.current = settings;
+  }
   const resizing = useRef(false);
   const [resizingPanel, setResizingPanel] = useState(false);
   const [view, setView] = useState<AgentPanelView>("run");
@@ -137,7 +144,23 @@ export function AgentPanelPage() {
   const mode: ComposerMode = !run ? "start" : active ? "reply" : run.source === "agent" ? "followup" : "start";
   const showRunAutonomy = !!run && active && run.source === "agent";
   const autonomy: AgentAutonomy = showRunAutonomy ? run.autonomy : agent.draft.autonomy;
-  const modelFallback = settings?.automation.agentModel || settings?.aiProviders[settings.aiProvider]?.model || "";
+  const providerModel = settings?.aiProviders[settings.aiProvider]?.model ?? "";
+  const savedModel = settings?.automation.agentModel ?? "";
+  const modelName = savedModel || providerModel;
+  const inputTokens = settings?.aiMaxInputTokens ?? AI_INPUT_TOKENS.fallback;
+  const outputTokens = settings?.aiMaxOutputTokens ?? AI_OUTPUT_TOKENS.fallback;
+  const saveChatSettings = (patch: Partial<BrowserSettings>) => {
+    const current = settingsRef.current;
+    if (!current) {
+      return;
+    }
+    const next = { ...current, ...patch };
+    settingsRef.current = next;
+    settingsWrites.current += 1;
+    void saveSettings(next).finally(() => {
+      settingsWrites.current -= 1;
+    });
+  };
   const access = showRunAutonomy ? withDefaults(run.access) : agent.draft.access;
   const currentSite = siteOf(activeTab?.url ?? "");
   const accessBlocked: Partial<Record<AccessToggle, string>> = {
@@ -215,9 +238,25 @@ export function AgentPanelPage() {
         autonomy={autonomy}
         autonomyFor={showRunAutonomy ? "run" : "next"}
         onAutonomy={(level) => (showRunAutonomy ? agent.setAutonomy(run.id, level) : agent.setDraft({ autonomy: level }))}
-        model={showRunAutonomy ? null : agent.draft.model}
-        modelFallback={modelFallback}
-        onModel={(model) => agent.setDraft({ model })}
+        model={modelName}
+        modelFallback={providerModel}
+        onModel={(model) => {
+          const current = settingsRef.current;
+          if (!current) {
+            return;
+          }
+          const provider = current.aiProvider;
+          const slot = current.aiProviders[provider];
+          saveChatSettings({
+            automation: { ...current.automation, agentModel: model },
+            aiProviders: model ? { ...current.aiProviders, [provider]: { ...slot, model } } : current.aiProviders,
+          });
+          agent.setDraft({ model: "" });
+        }}
+        inputTokens={inputTokens}
+        outputTokens={outputTokens}
+        onInputTokens={(aiMaxInputTokens) => saveChatSettings({ aiMaxInputTokens })}
+        onOutputTokens={(aiMaxOutputTokens) => saveChatSettings({ aiMaxOutputTokens })}
         access={access}
         onAccess={(next) => (showRunAutonomy ? agent.setAccess(run.id, next) : agent.setDraft({ access: next }))}
         currentSite={currentSite}
@@ -333,6 +372,24 @@ export function AgentPanelPage() {
             onSubmit={submit}
           />
         )}
+        <div id="agent-panel-chat-meta" className="flex flex-row items-center justify-between gap-1">
+          <p id="agent-panel-chat-meta-limits" className="text-[10px] text-zinc-500">
+            {`${inputTokens.toLocaleString()} in · ${outputTokens.toLocaleString()} out`}
+          </p>
+          <p id="agent-panel-chat-meta-model" className="truncate text-[10px] text-zinc-500">
+            {modelName || "No model"}
+          </p>
+          {run && run.tokensIn + run.tokensOut > 0 ? (
+            <p id="agent-panel-chat-meta-used" className="text-[10px] text-zinc-500">
+              Used {formatTokens(run?.tokensIn ?? 0)} in / {formatTokens(run?.tokensOut ?? 0)} out
+            </p>
+          ) : (
+            <p id="agent-panel-chat-meta-used" className="text-[10px] text-zinc-500">
+              Used...
+            </p>
+          )}
+        </div>
+
       </footer>
     </div>
   );

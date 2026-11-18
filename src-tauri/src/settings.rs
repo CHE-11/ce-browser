@@ -850,6 +850,14 @@ pub struct BrowserSettings {
     /// Hosts the agent will not read, screenshot, or answer about. Also blocked for automation.
     #[serde(default)]
     pub ai_blocked_sites: Vec<String>,
+    /// Tokens of prompt text sent to the model. Older text is shortened to fit.
+    /// An older file omits this and gets `AI_INPUT_TOKENS_DEFAULT`.
+    #[serde(default = "default_ai_max_input_tokens")]
+    pub ai_max_input_tokens: u32,
+    /// Tokens a reply may use. On Claude, thinking raises a number under 8192.
+    /// An older file omits this and gets `AI_OUTPUT_TOKENS_DEFAULT`.
+    #[serde(default = "default_ai_max_output_tokens")]
+    pub ai_max_output_tokens: u32,
     /// Agent, recorded flows, schedules and the MCP server. An older file omits this.
     #[serde(default)]
     pub automation: AutomationSettings,
@@ -1812,6 +1820,8 @@ impl Default for BrowserSettings {
             agent_panel_width: default_agent_panel_width(),
             agent_suggestions: default_agent_suggestions(),
             ai_blocked_sites: Vec::new(),
+            ai_max_input_tokens: AI_INPUT_TOKENS_DEFAULT,
+            ai_max_output_tokens: AI_OUTPUT_TOKENS_DEFAULT,
             automation: AutomationSettings::default(),
         }
     }
@@ -1963,11 +1973,18 @@ impl BrowserSettings {
         );
         let plain = self.bookmark_divider_padding;
         let labeled = default_folder_divider_label_padding();
-        self.bookmark_divider_padding_top = Some(optional_rem(self.bookmark_divider_padding_top, plain));
-        self.bookmark_divider_padding_bottom = Some(optional_rem(self.bookmark_divider_padding_bottom, plain));
-        self.bookmark_divider_label_padding_top = Some(optional_rem(self.bookmark_divider_label_padding_top, labeled));
-        self.bookmark_divider_label_padding_bottom =
-            Some(optional_rem(self.bookmark_divider_label_padding_bottom, labeled));
+        self.bookmark_divider_padding_top =
+            Some(optional_rem(self.bookmark_divider_padding_top, plain));
+        self.bookmark_divider_padding_bottom =
+            Some(optional_rem(self.bookmark_divider_padding_bottom, plain));
+        self.bookmark_divider_label_padding_top = Some(optional_rem(
+            self.bookmark_divider_label_padding_top,
+            labeled,
+        ));
+        self.bookmark_divider_label_padding_bottom = Some(optional_rem(
+            self.bookmark_divider_label_padding_bottom,
+            labeled,
+        ));
         self.bookmark_divider_inset = rem_in(
             self.bookmark_divider_inset,
             DIVIDER_INSET_REM,
@@ -2189,6 +2206,18 @@ impl BrowserSettings {
             .clamp(AGENT_PANEL_WIDTH_PX.0, AGENT_PANEL_WIDTH_PX.1);
         self.agent_suggestions = clean_agent_suggestions(&self.agent_suggestions);
         self.ai_blocked_sites = automation_hosts(&self.ai_blocked_sites);
+        self.ai_max_input_tokens = clean_token_limit(
+            self.ai_max_input_tokens,
+            AI_INPUT_TOKENS_MIN,
+            AI_INPUT_TOKENS_MAX,
+            AI_INPUT_TOKENS_DEFAULT,
+        );
+        self.ai_max_output_tokens = clean_token_limit(
+            self.ai_max_output_tokens,
+            AI_OUTPUT_TOKENS_MIN,
+            AI_OUTPUT_TOKENS_MAX,
+            AI_OUTPUT_TOKENS_DEFAULT,
+        );
         self.automation = self.automation.normalize();
         if !TAB_LAYOUTS.contains(&self.tab_layout.as_str()) {
             self.tab_layout = defaults.tab_layout.clone();
@@ -3087,6 +3116,32 @@ fn clean_hosts(hosts: &[String]) -> Vec<String> {
 /// Saved ids that are still available, in that order, then any available id the list does not mention.
 pub fn hotkey_blank(token: &str) -> bool {
     token.trim().is_empty() || crate::system::hotkey_mods(token).is_none()
+}
+
+/// Lowest, highest, and default prompt size, in tokens.
+pub const AI_INPUT_TOKENS_MIN: u32 = 256;
+pub const AI_INPUT_TOKENS_MAX: u32 = 1_000_000;
+pub const AI_INPUT_TOKENS_DEFAULT: u32 = 32_768;
+/// Lowest, highest, and default reply size, in tokens.
+pub const AI_OUTPUT_TOKENS_MIN: u32 = 64;
+pub const AI_OUTPUT_TOKENS_MAX: u32 = 128_000;
+pub const AI_OUTPUT_TOKENS_DEFAULT: u32 = 4_096;
+
+fn default_ai_max_input_tokens() -> u32 {
+    AI_INPUT_TOKENS_DEFAULT
+}
+
+fn default_ai_max_output_tokens() -> u32 {
+    AI_OUTPUT_TOKENS_DEFAULT
+}
+
+/// Zero is not a limit, so it becomes the default. Anything outside the range is pulled back in.
+fn clean_token_limit(value: u32, min: u32, max: u32, fallback: u32) -> u32 {
+    if value == 0 {
+        fallback
+    } else {
+        value.clamp(min, max)
+    }
 }
 
 fn clean_thinking(value: &str) -> String {
@@ -4312,6 +4367,41 @@ mod tests {
         let loaded: super::BrowserSettings =
             serde_json::from_str(r#"{"aiProvider":"retired"}"#).expect("settings parse");
         assert_eq!(loaded.normalize().ai_provider, "local");
+    }
+
+    #[test]
+    fn ai_token_limits_default_when_missing_and_clamp() {
+        let missing: super::BrowserSettings = serde_json::from_str("{}").expect("settings parse");
+        let missing = missing.normalize();
+        assert_eq!(missing.ai_max_input_tokens, super::AI_INPUT_TOKENS_DEFAULT);
+        assert_eq!(
+            missing.ai_max_output_tokens,
+            super::AI_OUTPUT_TOKENS_DEFAULT
+        );
+
+        let zero: super::BrowserSettings =
+            serde_json::from_str(r#"{"aiMaxInputTokens":0,"aiMaxOutputTokens":0}"#)
+                .expect("settings parse");
+        let zero = zero.normalize();
+        assert_eq!(zero.ai_max_input_tokens, super::AI_INPUT_TOKENS_DEFAULT);
+        assert_eq!(zero.ai_max_output_tokens, super::AI_OUTPUT_TOKENS_DEFAULT);
+
+        let loaded: super::BrowserSettings =
+            serde_json::from_str(r#"{"aiMaxInputTokens":12,"aiMaxOutputTokens":9000000}"#)
+                .expect("settings parse");
+        let loaded = loaded.normalize();
+        assert_eq!(loaded.ai_max_input_tokens, super::AI_INPUT_TOKENS_MIN);
+        assert_eq!(loaded.ai_max_output_tokens, super::AI_OUTPUT_TOKENS_MAX);
+
+        let custom: super::BrowserSettings =
+            serde_json::from_str(r#"{"aiMaxInputTokens":8192,"aiMaxOutputTokens":1024}"#)
+                .expect("settings parse");
+        let custom = custom.normalize();
+        assert_eq!(custom.ai_max_input_tokens, 8192);
+        assert_eq!(custom.ai_max_output_tokens, 1024);
+        let again = custom.clone().normalize();
+        assert_eq!(again.ai_max_input_tokens, custom.ai_max_input_tokens);
+        assert_eq!(again.ai_max_output_tokens, custom.ai_max_output_tokens);
     }
 
     #[test]

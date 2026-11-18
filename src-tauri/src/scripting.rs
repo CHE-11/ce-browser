@@ -1,10 +1,13 @@
 //! Per-site scripts in `scripting.json`. JavaScript and TypeScript run in the page.
 //! Python runs there too, through a Pyodide runtime cached under local app data.
+//! A manual run can be stopped. JavaScript is cut off immediately. Python stops when it
+//! next returns to the page, and sooner when the runtime accepts an interrupt.
 
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -34,6 +37,40 @@ const PYODIDE_FILES: &[&str] = &[
 ];
 
 static FETCH: Mutex<()> = Mutex::new(());
+/// Run id the panel is executing. `0` means nothing is running.
+static ACTIVE_RUN: AtomicU64 = AtomicU64::new(0);
+/// Run id the panel asked to stop. Compared with [`ACTIVE_RUN`].
+static CANCEL_RUN: AtomicU64 = AtomicU64::new(0);
+
+struct ActiveRun(u64);
+
+impl ActiveRun {
+    fn enter(run_id: u64) -> Self {
+        ACTIVE_RUN.store(run_id, Ordering::SeqCst);
+        Self(run_id)
+    }
+}
+
+impl Drop for ActiveRun {
+    fn drop(&mut self) {
+        if ACTIVE_RUN.load(Ordering::SeqCst) == self.0 {
+            ACTIVE_RUN.store(0, Ordering::SeqCst);
+        }
+    }
+}
+
+fn cancelled() -> bool {
+    let active = ACTIVE_RUN.load(Ordering::SeqCst);
+    active != 0 && CANCEL_RUN.load(Ordering::SeqCst) == active
+}
+
+fn stopped_run() -> ScriptRun {
+    ScriptRun {
+        logs: Vec::new(),
+        value: None,
+        error: Some("Stopped".into()),
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
@@ -222,7 +259,15 @@ pub fn injection(app: &AppHandle, url: &str) -> String {
     let javascript = serde_json::to_string(&javascript).unwrap_or_else(|_| "[]".into());
     let css = serde_json::to_string(&css).unwrap_or_else(|_| "[]".into());
     let python = serde_json::to_string(&python).unwrap_or_else(|_| "[]".into());
-    fill_once(&fill_once(&fill_once(ONLOAD, "__CE_JS__", &javascript), "__CE_CSS__", &css), "__CE_PY__", &python)
+    fill_once(
+        &fill_once(
+            &fill_once(ONLOAD, "__CE_JS__", &javascript),
+            "__CE_CSS__",
+            &css,
+        ),
+        "__CE_PY__",
+        &python,
+    )
 }
 
 /// Replaces the first placeholder and leaves the inserted text alone.
@@ -234,13 +279,19 @@ fn fill_once(template: &str, key: &str, value: &str) -> String {
 }
 
 /// Runs `source` in the page of tab `tab_id`. TypeScript arrives already compiled to JavaScript.
+/// `run_id` is the panel's token for this attempt. [`stop`] with the same id cancels it.
 pub fn run(
     app: &AppHandle,
     tab_id: u32,
     language: &str,
     source: &str,
     expression: bool,
+    run_id: u64,
 ) -> Result<ScriptRun, String> {
+    let _active = ActiveRun::enter(run_id);
+    if cancelled() {
+        return Ok(stopped_run());
+    }
     let url = tabs::tab_page_url(app, tab_id).ok_or("This tab is not open.")?;
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("Scripts run on a website. Open an http or https page.".into());
@@ -251,7 +302,15 @@ pub fn run(
     let webview = tabs::page_view(app, tab_id).ok_or("This page is not loaded yet.")?;
     let language = canonical_language(language);
     let (program, timeout) = if language == "python" {
-        ensure_pyodide(app)?;
+        if let Err(error) = ensure_pyodide(app) {
+            if cancelled() || error == "Stopped" {
+                return Ok(stopped_run());
+            }
+            return Err(error);
+        }
+        if cancelled() {
+            return Ok(stopped_run());
+        }
         map_webview(app, &webview)?;
         (python_runner(source), Duration::from_secs(120))
     } else if language == "css" {
@@ -262,8 +321,56 @@ pub fn run(
             Duration::from_secs(20),
         )
     };
-    let value = webview2::evaluate(&webview, &program, timeout, "The script")?;
-    Ok(parse_run(value))
+    if cancelled() {
+        return Ok(stopped_run());
+    }
+    let value = match webview2::evaluate_until(&webview, &program, timeout, "The script", cancelled)
+    {
+        Ok(value) => value,
+        Err(_) if cancelled() => return Ok(read_stopped(&webview)),
+        Err(error) => return Err(error),
+    };
+    let mut run = parse_run(value);
+    if cancelled() && run.error.is_some() {
+        run.error = Some("Stopped".into());
+    }
+    Ok(run)
+}
+
+/// Cancels the run identified by `run_id`. The page task rejects, timers and fetches it
+/// started are cleared, and a stuck JavaScript loop is terminated.
+pub fn stop(app: &AppHandle, tab_id: u32, run_id: u64) -> Result<(), String> {
+    if run_id != 0 {
+        CANCEL_RUN.store(run_id, Ordering::SeqCst);
+    }
+    let Some(webview) = tabs::page_view(app, tab_id) else {
+        return Ok(());
+    };
+    if webview2::evaluate(&webview, STOP_JS, Duration::from_millis(400), "Stop").is_ok() {
+        return Ok(());
+    }
+    let _ = webview2::call_cdp_json(
+        &webview,
+        "Runtime.terminateExecution",
+        "{}",
+        Duration::from_secs(2),
+        "Stop",
+    );
+    let _ = webview2::evaluate(&webview, STOP_JS, Duration::from_secs(2), "Stop");
+    Ok(())
+}
+
+fn read_stopped(webview: &tauri::Webview) -> ScriptRun {
+    match webview2::evaluate(webview, HARVEST_JS, Duration::from_millis(500), "Stop") {
+        Ok(value) => {
+            let mut run = parse_run(value);
+            if run.error.is_none() {
+                run.error = Some("Stopped".into());
+            }
+            run
+        }
+        Err(_) => stopped_run(),
+    }
 }
 
 pub fn pyodide_ready(app: &AppHandle) -> bool {
@@ -329,6 +436,9 @@ pub fn ensure_pyodide(app: &AppHandle) -> Result<(), String> {
     if pyodide_ready(app) {
         return Ok(());
     }
+    if cancelled() {
+        return Err("Stopped".into());
+    }
     let dir = cache_dir(app);
     fs::create_dir_all(&dir).map_err(|error| {
         format!(
@@ -337,6 +447,9 @@ pub fn ensure_pyodide(app: &AppHandle) -> Result<(), String> {
         )
     })?;
     for name in PYODIDE_FILES {
+        if cancelled() {
+            return Err("Stopped".into());
+        }
         let dest = dir.join(name);
         if cached(&dest, name) {
             continue;
@@ -374,10 +487,31 @@ fn download(url: &str, dest: &Path) -> Result<(), String> {
             temp.display()
         )
     })?;
-    io::copy(&mut response.into_reader(), &mut file).map_err(|error| {
-        let _ = fs::remove_file(&temp);
-        format!("Could not download the Python runtime: {error}")
-    })?;
+    let mut reader = response.into_reader();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        if cancelled() {
+            drop(file);
+            let _ = fs::remove_file(&temp);
+            return Err("Stopped".into());
+        }
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(count) => {
+                if let Err(error) = file.write_all(&buf[..count]) {
+                    drop(file);
+                    let _ = fs::remove_file(&temp);
+                    return Err(format!("Could not download the Python runtime: {error}"));
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => {
+                drop(file);
+                let _ = fs::remove_file(&temp);
+                return Err(format!("Could not download the Python runtime: {error}"));
+            }
+        }
+    }
     file.flush().ok();
     drop(file);
     fs::rename(&temp, dest).map_err(|error| {
@@ -437,13 +571,16 @@ fn parse_run(value: Value) -> ScriptRun {
 fn javascript_runner(source: &str, expression: bool) -> String {
     let encoded = serde_json::to_string(source).unwrap_or_else(|_| "\"\"".into());
     JS_RUNNER
+        .replacen("__CE_CONTROL__", SCRIPT_CONTROL, 1)
         .replacen("__CE_EXPR__", if expression { "true" } else { "false" }, 1)
         .replacen("__CE_SOURCE__", &encoded, 1)
 }
 
 fn python_runner(source: &str) -> String {
     let encoded = serde_json::to_string(source).unwrap_or_else(|_| "\"\"".into());
-    PY_RUNNER.replacen("__CE_SOURCE__", &encoded, 1)
+    PY_RUNNER
+        .replacen("__CE_CONTROL__", SCRIPT_CONTROL, 1)
+        .replacen("__CE_SOURCE__", &encoded, 1)
 }
 
 fn css_runner(source: &str) -> String {
@@ -451,10 +588,162 @@ fn css_runner(source: &str) -> String {
     CSS_RUNNER.replacen("__CE_SOURCE__", &encoded, 1)
 }
 
+/// Arms a stop hook for one run. Timers, animation frames, fetches, and XHR calls made
+/// while it is armed are cancelled when the panel asks the page to stop.
+const SCRIPT_CONTROL: &str = r#"(() => {
+  const slot = globalThis.__ceScriptRun || (globalThis.__ceScriptRun = { stop: null, logs: [] });
+  const logs = [];
+  slot.logs = logs;
+  const state = { stopped: false };
+  const timers = new Set();
+  const intervals = new Set();
+  const frames = new Set();
+  const fetches = new Set();
+  const requests = new Set();
+  const orig = {
+    setTimeout: globalThis.setTimeout.bind(globalThis),
+    clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    setInterval: globalThis.setInterval.bind(globalThis),
+    clearInterval: globalThis.clearInterval.bind(globalThis),
+    requestAnimationFrame: globalThis.requestAnimationFrame.bind(globalThis),
+    cancelAnimationFrame: globalThis.cancelAnimationFrame.bind(globalThis),
+    fetch: globalThis.fetch.bind(globalThis),
+  };
+  const xhrSend = XMLHttpRequest.prototype.send;
+  let rejectStop = function () {};
+  const stoppedPromise = new Promise(function (_, reject) {
+    rejectStop = function () { reject(new Error("Stopped")); };
+  });
+  stoppedPromise.catch(function () {});
+  const halt = function () {
+    if (state.stopped) return;
+    state.stopped = true;
+    for (const id of timers) orig.clearTimeout(id);
+    timers.clear();
+    for (const id of intervals) orig.clearInterval(id);
+    intervals.clear();
+    for (const id of frames) orig.cancelAnimationFrame(id);
+    frames.clear();
+    for (const controller of fetches) {
+      try { controller.abort(); } catch (error) {}
+    }
+    fetches.clear();
+    for (const xhr of requests) {
+      try { xhr.abort(); } catch (error) {}
+    }
+    requests.clear();
+    const py = globalThis.__cePyodide;
+    if (py && py.__ceInterrupt) py.__ceInterrupt[0] = 2;
+    if (py && py.__ceInterruptWorker) {
+      try { py.__ceInterruptWorker.postMessage("stop"); } catch (error) {}
+    }
+    rejectStop();
+  };
+  slot.stop = halt;
+  globalThis.setTimeout = function (fn, delay) {
+    if (state.stopped) return 0;
+    const args = Array.prototype.slice.call(arguments, 2);
+    const id = orig.setTimeout(function () {
+      timers.delete(id);
+      if (state.stopped || typeof fn !== "function") return;
+      fn.apply(globalThis, args);
+    }, delay);
+    timers.add(id);
+    return id;
+  };
+  globalThis.clearTimeout = function (id) {
+    timers.delete(id);
+    return orig.clearTimeout(id);
+  };
+  globalThis.setInterval = function (fn, delay) {
+    if (state.stopped) return 0;
+    const args = Array.prototype.slice.call(arguments, 2);
+    const id = orig.setInterval(function () {
+      if (state.stopped) {
+        orig.clearInterval(id);
+        intervals.delete(id);
+        return;
+      }
+      if (typeof fn === "function") fn.apply(globalThis, args);
+    }, delay);
+    intervals.add(id);
+    return id;
+  };
+  globalThis.clearInterval = function (id) {
+    intervals.delete(id);
+    return orig.clearInterval(id);
+  };
+  globalThis.requestAnimationFrame = function (fn) {
+    if (state.stopped) return 0;
+    const id = orig.requestAnimationFrame(function (time) {
+      frames.delete(id);
+      if (!state.stopped && typeof fn === "function") fn(time);
+    });
+    frames.add(id);
+    return id;
+  };
+  globalThis.cancelAnimationFrame = function (id) {
+    frames.delete(id);
+    return orig.cancelAnimationFrame(id);
+  };
+  globalThis.fetch = function (input, init) {
+    if (state.stopped) return Promise.reject(new Error("Stopped"));
+    const controller = new AbortController();
+    fetches.add(controller);
+    const next = init ? Object.assign({}, init) : {};
+    if (next.signal && typeof AbortSignal.any === "function") {
+      next.signal = AbortSignal.any([next.signal, controller.signal]);
+    } else {
+      next.signal = controller.signal;
+    }
+    return orig.fetch(input, next).finally(function () { fetches.delete(controller); });
+  };
+  XMLHttpRequest.prototype.send = function () {
+    if (state.stopped) throw new Error("Stopped");
+    requests.add(this);
+    this.addEventListener("loadend", function () { requests.delete(this); }, { once: true });
+    return xhrSend.apply(this, arguments);
+  };
+  return {
+    logs: logs,
+    stoppedPromise: stoppedPromise,
+    stopped: function () { return state.stopped; },
+    errorText: function (error) {
+      if (state.stopped || (error && error.message === "Stopped")) return "Stopped";
+      const text = error && error.stack ? String(error.stack) : String(error);
+      return text.slice(0, 8000);
+    },
+    restore: function () {
+      if (slot.stop === halt) slot.stop = null;
+      globalThis.setTimeout = orig.setTimeout;
+      globalThis.clearTimeout = orig.clearTimeout;
+      globalThis.setInterval = orig.setInterval;
+      globalThis.clearInterval = orig.clearInterval;
+      globalThis.requestAnimationFrame = orig.requestAnimationFrame;
+      globalThis.cancelAnimationFrame = orig.cancelAnimationFrame;
+      globalThis.fetch = orig.fetch;
+      XMLHttpRequest.prototype.send = xhrSend;
+    },
+  };
+})()"#;
+
+const STOP_JS: &str = r#"(() => {
+  const slot = globalThis.__ceScriptRun;
+  if (slot && typeof slot.stop === "function") slot.stop();
+  return true;
+})()"#;
+
+const HARVEST_JS: &str = r#"(() => {
+  const slot = globalThis.__ceScriptRun || {};
+  const logs = Array.isArray(slot.logs) ? slot.logs : [];
+  return { logs: logs, value: null, error: "Stopped" };
+})()"#;
+
 const JS_RUNNER: &str = r#"(async () => {
   const expression = __CE_EXPR__;
   const source = __CE_SOURCE__;
-  const logs = [];
+  const control = __CE_CONTROL__;
+  const logs = control.logs;
   const levels = ["log", "info", "warn", "error", "debug"];
   const original = {};
   const show = (value) => {
@@ -471,31 +760,34 @@ const JS_RUNNER: &str = r#"(async () => {
       original[level](...args);
     };
   }
-  try {
-    let value;
+  const task = (async () => {
     if (expression) {
       const expressionSource = source.trim().replace(/;+\s*$/, "");
       try {
-        value = await (0, eval)("(" + expressionSource + ")");
+        return await (0, eval)("(" + expressionSource + ")");
       } catch (error) {
         if (!(error instanceof SyntaxError)) throw error;
-        value = await (0, eval)("(async () => {\n" + source + "\n})()");
+        return await (0, eval)("(async () => {\n" + source + "\n})()");
       }
-    } else {
-      value = await (0, eval)("(async () => {\n" + source + "\n})()");
     }
+    return await (0, eval)("(async () => {\n" + source + "\n})()");
+  })();
+  task.catch(function () {});
+  try {
+    const value = await Promise.race([task, control.stoppedPromise]);
     return { logs, value: show(value), error: null };
   } catch (error) {
-    const text = error && error.stack ? String(error.stack) : String(error);
-    return { logs, value: null, error: text.slice(0, 8000) };
+    return { logs, value: null, error: control.errorText(error) };
   } finally {
     for (const level of levels) console[level] = original[level];
+    control.restore();
   }
 })()"#;
 
 const PY_RUNNER: &str = r#"(async () => {
   const source = __CE_SOURCE__;
-  const logs = [];
+  const control = __CE_CONTROL__;
+  const logs = control.logs;
   const levels = ["log", "info", "warn", "error", "debug"];
   const original = {};
   const note = (level, text) => {
@@ -512,6 +804,25 @@ const PY_RUNNER: &str = r#"(async () => {
     if (typeof plain === "number" || typeof plain === "boolean") return String(plain);
     try { return JSON.stringify(plain); } catch (error) { return String(plain); }
   };
+  const armInterrupt = (pyodide) => {
+    try {
+      if (pyodide.__ceInterrupt) {
+        if (!control.stopped()) pyodide.__ceInterrupt[0] = 0;
+        return;
+      }
+      if (typeof SharedArrayBuffer !== "function" || typeof pyodide.setInterruptBuffer !== "function") return;
+      const buffer = new SharedArrayBuffer(1);
+      const bytes = new Uint8Array(buffer);
+      pyodide.setInterruptBuffer(bytes);
+      pyodide.__ceInterrupt = bytes;
+      const url = URL.createObjectURL(new Blob(["let bytes;self.onmessage=function(e){if(e.data&&e.data.buffer){bytes=new Uint8Array(e.data.buffer);}else if(bytes){bytes[0]=2;}};"], { type: "text/javascript" }));
+      const worker = new Worker(url);
+      URL.revokeObjectURL(url);
+      worker.postMessage({ buffer: buffer });
+      pyodide.__ceInterruptWorker = worker;
+      if (control.stopped()) bytes[0] = 2;
+    } catch (error) {}
+  };
   for (const level of levels) {
     original[level] = console[level].bind(console);
     console[level] = (...args) => {
@@ -527,20 +838,25 @@ const PY_RUNNER: &str = r#"(async () => {
       const mod = await import("https://ce-pyodide.localhost/pyodide.mjs");
       globalThis.__cePyodide = await mod.loadPyodide({ indexURL: "https://ce-pyodide.localhost/" });
     }
+    if (control.stopped()) throw new Error("Stopped");
     const pyodide = globalThis.__cePyodide;
+    armInterrupt(pyodide);
+    if (control.stopped()) throw new Error("Stopped");
     if (typeof pyodide.setStdout === "function") {
       pyodide.setStdout({ batched: (text) => note("log", text) });
     }
     if (typeof pyodide.setStderr === "function") {
       pyodide.setStderr({ batched: (text) => note("error", text) });
     }
-    const value = await pyodide.runPythonAsync(source);
+    const task = pyodide.runPythonAsync(source);
+    task.catch(function () {});
+    const value = await Promise.race([task, control.stoppedPromise]);
     return { logs, value: show(value), error: null };
   } catch (error) {
-    const text = error && error.stack ? String(error.stack) : String(error);
-    return { logs, value: null, error: text.slice(0, 8000) };
+    return { logs, value: null, error: control.errorText(error) };
   } finally {
     for (const level of levels) console[level] = original[level];
+    control.restore();
   }
 })()"#;
 
@@ -718,6 +1034,15 @@ mod tests {
         let normalized = super::normalize_script(script).expect("script");
         assert_eq!(normalized.language, "css");
         assert_eq!(normalized.compiled, "body { color: red }");
+    }
+
+    #[test]
+    fn the_runner_keeps_a_source_that_mentions_the_control_token() {
+        let program = super::javascript_runner("globalThis.__CE_CONTROL__", false);
+        assert_eq!(program.matches("__CE_CONTROL__").count(), 1);
+        assert!(program.contains("slot.stop"));
+        assert!(!program.contains("__CE_SOURCE__"));
+        assert!(!program.contains("__CE_EXPR__"));
     }
 
     #[test]

@@ -11,12 +11,14 @@ type Props = {
   fallback: string;
   onChange: (model: string) => void;
   className?: string;
+  /** `inline` draws the list in the page flow so a parent menu can scroll it. */
+  listPlacement?: "overlay" | "inline";
 };
 
 type Choice = { value: string; label: string; detail: string; price: string };
 
 /** Combo box for the next task's model, with its price per million tokens. Blank uses the agent model from Settings. */
-export function AgentModelPicker({ id, value, fallback, onChange, className }: Props) {
+export function AgentModelPicker({ id, value, fallback, onChange, className, listPlacement = "overlay" }: Props) {
   const root = useRef<HTMLDivElement | null>(null);
   const input = useRef<HTMLInputElement | null>(null);
   const { models, prices, loading } = useModelCatalog();
@@ -68,6 +70,7 @@ export function AgentModelPicker({ id, value, fallback, onChange, className }: P
       }
     } else if (event.key === "Escape" && open) {
       event.preventDefault();
+      event.stopPropagation();
       close();
     }
   };
@@ -127,7 +130,10 @@ export function AgentModelPicker({ id, value, fallback, onChange, className }: P
         <div
           id={`${id}-popover`}
           data-agent-popover
-          className="absolute right-0 top-full z-40 mt-1 w-[min(20rem,calc(100vw-1.5rem))] overflow-hidden rounded-lg bg-zinc-900 shadow-2xl ring-1 ring-zinc-700"
+          className={cn(
+            "z-40 mt-1 overflow-hidden rounded-lg bg-zinc-900 shadow-2xl ring-1 ring-zinc-700",
+            listPlacement === "inline" ? "relative" : "absolute right-0 top-full w-[min(20rem,calc(100vw-1.5rem))]",
+          )}
         >
           <div id={`${id}-heading`} className="flex justify-between border-b border-zinc-800 px-2.5 py-1 text-[10px] text-zinc-500">
             <span id={`${id}-heading-model`}>Model</span>

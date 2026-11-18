@@ -29,6 +29,18 @@ const THINKING_LEVELS = [
   { value: "high", label: "High" },
 ];
 const KEY_LABEL = "API key";
+/** Keep in step with `AI_INPUT_TOKENS_*` in settings.rs. */
+const INPUT_TOKENS_MIN = 256;
+const INPUT_TOKENS_MAX = 1_000_000;
+const INPUT_TOKENS_DEFAULT = 32_768;
+const INPUT_TOKENS_LABEL = "Max input tokens";
+const INPUT_TOKENS_HINT = "How much of the prompt is sent. Older text and screenshots are left out to fit.";
+/** Keep in step with `AI_OUTPUT_TOKENS_*` in settings.rs. */
+const OUTPUT_TOKENS_MIN = 64;
+const OUTPUT_TOKENS_MAX = 128_000;
+const OUTPUT_TOKENS_DEFAULT = 4_096;
+const OUTPUT_TOKENS_LABEL = "Max output tokens";
+const OUTPUT_TOKENS_HINT = "How long a reply may be. On Claude, thinking raises a number under 8192. Higher costs more.";
 const SUGGESTIONS_LABEL = "Agent suggestions";
 const SUGGESTIONS_HINT = "Shown in the agent panel. Click one to fill in the task.";
 const BLOCKED_LABEL = "Blocked sites";
@@ -78,6 +90,10 @@ export function AiSection({ settings, query, onUpdate, onError, onMatch }: Setti
     modelHint,
     THINKING_LABEL,
     THINKING_HINT,
+    INPUT_TOKENS_LABEL,
+    INPUT_TOKENS_HINT,
+    OUTPUT_TOKENS_LABEL,
+    OUTPUT_TOKENS_HINT,
     SUGGESTIONS_LABEL,
     SUGGESTIONS_HINT,
     BLOCKED_LABEL,
@@ -249,6 +265,26 @@ export function AiSection({ settings, query, onUpdate, onError, onMatch }: Setti
         </select>
       </Row>
       ) : null}
+      <TokenLimit
+        id="settings-ai-input-tokens"
+        label={INPUT_TOKENS_LABEL}
+        hint={INPUT_TOKENS_HINT}
+        setting="aiMaxInputTokens"
+        value={settings.aiMaxInputTokens ?? INPUT_TOKENS_DEFAULT}
+        min={INPUT_TOKENS_MIN}
+        max={INPUT_TOKENS_MAX}
+        onChange={(aiMaxInputTokens) => onUpdate({ aiMaxInputTokens })}
+      />
+      <TokenLimit
+        id="settings-ai-output-tokens"
+        label={OUTPUT_TOKENS_LABEL}
+        hint={OUTPUT_TOKENS_HINT}
+        setting="aiMaxOutputTokens"
+        value={settings.aiMaxOutputTokens ?? OUTPUT_TOKENS_DEFAULT}
+        min={OUTPUT_TOKENS_MIN}
+        max={OUTPUT_TOKENS_MAX}
+        onChange={(aiMaxOutputTokens) => onUpdate({ aiMaxOutputTokens })}
+      />
       <AgentSuggestions settings={settings} onUpdate={onUpdate} />
       <SiteList
         id="settings-ai-blocked"
@@ -302,6 +338,60 @@ export function AiSection({ settings, query, onUpdate, onError, onMatch }: Setti
         </div>
       </Row>
     </Section>
+  );
+}
+
+function TokenLimit({
+  id,
+  label,
+  hint,
+  setting,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  setting: "aiMaxInputTokens" | "aiMaxOutputTokens";
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+  const commit = () => {
+    const parsed = Math.round(Number(draft));
+    const next = Number.isFinite(parsed) ? Math.min(max, Math.max(min, parsed)) : value;
+    setDraft(String(next));
+    if (next !== value) {
+      onChange(next);
+    }
+  };
+  return (
+    <Row id={id} setting={setting} label={label} hint={hint} search={["tokens", "context", "length"]}>
+      <input
+        id={`${id}-input`}
+        className={cn(inputClass, "text-right")}
+        type="number"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        step={1}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+        }}
+      />
+    </Row>
   );
 }
 

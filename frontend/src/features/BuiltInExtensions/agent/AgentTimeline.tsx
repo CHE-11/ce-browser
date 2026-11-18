@@ -36,7 +36,7 @@ const FILTERS: { value: Filter; label: string }[] = [
   { value: "problems", label: "Problems" },
 ];
 
-/** Groups open by default, counted from the newest. */
+/** Action lists open by default, counted from the newest. Messages stay shown until the user hides them. */
 const OPEN_GROUPS = 4;
 
 type Indexed = { step: AgentStep; index: number };
@@ -73,11 +73,12 @@ type Props = {
   streaming?: { text: string; thinking: string } | null;
 };
 
-/** The run's steps: each thought with the actions that follow it, newest at the bottom. */
+/** The run's chat: user and agent messages stay visible, and each one can be hidden or shown. Actions under an agent message fold separately. */
 export function AgentTimeline({ id, steps, streaming }: Props) {
   const end = useRef<HTMLDivElement | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [toggled, setToggled] = useState<Record<number, boolean>>({});
+  const [messagesOpen, setMessagesOpen] = useState<Record<number, boolean>>({});
   const [zoomed, setZoomed] = useState<number | null>(null);
   const groups = groupSteps(steps);
   const live = streaming && (streaming.text || streaming.thinking) ? streaming : null;
@@ -133,17 +134,44 @@ export function AgentTimeline({ id, steps, streaming }: Props) {
     );
   };
 
-  const head = ({ step, index }: Indexed, open: boolean, count: number, onToggle: () => void) => {
+  const shown = (index: number) => messagesOpen[index] ?? true;
+  const toggleMessage = (index: number) => setMessagesOpen((previous) => ({ ...previous, [index]: !(previous[index] ?? true) }));
+
+  const messageToggle = (index: number, open: boolean) => (
+    <button
+      id={`${id}-${index}-message`}
+      type="button"
+      className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded text-zinc-500 hover:text-zinc-200"
+      aria-expanded={open}
+      aria-label={open ? "Hide message" : "Show message"}
+      title={open ? "Hide message" : "Show message"}
+      onClick={() => toggleMessage(index)}
+    >
+      <ChevronRight id={`${id}-${index}-message-icon`} className={cn("size-3.5 transition-transform", open && "rotate-90")} aria-hidden />
+    </button>
+  );
+
+  const head = ({ step, index }: Indexed, actionsOpen: boolean, count: number, onToggleActions: () => void) => {
+    const open = shown(index);
+    const prior = steps[index - 1];
+    const repeatsPrior =
+      !!step.text.trim() && !!prior && (prior.kind === "think" || prior.kind === "answer") && prior.text.trim() === step.text.trim();
     if (step.kind === "user") {
       return (
-        <div id={`${id}-${index}`} className="ml-6 rounded-lg rounded-br-sm bg-violet-950/50 px-2.5 py-1.5 text-xs text-violet-100 ring-1 ring-violet-900/60">
-          <div id={`${id}-${index}-text`} className="whitespace-pre-wrap break-words">
-            {step.text}
+        <div id={`${id}-${index}`} className="flex items-start justify-end gap-1">
+          {messageToggle(index, open)}
+          <div
+            id={`${id}-${index}-bubble`}
+            className="min-w-0 max-w-[85%] rounded-lg rounded-br-sm bg-violet-950/50 px-2.5 py-1.5 text-xs text-violet-100 ring-1 ring-violet-900/60"
+          >
+            <div id={`${id}-${index}-text`} className={cn("whitespace-pre-wrap break-words", !open && "line-clamp-1")}>
+              {step.text}
+            </div>
           </div>
         </div>
       );
     }
-    if (step.kind === "answer") {
+    if (step.kind === "answer" && (!step.text.trim() || repeatsPrior)) {
       return (
         <div id={`${id}-${index}`} className="flex items-center gap-1.5 text-[11px] text-emerald-400">
           <CheckCircle2 id={`${id}-${index}-icon`} className="size-3.5" aria-hidden />
@@ -156,19 +184,39 @@ export function AgentTimeline({ id, steps, streaming }: Props) {
     }
     return (
       <div id={`${id}-${index}`} className="flex gap-1.5">
-        <button
-          id={`${id}-${index}-toggle`}
-          type="button"
-          className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded text-zinc-500 hover:text-zinc-200 disabled:invisible"
-          aria-expanded={open}
-          aria-label={open ? "Hide actions" : `Show ${count} actions`}
-          disabled={count === 0}
-          onClick={onToggle}
-        >
-          <ChevronRight id={`${id}-${index}-toggle-icon`} className={cn("size-3.5 transition-transform", open && "rotate-90")} aria-hidden />
-        </button>
+        {messageToggle(index, open)}
         <div id={`${id}-${index}-body`} className="min-w-0 flex-1">
-          <Markdown id={`${id}-${index}-text`} text={step.text} className={cn("text-xs text-zinc-300", !open && "line-clamp-3")} />
+          <div id={`${id}-${index}-bubble`} className="rounded-lg rounded-bl-sm bg-zinc-900/80 px-2.5 py-1.5 ring-1 ring-zinc-800">
+            {open ? (
+              <Markdown id={`${id}-${index}-text`} text={step.text} className="text-xs text-zinc-200" />
+            ) : (
+              <p id={`${id}-${index}-text`} className="line-clamp-1 whitespace-pre-wrap break-words text-xs text-zinc-400">
+                {step.text}
+              </p>
+            )}
+          </div>
+          {step.kind === "answer" ? (
+            <div id={`${id}-${index}-status`} className="mt-1 flex items-center gap-1.5 text-[11px] text-emerald-400">
+              <CheckCircle2 id={`${id}-${index}-icon`} className="size-3.5" aria-hidden />
+              Finished
+              <time id={`${id}-${index}-time`} className="ml-auto text-[10px] text-zinc-600">
+                {formatClock(step.at)}
+              </time>
+            </div>
+          ) : null}
+          {open && count > 0 ? (
+            <button
+              id={`${id}-${index}-toggle`}
+              type="button"
+              className="mt-1 flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300"
+              aria-expanded={actionsOpen}
+              aria-label={actionsOpen ? "Hide actions" : `Show ${count} actions`}
+              onClick={onToggleActions}
+            >
+              <ChevronRight id={`${id}-${index}-toggle-icon`} className={cn("size-3 transition-transform", actionsOpen && "rotate-90")} aria-hidden />
+              <span id={`${id}-${index}-folded`}>{actionsOpen ? "Hide actions" : `${count} ${count === 1 ? "action" : "actions"}`}</span>
+            </button>
+          ) : null}
           {!open && count > 0 ? (
             <div id={`${id}-${index}-folded`} className="mt-0.5 text-[10px] text-zinc-500">
               {count} {count === 1 ? "action" : "actions"}
@@ -206,11 +254,14 @@ export function AgentTimeline({ id, steps, streaming }: Props) {
           {groups.map((group, groupIndex) => {
             const key = group.head?.index ?? group.items[0]?.index ?? groupIndex;
             const fallbackOpen = groupIndex >= groups.length - OPEN_GROUPS;
-            const open = toggled[key] ?? fallbackOpen;
+            const actionsOpen = toggled[key] ?? fallbackOpen;
+            const messageOpen = group.head ? shown(group.head.index) : true;
             return (
               <li id={`${id}-group-${key}`} key={key} className="flex flex-col gap-1.5">
-                {group.head ? head(group.head, open, group.items.length, () => setToggled((previous) => ({ ...previous, [key]: !open }))) : null}
-                {group.items.length > 0 && (open || !group.head) ? (
+                {group.head
+                  ? head(group.head, actionsOpen, group.items.length, () => setToggled((previous) => ({ ...previous, [key]: !actionsOpen })))
+                  : null}
+                {group.items.length > 0 && messageOpen && (actionsOpen || !group.head) ? (
                   <ol id={`${id}-group-${key}-items`} className={cn("flex flex-col gap-1.5", group.head?.step.kind === "think" && "ml-5")}>
                     {group.items.map(row)}
                   </ol>

@@ -4599,6 +4599,17 @@ pub fn call_cdp_json(
     timeout: Duration,
     failure: &str,
 ) -> std::result::Result<serde_json::Value, String> {
+    call_cdp_json_until(webview, method, params, timeout, failure, || false)
+}
+
+fn call_cdp_json_until(
+    webview: &Webview,
+    method: &str,
+    params: &str,
+    timeout: Duration,
+    failure: &str,
+    cancelled: impl Fn() -> bool,
+) -> std::result::Result<serde_json::Value, String> {
     let (tx, rx) = mpsc::channel::<std::result::Result<String, String>>();
     let method = method.to_string();
     let params = params.to_string();
@@ -4633,13 +4644,43 @@ pub fn call_cdp_json(
             }
         })
         .map_err(|error| error.to_string())?;
-    let body = rx
-        .recv_timeout(timeout)
-        .map_err(|_| format!("{failure} The page did not answer in time."))??;
+    let body = wait_for_cdp(&rx, timeout, failure, &cancelled)?;
     if body.trim().is_empty() {
         return Ok(serde_json::Value::Null);
     }
     serde_json::from_str(&body).map_err(|error| format!("{failure} {error}"))
+}
+
+fn wait_for_cdp(
+    rx: &mpsc::Receiver<std::result::Result<String, String>>,
+    timeout: Duration,
+    failure: &str,
+    cancelled: &dyn Fn() -> bool,
+) -> std::result::Result<String, String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match rx.try_recv() {
+            Ok(result) => return result,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                return Err(format!("{failure} The page did not answer in time."));
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+        }
+        if cancelled() {
+            return Err(format!("{failure} Stopped"));
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(format!("{failure} The page did not answer in time."));
+        }
+        match rx.recv_timeout(remaining.min(Duration::from_millis(200))) {
+            Ok(result) => return result,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(format!("{failure} The page did not answer in time."));
+            }
+        }
+    }
 }
 
 fn cdp_error(failure: &str, error: &windows::core::Error, body: &str) -> String {
@@ -4659,6 +4700,17 @@ pub fn evaluate(
     timeout: Duration,
     failure: &str,
 ) -> std::result::Result<serde_json::Value, String> {
+    evaluate_until(webview, expression, timeout, failure, || false)
+}
+
+/// Like [`evaluate`], but returns as soon as `cancelled` is true instead of waiting out `timeout`.
+pub fn evaluate_until(
+    webview: &Webview,
+    expression: &str,
+    timeout: Duration,
+    failure: &str,
+    cancelled: impl Fn() -> bool,
+) -> std::result::Result<serde_json::Value, String> {
     let params = serde_json::json!({
         "expression": expression,
         "returnByValue": true,
@@ -4666,7 +4718,21 @@ pub fn evaluate(
         "userGesture": false,
     })
     .to_string();
-    let mut response = call_cdp_json(webview, "Runtime.evaluate", &params, timeout, failure)?;
+    let response = call_cdp_json_until(
+        webview,
+        "Runtime.evaluate",
+        &params,
+        timeout,
+        failure,
+        cancelled,
+    )?;
+    evaluation_value(response, failure)
+}
+
+fn evaluation_value(
+    mut response: serde_json::Value,
+    failure: &str,
+) -> std::result::Result<serde_json::Value, String> {
     if let Some(details) = response.get("exceptionDetails") {
         let text = details
             .pointer("/exception/description")

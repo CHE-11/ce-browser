@@ -1660,9 +1660,16 @@ async fn run_page_script(
     language: String,
     source: String,
     expression: Option<bool>,
+    run_id: Option<u64>,
 ) -> Result<scripting::ScriptRun, String> {
     let expression = expression.unwrap_or(false);
-    blocking(move || scripting::run(&app, tab_id, &language, &source, expression)).await
+    let run_id = run_id.unwrap_or(0);
+    blocking(move || scripting::run(&app, tab_id, &language, &source, expression, run_id)).await
+}
+
+#[tauri::command]
+async fn stop_page_script(app: AppHandle, tab_id: u32, run_id: u64) -> Result<(), String> {
+    blocking(move || scripting::stop(&app, tab_id, run_id)).await
 }
 
 #[tauri::command]
@@ -3295,6 +3302,7 @@ pub fn run() {
             delete_page_script,
             pyodide_ready,
             run_page_script,
+            stop_page_script,
             start_zapper,
             start_inspector,
             translation_active,

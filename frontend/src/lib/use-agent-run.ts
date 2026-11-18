@@ -29,7 +29,7 @@ const OPTIONS_KEY = "ce-agent-panel-options";
 /** How the next task starts. */
 export type AgentDraftOptions = {
   autonomy: AgentAutonomy;
-  /** Blank uses the agent model from Settings. */
+  /** Kept for older saved options. New tasks use the model saved in Settings. */
   model: string;
   access: AgentAccess;
 };
@@ -145,7 +145,7 @@ export function useAgentRun() {
       }
       const id = await agentStart(tabId, goal, {
         autonomy: autonomy ?? draft.autonomy,
-        model: draft.model,
+        model: "",
         background,
         contextTabs: contextTabs.filter((id) => id !== tabId),
         instructions,

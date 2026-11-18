@@ -371,9 +371,10 @@ pub(super) fn emit(app: &AppHandle) {
 
 /// The model's reply as it is written. Empty text clears it.
 pub(super) fn emit_delta(app: &AppHandle, id: u32, text: &str, thinking: &str) {
+    let limit = output_chars(&settings::get(app));
     let _ = app.emit(
         "agent-delta",
-        json!({ "runId": id, "text": clip(text, 6000), "thinking": clip(thinking, 6000) }),
+        json!({ "runId": id, "text": clip(text, limit), "thinking": clip(thinking, limit) }),
     );
 }
 
@@ -467,7 +468,7 @@ pub fn start_with(
             source: "agent".into(),
             tab_id: tab,
             window: info.window.clone(),
-            goal: clip(goal, 4000),
+            goal: clip(goal, input_chars(&current)),
             status: "running".into(),
             started: now_ms(),
             max_steps: current.automation.max_steps,
@@ -481,7 +482,7 @@ pub fn start_with(
             ..AgentRun::default()
         });
         state.context_tabs = context_tabs;
-        state.instructions = clip(options.instructions.trim(), 2000);
+        state.instructions = clip(options.instructions.trim(), input_chars(&current));
         state.working = true;
         agents.runs.push(state);
         trim_runs(&mut agents);
@@ -538,6 +539,7 @@ pub fn continue_run(app: &AppHandle, id: u32, text: &str, tab: Option<u32>) -> R
         }
         state.working = true;
         let earlier = std::mem::take(&mut state.run.result);
+        let previous_status = state.run.status.clone();
         state.follow_up = Some(if state.transcript.is_empty() && !earlier.is_empty() {
             format!(
                 "{text}\n\n(Your earlier answer was: {})",
@@ -555,7 +557,18 @@ pub fn continue_run(app: &AppHandle, id: u32, text: &str, tab: Option<u32>) -> R
         state.paused = false;
         state.answer = None;
         state.notes.clear();
-        add_step(&mut state.run, step("user", text, ""));
+        // The result card unmounts once the run is active again. Keep that text in the chat
+        // when no step already shows it, then record the follow-up under it.
+        keep_result_visible(
+            &mut state.run,
+            &earlier,
+            previous_status == "failed",
+            output_chars(&current),
+        );
+        add_step(
+            &mut state.run,
+            step_within("user", text, "", input_chars(&current)),
+        );
         true
     })
     .unwrap_or(false);
@@ -778,9 +791,11 @@ pub fn reply(app: &AppHandle, id: u32, text: &str) -> Result<(), String> {
         return Ok(());
     }
     let tab = with_run(id, |state| state.run.tab_id).ok_or("That run has finished.")?;
-    if tabs::tab_info(app, tab).is_some_and(|info| settings::get(app).ai_blocked(&info.url)) {
+    let current = settings::get(app);
+    if tabs::tab_info(app, tab).is_some_and(|info| current.ai_blocked(&info.url)) {
         return Err(settings::AI_SITE_BLOCKED.into());
     }
+    let message_limit = input_chars(&current);
     with_run(id, |state| {
         if !state.run.active() {
             return Err("That run has finished.".to_string());
@@ -791,7 +806,10 @@ pub fn reply(app: &AppHandle, id: u32, text: &str) -> Result<(), String> {
             }
             _ => state.notes.push(format!("Message from the user: {text}")),
         }
-        add_step(&mut state.run, step("user", text, ""));
+        add_step(
+            &mut state.run,
+            step_within("user", text, "", message_limit),
+        );
         Ok(())
     })
     .ok_or("That run has finished.")??;
@@ -928,14 +946,35 @@ pub fn tab_closed(app: &AppHandle, tab: u32) {
 }
 
 pub(super) fn step(kind: &str, text: &str, detail: &str) -> AgentStep {
+    step_within(kind, text, detail, 4_000)
+}
+
+/// A chat message. `limit` is in characters and follows the token setting, so a long
+/// task or reply is not cut off while tokens remain.
+fn step_within(kind: &str, text: &str, detail: &str, limit: usize) -> AgentStep {
     AgentStep {
         kind: kind.into(),
-        text: clip(text, 4000),
-        detail: clip(detail, 4000),
+        text: clip(text, limit),
+        detail: clip(detail, limit),
         thumb: None,
         at: now_ms(),
         ..AgentStep::default()
     }
+}
+
+/// Characters the prompt may keep. About four characters to a token, and never
+/// shorter than the old 4,000-character task.
+fn input_chars(settings: &settings::BrowserSettings) -> usize {
+    chars_for_tokens(settings.ai_max_input_tokens).max(4_000)
+}
+
+/// Characters a reply may keep. Never shorter than the old 8,000-character result.
+fn output_chars(settings: &settings::BrowserSettings) -> usize {
+    chars_for_tokens(settings.ai_max_output_tokens).max(8_000)
+}
+
+fn chars_for_tokens(tokens: u32) -> usize {
+    (tokens as usize).saturating_mul(4)
 }
 
 fn add_step(run: &mut AgentRun, step: AgentStep) {
@@ -945,9 +984,48 @@ fn add_step(run: &mut AgentRun, step: AgentStep) {
     }
 }
 
+/// Copies a finished run's result into the chat before a follow-up clears the result card.
+/// A think, answer, or error step that already shows the text is left as it is.
+fn keep_result_visible(run: &mut AgentRun, result: &str, failed: bool, limit: usize) {
+    let result = result.trim();
+    if result.is_empty() || result == "Stopped." || result == "Finished." {
+        return;
+    }
+    let clipped = clip(result, limit);
+    for step in run.steps.iter_mut().rev() {
+        if step.kind == "user" {
+            break;
+        }
+        if !matches!(step.kind.as_str(), "think" | "answer" | "error") {
+            continue;
+        }
+        let text = step.text.trim().to_string();
+        if text.is_empty() {
+            continue;
+        }
+        if text == clipped {
+            return;
+        }
+        // The step was stored shorter than the result card. Lengthen that same message.
+        if text.len() >= 80 && clipped.starts_with(&text) {
+            step.text = clipped;
+            return;
+        }
+    }
+    let mut kept = step(if failed { "think" } else { "answer" }, &clipped, "");
+    kept.text = clipped;
+    add_step(run, kept);
+}
+
 pub(super) fn push_step(app: &AppHandle, id: u32, kind: &str, text: &str, detail: &str) {
+    let settings = settings::get(app);
+    let limit = match kind {
+        "user" => input_chars(&settings),
+        "think" | "answer" => output_chars(&settings),
+        _ => 4_000,
+    };
     with_run(id, |state| {
-        add_step(&mut state.run, step(kind, text, detail))
+        add_step(&mut state.run, step_within(kind, text, detail, limit))
     });
     emit(app);
 }
@@ -1263,6 +1341,7 @@ pub(super) fn current_tab(id: u32) -> Option<u32> {
 }
 
 pub(super) fn finish(app: &AppHandle, id: u32, status: &str, result: &str) {
+    let result_limit = output_chars(&settings::get(app));
     let closed = with_run(id, |state| {
         if state.run.finished != 0 {
             return None;
@@ -1272,7 +1351,7 @@ pub(super) fn finish(app: &AppHandle, id: u32, status: &str, result: &str) {
         let result = if state.stop {
             "Stopped.".to_string()
         } else {
-            clip(result, 8000)
+            clip(result, result_limit)
         };
         state.run.status = status.into();
         state.run.result = result.clone();
@@ -1330,6 +1409,60 @@ pub(super) fn finish(app: &AppHandle, id: u32, status: &str, result: &str) {
     emit(app);
     if source == "agent" {
         save(app);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run_with(steps: &[(&str, &str)]) -> AgentRun {
+        let mut run = AgentRun::default();
+        for (kind, text) in steps {
+            add_step(&mut run, step(kind, text, ""));
+        }
+        run
+    }
+
+    #[test]
+    fn follow_up_keeps_a_result_the_chat_does_not_already_show() {
+        let mut run = run_with(&[("think", "Looking at the page.")]);
+        keep_result_visible(&mut run, "Paris is the capital.", false, 8_000);
+        assert_eq!(run.steps.len(), 2);
+        assert_eq!(run.steps[1].kind, "answer");
+        assert_eq!(run.steps[1].text, "Paris is the capital.");
+    }
+
+    #[test]
+    fn follow_up_does_not_copy_a_result_already_in_the_chat() {
+        let mut run = run_with(&[("answer", "Paris is the capital.")]);
+        keep_result_visible(&mut run, "Paris is the capital.", false, 8_000);
+        assert_eq!(run.steps.len(), 1);
+    }
+
+    #[test]
+    fn follow_up_lengthens_a_clipped_copy_of_the_same_answer() {
+        let body = "a".repeat(100);
+        let full = format!("{body} and more");
+        let mut run = run_with(&[("think", &body)]);
+        keep_result_visible(&mut run, &full, false, 8_000);
+        assert_eq!(run.steps.len(), 1);
+        assert_eq!(run.steps[0].text, full);
+    }
+
+    #[test]
+    fn follow_up_skips_a_stopped_note() {
+        let mut run = AgentRun::default();
+        keep_result_visible(&mut run, "Stopped.", false, 8_000);
+        assert!(run.steps.is_empty());
+    }
+
+    #[test]
+    fn a_failed_result_is_kept_as_an_agent_message() {
+        let mut run = AgentRun::default();
+        keep_result_visible(&mut run, "The page never loaded.", true, 8_000);
+        assert_eq!(run.steps[0].kind, "think");
+        assert_eq!(run.steps[0].text, "The page never loaded.");
     }
 }
 

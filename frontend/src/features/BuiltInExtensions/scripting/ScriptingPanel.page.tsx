@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AppWindow, ChevronsLeft, ChevronsRight, PanelLeftClose, PanelLeftOpen, Play, Plus, Save, SquareCode, Trash2, X } from "lucide-react";
+import { AppWindow, ChevronsLeft, ChevronsRight, CircleStop, PanelLeftClose, PanelLeftOpen, Play, Plus, Save, SquareCode, Trash2, X } from "lucide-react";
 import type { PageScript, ScriptLanguage, ScriptRun } from "@type/browser";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
@@ -13,6 +13,7 @@ import {
   resizeAgentPanel,
   runPageScript,
   savePageScript,
+  stopPageScript,
   setAgentPanelWidth,
   toggleScriptingPanel,
 } from "@/lib/browser-client";
@@ -90,6 +91,7 @@ function matches(domain: string, script: PageScript) {
 }
 
 let lineId = 1;
+let nextRunId = 1;
 
 function linesFrom(input: string, result: ScriptRun): ConsoleLine[] {
   const lines: ConsoleLine[] = [
@@ -98,7 +100,9 @@ function linesFrom(input: string, result: ScriptRun): ConsoleLine[] {
   for (const log of result.logs) {
     lines.push({ id: lineId++, kind: "log", level: log.level, text: log.text });
   }
-  if (result.error) {
+  if (result.error === "Stopped") {
+    lines.push({ id: lineId++, kind: "log", level: "warn", text: "Stopped" });
+  } else if (result.error) {
     lines.push({ id: lineId++, kind: "error", level: "error", text: result.error });
   } else if (result.value !== null) {
     lines.push({ id: lineId++, kind: "result", level: "result", text: result.value });
@@ -113,6 +117,9 @@ export function ScriptingPanelPage() {
   const tabs = useTabs();
   const file = useScripting();
   const editor = useRef<ScriptingEditorHandle>(null);
+  const runId = useRef(0);
+  const runTab = useRef(0);
+  const stopRequested = useRef(false);
   const width = settings?.agentPanelWidth ?? DEFAULT_PANEL_WIDTH;
   const resizing = useRef(false);
   const [resizingPanel, setResizingPanel] = useState(false);
@@ -189,33 +196,85 @@ export function ScriptingPanelPage() {
     return current;
   };
 
+  const requestStop = () => {
+    const tab = runTab.current;
+    const token = runId.current;
+    if (!tab || !token) {
+      return;
+    }
+    stopRequested.current = true;
+    setStatus("Stopping");
+    void stopPageScript(tab, token).catch((reason: unknown) => {
+      setStatus((current) => (current === "Stopping" ? String(reason) : current));
+    });
+  };
+  const requestStopRef = useRef(requestStop);
+  requestStopRef.current = requestStop;
+
+  useEffect(() => {
+    if (!busy) {
+      return;
+    }
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      requestStopRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [busy]);
+
   const runSource = async (language: ScriptLanguage, source: string, expression: boolean, input: string) => {
     if (!active || !domain) {
       setStatus("Open a website to run a script.");
       return;
     }
+    const token = ++nextRunId;
+    runId.current = token;
+    runTab.current = active.id;
+    stopRequested.current = false;
     const start = new Date();
     setRunClock({ start, stop: null });
     setBusy(true);
     setStatus(language === "python" && pythonReady === false ? "Downloading the Python runtime…" : "Running");
+    const stoppedResult = { logs: [], value: null, error: "Stopped" };
     try {
       const code = language === "typescript" ? await compileSource("typescript", source) : source;
+      if (stopRequested.current || runId.current !== token) {
+        setLines((current) => [...current, ...linesFrom(input, stoppedResult)]);
+        setStatus("Stopped");
+        return;
+      }
       const runLanguage = language === "python" || language === "css" ? language : "javascript";
-      const result = await runPageScript(active.id, runLanguage, code, expression);
-      setLines((current) => [...current, ...linesFrom(input, result)]);
-      if (language === "python") {
+      const result = await runPageScript(active.id, runLanguage, code, expression, token);
+      if (runId.current !== token) {
+        return;
+      }
+      const stopped = result.error === "Stopped" || (stopRequested.current && result.error !== null);
+      const shown = stopped ? { ...result, error: "Stopped" } : result;
+      setLines((current) => [...current, ...linesFrom(input, shown)]);
+      if (language === "python" && !stopped) {
         setPythonReady(true);
       }
-      setStatus(result.error ? "Failed" : "Finished");
+      setStatus(shown.error === "Stopped" ? "Stopped" : shown.error ? "Failed" : "Finished");
     } catch (reason: unknown) {
+      if (runId.current !== token) {
+        return;
+      }
+      const message = stopRequested.current ? "Stopped" : String(reason);
       setLines((current) => [
         ...current,
-        ...linesFrom(input, { logs: [], value: null, error: String(reason) }),
+        ...linesFrom(input, { logs: [], value: null, error: message }),
       ]);
-      setStatus("Failed");
+      setStatus(stopRequested.current ? "Stopped" : "Failed");
     } finally {
-      setRunClock({ start, stop: new Date() });
-      setBusy(false);
+      if (runId.current === token) {
+        setRunClock({ start, stop: new Date() });
+        setBusy(false);
+      }
     }
   };
 
@@ -500,14 +559,22 @@ export function ScriptingPanelPage() {
                 <Button
                   id="scripting-run"
                   size="xs"
-                  variant="primary"
-                  disabled={busy}
+                  variant={busy ? "destructive" : "primary"}
+                  title={busy ? "Stop the running script (Escape)" : "Run this script"}
                   onClick={() => {
+                    if (busy) {
+                      requestStop();
+                      return;
+                    }
                     void runSource(draft.language, draft.source, false, draft.name || draft.language);
                   }}
                 >
-                  <Play id="scripting-run-icon" className="size-3" aria-hidden />
-                  Run
+                  {busy ? (
+                    <CircleStop id="scripting-stop-icon" className="size-3" aria-hidden />
+                  ) : (
+                    <Play id="scripting-run-icon" className="size-3" aria-hidden />
+                  )}
+                  {busy ? "Stop" : "Run"}
                 </Button>
               </div>
               <div id="scripting-editor" className="min-h-0 flex-1">
@@ -552,7 +619,12 @@ export function ScriptingPanelPage() {
       <footer id="scripting-statusbar" className="flex h-7 shrink-0 items-center gap-4 border-t border-zinc-800 bg-zinc-950 px-3 text-[11px] text-zinc-400">
         <span
           id="scripting-statusbar-message"
-          className={cn("min-w-0 flex-1 truncate", status === "Failed" && "text-red-300", status === "Running" && "text-sky-300")}
+          className={cn(
+            "min-w-0 flex-1 truncate",
+            status === "Failed" && "text-red-300",
+            status === "Stopped" && "text-amber-300",
+            (status === "Running" || status === "Stopping" || status?.startsWith("Downloading")) && "text-sky-300",
+          )}
         >
           {status ?? "Ready"}
         </span>

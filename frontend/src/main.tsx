@@ -26,7 +26,7 @@ import { PermissionsPage } from "./features/Permissions/Permissions.page";
 import { PopupPage } from "./features/Popup/Popup.page";
 import { PrintEditorPage } from "./features/BuiltInExtensions/print-to-pdf/PrintEditor.page";
 import { ReaderPage } from "./features/BuiltInExtensions/reader/Reader.page";
-import { ScriptsPage } from "./features/BuiltInExtensions/scripts/Scripts.page";
+import { ScriptsPage } from "./features/BuiltInExtensions/scripting/Scripts.page";
 import { ScriptingPanelPage } from "./features/BuiltInExtensions/scripting/ScriptingPanel.page";
 import { RewritesPage } from "./features/BuiltInExtensions/rewrites/Rewrites.page";
 import { ShortcutsPage } from "./features/Shortcuts/Shortcuts.page";

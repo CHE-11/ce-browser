@@ -742,7 +742,13 @@ const COPY_PARTS: &[PartSpec] = &[
         ..bare("adblock")
     },
     PartSpec {
-        settings: &["aiProvider", "aiProviders", "agentSuggestions"],
+        settings: &[
+            "aiProvider",
+            "aiProviders",
+            "agentSuggestions",
+            "aiMaxInputTokens",
+            "aiMaxOutputTokens",
+        ],
         extra: &["assistantEndpoint", "assistantModel", "assistantKey"],
         secrets: true,
         ..bare("ai")

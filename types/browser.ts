@@ -1157,6 +1157,10 @@ export type BrowserSettings = {
   agentSuggestions: string[];
   /** Hosts the agent will not read, screenshot, or answer about. Also blocked for automation. */
   aiBlockedSites: string[];
+  /** Tokens of prompt text sent to the model. Older text is shortened to fit. 256 to 1,000,000. Default 32768. */
+  aiMaxInputTokens: number;
+  /** Tokens a reply may use. 64 to 128,000. Default 4096. On Claude, thinking raises a number under 8192. */
+  aiMaxOutputTokens: number;
   /** Agent, recorded flows, schedules, and the MCP server. */
   automation: AutomationSettings;
 };
