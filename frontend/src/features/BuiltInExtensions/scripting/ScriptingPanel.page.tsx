@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AppWindow, ChevronsLeft, ChevronsRight, CircleStop, PanelLeftClose, PanelLeftOpen, Play, Plus, Save, SquareCode, Trash2, X } from "lucide-react";
+import { AppWindow, ChevronsLeft, ChevronsRight, CircleStop, ExternalLink, PanelLeftClose, PanelLeftOpen, Play, Plus, Save, SquareCode, Trash2, X } from "lucide-react";
 import type { PageScript, ScriptLanguage, ScriptRun, ScriptScope } from "@type/browser";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
@@ -8,6 +8,7 @@ import { Toggle } from "@/components/Toggle";
 import {
   deletePageScript,
   closeWindow,
+  createTab,
   openScriptingWindow,
   pyodideReady,
   runPageScript,
@@ -505,7 +506,7 @@ export function ScriptingPanelPage() {
                     title={
                       draft.scope !== "url"
                         ? "Run only on this page"
-                        : draft.url === address
+                        : pageAddress(draft.url) === address
                           ? draft.url
                           : `Runs on ${draft.url}. Click to use this page instead.`
                     }
@@ -520,13 +521,38 @@ export function ScriptingPanelPage() {
                   </button>
                 </div>
                 {draft.scope === "url" ? (
-                  <span
-                    id="scripting-scope-address"
-                    className={cn("max-w-36 truncate text-[11px]", draft.url === address ? "text-zinc-500" : "text-amber-300")}
-                    title={draft.url === address ? draft.url : `${draft.url} — click URL to use this page`}
-                  >
-                    {pageLabel(draft.url)}
-                  </span>
+                  <div id="scripting-scope-address-container" className="flex items-center gap-1">
+                    {pageAddress(draft.url) === address ? (
+                      <span
+                        id="scripting-scope-address"
+                        className="max-w-36 truncate text-[11px] text-zinc-500"
+                        title={draft.url}
+                      >
+                        {pageLabel(draft.url)}
+                      </span>
+                    ) : (
+                      <button
+                        id="scripting-scope-address"
+                        type="button"
+                        className={cn("max-w-36 truncate text-[11px] text-amber-300 hover:underline", focusRing)}
+                        title={`${draft.url} — click to use this page`}
+                        onClick={() => setScope("url")}
+                      >
+                        {pageLabel(draft.url)}
+                      </button>
+                    )}
+                    <button
+                      id="scripting-scope-address-open"
+                      type="button"
+                      className={cn("inline-flex size-5 shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100", focusRing)}
+                      title={draft.url ? `Open ${draft.url}` : "Open this page"}
+                      aria-label={draft.url ? `Open ${draft.url}` : "Open this page"}
+                      disabled={!draft.url}
+                      onClick={() => void createTab(draft.url)}
+                    >
+                      <ExternalLink id="scripting-scope-address-icon" className="size-3" aria-hidden />
+                    </button>
+                  </div>
                 ) : null}
                 <label id="scripting-enabled" className="flex items-center gap-1.5 text-[11px] text-zinc-400">
                   <Toggle
