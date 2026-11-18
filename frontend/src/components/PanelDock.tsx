@@ -1,8 +1,9 @@
 import { useRef, type KeyboardEvent, type PointerEvent } from "react";
 import { ChevronsLeft, ChevronsRight, GripVertical, X } from "lucide-react";
 import type { SidePanelInfo } from "@type/browser";
+import { PanelSide } from "@/components/PanelSide";
 import { PANEL_RAIL } from "@/features/DevTools/page-column";
-import { closeSidePanel, collapseSidePanel, nudgeSidePanel, reorderSidePanel, resizeSidePanel } from "@/lib/browser-client";
+import { closeSidePanel, collapseSidePanel, nudgeSidePanel, reorderSidePanel, resizeSidePanel, setSidePanelEdge } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 
 function domId(id: string) {
@@ -108,6 +109,15 @@ function PanelColumn({ panel }: { panel: SidePanelInfo }) {
           <span id={`panel-dock-${id}-title`} className="min-w-0 flex-1 truncate text-sm font-medium">
             {panel.title}
           </span>
+          {panel.extensionId ? (
+            <div id={`panel-dock-${id}-side-wrap`} className="shrink-0">
+              <PanelSide
+                id={`panel-dock-${id}-side`}
+                side={panel.edge}
+                onChange={(side) => run(() => setSidePanelEdge(panel.id, side))}
+              />
+            </div>
+          ) : null}
           <button
             id={`panel-dock-${id}-collapse`}
             type="button"

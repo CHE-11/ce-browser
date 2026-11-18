@@ -5,6 +5,7 @@ import { ToolbarIcon } from "@features/BuiltInExtensions";
 import { builtinTool } from "@features/BuiltInExtensions/builtin";
 import { HostToolbarButton } from "@/features/Extensions/HostToolbarButton";
 import { openExtensionPanel, openPopup, saveSettings } from "@/lib/browser-client";
+import { useExtensionAction } from "@/lib/extension-action";
 import { extensionOpenAs } from "@/lib/extension-open";
 import { useHostExtensions, useSettings, useTabs } from "@/lib/use-browser";
 import { cn } from "@/lib/cn";
@@ -19,6 +20,7 @@ import {
 } from "@/lib/toolbar-pin";
 import { toolbarSidePatch } from "@/lib/toolbar-side";
 import { ExtensionIcon } from "@/components/ExtensionIcon";
+import { ExtensionActionBadge } from "./ExtensionActionBadge";
 import { IconButton, ToolbarEntryClickContext } from "@/components/IconButton";
 import { Toggle } from "@/components/Toggle";
 import { ExtensionsToolbarScrollbar } from "./ExtensionsToolbarScrollbar";
@@ -32,14 +34,16 @@ type ExtensionToolbarButtonProps = {
 
 export function ExtensionToolbarButton({ extension, idPrefix }: ExtensionToolbarButtonProps) {
   const settings = useSettings();
-  const { sidePanels } = useTabs();
+  const { sidePanels, tabs, activeId } = useTabs();
+  const pageUrl = tabs.find((tab) => tab.id === activeId)?.url;
+  const action = useExtensionAction(extension.id, pageUrl);
   const domId = `${idPrefix}-extension-${extension.id}`;
-  const label = extension.defaultTitle || extension.name;
+  const label = action.title || extension.defaultTitle || extension.name;
   const active = sidePanels.some((panel) => panel.extensionId === extension.id);
   return (
     <IconButton
       id={domId}
-      label={label}
+      label={action.badge ? `${label}, ${action.badge}` : label}
       active={active}
       aria-pressed={active}
       onClick={(event) => {
@@ -56,13 +60,21 @@ export function ExtensionToolbarButton({ extension, idPrefix }: ExtensionToolbar
         }
       }}
     >
-      <ExtensionIcon
-        id={`${domId}-icon`}
-        extensionId={extension.id}
-        name={extension.name}
-        src={extension.icon}
-        className="size-4"
-      />
+      <span id={`${domId}-glyph`} className="relative inline-flex">
+        <ExtensionIcon
+          id={`${domId}-icon`}
+          extensionId={extension.id}
+          name={extension.name}
+          src={action.icon || extension.icon}
+          className="size-4"
+        />
+        <ExtensionActionBadge
+          id={`${domId}-badge`}
+          text={action.badge}
+          color={action.badgeColor}
+          textColor={action.badgeTextColor}
+        />
+      </span>
     </IconButton>
   );
 }

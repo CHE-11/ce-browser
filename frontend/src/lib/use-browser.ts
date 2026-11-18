@@ -19,6 +19,7 @@ import {
   listBookmarks,
   listDownloads,
   computerName,
+  listExtensionActions,
   listExtensions,
   listHistory,
   listRecentlyClosed,
@@ -27,6 +28,7 @@ import {
   onDownloadsChanged,
   onFaviconsChanged,
   listHostExtensions,
+  onExtensionActionsChanged,
   onExtensionsChanged,
   onHostExtensionsChanged,
   onHistoryChanged,
@@ -333,6 +335,12 @@ export function useHistory() {
 export function useExtensions() {
   const { value, error, loaded } = useLiveValue("extensions", listExtensions, onExtensionsChanged);
   return { extensions: value ?? [], error, loaded };
+}
+
+/** Icon, badge text, and tooltip extensions have set on their toolbar buttons. */
+export function useExtensionActions() {
+  const { value } = useLiveValue("extension-actions", listExtensionActions, onExtensionActionsChanged);
+  return value ?? [];
 }
 
 export function useHostExtensions() {

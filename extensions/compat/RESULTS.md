@@ -7,7 +7,7 @@ Unpacked fixtures in this folder were installed with passage against a dev build
 | `contextMenus.create` | Succeeded. The item **CE compat probe** appeared at the bottom of the page right-click menu on example.com, and choosing it is left to WebView2. |
 | `commands` `Ctrl+Shift+9` | Pressing it on the focused page did not run `chrome.commands.onCommand`. The browser keeps its own shortcuts. Bitwarden also suggests `Ctrl+Shift+Y`, which opens the agent panel. |
 | `action.onClicked` | No WebView2 call dispatches it. The toolbar button is enabled (`Action only`) and the click has nowhere to go. |
-| `action.setBadgeText` / `setTitle` | The calls succeeded inside the extension. The toolbar icon does not show the badge or a new title beyond `default_title`. |
+| `action.setBadgeText` / `setTitle` / `setIcon` | The calls succeed inside the extension. The address bar and tools toolbar draw the badge, the tooltip, and a replacement icon, such as Bitwarden's lock. |
 | `chrome.tabs.query` / `chrome.windows.getAll` from a popup | One browser window and the real tab strip. `query({ active: true, currentWindow: true })` and `getCurrent` return the open page. |
 | Same calls from the service worker | One window per webview (16 windows for 16 views). The page script cannot patch a worker. |
 | Content script on `https://example.com/` | The script ran (`data-ce-content` was set). `chrome.tabs` was missing in that script (`reading 'query'`). |

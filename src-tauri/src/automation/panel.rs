@@ -170,9 +170,9 @@ fn fitted_width(app: &AppHandle, window: &str, kind: tabs::SidePanel, width: f64
         let cap = if wide_column(kind) { 8192.0 } else { AGENT_MAX };
         return width.clamp(panel_min(kind), cap);
     };
-    let span = (geom.client - geom.right.max(0.0) - geom.left.max(0.0) - others
-        - tabs::PANEL_PAGE_MIN)
-        .max(0.0);
+    let span =
+        (geom.client - geom.right.max(0.0) - geom.left.max(0.0) - others - tabs::PANEL_PAGE_MIN)
+            .max(0.0);
     let floor = f64::from(settings::AGENT_PANEL_WIDTH_PX.0);
     let min = panel_min(kind).min(span.max(floor));
     width_for_edge(
@@ -256,7 +256,12 @@ pub fn track_panel_resize(app: &AppHandle, window: &str, id: &str) -> Result<(),
     }
 }
 
-fn resize_limits(app: &AppHandle, window: &str, id: &str, entry: &tabs::DockEntry) -> (f64, f64, bool, f64) {
+fn resize_limits(
+    app: &AppHandle,
+    window: &str,
+    id: &str,
+    entry: &tabs::DockEntry,
+) -> (f64, f64, bool, f64) {
     if let Some(extension) = tabs::extension_id_of(id) {
         let (min, max, fallback) = crate::host_extensions::extension_panel_limits(app, extension)
             .unwrap_or((entry.min, 8192.0, entry.width));
@@ -270,12 +275,7 @@ fn resize_limits(app: &AppHandle, window: &str, id: &str, entry: &tabs::DockEntr
     } else {
         f64::from(settings::AGENT_PANEL_WIDTH_PX.0)
     };
-    (
-        min,
-        max.max(min),
-        id == tabs::AGENT_PANEL_ID,
-        entry.width,
-    )
+    (min, max.max(min), id == tabs::AGENT_PANEL_ID, entry.width)
 }
 
 /// Follows the pointer and reorders `id` among the panels on its edge.
@@ -765,24 +765,29 @@ pub fn restore_dock(app: &AppHandle, panels: &[tabs::DockRecord]) {
             saved_width(app)
         };
         let opened = if let Some(kind) = builtin_kind(id) {
-            ensure_kind(app, tabs::WINDOW, kind).is_ok()
-                && {
-                    tabs::open_dock_panel(
-                        app,
-                        tabs::WINDOW,
-                        id,
-                        kind.title(),
-                        tabs::PanelEdge::Right,
-                        width,
-                        panel_min(kind),
-                        true,
-                    );
-                    true
-                }
+            ensure_kind(app, tabs::WINDOW, kind).is_ok() && {
+                tabs::open_dock_panel(
+                    app,
+                    tabs::WINDOW,
+                    id,
+                    kind.title(),
+                    tabs::PanelEdge::Right,
+                    width,
+                    panel_min(kind),
+                    true,
+                );
+                true
+            }
         } else if let Some(extension) = tabs::extension_id_of(id) {
             let edge = tabs::parse_panel_edge(&panel.edge);
-            crate::host_extensions::reopen_extension_panel(app, tabs::WINDOW, extension, edge, width)
-                .is_ok()
+            crate::host_extensions::reopen_extension_panel(
+                app,
+                tabs::WINDOW,
+                extension,
+                edge,
+                width,
+            )
+            .is_ok()
         } else {
             false
         };

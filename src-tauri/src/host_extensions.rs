@@ -605,6 +605,7 @@ pub fn remove(app: &AppHandle, id: &str) -> Result<(), String> {
         let _ = fs::remove_file(&storage);
     }
     refresh_after_change(app);
+    crate::extension_actions::forget(app, &format!("host:{id}"));
     Ok(())
 }
 
@@ -1231,6 +1232,13 @@ fn ensure_child(app: &AppHandle, window: &str, label: &str, url: Url) -> Result<
     let _ = view.set_zoom(settings::get(app).ui_zoom_factor());
     if label.starts_with("cext-panel-") {
         watch_panel_navigation(app, &view, label);
+        let close_app = app.clone();
+        let close_label = label.to_string();
+        webview2::on_close_requested(&view, move || {
+            let app = close_app.clone();
+            let label = close_label.clone();
+            std::thread::spawn(move || panel_close_requested(&app, &label));
+        });
         eprintln!("panel: created {label}");
     } else {
         let _ = view.navigate(url);
@@ -1305,7 +1313,7 @@ fn panel_view_alive(view: &Webview) -> bool {
     }
 }
 
-/// A blank or error document. The close and side buttons can paint here, with no extension.
+/// A blank or error document. The extension has not drawn its page yet.
 fn panel_placeholder(url: &str) -> bool {
     let url = url.trim();
     url.is_empty()
@@ -1880,7 +1888,8 @@ fn open_called_side_panel(app: &AppHandle, label: &str) {
         return;
     };
     let window = surface_window(app, label);
-    if let Err(error) = open_store_panel(app, &window, &id, page, store_panel_edge(app, &id), None) {
+    if let Err(error) = open_store_panel(app, &window, &id, page, store_panel_edge(app, &id), None)
+    {
         eprintln!("panel: {error}");
     }
 }
@@ -1897,7 +1906,7 @@ fn apply_chrome_action(app: &AppHandle, label: &str, action: &str, side: &str) {
             apply_store_panel_chrome(app, &window, &id, action, side);
             return;
         }
-        let result = if action == "close" {
+        let result = if action == "close" || action == "window-close" {
             toggle_panel(app, &window, &id).map(|_| ())
         } else if action == "side" {
             set_panel_layout(app, &id, side)
@@ -2458,8 +2467,64 @@ fn dispatch(app: &AppHandle, id: &str, method: &str, params: &Value) -> Result<V
             set_page_toolbar_open(app, id, false)?;
             Ok(Value::Null)
         }
+        "action.setBadge" | "action.setIcon" | "action.setTitle" => {
+            apply_host_action(app, id, &loaded.root, method, params)
+        }
         _ => Err(format!("Unknown ce method {method}.")),
     }
+}
+
+fn apply_host_action(
+    app: &AppHandle,
+    id: &str,
+    root: &Path,
+    method: &str,
+    params: &Value,
+) -> Result<Value, String> {
+    let url = params.get("url").and_then(Value::as_str).unwrap_or("");
+    let mut patch = json!({ "url": url });
+    match method {
+        "action.setBadge" => {
+            patch["badge"] = json!(params.get("text").and_then(Value::as_str).unwrap_or(""));
+            if let Some(color) = params
+                .get("color")
+                .and_then(Value::as_str)
+                .filter(|color| !color.is_empty())
+            {
+                patch["badgeColor"] = json!(color);
+            }
+            if let Some(color) = params
+                .get("textColor")
+                .and_then(Value::as_str)
+                .filter(|color| !color.is_empty())
+            {
+                patch["badgeTextColor"] = json!(color);
+            }
+        }
+        "action.setIcon" => {
+            let icon = params.get("icon").and_then(Value::as_str).unwrap_or("");
+            patch["icon"] = json!(host_action_icon(root, icon)?);
+        }
+        "action.setTitle" => {
+            patch["title"] = json!(params.get("title").and_then(Value::as_str).unwrap_or(""));
+        }
+        _ => return Err(format!("Unknown ce method {method}.")),
+    }
+    crate::extension_actions::update_host(app, id, patch)?;
+    Ok(Value::Null)
+}
+
+fn host_action_icon(root: &Path, icon: &str) -> Result<String, String> {
+    if icon.is_empty() {
+        return Ok(String::new());
+    }
+    if icon.starts_with("data:image/") {
+        if icon.len() > MAX_ICON {
+            return Err("That icon is too large.".into());
+        }
+        return Ok(icon.to_string());
+    }
+    icon_data(root, icon).ok_or_else(|| "That icon could not be read.".into())
 }
 
 fn need_desktop(app: &AppHandle, loaded: &Loaded) -> Result<(), String> {
@@ -2819,6 +2884,19 @@ fn apply_popup_chrome(app: &AppHandle, label: &str, action: &str, side: &str) {
 }
 
 fn apply_store_panel_chrome(app: &AppHandle, window: &str, id: &str, action: &str, side: &str) {
+    if action == "window-close" {
+        let label = tabs::host_panel_label(window, id);
+        if crate::extension_popouts::opened_recently(id, POPOUT_HANDOFF) {
+            eprintln!("panel: {label} kept open while its popout is showing");
+            held_panels()
+                .lock()
+                .expect("held panels")
+                .insert(label);
+            return;
+        }
+        tabs::close_dock_panel(app, window, &tabs::extension_panel_id(id));
+        return;
+    }
     if action == "close" {
         tabs::close_dock_panel(app, window, &tabs::extension_panel_id(id));
         return;
@@ -3009,6 +3087,112 @@ fn open_store_panel(
     Ok(())
 }
 
+/// How soon after opening a popout an extension page may close itself and still mean "hand over to
+/// the popout". Bitwarden opens its unlock popout and closes the popup page in the same task.
+const POPOUT_HANDOFF: Duration = Duration::from_secs(5);
+/// Lets the extension write the state its popout changed before the panel reloads.
+const POPOUT_SETTLE: Duration = Duration::from_millis(300);
+
+/// Store panels that asked to close because they handed over to a popout.
+fn held_panels() -> &'static Mutex<HashSet<String>> {
+    static HELD: std::sync::OnceLock<Mutex<HashSet<String>>> = std::sync::OnceLock::new();
+    HELD.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// A side panel page asked WebView2 to close it, or its extension called `chrome.windows.remove`
+/// on the window it is in. Bitwarden does this to a locked popup before it opens the unlock
+/// popout. A store panel stays for a popout that follows and reloads when that popout closes.
+/// With no popout it closes.
+pub fn panel_close_requested(app: &AppHandle, label: &str) {
+    let Some((window, id)) = tabs::split_host_panel_label(label) else {
+        return;
+    };
+    if state(app).iter().any(|record| record.id == id) {
+        if panel_column_open(app, label)
+            && let Err(error) = toggle_panel(app, &window, &id)
+        {
+            eprintln!("panel chrome: {error}");
+        }
+        return;
+    }
+    eprintln!("panel: {label} was asked to close, keeping it for a popout");
+    held_panels()
+        .lock()
+        .expect("held panels")
+        .insert(label.to_string());
+    let app = app.clone();
+    let label = label.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(POPOUT_HANDOFF);
+        if crate::extension_popouts::has_open(&id) {
+            return;
+        }
+        if !held_panels().lock().expect("held panels").remove(&label) {
+            return;
+        }
+        eprintln!("panel: {label} closes, no popout followed its removal");
+        tabs::close_dock_panel(&app, &window, &tabs::extension_panel_id(&id));
+    });
+}
+
+/// An extension popout window closed. Panels that stayed open for it reload, so they show what
+/// the popout changed, such as an unlocked vault.
+pub fn popout_closed(app: &AppHandle, url: &str) {
+    let Some(id) = crate::extension_popouts::extension_of(url) else {
+        return;
+    };
+    let labels: Vec<String> = {
+        let mut held = held_panels().lock().expect("held panels");
+        let mine: Vec<String> = held
+            .iter()
+            .filter(|label| {
+                tabs::split_host_panel_label(label).is_some_and(|(_, owner)| owner == id)
+            })
+            .cloned()
+            .collect();
+        for label in &mine {
+            held.remove(label);
+        }
+        mine
+    };
+    if labels.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(POPOUT_SETTLE);
+        for label in labels {
+            reload_store_panel(&app, &label, &id);
+        }
+    });
+}
+
+fn reload_store_panel(app: &AppHandle, label: &str, id: &str) {
+    let Some((window, _)) = tabs::split_host_panel_label(label) else {
+        return;
+    };
+    if showing_store_panel(app, &window, id).is_empty() {
+        return;
+    }
+    let Some(view) = app.get_webview(label) else {
+        return;
+    };
+    let wanted = panel_target_url(label).or_else(|| {
+        crate::extensions::store_panel_url(app, id)
+            .ok()
+            .map(|url| url.to_string())
+    });
+    let Some(url) = wanted.and_then(|wanted| Url::parse(&wanted).ok()) else {
+        return;
+    };
+    eprintln!("panel: reload {label} at {url} after its popout closed");
+    remember_panel_target(label, url.as_str(), true);
+    if let Err(error) = view.navigate(url) {
+        eprintln!("panel: reload {label} failed: {error}");
+    }
+    schedule_panel_check(app, label);
+}
+
 fn store_panel_title(app: &AppHandle, id: &str) -> String {
     crate::extensions::list(app)
         .ok()
@@ -3124,6 +3308,24 @@ fn close_panels_for(app: &AppHandle, id: &str) {
             let _ = view.close();
         }
     }
+}
+
+/// Moves an open extension panel. Host extensions keep the side on the extension record.
+/// Store extensions keep it in settings.
+pub fn set_extension_panel_side(
+    app: &AppHandle,
+    window: &str,
+    id: &str,
+    side: &str,
+) -> Result<(), String> {
+    if side != "left" && side != "right" {
+        return Err("The panel side must be left or right.".into());
+    }
+    if list(app).iter().any(|record| record.id == id) {
+        return set_panel_layout(app, id, side);
+    }
+    remember_store_panel_side(app, id, side);
+    place_store_extension_panel(app, window, id)
 }
 
 pub fn set_panel_layout(app: &AppHandle, id: &str, side: &str) -> Result<(), String> {
@@ -4257,122 +4459,23 @@ pub const EXTENSION_TAB_JS: &str = r##"(function () {
 "##;
 
 const PANEL_CHROME_JS: &str = r##"(function () {
-  function postChrome(action, side) {
+  if (window.__cePanelChrome) return;
+  window.__cePanelChrome = true;
+  function postChrome(action) {
     var target = window.__ceHost && window.__ceHost.postMessage ? window.__ceHost : null;
     if (!target) {
       try { target = window.chrome && window.chrome.webview; } catch (error) { target = null; }
     }
     if (!target || !target.postMessage) return;
-    var message = { type: "ce-chrome", action: action };
-    if (side) message.side = side;
-    target.postMessage(JSON.stringify(message));
+    target.postMessage(JSON.stringify({ type: "ce-chrome", action: action }));
   }
   // window.close() would destroy this reusable webview and leave the column empty.
+  // The dock header owns the side selector and the close button. A popup page that just
+  // opened a popout closes itself, and the host keeps the panel for that case.
   window.close = function () {
     try { console.warn("ce panel: window.close"); } catch (error) {}
-    postChrome("close");
+    postChrome("window-close");
   };
-  var href = "";
-  try { href = String(location.href || ""); } catch (error) { href = ""; }
-  if (href.indexOf("about:blank") === 0 || href.indexOf("chrome-error:") === 0 || href.indexOf("edge-error:") === 0) return;
-  if (window.__cePanelChrome) return;
-  window.__cePanelChrome = true;
-  var style = document.createElement("style");
-  style.id = "ce-panel-chrome-style";
-  style.textContent = [
-    "#ce-panel-chrome{position:fixed;top:8px;right:8px;z-index:2147483647;display:flex;align-items:center;gap:2px;padding:2px;border-radius:8px;background:rgba(24,24,27,.94);border:1px solid #3f3f46;box-shadow:0 1px 2px rgba(0,0,0,.4);user-select:none}",
-    "#ce-panel-chrome-side{display:flex}",
-    "#ce-panel-chrome button{width:22px;height:22px;border:0;border-radius:6px;padding:0;margin:0;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;background:transparent;color:#a1a1aa;font:600 11px/1 ui-sans-serif,system-ui,sans-serif}",
-    "#ce-panel-chrome button:hover{background:#27272a;color:#fafafa}",
-    "#ce-panel-chrome button[aria-pressed=true]{background:#3f3f46;color:#fafafa}"
-  ].join("");
-  function stop(event) { event.stopPropagation(); }
-  function sideButton(value, text, label) {
-    var button = document.createElement("button");
-    button.id = "ce-panel-chrome-" + value;
-    button.type = "button";
-    button.textContent = text;
-    button.title = label;
-    button.setAttribute("aria-label", label);
-    button.setAttribute("aria-pressed", "false");
-    button.addEventListener("click", function () {
-      paint(value);
-      postChrome("side", value);
-    });
-    return button;
-  }
-  function ensure() {
-    var root = document.getElementById("ce-panel-chrome");
-    if (root) return root;
-    if (!document.getElementById("ce-panel-chrome-style")) {
-      (document.head || document.documentElement).appendChild(style);
-    }
-    root = document.createElement("div");
-    root.id = "ce-panel-chrome";
-    ["pointerdown", "pointerup", "click", "mousedown", "mouseup", "contextmenu"].forEach(function (type) {
-      root.addEventListener(type, stop);
-    });
-    var sides = document.createElement("div");
-    sides.id = "ce-panel-chrome-side";
-    sides.setAttribute("role", "group");
-    sides.setAttribute("aria-label", "Panel side");
-    sides.appendChild(sideButton("left", "L", "Left"));
-    sides.appendChild(sideButton("right", "R", "Right"));
-    var close = document.createElement("button");
-    close.id = "ce-panel-chrome-close";
-    close.type = "button";
-    close.title = "Close";
-    close.setAttribute("aria-label", "Close");
-    close.innerHTML = '<svg id="ce-panel-chrome-close-icon" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"></path></svg>';
-    close.addEventListener("click", function () {
-      postChrome("close");
-    });
-    root.appendChild(sides);
-    root.appendChild(close);
-    (document.documentElement || document.body).appendChild(root);
-    try { console.info("ce panel: exit and side buttons on " + location.href); } catch (error) {}
-    return root;
-  }
-  function paint(side) {
-    ensure();
-    ["left", "right"].forEach(function (value) {
-      var button = document.getElementById("ce-panel-chrome-" + value);
-      if (!button) return;
-      button.setAttribute("aria-pressed", side === value ? "true" : "false");
-    });
-  }
-  function onMessage(event) {
-    var data = event && event.data !== undefined ? event.data : event;
-    if (typeof data === "string") {
-      try { data = JSON.parse(data); } catch (error) { return; }
-    }
-    if (data && data.type === "ce-panel" && data.side) paint(data.side);
-  }
-  function listen() {
-    if (window.__cePanelChromeListening) return;
-    var target = window.chrome && window.chrome.webview;
-    if (!target || !target.addEventListener) return;
-    window.__cePanelChromeListening = true;
-    target.addEventListener("message", onMessage);
-  }
-  function pull() {
-    listen();
-    ensure();
-    var ui = window.ce && window.ce.ui;
-    if (!ui || !ui.panelChrome) {
-      if (location.protocol === "chrome-extension:" && !window.__cePanelChromeAsked) {
-        window.__cePanelChromeAsked = true;
-        postChrome("chrome");
-      }
-      setTimeout(pull, 60);
-      return;
-    }
-    ui.panelChrome().then(function (detail) {
-      if (detail && detail.side) paint(detail.side);
-    }).catch(function () {});
-  }
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", pull);
-  else pull();
 })();
 "##;
 
@@ -4744,6 +4847,16 @@ const BRIDGE_JS: &str = r#"(function () {
     storage: {
       get: function (key) { return rpc("storage.get", { key: key }); },
       set: function (key, value) { return rpc("storage.set", { key: key, value: value }); }
+    },
+    action: {
+      setBadge: function (text, color, textColor, url) {
+        var params = { text: text == null ? "" : String(text), url: url || "" };
+        if (color) params.color = String(color);
+        if (textColor) params.textColor = String(textColor);
+        return rpc("action.setBadge", params);
+      },
+      setIcon: function (icon, url) { return rpc("action.setIcon", { icon: icon || "", url: url || "" }); },
+      setTitle: function (title, url) { return rpc("action.setTitle", { title: title || "", url: url || "" }); }
     },
     ui: {
       togglePanel: function () { return rpc("ui.togglePanel"); },

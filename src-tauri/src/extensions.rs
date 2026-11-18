@@ -732,6 +732,7 @@ pub fn remove(app: &AppHandle, id: &str) -> Result<(), String> {
     }
     save_records(app, |records| records.retain(|record| record.id != id))?;
     emit(app);
+    crate::extension_actions::forget(app, id);
     Ok(())
 }
 

@@ -166,7 +166,7 @@ Windows desktop browser built on Tauri 2 and WebView2. Each tab is its own page 
 - Popups, content scripts, and autofill usually work
 - Side panel pages open in the browser's side panel. The most recently enabled new-tab override is used for new tabs
 - Extension pages see this browser's tabs and windows. Extension items are added to the page right-click menu
-- A toolbar button with no popup does not receive a click, and badge text is not shown. WebView2 does not report those
+- A toolbar button with no popup does not receive a click. WebView2 does not report that click. Badge text and icon changes are drawn on the toolbar button
 - Extension keyboard commands are not delivered. Native messaging hosts registered for Chrome or Edge are started
 - Extension bookmark APIs use the WebView2 profile, not this browser's bookmark bar
 - Request blocking steps aside while an enabled extension uses declarativeNetRequest or webRequest

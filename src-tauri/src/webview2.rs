@@ -1825,6 +1825,28 @@ pub fn close_window_when_requested(app: &AppHandle, label: &str) {
     });
 }
 
+/// Runs `handler` when the page asks to close: `window.close()`, or `chrome.windows.remove` on
+/// the window WebView2 put the page in. Nothing is closed unless `handler` does it.
+pub fn on_close_requested(webview: &Webview, handler: impl Fn() + Send + Sync + 'static) {
+    let handler = std::sync::Arc::new(handler);
+    let _ = webview.with_webview(move |platform| {
+        let Ok(core) = core(&platform) else {
+            return;
+        };
+        let handler = handler.clone();
+        let mut token = 0i64;
+        let _ = unsafe {
+            core.add_WindowCloseRequested(
+                &WindowCloseRequestedEventHandler::create(Box::new(move |_, _| {
+                    handler();
+                    Ok(())
+                })),
+                &mut token,
+            )
+        };
+    });
+}
+
 /// Closes the popup stack when focus leaves it. Attached once, for the life of the window.
 pub fn attach_popup_blur(app: &AppHandle, webview: &Webview, label: &str) {
     let app = app.clone();

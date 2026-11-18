@@ -463,7 +463,9 @@ impl InnerWebView {
     unsafe { Self::set_webview_settings(&webview, &attributes, &pl_attrs)? };
 
     // Webview handlers
-    unsafe { Self::attach_handlers(hwnd, &webview, &mut attributes, &mut token, env)? };
+    unsafe {
+      Self::attach_handlers(hwnd, &webview, &mut attributes, &mut token, env, is_child)?
+    };
 
     // IPC handler
     unsafe { Self::attach_ipc_handler(&webview, &mut attributes, &mut token)? };
@@ -617,12 +619,17 @@ impl InnerWebView {
     attributes: &mut WebViewAttributes,
     token: &mut EventRegistrationToken,
     env: &ICoreWebView2Environment,
+    is_child: bool,
   ) -> Result<()> {
-    // Close container HWND when `window.close` is called in JS
-    webview.add_WindowCloseRequested(
-      &WindowCloseRequestedEventHandler::create(Box::new(move |_, _| DestroyWindow(hwnd))),
-      token,
-    )?;
+    // Close container HWND when `window.close` is called in JS. A child webview is owned by
+    // the app, which handles the request itself; destroying its container leaves a dead,
+    // blank view behind.
+    if !is_child {
+      webview.add_WindowCloseRequested(
+        &WindowCloseRequestedEventHandler::create(Box::new(move |_, _| DestroyWindow(hwnd))),
+        token,
+      )?;
+    }
 
     // Document title changed handler
     if let Some(document_title_changed_handler) = attributes.document_title_changed_handler.take() {

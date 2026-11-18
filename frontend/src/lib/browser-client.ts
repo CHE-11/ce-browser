@@ -104,6 +104,7 @@ import type {
   BookmarkHealthProgress,
   StatusSnapshot,
   StatusText,
+  ExtensionActionState,
   ExtensionInfo,
   HostExtensionInfo,
   HostPanelSide,
@@ -1749,6 +1750,14 @@ export function onExtensionsChanged(handler: (extensions: ExtensionInfo[]) => vo
   return listen<ExtensionInfo[]>("extensions-changed", (event) => handler(event.payload));
 }
 
+export function listExtensionActions() {
+  return invoke<ExtensionActionState[]>("list_extension_actions");
+}
+
+export function onExtensionActionsChanged(handler: (actions: ExtensionActionState[]) => void): Promise<UnlistenFn> {
+  return listen<ExtensionActionState[]>("extension-actions-changed", (event) => handler(event.payload));
+}
+
 export function listHostExtensions() {
   return invoke<HostExtensionInfo[]>("list_host_extensions");
 }
@@ -2264,6 +2273,11 @@ export function collapseSidePanel(id: string, collapsed?: boolean) {
 
 export function closeSidePanel(id: string) {
   return invoke<void>("close_side_panel", { id });
+}
+
+/** Moves an open extension panel to the left or right edge and remembers that side. */
+export function setSidePanelEdge(id: string, side: HostPanelSide) {
+  return invoke<void>("set_side_panel_edge", { id, side });
 }
 
 /** Follows the mouse and resizes one docked panel. */

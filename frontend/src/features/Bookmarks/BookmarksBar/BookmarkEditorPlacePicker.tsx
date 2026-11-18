@@ -36,6 +36,10 @@ type BookmarkPlacePickerProps = {
   onBlankMenu: (event: MouseEvent) => void;
   /** Open this folder after something was added inside it. `token` changes on every add. */
   expandRequest?: { id: string; token: number } | null;
+  /** Collapse or expand every folder. `token` changes on every click. */
+  foldRequest?: { expand: boolean; token: number } | null;
+  /** True while any folder in the tree is open. */
+  onFoldersOpen?: (open: boolean) => void;
 };
 
 type PlaceContextValue = {
@@ -159,6 +163,22 @@ function foldersToOpen(tree: BookmarkTree, needle: string, bookmarkId: string, p
     if (holdsPlace(node, parentId) || containsMatch(node, needle, bookmarkId)) {
       ids.push(node.id);
     }
+    for (const child of node.children ?? []) {
+      walk(child);
+    }
+  };
+  walk(tree.bar);
+  walk(tree.other);
+  return ids;
+}
+
+function allFolderIds(tree: BookmarkTree) {
+  const ids: string[] = [];
+  const walk = (node: BookmarkNode) => {
+    if (!isFolder(node)) {
+      return;
+    }
+    ids.push(node.id);
     for (const child of node.children ?? []) {
       walk(child);
     }
@@ -465,6 +485,8 @@ export function BookmarkPlacePicker({
   onRowMenu,
   onBlankMenu,
   expandRequest,
+  foldRequest,
+  onFoldersOpen,
 }: BookmarkPlacePickerProps) {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
@@ -482,6 +504,8 @@ export function BookmarkPlacePicker({
     paddingBlock: "0.2rem",
   };
   const seeded = useRef(ancestorFolderIds(tree, bookmarkId) !== null);
+  const treeRef = useRef(tree);
+  treeRef.current = tree;
   const [expanded, setExpanded] = useState(() => new Set(ancestorFolderIds(tree, bookmarkId) ?? []));
 
   useEffect(() => {
@@ -532,6 +556,18 @@ export function BookmarkPlacePicker({
       return next;
     });
   }, [expandRequest]);
+
+  useEffect(() => {
+    if (!foldRequest) {
+      return;
+    }
+    const current = treeRef.current;
+    setExpanded(current && foldRequest.expand ? new Set(allFolderIds(current)) : new Set());
+  }, [foldRequest]);
+
+  useEffect(() => {
+    onFoldersOpen?.(expanded.size > 0);
+  }, [expanded, onFoldersOpen]);
 
   const toggleFolder = (id: string) => {
     setExpanded((current) => {

@@ -13,6 +13,7 @@ mod capture;
 mod debug;
 mod devtools;
 mod downloads;
+mod extension_actions;
 mod extension_popouts;
 mod extension_store;
 mod extensions;
@@ -1318,6 +1319,11 @@ async fn site_info(app: AppHandle, id: u32) -> Result<site_info::SiteInfo, Strin
 #[tauri::command]
 async fn list_extensions(app: AppHandle) -> Result<Vec<ExtensionInfo>, String> {
     blocking(move || extensions::list(&app)).await
+}
+
+#[tauri::command]
+fn list_extension_actions() -> Vec<extension_actions::ExtensionActionState> {
+    extension_actions::list()
 }
 
 #[tauri::command]
@@ -2656,12 +2662,7 @@ async fn resize_agent_panel(app: AppHandle, window: Window) -> Result<(), String
 
 #[tauri::command]
 async fn set_agent_panel_width(app: AppHandle, window: Window, width: f64) -> Result<(), String> {
-    automation::panel::set_width(
-        &app,
-        &browser_window(&window),
-        tabs::AGENT_PANEL_ID,
-        width,
-    )
+    automation::panel::set_width(&app, &browser_window(&window), tabs::AGENT_PANEL_ID, width)
 }
 
 #[tauri::command]
@@ -2683,6 +2684,19 @@ async fn collapse_side_panel(
 async fn close_side_panel(app: AppHandle, window: Window, id: String) -> Result<(), String> {
     tabs::close_dock_panel(&app, &browser_window(&window), &id);
     Ok(())
+}
+
+#[tauri::command]
+async fn set_side_panel_edge(
+    app: AppHandle,
+    window: Window,
+    id: String,
+    side: String,
+) -> Result<(), String> {
+    let Some(extension_id) = tabs::extension_id_of(&id).map(str::to_string) else {
+        return Err("That panel stays on its edge.".into());
+    };
+    host_extensions::set_extension_panel_side(&app, &browser_window(&window), &extension_id, &side)
 }
 
 #[tauri::command]
@@ -3059,8 +3073,10 @@ pub fn run() {
                 return;
             }
             if label.starts_with("script-") {
-                if matches!(event, WindowEvent::Destroyed) {
-                    extension_popouts::closed(&label);
+                if matches!(event, WindowEvent::Destroyed)
+                    && let Some(url) = extension_popouts::closed(&label)
+                {
+                    host_extensions::popout_closed(window.app_handle(), &url);
                 }
                 return;
             }
@@ -3307,6 +3323,7 @@ pub fn run() {
             clear_history,
             check_bookmark_health,
             list_extensions,
+            list_extension_actions,
             install_extension_folder,
             install_extension_zip,
             install_extension_from_store,
@@ -3500,6 +3517,7 @@ pub fn run() {
             set_agent_panel_width,
             collapse_side_panel,
             close_side_panel,
+            set_side_panel_edge,
             resize_side_panel,
             reorder_side_panel,
             nudge_side_panel,

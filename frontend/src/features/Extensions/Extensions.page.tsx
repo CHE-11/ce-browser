@@ -297,8 +297,9 @@ export function ExtensionsPage() {
             page is used for new tabs.
           </p>
           <p id="extensions-page-install-limits" className="mt-2 text-xs text-zinc-500">
-            A toolbar button with no popup does not receive a click, and badge text is not shown on the icon. WebView2
-            does not report those to the browser. Extension keyboard commands are not delivered. Items an extension adds
+            A toolbar button with no popup does not receive a click. WebView2 does not report that click. Badge text
+            and icon changes, such as a lock while a vault is locked, are drawn on the toolbar button. Extension
+            keyboard commands are not delivered. Items an extension adds
             to the page menu do appear. Native messaging hosts registered for Chrome or Edge are started. Extension
             bookmark APIs use the WebView2 profile, not this browser's bookmark bar. While an enabled extension uses
             declarativeNetRequest or webRequest, this browser's request blocking steps aside. Accelerated downloads stay

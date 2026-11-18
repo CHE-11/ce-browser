@@ -835,6 +835,34 @@ export type ExtensionInfo = {
   updateVersion: string | null;
 };
 
+/**
+ * Page-specific toolbar icon or badge. A null field keeps the extension-wide value.
+ * An empty icon uses the manifest icon. An empty badge hides the badge on that page.
+ */
+export type ExtensionActionTab = {
+  url: string;
+  icon: string | null;
+  badge: string | null;
+  badgeColor: string | null;
+  badgeTextColor: string | null;
+  title: string | null;
+};
+
+/** Icon, badge, and tooltip an extension set for its toolbar button. */
+export type ExtensionActionState = {
+  /** Store extension id, or `host:` plus a host extension id. */
+  id: string;
+  /** Data URL drawn instead of the manifest icon. Null keeps the manifest icon. */
+  icon: string | null;
+  /** Badge text. Empty hides the badge. */
+  badge: string;
+  badgeColor: string;
+  badgeTextColor: string;
+  /** Tooltip. Empty keeps the manifest title. */
+  title: string;
+  tabs: ExtensionActionTab[];
+};
+
 export type SearchEngine =
   | "google"
   | "bing"

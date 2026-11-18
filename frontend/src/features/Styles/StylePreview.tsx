@@ -284,10 +284,25 @@ function BookmarkEditorPreview({ settings }: { settings: BrowserSettings }) {
           Example
         </span>
       </label>
-      <div id="styles-preview-bookmark-editor-place" className="flex flex-col gap-[0.4em]">
-        <span id="styles-preview-bookmark-editor-place-label" className="text-[0.8em] text-zinc-400">
-          Place
+      <label id="styles-preview-bookmark-editor-url-label" className="flex flex-col gap-[0.25em] text-[0.8em] text-zinc-400">
+        URL
+        <span
+          id="styles-preview-bookmark-editor-url"
+          className="flex items-center rounded-md border border-zinc-700 bg-zinc-950 px-[0.55em] text-zinc-100"
+          style={{ height: "2.15em", fontSize: `${settings.bookmarkEditorTextSize}rem` }}
+        >
+          https://example.com
         </span>
+      </label>
+      <div id="styles-preview-bookmark-editor-place" className="flex flex-col gap-[0.4em]">
+        <div id="styles-preview-bookmark-editor-place-heading" className="flex items-center justify-between gap-[0.5em]">
+          <span id="styles-preview-bookmark-editor-place-label" className="text-[0.8em] text-zinc-400">
+            Place
+          </span>
+          <span id="styles-preview-bookmark-editor-fold-all" className="inline-flex h-[1.8em] items-center px-[0.45em] text-[0.75em] text-zinc-300">
+            Collapse all
+          </span>
+        </div>
         <div
           id="styles-preview-bookmark-editor-list"
           className="overflow-hidden rounded-md border border-zinc-700 bg-zinc-950 p-1"
@@ -310,13 +325,18 @@ function BookmarkEditorPreview({ settings }: { settings: BrowserSettings }) {
           Bookmarks bar, before News
         </p>
       </div>
-      <div id="styles-preview-bookmark-editor-actions" className="flex justify-end gap-[0.5em]">
-        <span id="styles-preview-bookmark-editor-remove" className="inline-flex h-[2.15em] items-center px-[0.8em] text-zinc-300">
+      <div id="styles-preview-bookmark-editor-actions" className="flex justify-between gap-[0.5em]">
+        <span id="styles-preview-bookmark-editor-remove" className="inline-flex h-[2.15em] items-center rounded-md border border-red-700 px-[0.8em] text-red-400">
           Remove
         </span>
-        <span id="styles-preview-bookmark-editor-done" className="inline-flex h-[2.15em] items-center rounded-md bg-sky-600 px-[0.8em] text-white">
-          Done
-        </span>
+        <div id="styles-preview-bookmark-editor-save-actions" className="flex justify-end gap-[0.5em]">
+          <span id="styles-preview-bookmark-editor-cancel" className="inline-flex h-[2.15em] items-center px-[0.8em] text-zinc-300">
+            Cancel
+          </span>
+          <span id="styles-preview-bookmark-editor-done" className="inline-flex h-[2.15em] items-center rounded-md bg-sky-600 px-[0.8em] text-white">
+            Done
+          </span>
+        </div>
       </div>
     </div>
   );

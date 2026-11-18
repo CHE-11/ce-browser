@@ -294,4 +294,4 @@ WebView2 loads unpacked Chrome and Edge extensions. To add one:
 
 The extension's files are copied into the `extensions` folder of the current profile, inside the root folder described above. WebView2 runs the extension. Popups, content scripts, and autofill usually work. This browser shows the toolbar button, hosts the popup, options page, and side panel, and tells those pages which tab is open. The most recently enabled extension that replaces the new tab page is used for new tabs. Extension items are added to the page's right-click menu. Native messaging hosts registered for Chrome or Edge are started.
 
-WebView2 does not tell the browser about a toolbar click on a button with no popup, or about badge text, so the icon stays as it was declared. Extension keyboard commands are not delivered. Extension bookmark APIs use the WebView2 profile, not this browser's bookmark bar.
+WebView2 does not tell the browser about a toolbar click on a button with no popup. Badge text and icon changes are drawn on the toolbar button. Extension keyboard commands are not delivered. Extension bookmark APIs use the WebView2 profile, not this browser's bookmark bar.

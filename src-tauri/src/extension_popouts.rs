@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
 use tiny_http::{Header, Method, Request, Response, Server};
 
-use crate::tabs;
+use crate::{extension_actions, tabs};
 
 const POPOUT_BASE: i64 = 2_100_000_000;
 const POPOUT_SPAN: i64 = 1_000_000;
@@ -82,16 +82,44 @@ pub fn track(label: &str, url: &str) {
     });
 }
 
-/// The window is gone. `windows.onRemoved` is reported from the closed list.
-pub fn closed(label: &str) {
+/// The window is gone. `windows.onRemoved` is reported from the closed list. Returns the
+/// popout's URL when `label` was an extension popout.
+pub fn closed(label: &str) -> Option<String> {
     let mut popouts = registry().lock().expect("extension popouts");
     let now = Instant::now();
+    let mut url = None;
     for popout in popouts.iter_mut() {
         if popout.label == label && popout.closed.is_none() {
             popout.closed = Some(now);
+            url = Some(popout.url.clone());
         }
     }
     prune(&mut popouts, now);
+    url
+}
+
+/// Extension `id` has a popout window open.
+pub fn has_open(id: &str) -> bool {
+    let popouts = registry().lock().expect("extension popouts");
+    popouts
+        .iter()
+        .any(|popout| popout.closed.is_none() && extension_id(&popout.url) == Some(id))
+}
+
+/// Extension `id` opened a popout in the last `within` that is still open.
+pub fn opened_recently(id: &str, within: Duration) -> bool {
+    let popouts = registry().lock().expect("extension popouts");
+    let now = Instant::now();
+    popouts.iter().any(|popout| {
+        popout.closed.is_none()
+            && now.duration_since(popout.created) < within
+            && extension_id(&popout.url) == Some(id)
+    })
+}
+
+/// Extension id of a `chrome-extension:` URL.
+pub fn extension_of(url: &str) -> Option<String> {
+    extension_id(url).map(str::to_string)
 }
 
 /// The popout `windows.create` should return. A recent claim of the same URL is repeated
@@ -210,13 +238,20 @@ fn handle(app: &AppHandle, mut request: Request) {
     }
     let url = request.url().to_string();
     let path = url.split('?').next().unwrap_or("");
-    let body = read_body(&mut request);
+    let body = read_body(
+        &mut request,
+        if path == "/action" { 400_000 } else { 65_536 },
+    );
     let response = match (request.method(), path) {
         (&Method::Get, "/claim") => {
             let wanted = query_param(&url, "url").unwrap_or_default();
             json_body(claim(app, &wanted))
         }
         (&Method::Get, "/windows") => json_body(json!(open_windows(app))),
+        (&Method::Get, "/current") => {
+            let page = query_param(&url, "url").unwrap_or_default();
+            json_body(current(app, &page))
+        }
         (&Method::Get, "/closed") => json_body(json!(closed_ids())),
         (&Method::Post, "/remove") => {
             if let Some(id) = json_id(&body) {
@@ -224,12 +259,24 @@ fn handle(app: &AppHandle, mut request: Request) {
             }
             json_body(json!({}))
         }
+        (&Method::Post, "/release") => {
+            let urls: Vec<String> = serde_json::from_str::<Value>(&body)
+                .ok()
+                .and_then(|value| value.get("urls").cloned())
+                .and_then(|urls| serde_json::from_value(urls).ok())
+                .unwrap_or_default();
+            json_body(json!({ "handled": release(app, &urls) }))
+        }
         (&Method::Post, "/update") => {
             if let Ok(value) = serde_json::from_str::<Value>(&body)
                 && let Some(id) = value.get("id").and_then(Value::as_i64)
             {
                 update(app, id, &value);
             }
+            json_body(json!({}))
+        }
+        (&Method::Post, "/action") => {
+            extension_actions::update_chrome(app, &body);
             json_body(json!({}))
         }
         _ => Response::from_string(String::new()).with_status_code(404),
@@ -361,7 +408,74 @@ fn remove(app: &AppHandle, id: i64) {
             let _ = window.close();
         }
     });
-    closed(&label);
+    if let Some(url) = closed(&label) {
+        crate::host_extensions::popout_closed(app, &url);
+    }
+}
+
+/// The open popout showing `page`, as `chrome.windows.getCurrent` reports it to that page.
+fn current(app: &AppHandle, page: &str) -> Value {
+    let labels: Vec<(i64, String)> = {
+        let popouts = registry().lock().expect("extension popouts");
+        popouts
+            .iter()
+            .filter(|popout| popout.closed.is_none())
+            .map(|popout| (popout.id, popout.label.clone()))
+            .collect()
+    };
+    labels
+        .into_iter()
+        .find(|(_, label)| {
+            app.get_webview(label)
+                .and_then(|view| view.url().ok())
+                .is_some_and(|current| same_page(page, current.as_str()))
+        })
+        .and_then(|(id, _)| window_value(app, id))
+        .unwrap_or(Value::Null)
+}
+
+/// `chrome.windows.remove` on a window WebView2 numbered itself. `urls` are that window's pages.
+/// Popouts close as windows and side panels go through the dock. A window holding any other page
+/// of this browser is kept, since WebView2 would leave its views blank. `false` lets the native
+/// call run for a window that is none of these.
+fn release(app: &AppHandle, urls: &[String]) -> bool {
+    let showing = |label: &str| {
+        app.get_webview(label)
+            .and_then(|view| view.url().ok())
+            .is_some_and(|current| urls.iter().any(|url| same_page(url, current.as_str())))
+    };
+    let popouts: Vec<(i64, String)> = {
+        let popouts = registry().lock().expect("extension popouts");
+        popouts
+            .iter()
+            .filter(|popout| popout.closed.is_none())
+            .map(|popout| (popout.id, popout.label.clone()))
+            .collect()
+    };
+    let popouts: Vec<(i64, String)> = popouts
+        .into_iter()
+        .filter(|(_, label)| showing(label))
+        .collect();
+    let mut kept = false;
+    for (label, _) in app.webviews() {
+        if popouts.iter().any(|(_, popout)| popout == &label) || !showing(&label) {
+            continue;
+        }
+        if tabs::split_host_panel_label(&label).is_some() {
+            crate::host_extensions::panel_close_requested(app, &label);
+        } else {
+            eprintln!("extension popouts: kept {label}, an extension asked to remove its window");
+        }
+        kept = true;
+    }
+    for (id, _) in &popouts {
+        remove(app, *id);
+    }
+    kept || !popouts.is_empty()
+}
+
+fn same_page(left: &str, right: &str) -> bool {
+    left.trim_end_matches('/') == right.trim_end_matches('/')
 }
 
 fn update(app: &AppHandle, id: i64, value: &Value) {
@@ -440,9 +554,9 @@ fn origin_ok(origin: Option<&str>) -> bool {
     }
 }
 
-fn read_body(request: &mut Request) -> String {
+fn read_body(request: &mut Request, limit: u64) -> String {
     let mut body = String::new();
-    let _ = request.as_reader().take(65_536).read_to_string(&mut body);
+    let _ = request.as_reader().take(limit).read_to_string(&mut body);
     body
 }
 
@@ -669,15 +783,235 @@ fn patch_script(port: u16) -> String {
 }
 
 const PATCH: &str = r#"(function () {
+  function hookExtensionAction(port) {
+    try {
+      if (globalThis.__ceActionHook) return;
+      if (!globalThis.chrome || !chrome.runtime || !chrome.runtime.id) return;
+      var apis = [];
+      if (chrome.action) apis.push(chrome.action);
+      if (chrome.browserAction && chrome.browserAction !== chrome.action) apis.push(chrome.browserAction);
+      if (!apis.length) return;
+      function pageUrl(tabId) {
+        return new Promise(function (resolve) {
+          if (tabId == null || !chrome.tabs || typeof chrome.tabs.get !== "function") {
+            resolve("");
+            return;
+          }
+          var settled = false;
+          function finish(tab) {
+            if (settled) return;
+            settled = true;
+            resolve(tab && tab.url ? String(tab.url) : "");
+          }
+          try {
+            var result = chrome.tabs.get(tabId, function (tab) {
+              if (chrome.runtime.lastError) tab = null;
+              finish(tab);
+            });
+            if (result && typeof result.then === "function") result.then(finish, function () { finish(null); });
+          } catch (error) {
+            finish(null);
+          }
+        });
+      }
+      function send(body) {
+        fetch("http://127.0.0.1:" + port + "/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        }).catch(function () {});
+      }
+      function report(patch, tabId) {
+        pageUrl(tabId).then(function (url) {
+          var body = { id: chrome.runtime.id };
+          if (url) body.url = url;
+          var keys = Object.keys(patch);
+          for (var i = 0; i < keys.length; i++) body[keys[i]] = patch[keys[i]];
+          send(body);
+        });
+      }
+      function cssColor(color) {
+        if (!color) return "";
+        if (typeof color === "string") return color;
+        if (color.length >= 3) {
+          if (color.length > 3 && color[3] === 0) return "";
+          var alpha = color.length > 3 && color[3] != null ? color[3] / 255 : 1;
+          return "rgba(" + (color[0] | 0) + "," + (color[1] | 0) + "," + (color[2] | 0) + "," + alpha + ")";
+        }
+        return "";
+      }
+      function bytesToDataUrl(bytes, mime) {
+        var binary = "";
+        var step = 8192;
+        for (var i = 0; i < bytes.length; i += step) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+        }
+        return "data:" + (mime || "image/png") + ";base64," + btoa(binary);
+      }
+      function blobToDataUrl(blob) {
+        return blob.arrayBuffer().then(function (buffer) {
+          if (buffer.byteLength > 350000) return "";
+          return bytesToDataUrl(new Uint8Array(buffer), blob.type || "image/png");
+        });
+      }
+      function shrink(blob) {
+        if (!blob || blob.size <= 48000 || typeof createImageBitmap !== "function" || typeof OffscreenCanvas !== "function") {
+          return Promise.resolve(blob);
+        }
+        return createImageBitmap(blob).then(function (bitmap) {
+          var largest = Math.max(bitmap.width, bitmap.height) || 1;
+          var scale = Math.min(1, 64 / largest);
+          var canvas = new OffscreenCanvas(Math.max(1, Math.round(bitmap.width * scale)), Math.max(1, Math.round(bitmap.height * scale)));
+          canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          if (bitmap.close) bitmap.close();
+          return canvas.convertToBlob({ type: "image/png" });
+        }).catch(function () { return blob; });
+      }
+      function pathToDataUrl(path) {
+        if (!path) return Promise.resolve("");
+        if (String(path).indexOf("data:image/") === 0) return Promise.resolve(String(path));
+        var url = String(path);
+        if (url.indexOf("://") < 0) {
+          try { url = chrome.runtime.getURL(url.replace(/^\//, "")); } catch (error) {}
+        }
+        return fetch(url).then(function (response) {
+          if (!response.ok) return "";
+          return response.blob().then(shrink).then(blobToDataUrl);
+        }).catch(function () { return ""; });
+      }
+      function pickPath(path) {
+        if (!path) return "";
+        if (typeof path === "string") return path;
+        var order = ["32", "38", "19", "16", "24", "48", "128"];
+        for (var i = 0; i < order.length; i++) if (typeof path[order[i]] === "string") return path[order[i]];
+        var keys = Object.keys(path);
+        for (var j = 0; j < keys.length; j++) if (typeof path[keys[j]] === "string") return path[keys[j]];
+        return "";
+      }
+      function pickImage(imageData) {
+        if (!imageData || typeof imageData !== "object") return null;
+        if (imageData.data && imageData.width && imageData.height) return imageData;
+        var order = ["32", "38", "19", "16", "24", "48", "128"];
+        for (var i = 0; i < order.length; i++) {
+          var item = imageData[order[i]];
+          if (item && item.data && item.width) return item;
+        }
+        return null;
+      }
+      function imageToDataUrl(image) {
+        try {
+          if (typeof OffscreenCanvas !== "function" || typeof ImageData !== "function") return Promise.resolve("");
+          var raw = image.data;
+          var data = raw instanceof Uint8ClampedArray ? raw : new Uint8ClampedArray(raw);
+          var canvas = new OffscreenCanvas(image.width, image.height);
+          canvas.getContext("2d").putImageData(new ImageData(data, image.width, image.height), 0, 0);
+          return canvas.convertToBlob({ type: "image/png" }).then(shrink).then(blobToDataUrl);
+        } catch (error) {
+          return Promise.resolve("");
+        }
+      }
+      function publishIcon(details) {
+        var image = pickImage(details.imageData);
+        var pending = image ? imageToDataUrl(image) : pathToDataUrl(pickPath(details.path));
+        pending.then(function (icon) {
+          if (icon) report({ icon: icon }, details.tabId);
+        });
+      }
+      function wrap(api, name, handler) {
+        if (!api || typeof api[name] !== "function" || api[name].__ceAction) return;
+        var native = api[name].bind(api);
+        function wrapped(details, callback) {
+          try { handler(details || {}); } catch (error) {}
+          try { return native(details, callback); } catch (error) {
+            if (typeof callback === "function") callback();
+          }
+        }
+        wrapped.__ceAction = true;
+        try { api[name] = wrapped; } catch (error) {}
+      }
+      function read(api, method) {
+        return new Promise(function (resolve) {
+          if (!api || typeof api[method] !== "function") { resolve(null); return; }
+          var settled = false;
+          function finish(value) {
+            if (settled) return;
+            settled = true;
+            resolve(value == null ? null : value);
+          }
+          try {
+            var result = api[method]({}, function (value) {
+              if (chrome.runtime.lastError) value = null;
+              finish(value);
+            });
+            if (result && typeof result.then === "function") result.then(finish, function () { finish(null); });
+          } catch (error) { finish(null); }
+        });
+      }
+      apis.forEach(function (api) {
+        wrap(api, "setBadgeText", function (details) {
+          report({ badge: details.text == null ? "" : String(details.text) }, details.tabId);
+        });
+        wrap(api, "setBadgeBackgroundColor", function (details) {
+          var color = cssColor(details.color);
+          if (color) report({ badgeColor: color }, details.tabId);
+        });
+        wrap(api, "setBadgeTextColor", function (details) {
+          var color = cssColor(details.color);
+          if (color) report({ badgeTextColor: color }, details.tabId);
+        });
+        wrap(api, "setTitle", function (details) {
+          report({ title: details.title == null ? "" : String(details.title) }, details.tabId);
+        });
+        wrap(api, "setIcon", function (details) { publishIcon(details); });
+      });
+      globalThis.__ceActionHook = true;
+      var api = apis[0];
+      read(api, "getBadgeText").then(function (text) {
+        read(api, "getBadgeBackgroundColor").then(function (color) {
+          read(api, "getBadgeTextColor").then(function (textColor) {
+            read(api, "getTitle").then(function (title) {
+              var patch = {};
+              if (text) patch.badge = String(text);
+              var background = cssColor(color);
+              if (background && text) patch.badgeColor = background;
+              var foreground = cssColor(textColor);
+              if (foreground && text) patch.badgeTextColor = foreground;
+              if (title) patch.title = String(title);
+              if (Object.keys(patch).length) report(patch, null);
+            });
+          });
+        });
+      });
+    } catch (error) {}
+  }
   try {
-    if (globalThis.__cePasskeyWindows) return true;
-    if (!globalThis.chrome || !chrome.windows || !chrome.runtime) return false;
+    if (!globalThis.chrome) return false;
     var port = __CE_PORT__;
+    hookExtensionAction(port);
+    var actionDone = !!globalThis.__ceActionHook || (!chrome.action && !chrome.browserAction && chrome.runtime && chrome.runtime.id);
+    if (!chrome.runtime || !chrome.runtime.id) return false;
+    if (!chrome.windows) return !!actionDone;
+    if (globalThis.__cePasskeyWindows) return !!actionDone;
     var base = 2100000000;
     var removed = [];
     var seenClosed = {};
+    var rawTabsQuery = chrome.tabs && typeof chrome.tabs.query === "function" ? chrome.tabs.query.bind(chrome.tabs) : null;
     function own(id) {
       return typeof id === "number" && id >= base && id < base + 1000000;
+    }
+    function windowUrls(windowId) {
+      return new Promise(function (resolve) {
+        if (!rawTabsQuery) return resolve([]);
+        try {
+          var result = rawTabsQuery({ windowId: windowId }, function (tabs) {
+            if (chrome.runtime.lastError) tabs = [];
+            resolve((tabs || []).map(function (tab) { return tab.url || tab.pendingUrl || ""; }).filter(Boolean));
+          });
+          if (result && typeof result.then === "function") result.then(function () {}, function () { resolve([]); });
+        } catch (error) {
+          resolve([]);
+        }
+      });
     }
     function host(path, options) {
       return fetch("http://127.0.0.1:" + port + path, options || { cache: "no-store" }).then(function (response) {
@@ -851,18 +1185,65 @@ const PATCH: &str = r#"(function () {
       getWindow.__cePasskey = true;
       try { chrome.windows.get = getWindow; } catch (error) {}
     }
+    // WebView2 reports the browser window as current for a popout page. Closing "the current
+    // window" from a popout then removes the browser window instead.
+    if (typeof chrome.windows.getCurrent === "function" && !chrome.windows.getCurrent.__cePasskey && typeof document !== "undefined") {
+      var nativeCurrent = chrome.windows.getCurrent.bind(chrome.windows);
+      function getCurrent(getInfo, callback) {
+        if (typeof getInfo === "function") {
+          callback = getInfo;
+          getInfo = {};
+        }
+        var found = host("/current?url=" + encodeURIComponent(location.href)).then(function (win) {
+          if (win && typeof win.id === "number") return win;
+          return new Promise(function (resolve) {
+            try {
+              var result = nativeCurrent(getInfo || {}, function (current) {
+                if (chrome.runtime.lastError) current = undefined;
+                resolve(current);
+              });
+              if (result && typeof result.then === "function") result.then(resolve, function () { resolve(undefined); });
+            } catch (error) {
+              resolve(undefined);
+            }
+          });
+        });
+        if (typeof callback === "function") {
+          found.then(function (win) { callback(win); });
+          return undefined;
+        }
+        return found;
+      }
+      getCurrent.__cePasskey = true;
+      try { chrome.windows.getCurrent = getCurrent; } catch (error) {}
+    }
     if (typeof chrome.windows.remove === "function" && !chrome.windows.remove.__cePasskey) {
       var nativeRemove = chrome.windows.remove.bind(chrome.windows);
       function removeWindow(windowId, callback) {
+        var settle;
+        var finished = new Promise(function (resolve) { settle = resolve; });
         function done() {
           if (chrome.runtime.lastError) {}
+          settle();
           if (typeof callback === "function") callback();
+        }
+        function removeNative() {
+          try { nativeRemove(windowId, done); } catch (error) { done(); }
         }
         if (own(windowId)) {
           host("/remove", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: windowId }) }).then(done, done);
-          return;
+        } else {
+          // WebView2 removes a window by tearing down its page and leaving the host frame blank.
+          // Popouts and side panels are closed or kept by the browser instead.
+          windowUrls(windowId).then(function (urls) {
+            if (!urls.length) return null;
+            return host("/release", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ urls: urls }) });
+          }).then(function (answer) {
+            if (answer && answer.handled) done();
+            else removeNative();
+          }, removeNative);
         }
-        try { return nativeRemove(windowId, done); } catch (error) { done(); }
+        return typeof callback === "function" ? undefined : finished;
       }
       removeWindow.__cePasskey = true;
       try { chrome.windows.remove = removeWindow; } catch (error) {}
@@ -995,7 +1376,7 @@ const PATCH: &str = r#"(function () {
       try { chrome.tabs.get = getTab; } catch (error) {}
     }
     globalThis.__cePasskeyWindows = true;
-    return true;
+    return !!actionDone;
   } catch (error) {
     return false;
   }
@@ -1097,6 +1478,9 @@ mod tests {
         let script = patch_script(1427);
         assert!(script.contains("var port = 1427;"));
         assert!(script.contains("Duplicate script ID"));
+        assert!(script.contains("setBadgeText"));
+        assert!(script.contains("setIcon"));
+        assert!(script.contains("/action"));
         assert!(!script.contains("__CE_PORT__"));
     }
 }

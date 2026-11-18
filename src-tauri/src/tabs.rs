@@ -7585,10 +7585,7 @@ pub fn extension_id_of(panel_id: &str) -> Option<&str> {
 
 /// Webview for one extension panel. Dots in the id become underscores, which host ids do not use.
 pub fn host_panel_label(window: &str, extension_id: &str) -> String {
-    format!(
-        "cext-panel-{window}--{}",
-        extension_id.replace('.', "_")
-    )
+    format!("cext-panel-{window}--{}", extension_id.replace('.', "_"))
 }
 
 /// Window label and extension id encoded in a panel webview label.
@@ -7829,7 +7826,11 @@ pub fn open_dock_panel(
     min: f64,
     resizable: bool,
 ) {
-    let width = if width.is_finite() { width.max(min) } else { min };
+    let width = if width.is_finite() {
+        width.max(min)
+    } else {
+        min
+    };
     let min = if min.is_finite() { min.max(1.0) } else { 1.0 };
     let span = content_span(app, window);
     with_state(app, |state| {
@@ -7898,9 +7899,7 @@ pub fn set_dock_collapsed(app: &AppHandle, window: &str, id: &str, collapsed: bo
             }
             entry.collapsed = collapsed;
         }
-        if !collapsed
-            && let Some(span) = span
-        {
+        if !collapsed && let Some(span) = span {
             squeeze_panels(&mut chrome.panels, id, span);
         }
         Some(())
@@ -7989,9 +7988,9 @@ fn place_side_panel(
     scale: f64,
 ) {
     let (fullscreen, panels) = with_state(app, |state| {
-        state.chrome(window).map(|chrome| {
-            (chrome.fullscreen, chrome.panels.clone())
-        })
+        state
+            .chrome(window)
+            .map(|chrome| (chrome.fullscreen, chrome.panels.clone()))
     })
     .unwrap_or((false, Vec::new()));
     let mut placed = HashSet::new();
@@ -8200,10 +8199,8 @@ struct DockLayoutEvent {
 }
 
 pub fn emit_dock_layout(app: &AppHandle, window: &str) {
-    let side_panels = with_state(app, |state| {
-        state.chrome(window).map(published_panels)
-    })
-    .unwrap_or_default();
+    let side_panels =
+        with_state(app, |state| state.chrome(window).map(published_panels)).unwrap_or_default();
     let _ = app.emit(
         "side-panels-layout",
         DockLayoutEvent {

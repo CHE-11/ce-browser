@@ -806,10 +806,7 @@ pub fn reply(app: &AppHandle, id: u32, text: &str) -> Result<(), String> {
             }
             _ => state.notes.push(format!("Message from the user: {text}")),
         }
-        add_step(
-            &mut state.run,
-            step_within("user", text, "", message_limit),
-        );
+        add_step(&mut state.run, step_within("user", text, "", message_limit));
         Ok(())
     })
     .ok_or("That run has finished.")??;

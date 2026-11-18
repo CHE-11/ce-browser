@@ -5,7 +5,8 @@ import { findBookmark, addBookmark, updateBookmark, moveBookmark, closePopup, de
 import { CHROME, CHROME_LIMITS, metric } from "@/lib/chrome-metrics";
 import { findBookmarkParent, findFolder, useBookmarksState, useSettings } from "@/lib/use-browser";
 import { BookmarkNode } from "@type/browser";
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { ChevronsDownUp, ChevronsUpDown, TrashIcon } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { BookmarkEditorCompose, BookmarkEditorComposeDialog, BookmarkEditorContextMenu, type BookmarkEditorMenuTarget } from "./BookmarkEditorContextMenu";
 import { BookmarkPlace, BookmarkPlacePicker } from "./BookmarkEditorPlacePicker";
 
@@ -14,7 +15,7 @@ type BookmarkEditorProps = {
   title: string;
 };
 
-/** The star adds the page right away, like Chrome. The editor then renames, moves or removes it. */
+/** The star adds the page right away, like Chrome. Done keeps the rename, move, or address. Cancel drops a bookmark this editor just added and leaves an existing one as it was. */
 export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
   const { tree, loaded } = useBookmarksState();
   const settings = useSettings();
@@ -29,16 +30,22 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
   const [bookmark, setBookmark] = useState<BookmarkNode | null>(null);
   const [created, setCreated] = useState(false);
   const [name, setName] = useState(title);
+  const [link, setLink] = useState(url);
   const [place, setPlace] = useState<BookmarkPlace | null>(null);
+  const [foldersOpen, setFoldersOpen] = useState(true);
+  const [foldRequest, setFoldRequest] = useState<{ expand: boolean; token: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; target: BookmarkEditorMenuTarget } | null>(null);
   const [compose, setCompose] = useState<BookmarkEditorCompose | null>(null);
   const [expandRequest, setExpandRequest] = useState<{ id: string; token: number } | null>(null);
   const started = useRef(false);
+  const cancelled = useRef(false);
   const placeKnown = useRef(false);
   const seenBookmark = useRef(false);
   const expandToken = useRef(0);
+  const foldToken = useRef(0);
   const nameRef = useRef<HTMLInputElement>(null);
+  const onFoldersOpen = useCallback((open: boolean) => setFoldersOpen(open), []);
 
   useEffect(() => {
     if (started.current) {
@@ -48,12 +55,20 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
     void (async () => {
       try {
         const existing = await findBookmark(url);
+        if (cancelled.current) {
+          return;
+        }
         if (existing) {
           setBookmark(existing);
           setName(existing.title);
+          setLink(existing.url ?? url);
           return;
         }
         const node = await addBookmark("bar", title || url, url);
+        if (cancelled.current) {
+          await deleteBookmark(node.id);
+          return;
+        }
         setBookmark(node);
         setCreated(true);
       } catch (reason) {
@@ -148,9 +163,15 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
     if (!bookmark || !place) {
       return;
     }
+    const nextUrl = link.trim();
+    if (!nextUrl) {
+      setError("A bookmark needs an address.");
+      return;
+    }
     try {
-      if (name.trim() && name !== bookmark.title) {
-        await updateBookmark(bookmark.id, name.trim(), bookmark.url);
+      const nextTitle = name.trim() || bookmark.title;
+      if (nextTitle !== bookmark.title || nextUrl !== (bookmark.url ?? "")) {
+        await updateBookmark(bookmark.id, nextTitle, nextUrl);
       }
       const current = findBookmarkParent(tree, bookmark.id);
       if (!current || current.parentId !== place.parentId || current.index !== place.index) {
@@ -167,6 +188,25 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
       await deleteBookmark(bookmark.id);
     }
     await closePopup();
+  };
+
+  const cancel = async () => {
+    cancelled.current = true;
+    if (created && bookmark) {
+      try {
+        await deleteBookmark(bookmark.id);
+      } catch (reason) {
+        cancelled.current = false;
+        setError(String(reason));
+        return;
+      }
+    }
+    await closePopup();
+  };
+
+  const toggleAllFolders = () => {
+    foldToken.current += 1;
+    setFoldRequest({ expand: !foldersOpen, token: foldToken.current });
   };
 
   const reveal = (parentId: string) => {
@@ -251,7 +291,7 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
     <PopupFrame
       id="bookmark-editor"
       width={width}
-      maxHeight={Math.ceil(listHeight * 16 + 200 + textSize * 96)}
+      maxHeight={Math.ceil(listHeight * 16 + 260 + textSize * 96)}
       ready={loaded && (bookmark !== null || error !== null)}
     >
       <form
@@ -277,16 +317,44 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
             style={{ height: "2.15em", fontSize: `${textSize}rem` }}
           />
         </label>
+        <label id="bookmark-editor-url-label" className="flex flex-col gap-[0.25em] text-[0.8em] text-zinc-400">
+          URL
+          <input
+            id="bookmark-editor-url"
+            value={link}
+            spellCheck={false}
+            onChange={(event) => setLink(event.target.value)}
+            className="rounded-md border border-zinc-700 bg-zinc-950 px-[0.55em] text-zinc-100 outline-none focus:border-sky-500"
+            style={{ height: "2.15em", fontSize: `${textSize}rem` }}
+          />
+        </label>
         <div id="bookmark-editor-place" className="flex min-h-0 flex-col gap-[0.25em]">
-          <span id="bookmark-editor-place-label" className="text-[0.8em] text-zinc-400">
-            Place
-          </span>
+          <div id="bookmark-editor-place-heading" className="flex items-center justify-between gap-[0.5em]">
+            <span id="bookmark-editor-place-label" className="text-[0.8em] text-zinc-400">
+              Place
+            </span>
+            {bookmark && place ? (
+              <Button
+                id="bookmark-editor-fold-all"
+                variant="ghost"
+                className="h-[1.8em] gap-[0.3em] px-[0.45em] text-[0.75em]"
+                onClick={toggleAllFolders}
+              >
+                {foldersOpen ? (
+                  <ChevronsDownUp id="bookmark-editor-fold-all-icon" style={{ width: "1.1em", height: "1.1em" }} aria-hidden />
+                ) : (
+                  <ChevronsUpDown id="bookmark-editor-fold-all-icon" style={{ width: "1.1em", height: "1.1em" }} aria-hidden />
+                )}
+                {foldersOpen ? "Collapse all" : "Expand all"}
+              </Button>
+            ) : null}
+          </div>
           {bookmark && place ? (
             <BookmarkPlacePicker
               tree={tree}
               bookmarkId={bookmark.id}
               name={name}
-              url={bookmark.url ?? url}
+              url={link.trim() || bookmark.url || url}
               place={place}
               textSize={textSize}
               rowPadding={rowPadding}
@@ -297,6 +365,8 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
               onRowMenu={onRowMenu}
               onBlankMenu={onBlankMenu}
               expandRequest={expandRequest}
+              foldRequest={foldRequest}
+              onFoldersOpen={onFoldersOpen}
             />
           ) : (
             <p id="bookmark-editor-place-loading" className="text-[0.85em] text-zinc-500">
@@ -309,13 +379,19 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
             {error}
           </p>
         ) : null}
-        <div id="bookmark-editor-actions" className="flex justify-end gap-[0.5em]">
-          <Button id="bookmark-editor-remove" className="h-[2.15em] px-[0.8em] text-[1em]" variant="ghost" disabled={!bookmark} onClick={() => void remove()}>
+        <div id="bookmark-editor-actions" className="flex justify-between gap-[0.5em] mt-2">
+          <Button id="bookmark-editor-remove" className="h-[2.15em] px-[0.8em] text-[1em]" variant="destructiveOutline" disabled={!bookmark} onClick={() => void remove()}>
+            <TrashIcon id="bookmark-editor-remove-icon" style={{ width: "1.1em", height: "1.1em" }} aria-hidden />
             Remove
           </Button>
-          <Button id="bookmark-editor-done" className="h-[2.15em] px-[0.8em] text-[1em]" type="submit" variant="primary" disabled={!bookmark || !place}>
-            Done
-          </Button>
+          <div id="bookmark-editor-save-actions" className="flex justify-end gap-[0.5em]">
+            <Button id="bookmark-editor-cancel" className="h-[2.15em] px-[0.8em] text-[1em]" type="button" variant="ghost" onClick={() => void cancel()}>
+              Cancel
+            </Button>
+            <Button id="bookmark-editor-done" className="h-[2.15em] px-[0.8em] text-[1em]" type="submit" variant="primary" disabled={!bookmark || !place || !link.trim()}>
+              Done
+            </Button>
+          </div>
         </div>
       </form>
       {menu && bookmark ? (
