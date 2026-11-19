@@ -893,6 +893,14 @@ export type ToolbarSide = "top" | "right" | "bottom" | "left";
 /** Where folders and bookmarks sit on the bookmarks bar. */
 export type BookmarksBarAlign = "left" | "center" | "right";
 
+/** Bookmark the editor last saved, and where it sat in its folder. */
+export type BookmarkEditorLastPlace = {
+  parentId: string;
+  bookmarkId: string;
+  /** Index of that bookmark. The next one uses this when the bookmark is gone. */
+  index: number;
+};
+
 /** Stroke of a bookmark divider. */
 export type BookmarkDividerLine = "solid" | "dashed" | "dotted" | "double";
 
@@ -990,6 +998,11 @@ export type BrowserSettings = {
   bookmarkEditorListHeight: number;
   /** Width of the bookmark editor, in CSS pixels at 100% UI size. */
   bookmarkEditorWidth: number;
+  /**
+   * Bookmark the editor last saved. A new bookmark is placed beside it.
+   * Null when the editor has not saved one yet. An older file omits this.
+   */
+  bookmarkEditorLastPlace: BookmarkEditorLastPlace | null;
   /** The status bar under every page. */
   showStatusBar: boolean;
   /** Memory, time and the other status readings. Off leaves the version and zoom. */

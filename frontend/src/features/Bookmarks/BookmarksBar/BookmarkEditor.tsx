@@ -3,8 +3,8 @@ import { PopupFrame } from "@/components/PopupFrame";
 import { bookmarkEditorFrameStyle } from "@/lib/bookmark-size";
 import { findBookmark, addBookmark, updateBookmark, moveBookmark, closePopup, deleteBookmark, saveSettings } from "@/lib/browser-client";
 import { CHROME, CHROME_LIMITS, metric } from "@/lib/chrome-metrics";
-import { findBookmarkParent, findFolder, useBookmarksState, useSettings } from "@/lib/use-browser";
-import { BookmarkNode } from "@type/browser";
+import { findBookmarkParent, findFolder, useBookmarksState, useSettingsState } from "@/lib/use-browser";
+import { BookmarkEditorLastPlace, BookmarkNode, BookmarkTree } from "@type/browser";
 import { ChevronsDownUp, ChevronsUpDown, TrashIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { BookmarkEditorCompose, BookmarkEditorComposeDialog, BookmarkEditorContextMenu, type BookmarkEditorMenuTarget } from "./BookmarkEditorContextMenu";
@@ -15,10 +15,38 @@ type BookmarkEditorProps = {
   title: string;
 };
 
-/** The star adds the page right away, like Chrome. Done keeps the rename, move, or address. Cancel drops a bookmark this editor just added and leaves an existing one as it was. */
+/** Where a new bookmark goes: beside the last one this editor saved, or the end of the bar. */
+function placeBesideLast(tree: BookmarkTree | null, last: BookmarkEditorLastPlace | null | undefined): { parentId: string; index?: number } {
+  if (!tree) {
+    return { parentId: "bar" };
+  }
+  if (last?.bookmarkId) {
+    const found = findBookmarkParent(tree, last.bookmarkId);
+    if (found) {
+      return { parentId: found.parentId, index: found.index + 1 };
+    }
+  }
+  const folder = last?.parentId ? findFolder(tree, last.parentId) : null;
+  if (folder) {
+    const length = folder.children?.length ?? 0;
+    return { parentId: folder.id, index: Math.max(0, Math.min(last?.index ?? length, length)) };
+  }
+  return { parentId: "bar", index: tree.bar.children?.length ?? 0 };
+}
+
+/** Index the bookmark occupies after a move to `place`. Moving down in the same folder shifts the index back by one. */
+function indexAfterMove(tree: BookmarkTree | null, bookmarkId: string, place: BookmarkPlace) {
+  const current = findBookmarkParent(tree, bookmarkId);
+  if (current && current.parentId === place.parentId && current.index < place.index) {
+    return place.index - 1;
+  }
+  return place.index;
+}
+
+/** The star adds the page right away, beside the last bookmark this editor saved. Done keeps the rename, move, or address and remembers that place. Cancel drops a bookmark this editor just added and leaves an existing one as it was. */
 export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
   const { tree, loaded } = useBookmarksState();
-  const settings = useSettings();
+  const { settings, loaded: settingsLoaded } = useSettingsState();
   const textSize = metric(settings?.bookmarkEditorTextSize, CHROME.bookmarkEditorTextSize);
   const padding = metric(settings?.bookmarkEditorPadding, CHROME.bookmarkEditorPadding);
   const rowPadding = metric(settings?.bookmarkEditorRowPadding, CHROME.bookmarkEditorRowPadding);
@@ -45,13 +73,38 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
   const expandToken = useRef(0);
   const foldToken = useRef(0);
   const nameRef = useRef<HTMLInputElement>(null);
+  const settingsRef = useRef(settings);
+  const rememberChain = useRef(Promise.resolve());
+  settingsRef.current = settings;
   const onFoldersOpen = useCallback((open: boolean) => setFoldersOpen(open), []);
+  const rememberPlace = useCallback((parentId: string, bookmarkId: string, index: number) => {
+    const run = rememberChain.current.catch(() => undefined).then(async () => {
+      const current = settingsRef.current;
+      if (!current) {
+        return;
+      }
+      const last = current.bookmarkEditorLastPlace;
+      if (last?.parentId === parentId && last.bookmarkId === bookmarkId && last.index === index) {
+        return;
+      }
+      const saved = await saveSettings({
+        ...current,
+        bookmarkEditorLastPlace: { parentId, bookmarkId, index },
+      });
+      if (settingsRef.current === current) {
+        settingsRef.current = saved;
+      }
+    });
+    rememberChain.current = run;
+    return run;
+  }, []);
 
   useEffect(() => {
-    if (started.current) {
+    if (started.current || !loaded || !settingsLoaded) {
       return;
     }
     started.current = true;
+    const spot = placeBesideLast(tree, settings?.bookmarkEditorLastPlace);
     void (async () => {
       try {
         const existing = await findBookmark(url);
@@ -64,18 +117,21 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
           setLink(existing.url ?? url);
           return;
         }
-        const node = await addBookmark("bar", title || url, url);
+        const node = await addBookmark(spot.parentId, title || url, url, spot.index);
         if (cancelled.current) {
           await deleteBookmark(node.id);
           return;
         }
         setBookmark(node);
         setCreated(true);
+        if (spot.index !== undefined) {
+          void rememberPlace(spot.parentId, node.id, spot.index).catch(() => undefined);
+        }
       } catch (reason) {
         setError(String(reason));
       }
     })();
-  }, [title, url]);
+  }, [loaded, rememberPlace, settings, settingsLoaded, title, tree, url]);
 
   useEffect(() => {
     if (!bookmark || placeKnown.current) {
@@ -154,9 +210,20 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
   const onListHeight = (height: number, done: boolean) => {
     const next = Math.min(CHROME_LIMITS.listHeight.max, Math.max(CHROME_LIMITS.listHeight.min, height));
     setDragHeight(next);
-    if (done && settings && next !== settings.bookmarkEditorListHeight) {
-      void saveSettings({ ...settings, bookmarkEditorListHeight: next });
+    if (!done) {
+      return;
     }
+    const run = rememberChain.current.catch(() => undefined).then(async () => {
+      const current = settingsRef.current;
+      if (!current || next === current.bookmarkEditorListHeight) {
+        return;
+      }
+      const saved = await saveSettings({ ...current, bookmarkEditorListHeight: next });
+      if (settingsRef.current === current) {
+        settingsRef.current = saved;
+      }
+    });
+    rememberChain.current = run;
   };
 
   const save = async () => {
@@ -174,8 +241,12 @@ export function BookmarkEditor({ url, title }: BookmarkEditorProps) {
         await updateBookmark(bookmark.id, nextTitle, nextUrl);
       }
       const current = findBookmarkParent(tree, bookmark.id);
-      if (!current || current.parentId !== place.parentId || current.index !== place.index) {
+      const moved = !current || current.parentId !== place.parentId || current.index !== place.index;
+      if (moved) {
         await moveBookmark(bookmark.id, place.parentId, place.index);
+      }
+      if (created || moved) {
+        await rememberPlace(place.parentId, bookmark.id, indexAfterMove(tree, bookmark.id, place));
       }
       await closePopup();
     } catch (reason) {

@@ -72,6 +72,42 @@ const DIVIDER_THICKNESS_PX: (f32, f32) = (1.0, 12.0);
 const DIVIDER_LENGTH_PERCENT: (f32, f32) = (10.0, 100.0);
 /// Space at each end of a horizontal bookmark divider, in rem.
 const DIVIDER_INSET_REM: (f32, f32) = (0.0, 2.0);
+/// Folder and bookmark the editor last saved. The next new bookmark is placed beside it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct BookmarkEditorLastPlace {
+    pub parent_id: String,
+    /// Bookmark the new one sits beside. Empty when only the folder is known.
+    pub bookmark_id: String,
+    /// Index of that bookmark in its folder. Used when the bookmark is gone.
+    pub index: u32,
+}
+
+impl Default for BookmarkEditorLastPlace {
+    fn default() -> Self {
+        Self {
+            parent_id: String::new(),
+            bookmark_id: String::new(),
+            index: 0,
+        }
+    }
+}
+
+impl BookmarkEditorLastPlace {
+    fn normalize(mut self) -> Option<Self> {
+        self.parent_id = self.parent_id.trim().to_string();
+        self.bookmark_id = self.bookmark_id.trim().to_string();
+        if self.parent_id.is_empty()
+            || self.bookmark_id.is_empty()
+            || self.parent_id.len() > 64
+            || self.bookmark_id.len() > 64
+        {
+            return None;
+        }
+        Some(self)
+    }
+}
+
 /// Fine-tune sizes and bookmarks bar alignment the Styles page copies from another profile. Theme, font, and zoom stay out.
 pub const STYLE_METRIC_KEYS: &[&str] = &[
     "tabWidth",
@@ -520,6 +556,10 @@ pub struct BrowserSettings {
     /// Width of the bookmark editor, in CSS pixels at 100% UI size.
     #[serde(default = "default_bookmark_editor_width")]
     pub bookmark_editor_width: u32,
+    /// Where the editor last saved a bookmark. The next new bookmark goes beside it.
+    /// An older file omits this, so the first bookmark still lands at the end of the bar.
+    #[serde(default)]
+    pub bookmark_editor_last_place: Option<BookmarkEditorLastPlace>,
     /// Retired preset (`small`, `default`, `large`, `xlarge`). Read once and mapped onto the
     /// four values above.
     #[serde(rename = "bookmarkSize", skip_serializing)]
@@ -1709,6 +1749,7 @@ impl Default for BrowserSettings {
             bookmark_editor_icon_size: default_bookmark_editor_icon_size(),
             bookmark_editor_list_height: default_bookmark_editor_list_height(),
             bookmark_editor_width: default_bookmark_editor_width(),
+            bookmark_editor_last_place: None,
             legacy_bookmark_size: None,
             show_status_bar: true,
             status_stats: true,
@@ -2038,6 +2079,10 @@ impl BrowserSettings {
         self.bookmark_editor_width = self
             .bookmark_editor_width
             .clamp(PANEL_WIDTH_PX.0, PANEL_WIDTH_PX.1);
+        self.bookmark_editor_last_place = self
+            .bookmark_editor_last_place
+            .take()
+            .and_then(BookmarkEditorLastPlace::normalize);
         self.menu_text_size = rem_in(
             self.menu_text_size,
             BOOKMARK_TEXT_REM,
@@ -3891,6 +3936,7 @@ mod tests {
         assert_eq!(loaded.bookmark_editor_icon_size, 1.0);
         assert_eq!(loaded.bookmark_editor_list_height, 24.0);
         assert_eq!(loaded.bookmark_editor_width, 400);
+        assert!(loaded.bookmark_editor_last_place.is_none());
         assert_eq!(loaded.menu_text_size, 0.875);
         assert_eq!(loaded.menu_padding, 0.625);
         assert_eq!(loaded.menu_height, 2.25);
@@ -3923,6 +3969,25 @@ mod tests {
         assert_eq!(loaded.downloads_panel_width, 720);
         assert_eq!(loaded.command_palette_width, 360);
         assert_eq!(loaded.omnibox_url_size, 1.5);
+    }
+
+    #[test]
+    fn bookmark_editor_last_place_is_kept_and_blank_values_clear() {
+        let saved: super::BrowserSettings = serde_json::from_str(
+            r#"{"bookmarkEditorLastPlace":{"parentId":"bar","bookmarkId":"b1a","index":3}}"#,
+        )
+        .expect("settings parse");
+        let saved = saved.normalize();
+        let place = saved.bookmark_editor_last_place.expect("last place");
+        assert_eq!(place.parent_id, "bar");
+        assert_eq!(place.bookmark_id, "b1a");
+        assert_eq!(place.index, 3);
+
+        let blank: super::BrowserSettings = serde_json::from_str(
+            r#"{"bookmarkEditorLastPlace":{"parentId":"  ","bookmarkId":"","index":2}}"#,
+        )
+        .expect("settings parse");
+        assert!(blank.normalize().bookmark_editor_last_place.is_none());
     }
 
     #[test]
