@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -232,6 +232,8 @@ struct ConsoleTab {
 struct ConsoleReset {
     tab_id: u32,
     url: String,
+    /// Wall time in milliseconds. Rows logged after this belong to the new document.
+    at: u64,
 }
 
 #[derive(Serialize)]
@@ -327,6 +329,26 @@ pub fn disarm(app: &AppHandle, window: &str) -> Result<(), String> {
         release_tab(app, tab);
     }
     Ok(())
+}
+
+/// A main-frame navigation started. Drop the previous document's log now, before the new
+/// page logs anything. Clearing when the load finishes deletes the lines just captured.
+pub fn on_navigation_started(app: &AppHandle, tab: u32, url: &str) {
+    if !watch_live(tab) {
+        return;
+    }
+    let at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0);
+    let _ = app.emit(
+        "console-reset",
+        &ConsoleReset {
+            tab_id: tab,
+            url: url.to_string(),
+            at,
+        },
+    );
 }
 
 /// The tab finished a main-frame navigation. Old object ids are dead.
@@ -735,10 +757,6 @@ fn reset_after_navigation(app: &AppHandle, tab: u32) {
         let _ = release_group(&webview, GROUP);
         let _ = cdp(&webview, "Runtime.enable", json!({}), SHORT);
     }
-    let url = tabs::tab_info(app, tab)
-        .map(|info| info.url)
-        .unwrap_or_default();
-    let _ = app.emit("console-reset", &ConsoleReset { tab_id: tab, url });
 }
 
 fn attach_tab(app: &AppHandle, tab: u32) -> Result<(), String> {

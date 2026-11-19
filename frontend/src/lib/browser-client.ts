@@ -2325,6 +2325,11 @@ export function onConsoleCleared(handler: (message: { tabId: number }) => void) 
   return listen<{ tabId: number }>("console-cleared", (event) => handler(event.payload));
 }
 
+/** Tells every webview that this tab's console log was cleared. */
+export function notifyConsoleCleared(tabId: number) {
+  return emit("console-cleared", { tabId });
+}
+
 export function onConsoleReset(handler: (message: ConsoleReset) => void) {
   return listen<ConsoleReset>("console-reset", (event) => handler(event.payload));
 }

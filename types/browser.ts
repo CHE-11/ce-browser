@@ -553,6 +553,8 @@ export type ConsoleProperty = {
 export type ConsoleReset = {
   tabId: number;
   url: string;
+  /** Wall time in milliseconds. Rows logged after this belong to the new document. */
+  at: number;
 };
 
 export type ConsolePicked = {

@@ -81,6 +81,27 @@ export function collectLog(log: TabLog): TabLog {
   };
 }
 
+/**
+ * A navigation started at `at` (milliseconds). Lines from the new document stay.
+ * Older lines are dropped, or kept and marked collected when preserve is on.
+ */
+export function afterNavigation(log: TabLog, at: number, preserve: boolean): TabLog {
+  if (!at) {
+    return preserve ? collectLog(log) : clearLog();
+  }
+  const entries: Entry[] = [];
+  for (const entry of log.entries) {
+    if (entry.timestamp >= at) {
+      entries.push(entry);
+      continue;
+    }
+    if (preserve) {
+      entries.push({ ...entry, collected: true });
+    }
+  }
+  return { entries, depth: 0 };
+}
+
 export function bucket(level: string) {
   if (level === "error" || level === "assert") {
     return "error";

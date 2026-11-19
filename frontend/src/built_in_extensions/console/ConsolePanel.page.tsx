@@ -14,6 +14,7 @@ import {
   consolePick,
   currentWindowLabel,
   listTabs,
+  notifyConsoleCleared,
   onConsoleCleared,
   onConsoleMessage,
   onConsolePicked,
@@ -28,7 +29,7 @@ import { focusRing } from "@/lib/focus-ring";
 import { useAppearanceState } from "@/lib/use-browser";
 import { ConsoleLog } from "./ConsoleLog";
 import { ConsolePrompt } from "./ConsolePrompt";
-import { clearLog, collectLog, counts, emptyLog, passes, pushMessage, pushRow, visibleEntries, type Entry, type TabLog } from "./log";
+import { afterNavigation, clearLog, counts, emptyLog, passes, pushMessage, pushRow, visibleEntries, type Entry, type TabLog } from "./log";
 
 const FILTERS = [
   ["all", "All"],
@@ -118,6 +119,8 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  /** Tab whose current document has been watched since navigation started. */
+  const [caughtTab, setCaughtTab] = useState<number | null>(null);
   const pickedTab = useRef<number | null>(null);
   const inputDrag = useRef<{ y: number; height: number } | null>(null);
   const [inputHeight, setInputHeight] = useState(120);
@@ -171,6 +174,10 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
   }, [ready, open, activeId, ownerLabel]);
 
   useEffect(() => {
+    setCaughtTab(null);
+  }, [activeId]);
+
+  useEffect(() => {
     const previous = pickedTab.current;
     if (previous != null && previous !== activeId) {
       void consolePick(previous, false);
@@ -202,7 +209,8 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
       onConsoleReset((message) => {
         if (!alive) return;
         const current = logs.current.get(message.tabId) ?? emptyLog();
-        logs.current.set(message.tabId, preserveRef.current ? collectLog(current) : clearLog());
+        logs.current.set(message.tabId, afterNavigation(current, message.at, preserveRef.current));
+        setCaughtTab(message.tabId);
         bump();
       }),
       onConsolePicked((message) => {
@@ -290,6 +298,7 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
     }
     logs.current.set(activeId, clearLog());
     setTick((value) => value + 1);
+    void notifyConsoleCleared(activeId);
   };
 
   const pick = () => {
@@ -404,7 +413,7 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
             <p id="console-empty-title" className="text-sm text-zinc-300">
               {activeId == null ? "Open a tab to use the console." : "Listening to this page."}
             </p>
-            {activeId != null ? (
+            {activeId != null && caughtTab !== activeId ? (
               <>
                 <p id="console-empty-hint" className="max-w-sm text-xs leading-5 text-zinc-500">
                   Messages from before the console opened are not here. Reload to capture them from the start.
