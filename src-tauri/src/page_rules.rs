@@ -1329,7 +1329,9 @@ mod tests {
         assert!(is_challenge_url(
             "https://www.aliexpress.us/_____tmd_____/punish?x5secdata=abc&x5step=1"
         ));
-        assert!(is_challenge_url("https://g.alicdn.com/secdev/entry/secaptcha/a.js"));
+        assert!(is_challenge_url(
+            "https://g.alicdn.com/secdev/entry/secaptcha/a.js"
+        ));
         assert!(!is_challenge_url("https://www.aliexpress.us/item/123.html"));
         assert!(!is_challenge_url("https://example.com/"));
     }

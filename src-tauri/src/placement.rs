@@ -1,5 +1,9 @@
-//! Where this profile last left a browser window: monitor, size, and maximized state.
+//! Where this profile last left a browser window, remembered per computer.
+//!
+//! Computers that share a profile have different monitors. `window.json` keeps a
+//! frame for each computer name, and a save replaces only this computer's entry.
 
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::time::Duration;
@@ -42,6 +46,28 @@ impl Default for WindowFile {
             maximized: false,
         }
     }
+}
+
+/// `window.json`. `computers` is keyed by the Windows computer name.
+///
+/// Files written before computer names are one frame at the top level. That
+/// frame is used while `computers` is still empty. A save writes `computers`
+/// only and replaces this computer's entry, leaving every other computer's
+/// frame as it was.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct WindowStore {
+    computers: BTreeMap<String, WindowFile>,
+    #[serde(skip_serializing)]
+    x: i32,
+    #[serde(skip_serializing)]
+    y: i32,
+    #[serde(skip_serializing)]
+    width: u32,
+    #[serde(skip_serializing)]
+    height: u32,
+    #[serde(skip_serializing)]
+    maximized: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,18 +116,17 @@ pub fn init(app: &AppHandle) {
     });
 }
 
-/// The frame saved for this profile, if one exists and has a real size.
+/// The frame saved for this computer, when it has a real size.
+///
+/// An older file has a single frame and no computer name. This computer uses
+/// that frame when `computers` has no entry for it yet.
 pub fn saved(app: &AppHandle) -> Option<WindowFile> {
     let path = paths::data_file(app, FILE);
     if !path.is_file() {
         return None;
     }
-    let file: WindowFile = files::read_json(&path);
-    if file.width == 0 || file.height == 0 {
-        None
-    } else {
-        Some(file)
-    }
+    let store: WindowStore = files::read_json(&path);
+    frame_for(&store, &crate::downloads::computer_name())
 }
 
 /// Places `window` on the saved monitor. A monitor that is no longer connected
@@ -213,10 +238,71 @@ fn save_now(app: &AppHandle) -> Result<(), String> {
     let Some(state) = app.try_state::<PlacementState>() else {
         return Ok(());
     };
-    let Some(file) = *state.current.lock().expect("placement lock") else {
+    let Some(frame) = *state.current.lock().expect("placement lock") else {
         return Ok(());
     };
-    files::write_json(&paths::data_file(app, FILE), &file)
+    // Read again so a frame another computer saved since startup stays in the file.
+    let path = paths::data_file(app, FILE);
+    let mut store: WindowStore = files::read_json(&path);
+    remember(&mut store, &crate::downloads::computer_name(), frame);
+    files::write_json(&path, &store)
+}
+
+/// This computer's frame. A shared older file still applies when nobody has a named entry.
+fn frame_for(store: &WindowStore, computer: &str) -> Option<WindowFile> {
+    if let Some(frame) = find_frame(store, computer) {
+        return real_frame(frame);
+    }
+    if store.computers.is_empty() {
+        return real_frame(store.legacy_frame());
+    }
+    None
+}
+
+fn find_frame(store: &WindowStore, computer: &str) -> Option<WindowFile> {
+    store
+        .computers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(computer))
+        .map(|(_, frame)| *frame)
+}
+
+/// Inserts `frame` under `computer`. A name that differs only by case is the same computer.
+fn remember(store: &mut WindowStore, computer: &str, frame: WindowFile) {
+    let keys: Vec<String> = store
+        .computers
+        .keys()
+        .filter(|name| name.eq_ignore_ascii_case(computer))
+        .cloned()
+        .collect();
+    let key = keys
+        .first()
+        .cloned()
+        .unwrap_or_else(|| computer.to_string());
+    for extra in keys.iter().skip(1) {
+        store.computers.remove(extra);
+    }
+    store.computers.insert(key, frame);
+}
+
+fn real_frame(frame: WindowFile) -> Option<WindowFile> {
+    if frame.width == 0 || frame.height == 0 {
+        None
+    } else {
+        Some(frame)
+    }
+}
+
+impl WindowStore {
+    fn legacy_frame(&self) -> WindowFile {
+        WindowFile {
+            x: self.x,
+            y: self.y,
+            width: self.width,
+            height: self.height,
+            maximized: self.maximized,
+        }
+    }
 }
 
 fn set_suppress(app: &AppHandle, suppress: bool) {
@@ -460,5 +546,119 @@ mod tests {
             serde_json::from_str::<WindowFile>("{}").unwrap(),
             WindowFile::default()
         );
+    }
+
+    fn placed(x: i32, y: i32, width: u32, height: u32, maximized: bool) -> WindowFile {
+        WindowFile {
+            x,
+            y,
+            width,
+            height,
+            maximized,
+        }
+    }
+
+    #[test]
+    fn an_older_file_is_used_until_a_computer_has_its_own_frame() {
+        let store: WindowStore = serde_json::from_str(
+            r#"{"x":10,"y":20,"width":800,"height":600,"maximized":true,"extra":true}"#,
+        )
+        .unwrap();
+        let frame = placed(10, 20, 800, 600, true);
+        assert_eq!(frame_for(&store, "ALPHA"), Some(frame));
+        assert_eq!(frame_for(&store, "BETA"), Some(frame));
+        assert_eq!(
+            serde_json::from_str::<WindowStore>("{}").unwrap(),
+            WindowStore::default()
+        );
+        assert_eq!(frame_for(&WindowStore::default(), "ALPHA"), None);
+    }
+
+    #[test]
+    fn each_computer_keeps_its_own_frame() {
+        let text = r#"{"extra":true,"computers":{"ALPHA":{"x":10,"y":20,"width":800,"height":600,"maximized":false,"nope":1},"BETA":{"x":1920,"y":40,"width":1400,"height":900,"maximized":true}}}"#;
+        let store: WindowStore = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            frame_for(&store, "alpha"),
+            Some(placed(10, 20, 800, 600, false))
+        );
+        assert_eq!(
+            frame_for(&store, "BETA"),
+            Some(placed(1920, 40, 1400, 900, true))
+        );
+        assert_eq!(frame_for(&store, "GAMMA"), None);
+    }
+
+    #[test]
+    fn a_named_file_ignores_the_old_shared_frame() {
+        let store: WindowStore = serde_json::from_str(
+            r#"{"x":1,"y":2,"width":900,"height":700,"computers":{"ALPHA":{"x":10,"y":20,"width":800,"height":600,"maximized":false}}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            frame_for(&store, "ALPHA"),
+            Some(placed(10, 20, 800, 600, false))
+        );
+        assert_eq!(frame_for(&store, "BETA"), None);
+    }
+
+    #[test]
+    fn saving_one_computer_leaves_the_other_and_drops_the_old_frame() {
+        let mut store: WindowStore = serde_json::from_str(
+            r#"{"x":1,"y":2,"width":900,"height":700,"computers":{"BETA":{"x":1920,"y":40,"width":1400,"height":900,"maximized":true}}}"#,
+        )
+        .unwrap();
+        let alpha = placed(30, 40, 1000, 800, false);
+        remember(&mut store, "alpha", alpha);
+        let written = serde_json::to_value(&store).unwrap();
+        assert!(written.get("x").is_none());
+        assert!(written.get("width").is_none());
+        let restored: WindowStore = serde_json::from_value(written).unwrap();
+        assert_eq!(frame_for(&restored, "ALPHA"), Some(alpha));
+        assert_eq!(
+            frame_for(&restored, "BETA"),
+            Some(placed(1920, 40, 1400, 900, true))
+        );
+        assert_eq!(restored.computers.len(), 2);
+    }
+
+    #[test]
+    fn a_current_file_round_trips_without_changing_frames() {
+        let text = r#"{"computers":{"ALPHA":{"x":10,"y":20,"width":800,"height":600,"maximized":false},"BETA":{"x":1920,"y":40,"width":1400,"height":900,"maximized":true}}}"#;
+        let store: WindowStore = serde_json::from_str(text).unwrap();
+        let again: WindowStore =
+            serde_json::from_str(&serde_json::to_string(&store).unwrap()).unwrap();
+        assert_eq!(store, again);
+        assert_eq!(frame_for(&again, "ALPHA"), frame_for(&store, "ALPHA"));
+        assert_eq!(frame_for(&again, "BETA"), frame_for(&store, "BETA"));
+    }
+
+    #[test]
+    fn remembering_a_computer_overwrites_only_that_computer() {
+        let mut store = WindowStore::default();
+        remember(&mut store, "Alpha", placed(1, 2, 800, 600, false));
+        remember(&mut store, "BETA", placed(3, 4, 900, 700, true));
+        remember(&mut store, "ALPHA", placed(5, 6, 1000, 800, false));
+        assert_eq!(store.computers.len(), 2);
+        assert_eq!(
+            frame_for(&store, "alpha"),
+            Some(placed(5, 6, 1000, 800, false))
+        );
+        assert_eq!(
+            frame_for(&store, "beta"),
+            Some(placed(3, 4, 900, 700, true))
+        );
+        assert_eq!(
+            store.computers.keys().next().map(String::as_str),
+            Some("Alpha")
+        );
+    }
+
+    #[test]
+    fn a_zero_size_frame_is_ignored() {
+        let mut store = WindowStore::default();
+        remember(&mut store, "ALPHA", WindowFile::default());
+        assert_eq!(frame_for(&store, "ALPHA"), None);
+        assert_eq!(frame_for(&store, "BETA"), None);
     }
 }

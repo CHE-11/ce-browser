@@ -2998,8 +2998,8 @@ fn attach_adblock(
                 // cache-bypassing refresh when their document request was modified.
                 if !service_worker_request(&args) {
                     let hints = client_hints_matter(context) && !site_keeps_its_cache(&uri);
-                    let referrer = crate::page_rules::control_for(&request_app, &page).referrer
-                        != "default";
+                    let referrer =
+                        crate::page_rules::control_for(&request_app, &page).referrer != "default";
                     if hints || referrer {
                         if let Ok(request) = args.Request() {
                             if let Ok(headers) = request.Headers() {
@@ -5439,7 +5439,9 @@ mod tests {
     #[test]
     fn google_pages_keep_the_request_that_their_cache_was_stored_with() {
         assert!(super::site_keeps_its_cache("https://www.google.com/"));
-        assert!(super::site_keeps_its_cache("https://mail.google.com/mail/u/0/"));
+        assert!(super::site_keeps_its_cache(
+            "https://mail.google.com/mail/u/0/"
+        ));
         assert!(super::site_keeps_its_cache(
             "https://docs.google.com/document/d/1"
         ));
@@ -5449,10 +5451,10 @@ mod tests {
         assert!(super::site_keeps_its_cache(
             "https://ssl.gstatic.com/ui/v1/icons/mail/rfr/logo_gmail_lockup_default_1x_r5.png"
         ));
+        assert!(!super::site_keeps_its_cache("https://www.primevideo.com/"));
         assert!(!super::site_keeps_its_cache(
-            "https://www.primevideo.com/"
+            "https://google.com.evil.test/"
         ));
-        assert!(!super::site_keeps_its_cache("https://google.com.evil.test/"));
         assert!(!super::site_keeps_its_cache("not a url"));
     }
 
