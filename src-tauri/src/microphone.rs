@@ -26,6 +26,10 @@ use windows::core::{HSTRING, PWSTR};
 
 /// Installed at document start. It pins `getUserMedia` to the saved microphone and reports capture.
 pub const DOCUMENT_SCRIPT: &str = r#"(() => {
+  try {
+    const challenge = String(location.href || "").toLowerCase();
+    if (challenge.includes("_____tmd_____") || challenge.includes("x5secdata=") || challenge.includes("x5step=") || challenge.includes("secaptcha") || challenge.includes("nocaptcha")) return;
+  } catch (e) {}
   if (window.__ceMicInstalled) return;
   window.__ceMicInstalled = true;
   const streams = new Set();

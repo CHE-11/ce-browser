@@ -3,7 +3,7 @@ import { IconButton } from "@/components/IconButton";
 import { PinPlacement } from "@/components/PinPlacement";
 import { PopupFrame } from "@/components/PopupFrame";
 import { Toggle } from "@/components/Toggle";
-import { BUILTIN_TOOLS } from "@/features/BuiltInExtensions/builtin";
+import { BUILTIN_TOOLS } from "@/built_in_extensions/builtin";
 import { ExtensionsToolbarSideControl } from "@/features/Extensions/ExtensionsToolbarSideControl";
 import { RemoveExtensionDialog } from "@/features/Extensions/RemoveExtensionDialog";
 import {

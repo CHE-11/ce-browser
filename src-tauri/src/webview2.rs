@@ -2536,6 +2536,7 @@ fn attach_page_state(app: &AppHandle, core: &ICoreWebView2, id: u32) -> windows:
                 let success = read_bool(|value| args.IsSuccess(value));
                 if success {
                     tabs::set_progress(&done_app, id, 100);
+                    crate::page_console::on_navigated(&done_app, id);
                     return Ok(());
                 }
                 let mut status = COREWEBVIEW2_WEB_ERROR_STATUS::default();
@@ -3706,6 +3707,10 @@ fn webview_token_len(lower: &str) -> usize {
 /// The call channel and its logger then fail. Reading the headers and dropping that function
 /// lets the same message through. A message that already clones is left untouched.
 pub const CLONE_MESSAGE_SCRIPT: &str = r#"(function () {
+  try {
+    var challenge = String(location.href || "").toLowerCase();
+    if (challenge.indexOf("_____tmd_____") !== -1 || challenge.indexOf("x5secdata=") !== -1 || challenge.indexOf("x5step=") !== -1 || challenge.indexOf("secaptcha") !== -1 || challenge.indexOf("nocaptcha") !== -1) return;
+  } catch (e) {}
   if (window.__ceCloneMessage) return;
   window.__ceCloneMessage = true;
 

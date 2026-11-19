@@ -89,6 +89,11 @@ import type {
   ScriptFile,
   SidePanelInfo,
   ScriptRun,
+  ConsoleEvaluation,
+  ConsoleMessage,
+  ConsolePicked,
+  ConsoleProperty,
+  ConsoleReset,
   PageToolRequest,
   SiteFavicon,
   SiteInfo,
@@ -2260,6 +2265,72 @@ export function toggleScriptingPanel(open?: boolean) {
 /** Opens the scripting panel in its own window and closes the docked one. */
 export function openScriptingWindow() {
   return invoke<void>("open_scripting_window");
+}
+
+/** Opens or closes the console beside this window's pages. `open` forces a state. */
+export function toggleConsolePanel(open?: boolean) {
+  return invoke<boolean>("toggle_console_panel", { open: open ?? null });
+}
+
+/** Opens the console in its own window and closes the docked one. */
+export function openConsoleWindow() {
+  return invoke<void>("open_console_window");
+}
+
+/** Listens to `tabId` while this window's console is open. */
+export function consoleArm(window: string, tabId: number) {
+  return invoke<void>("console_arm", { window, tabId });
+}
+
+/** Stops listening when this window's console is closed. */
+export function consoleDisarm(window: string) {
+  return invoke<void>("console_disarm", { window });
+}
+
+/** Runs `expression` in the page's main world and returns the live value. */
+export function consoleEvaluate(tabId: number, expression: string) {
+  return invoke<ConsoleEvaluation>("console_evaluate", { tabId, expression });
+}
+
+/** Own properties of a live console object. */
+export function consoleProperties(tabId: number, objectId: string) {
+  return invoke<ConsoleProperty[]>("console_properties", { tabId, objectId });
+}
+
+/** Names that complete `expression`, which is the text before the cursor. */
+export function consoleComplete(tabId: number, expression: string) {
+  return invoke<string[]>("console_complete", { tabId, expression });
+}
+
+/** A bounded JSON copy of a live object. */
+export function consoleJson(tabId: number, objectId: string) {
+  return invoke<string>("console_json", { tabId, objectId });
+}
+
+/** Scrolls a node into view and highlights it. */
+export function consoleReveal(tabId: number, objectId: string) {
+  return invoke<void>("console_reveal", { tabId, objectId });
+}
+
+/** Turns element picking on or off. Returns whether it is on. */
+export function consolePick(tabId: number, enabled: boolean) {
+  return invoke<boolean>("console_pick", { tabId, enabled });
+}
+
+export function onConsoleMessage(handler: (message: ConsoleMessage) => void) {
+  return listen<ConsoleMessage>("console-message", (event) => handler(event.payload));
+}
+
+export function onConsoleCleared(handler: (message: { tabId: number }) => void) {
+  return listen<{ tabId: number }>("console-cleared", (event) => handler(event.payload));
+}
+
+export function onConsoleReset(handler: (message: ConsoleReset) => void) {
+  return listen<ConsoleReset>("console-reset", (event) => handler(event.payload));
+}
+
+export function onConsolePicked(handler: (message: ConsolePicked) => void) {
+  return listen<ConsolePicked>("console-picked", (event) => handler(event.payload));
 }
 
 /** Follows the mouse until the button comes up and remembers the agent panel width. */

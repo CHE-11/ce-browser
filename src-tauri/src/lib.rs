@@ -33,6 +33,7 @@ mod model_prices;
 mod net_speed;
 mod notify;
 mod ocr;
+mod page_console;
 mod page_dialogs;
 mod page_errors;
 mod page_menu;
@@ -2655,6 +2656,72 @@ async fn open_scripting_window(app: AppHandle, window: Window) -> Result<(), Str
 }
 
 #[tauri::command]
+async fn toggle_console_panel(
+    app: AppHandle,
+    window: Window,
+    open: Option<bool>,
+) -> Result<bool, String> {
+    automation::panel::toggle_console(&app, &browser_window(&window), open)
+}
+
+#[tauri::command]
+async fn open_console_window(app: AppHandle, window: Window) -> Result<(), String> {
+    automation::panel::open_console_window(&app, &browser_window(&window))
+}
+
+#[tauri::command]
+async fn console_arm(app: AppHandle, window: String, tab_id: u32) -> Result<(), String> {
+    blocking(move || page_console::arm(&app, &window, tab_id)).await
+}
+
+#[tauri::command]
+async fn console_disarm(app: AppHandle, window: String) -> Result<(), String> {
+    blocking(move || page_console::disarm(&app, &window)).await
+}
+
+#[tauri::command]
+async fn console_evaluate(
+    app: AppHandle,
+    tab_id: u32,
+    expression: String,
+) -> Result<page_console::ConsoleEvaluation, String> {
+    blocking(move || page_console::evaluate(&app, tab_id, &expression)).await
+}
+
+#[tauri::command]
+async fn console_properties(
+    app: AppHandle,
+    tab_id: u32,
+    object_id: String,
+) -> Result<Vec<page_console::ConsoleProperty>, String> {
+    blocking(move || page_console::properties(&app, tab_id, &object_id)).await
+}
+
+#[tauri::command]
+async fn console_complete(
+    app: AppHandle,
+    tab_id: u32,
+    expression: String,
+) -> Result<Vec<String>, String> {
+    blocking(move || page_console::complete(&app, tab_id, &expression)).await
+}
+
+#[tauri::command]
+async fn console_json(app: AppHandle, tab_id: u32, object_id: String) -> Result<String, String> {
+    blocking(move || page_console::json_of(&app, tab_id, &object_id)).await
+}
+
+#[tauri::command]
+async fn console_reveal(app: AppHandle, tab_id: u32, object_id: String) -> Result<(), String> {
+    blocking(move || page_console::reveal(&app, tab_id, &object_id)).await
+}
+
+#[tauri::command]
+async fn console_pick(app: AppHandle, tab_id: u32, enabled: bool) -> Result<bool, String> {
+    blocking(move || page_console::pick(&app, tab_id, enabled)).await
+}
+
+#[tauri::command]
 async fn resize_agent_panel(app: AppHandle, window: Window) -> Result<(), String> {
     let window = browser_window(&window);
     blocking(move || automation::panel::track_resize(&app, &window)).await
@@ -3077,6 +3144,12 @@ pub fn run() {
                     && let Some(url) = extension_popouts::closed(&label)
                 {
                     host_extensions::popout_closed(window.app_handle(), &url);
+                }
+                return;
+            }
+            if label == page_console::POPOUT_LABEL {
+                if matches!(event, WindowEvent::Destroyed) {
+                    page_console::popout_closed(window.app_handle());
                 }
                 return;
             }
@@ -3513,6 +3586,16 @@ pub fn run() {
             toggle_automation_panel,
             toggle_scripting_panel,
             open_scripting_window,
+            toggle_console_panel,
+            open_console_window,
+            console_arm,
+            console_disarm,
+            console_evaluate,
+            console_properties,
+            console_complete,
+            console_json,
+            console_reveal,
+            console_pick,
             resize_agent_panel,
             set_agent_panel_width,
             collapse_side_panel,

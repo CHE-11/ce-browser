@@ -1,6 +1,6 @@
 import type { DragEvent, MouseEvent } from "react";
 import type { BrowserSettings, HostExtensionInfo, ToolbarPlacement } from "../../../types/browser";
-import { BUILTIN_TOOLS, builtinTool } from "../features/BuiltInExtensions/builtin";
+import { BUILTIN_TOOLS, builtinTool } from "../built_in_extensions/builtin";
 import { openPopup, saveSettings } from "./browser-client";
 
 /** Toolbar ids for enabled host extensions that have a button. */

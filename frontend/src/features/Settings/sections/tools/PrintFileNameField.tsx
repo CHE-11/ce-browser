@@ -5,7 +5,7 @@ import {
   FILE_NAME_TOKENS,
   previewFileName,
   suggestedFileNameTemplate,
-} from "@/features/BuiltInExtensions/print-to-pdf/file-name";
+} from "@/built_in_extensions/print-to-pdf/file-name";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { inputClass } from "../../SettingsControls";

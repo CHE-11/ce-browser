@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { formatBytes } from "@/lib/format";
 import { useTabs } from "@/lib/use-browser";
-import { siteKey } from "@features/BuiltInExtensions/page-controls/site";
+import { siteKey } from "@/built_in_extensions/page-controls/site";
 import { permissionLabel } from "@/lib/permission-label";
 import type { PermissionGrant, SiteInfo } from "@type/browser";
 import { MicrophonePanel } from "./MicrophonePanel";

@@ -164,6 +164,8 @@ export type WindowTabs = {
   automationPanel: boolean;
   /** The scripting panel is in the dock, including while its rail is collapsed. */
   scriptingPanel: boolean;
+  /** The console panel is in the dock, including while its rail is collapsed. */
+  consolePanel: boolean;
   /** First extension id in the dock. Empty when no extension panel is open. */
   hostPanel: string;
   /** Sum of the docked columns, in CSS pixels. Zero when the dock is closed. */
@@ -489,6 +491,73 @@ export type ScriptRun = {
   logs: ScriptLog[];
   value: string | null;
   error: string | null;
+};
+
+/** One property inside a console preview. */
+export type ConsolePreviewEntry = {
+  name: string;
+  type: string;
+  value: string;
+};
+
+/** A value from the page, either a primitive or a live object. */
+export type ConsoleValue = {
+  type: string;
+  subtype: string;
+  className: string;
+  description: string;
+  value: unknown;
+  objectId: string;
+  overflow: boolean;
+  preview: ConsolePreviewEntry[];
+};
+
+export type ConsoleStackFrame = {
+  functionName: string;
+  url: string;
+  line: number;
+  column: number;
+};
+
+export type ConsoleTable = {
+  columns: string[];
+  rows: string[][];
+};
+
+/** A console API call or an uncaught exception from the page. */
+export type ConsoleMessage = {
+  tabId: number;
+  id: number;
+  level: string;
+  timestamp: number;
+  origin: string;
+  args: ConsoleValue[];
+  stack: ConsoleStackFrame[];
+  text: string;
+  table: ConsoleTable | null;
+};
+
+/** The value of an expression run in the page. */
+export type ConsoleEvaluation = {
+  error: boolean;
+  value: ConsoleValue;
+  stack: ConsoleStackFrame[];
+  text: string;
+};
+
+export type ConsoleProperty = {
+  name: string;
+  value: ConsoleValue;
+};
+
+export type ConsoleReset = {
+  tabId: number;
+  url: string;
+};
+
+export type ConsolePicked = {
+  tabId: number;
+  value: ConsoleValue;
 };
 
 export type PageRules = {

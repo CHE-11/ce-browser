@@ -1,8 +1,8 @@
 import { forwardRef, useRef, useState, type DragEvent, type MouseEvent, type MouseEventHandler } from "react";
 import { ListCollapse } from "lucide-react";
 import type { BrowserSettings, ExtensionInfo, TabInfo, ToolbarSide } from "@type/browser";
-import { ToolbarIcon } from "@features/BuiltInExtensions";
-import { builtinTool } from "@features/BuiltInExtensions/builtin";
+import { ToolbarIcon } from "@/built_in_extensions";
+import { builtinTool } from "@/built_in_extensions/builtin";
 import { HostToolbarButton } from "@/features/Extensions/HostToolbarButton";
 import { openExtensionPanel, openPopup, saveSettings } from "@/lib/browser-client";
 import { useExtensionAction } from "@/lib/extension-action";

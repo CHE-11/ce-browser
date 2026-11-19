@@ -38,6 +38,10 @@ const KINDS: &[&str] = &[
 
 /// Wraps `navigator.registerProtocolHandler` so the page asks through our prompt.
 pub const PROTOCOL_JS: &str = r#"(function () {
+  try {
+    var challenge = String(location.href || "").toLowerCase();
+    if (challenge.indexOf("_____tmd_____") !== -1 || challenge.indexOf("x5secdata=") !== -1 || challenge.indexOf("x5step=") !== -1 || challenge.indexOf("secaptcha") !== -1 || challenge.indexOf("nocaptcha") !== -1) return;
+  } catch (e) {}
   if (window.__ceProtocol || !navigator.registerProtocolHandler) return;
   window.__ceProtocol = true;
   var native = navigator.registerProtocolHandler.bind(navigator);

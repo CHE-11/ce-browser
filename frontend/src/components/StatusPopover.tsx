@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Activity } from "lucide-react";
 import type { StatusSnapshot } from "@type/browser";
-import { useAdblockStats } from "@/features/BuiltInExtensions/ad-blocker/use-adblock-stats";
+import { useAdblockStats } from "@/built_in_extensions/ad-blocker/use-adblock-stats";
 import { PopupFrame } from "@/components/PopupFrame";
 import { onStatusChanged, onStatusText } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";

@@ -8,7 +8,7 @@ import { builtinToolEnabled, toolbarPlacement } from "@/lib/toolbar-pin";
 import type { BrowserSettings, ExtensionInfo, ToolbarPlacement } from "@type/browser";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
-import { BUILTIN_TOOLS } from "../BuiltInExtensions/builtin";
+import { BUILTIN_TOOLS } from "../../built_in_extensions/builtin";
 
 type SourceFlag = {
   key: string;

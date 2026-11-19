@@ -1506,7 +1506,7 @@ fn default_page_number_location() -> String {
     "right".into()
 }
 
-/// Keep in sync with `FILE_NAME_TEMPLATES` in `frontend/src/features/BuiltInExtensions/print-to-pdf/file-name.ts`.
+/// Keep in sync with `FILE_NAME_TEMPLATES` in `frontend/src/built_in_extensions/print-to-pdf/file-name.ts`.
 fn suggested_file_name(id: &str) -> String {
     match id {
         "clean-page" => "{site} - {article}".into(),

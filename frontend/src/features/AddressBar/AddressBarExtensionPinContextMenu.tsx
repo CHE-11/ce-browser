@@ -2,7 +2,7 @@ import { OpenAs } from "@/components/OpenAs";
 import { PanelSide } from "@/components/PanelSide";
 import { PinPlacement } from "@/components/PinPlacement";
 import { PopupFrame } from "@/components/PopupFrame";
-import { builtinTool } from "@/features/BuiltInExtensions/builtin";
+import { builtinTool } from "@/built_in_extensions/builtin";
 import { closePopup } from "@/lib/browser-client";
 import { extensionOpenAs, extensionPanelSide, saveExtensionOpenAs, saveExtensionPanelSide } from "@/lib/extension-open";
 import { saveToolbarPlacement, toolbarPlacement } from "@/lib/toolbar-pin";

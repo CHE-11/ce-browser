@@ -1,6 +1,16 @@
 (() => {
   if (__CE_ENABLED__ !== true) return;
   if (location.protocol !== "http:" && location.protocol !== "https:") return;
+  const href = String(location.href || "").toLowerCase();
+  if (
+    href.includes("_____tmd_____") ||
+    href.includes("x5secdata=") ||
+    href.includes("x5step=") ||
+    href.includes("secaptcha") ||
+    href.includes("nocaptcha")
+  ) {
+    return;
+  }
   const paused = __CE_PAUSED__;
   const host = String(location.hostname || "")
     .trim()

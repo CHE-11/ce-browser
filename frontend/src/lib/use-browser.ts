@@ -182,6 +182,7 @@ export function useTabs() {
     agentPanel: mine?.agentPanel ?? false,
     automationPanel: mine?.automationPanel ?? false,
     scriptingPanel: mine?.scriptingPanel ?? false,
+    consolePanel: mine?.consolePanel ?? false,
     hostPanel: mine?.hostPanel ?? "",
     sidePanelWidth: mine?.sidePanelWidth ?? 0,
     sidePanelEdge: mine?.sidePanelEdge === "left" || mine?.sidePanelEdge === "right" ? mine.sidePanelEdge : "",

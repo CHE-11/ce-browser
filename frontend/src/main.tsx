@@ -6,40 +6,41 @@ import { getUserStyles, getWindowsColorScheme, onUserStylesChanged, onWindowsCol
 import { useRoute } from "./lib/route";
 import { applyUserStyles } from "./lib/user-styles";
 import { applyZoom, readZoom } from "./lib/zoom";
-import { AgentPanelPage } from "./features/BuiltInExtensions/agent/AgentPanel.page";
-import { AutomationsPage } from "./features/BuiltInExtensions/automation/Automations.page";
-import { AutomationsPanelPage } from "./features/BuiltInExtensions/automation/AutomationsPanel.page";
-import { CaptureEditorPage } from "./features/BuiltInExtensions/capture-editor/CaptureEditor.page";
-import { PresentOverlayPage } from "./features/BuiltInExtensions/present/PresentOverlay.page";
-import { PresentPalette } from "./features/BuiltInExtensions/present/PresentPalette";
-import { RecordingCamera } from "./features/BuiltInExtensions/recording/RecordingCamera";
-import { RecordingControls } from "./features/BuiltInExtensions/recording/RecordingControls";
-import { RecordingDraw } from "./features/BuiltInExtensions/recording/RecordingDraw";
-import { RecordingsPage } from "./features/BuiltInExtensions/recording/Recordings.page";
+import { AgentPanelPage } from "./built_in_extensions/agent/AgentPanel.page";
+import { AutomationsPage } from "./built_in_extensions/automation/Automations.page";
+import { AutomationsPanelPage } from "./built_in_extensions/automation/AutomationsPanel.page";
+import { CaptureEditorPage } from "./built_in_extensions/capture-editor/CaptureEditor.page";
+import { PresentOverlayPage } from "./built_in_extensions/present/PresentOverlay.page";
+import { PresentPalette } from "./built_in_extensions/present/PresentPalette";
+import { RecordingCamera } from "./built_in_extensions/recording/RecordingCamera";
+import { RecordingControls } from "./built_in_extensions/recording/RecordingControls";
+import { RecordingDraw } from "./built_in_extensions/recording/RecordingDraw";
+import { RecordingsPage } from "./built_in_extensions/recording/Recordings.page";
 import { BrowserPage } from "./features/Browser/Browser.page";
 import { DownloadsPage } from "./features/Downloads/Downloads.page";
-import { FilesPage } from "./features/BuiltInExtensions/files/Files.page";
-import { NetworkPage } from "./features/BuiltInExtensions/network/Network.page";
+import { FilesPage } from "./built_in_extensions/files/Files.page";
+import { NetworkPage } from "./built_in_extensions/network/Network.page";
 import { ExtensionsPage } from "./features/Extensions/Extensions.page";
 import { PeekPage } from "./features/Peek/Peek.page";
 import { PermissionsPage } from "./features/Permissions/Permissions.page";
 import { PopupPage } from "./features/Popup/Popup.page";
-import { PrintEditorPage } from "./features/BuiltInExtensions/print-to-pdf/PrintEditor.page";
-import { ReaderPage } from "./features/BuiltInExtensions/reader/Reader.page";
-import { ScriptsPage } from "./features/BuiltInExtensions/scripting/Scripts.page";
-import { ScriptingPanelPage } from "./features/BuiltInExtensions/scripting/ScriptingPanel.page";
-import { RewritesPage } from "./features/BuiltInExtensions/rewrites/Rewrites.page";
+import { PrintEditorPage } from "./built_in_extensions/print-to-pdf/PrintEditor.page";
+import { ReaderPage } from "./built_in_extensions/reader/Reader.page";
+import { ScriptsPage } from "./built_in_extensions/scripting/Scripts.page";
+import { ConsolePanelPage } from "./built_in_extensions/console/ConsolePanel.page";
+import { ScriptingPanelPage } from "./built_in_extensions/scripting/ScriptingPanel.page";
+import { RewritesPage } from "./built_in_extensions/rewrites/Rewrites.page";
 import { ShortcutsPage } from "./features/Shortcuts/Shortcuts.page";
 import { StoragePage } from "./features/Storage/Storage.page";
 import { SettingsPage } from "./features/Settings/Settings.page";
 import { StylesPage } from "./features/Styles/Styles.page";
-import { ShoppingPage } from "./features/BuiltInExtensions/shopping/Shopping.page";
+import { ShoppingPage } from "./built_in_extensions/shopping/Shopping.page";
 import { WhatsNewPage } from "./features/WhatsNew/WhatsNew.page";
 import "./index.css";
 import { BookmarksPage } from "./features/Bookmarks/Bookmarks.page";
-import { BoardsPage } from "./features/BuiltInExtensions/boards/page/Boards.page";
-import { DebugHudPage } from "./features/BuiltInExtensions/debug-hud/DebugHud.page";
-import { DebugOutlinePage } from "./features/BuiltInExtensions/debug-hud/DebugOutline.page";
+import { BoardsPage } from "./built_in_extensions/boards/page/Boards.page";
+import { DebugHudPage } from "./built_in_extensions/debug-hud/DebugHud.page";
+import { DebugOutlinePage } from "./built_in_extensions/debug-hud/DebugOutline.page";
 import { HistoryPage } from "./features/History/History.page";
 
 const appearance = readAppearance();
@@ -124,6 +125,8 @@ function App() {
       return <AutomationsPanelPage />;
     case "scripting-panel":
       return <ScriptingPanelPage />;
+    case "console-panel":
+      return <ConsolePanelPage owner={route.params.get("owner") ?? ""} />;
     case "automations":
       return <AutomationsPage params={route.params} />;
     case "debug-hud":

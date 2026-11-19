@@ -228,6 +228,8 @@ pub struct WindowTabs {
     pub automation_panel: bool,
     /// The scripting panel is in the dock, including while its rail is collapsed.
     pub scripting_panel: bool,
+    /// The console panel is in the dock, including while its rail is collapsed.
+    pub console_panel: bool,
     /// First extension id in the dock. Empty when no extension panel is open.
     pub host_panel: String,
     /// Sum of the docked columns, in CSS pixels. Zero when the dock is closed.
@@ -455,6 +457,7 @@ pub enum SidePanel {
     Agent,
     Automations,
     Scripting,
+    Console,
     /// A host or store extension panel.
     #[allow(dead_code)]
     Host,
@@ -463,6 +466,7 @@ pub enum SidePanel {
 pub const AGENT_PANEL_ID: &str = "agent";
 pub const AUTOMATIONS_PANEL_ID: &str = "automations";
 pub const SCRIPTING_PANEL_ID: &str = "scripting";
+pub const CONSOLE_PANEL_ID: &str = "console";
 /// Collapsed rail, in CSS pixels. The panel chrome uses this same width.
 pub const PANEL_RAIL: f64 = 36.0;
 /// Header above an expanded panel webview, in CSS pixels.
@@ -478,6 +482,7 @@ impl SidePanel {
             Self::Agent => AGENT_PANEL_ID,
             Self::Automations => AUTOMATIONS_PANEL_ID,
             Self::Scripting => SCRIPTING_PANEL_ID,
+            Self::Console => CONSOLE_PANEL_ID,
             Self::Host | Self::None => "",
         }
     }
@@ -487,6 +492,7 @@ impl SidePanel {
             Self::Agent => "Agent",
             Self::Automations => "Automations",
             Self::Scripting => "Scripting",
+            Self::Console => "Console",
             Self::Host | Self::None => "",
         }
     }
@@ -951,6 +957,7 @@ impl TabsState {
                         agent_panel: dock_contains_id(&panels, AGENT_PANEL_ID),
                         automation_panel: dock_contains_id(&panels, AUTOMATIONS_PANEL_ID),
                         scripting_panel: dock_contains_id(&panels, SCRIPTING_PANEL_ID),
+                        console_panel: dock_contains_id(&panels, CONSOLE_PANEL_ID),
                         host_panel: panels
                             .iter()
                             .find_map(|entry| extension_id_of(&entry.id).map(str::to_string))
@@ -1644,6 +1651,9 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
                         tab.info.zoom = zoom;
                     }
                     tab.title_ready = false;
+                } else if crate::page_rules::is_challenge_url(&url) {
+                    // A restored punish tab kept the site zoom. The slider is drawn at 100%.
+                    tab.info.zoom = 1.0;
                 }
                 tab.info.loading = loading;
                 tab.info.url = url;
@@ -1747,7 +1757,7 @@ fn is_extension_url(url: &str) -> bool {
 /// Zoom a page opens at: 100% for `ce://` pages, Browser UI size for extension pages,
 /// the site's remembered zoom, or the default page zoom.
 fn page_zoom_for(app: &AppHandle, url: &str) -> f64 {
-    if url.starts_with(paths::INTERNAL_SCHEME) {
+    if url.starts_with(paths::INTERNAL_SCHEME) || crate::page_rules::is_challenge_url(url) {
         1.0
     } else if is_extension_url(url) {
         settings::get(app).ui_zoom_factor()
@@ -1762,6 +1772,16 @@ fn page_zoom_for(app: &AppHandle, url: &str) -> f64 {
 fn zoom_for_navigation(previous: &str, next: &str, current: f64, opening: f64) -> Option<f64> {
     if previous == next {
         return None;
+    }
+    // The punish page is the same site as the store, but it has to stay at 100%.
+    // 75% on a 125% display makes devicePixelRatio 0.9375 and the slider redraws itself.
+    let was_challenge = crate::page_rules::is_challenge_url(previous);
+    let now_challenge = crate::page_rules::is_challenge_url(next);
+    if now_challenge && !was_challenge {
+        return ((current - 1.0).abs() > 0.001).then_some(1.0);
+    }
+    if was_challenge && !now_challenge {
+        return ((current - opening).abs() > 0.001).then_some(opening);
     }
     let was_internal = previous.starts_with(paths::INTERNAL_SCHEME);
     let now_internal = next.starts_with(paths::INTERNAL_SCHEME);
@@ -1786,6 +1806,10 @@ fn zoom_for_navigation(previous: &str, next: &str, current: f64, opening: f64) -
 /// incoming invite, with no click, so audio elements are left free to play. Ordinary video stays
 /// paused until a click.
 const AUTOPLAY_GUARD_SCRIPT: &str = r#"(function () {
+  try {
+    var challenge = String(location.href || "").toLowerCase();
+    if (challenge.indexOf("_____tmd_____") !== -1 || challenge.indexOf("x5secdata=") !== -1 || challenge.indexOf("x5step=") !== -1 || challenge.indexOf("secaptcha") !== -1 || challenge.indexOf("nocaptcha") !== -1) return;
+  } catch (e) {}
   if (window.__ceAutoplayGuard || !window.HTMLMediaElement || !HTMLMediaElement.prototype) return;
   window.__ceAutoplayGuard = true;
   var allowed = false;
@@ -3922,6 +3946,10 @@ fn device_chrome_script(spec: &ChromeSpec) -> String {
     let browser = browser_json(&spec.browser);
     format!(
         r#"(function(html, ios, installed, keyboard, browser) {{
+  try {{
+    var challenge = String(location.href || "").toLowerCase();
+    if (challenge.indexOf("_____tmd_____") !== -1 || challenge.indexOf("x5secdata=") !== -1 || challenge.indexOf("x5step=") !== -1 || challenge.indexOf("secaptcha") !== -1 || challenge.indexOf("nocaptcha") !== -1) return;
+  }} catch (e) {{}}
   var root = document.getElementById("ce-device-chrome");
   if (!html) {{
     if (root) root.remove();
@@ -4075,11 +4103,13 @@ fn device_chrome_script(spec: &ChromeSpec) -> String {
   }}
   if (!state.mediaReady) {{
     try {{
-    var realMatch = window.matchMedia.bind(window);
+    var nativeMatchMedia = window.matchMedia;
+    var realMatch = nativeMatchMedia.bind(window);
     var nativeMatchesGet = null;
+    var nativeMatchesDesc = null;
     try {{
-      var matchesDesc = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, "matches");
-      nativeMatchesGet = matchesDesc && matchesDesc.get;
+      nativeMatchesDesc = Object.getOwnPropertyDescriptor(MediaQueryList.prototype, "matches");
+      nativeMatchesGet = nativeMatchesDesc && nativeMatchesDesc.get;
     }} catch (e) {{}}
     function ceReadMatches(list) {{
       if (nativeMatchesGet) return nativeMatchesGet.call(list);
@@ -4170,44 +4200,67 @@ fn device_chrome_script(spec: &ChromeSpec) -> String {
       }}
       return false;
     }}
-    if (nativeMatchesGet) {{
-      Object.defineProperty(MediaQueryList.prototype, "matches", {{
-        configurable: true,
-        get: function() {{
-          return ceInstalledMedia(this.media, nativeMatchesGet.call(this));
-        }}
-      }});
-    }}
-    window.matchMedia = function(query) {{
-      var mql = realMatch(query);
-      var wrapped = {{
-        media: mql.media,
-        onchange: null,
-        __listeners: [],
-        addListener: function(listener) {{ mql.addListener(listener); }},
-        removeListener: function(listener) {{ mql.removeListener(listener); }},
-        addEventListener: function(type, listener, options) {{
-          if (type === "change" && wrapped.__listeners.indexOf(listener) === -1) wrapped.__listeners.push(listener);
-          mql.addEventListener(type, listener, options);
-        }},
-        removeEventListener: function(type, listener, options) {{
-          mql.removeEventListener(type, listener, options);
-        }},
-        dispatchEvent: function(event) {{ return mql.dispatchEvent(event); }}
+    // A normal page keeps the native getter. Replacing it makes AliExpress's captcha
+    // call the copy with the wrong receiver, which throws Illegal invocation.
+    function installMedia() {{
+      if (state.mediaOn) return;
+      if (nativeMatchesGet) {{
+        Object.defineProperty(MediaQueryList.prototype, "matches", {{
+          configurable: true,
+          get: function() {{
+            var native = false;
+            try {{ native = nativeMatchesGet.call(this); }} catch (e) {{ return false; }}
+            var media = "";
+            try {{ media = this && this.media; }} catch (e) {{}}
+            return ceInstalledMedia(media, native);
+          }}
+        }});
+      }}
+      window.matchMedia = function(query) {{
+        var mql = realMatch(query);
+        var wrapped = {{
+          media: mql.media,
+          onchange: null,
+          __listeners: [],
+          addListener: function(listener) {{ mql.addListener(listener); }},
+          removeListener: function(listener) {{ mql.removeListener(listener); }},
+          addEventListener: function(type, listener, options) {{
+            if (type === "change" && wrapped.__listeners.indexOf(listener) === -1) wrapped.__listeners.push(listener);
+            mql.addEventListener(type, listener, options);
+          }},
+          removeEventListener: function(type, listener, options) {{
+            mql.removeEventListener(type, listener, options);
+          }},
+          dispatchEvent: function(event) {{ return mql.dispatchEvent(event); }}
+        }};
+        Object.defineProperty(wrapped, "matches", {{
+          get: function() {{
+            return ceInstalledMedia(query, ceReadMatches(mql));
+          }}
+        }});
+        state.queries.push(wrapped);
+        return wrapped;
       }};
-      Object.defineProperty(wrapped, "matches", {{
-        get: function() {{
-          return ceInstalledMedia(query, ceReadMatches(mql));
-        }}
-      }});
-      state.queries.push(wrapped);
-      return wrapped;
+      state.mediaOn = true;
+    }}
+    function removeMedia() {{
+      if (!state.mediaOn) return;
+      try {{
+        if (nativeMatchesDesc) Object.defineProperty(MediaQueryList.prototype, "matches", nativeMatchesDesc);
+      }} catch (e) {{}}
+      window.matchMedia = nativeMatchMedia;
+      state.mediaOn = false;
+    }}
+    state.syncMedia = function() {{
+      if (window.__ceInstalled || ceTouch()) installMedia();
+      else removeMedia();
     }};
     state.mediaReady = true;
     }} catch (error) {{
       state.patchError = String(error && (error.stack || error));
     }}
   }}
+  if (state.syncMedia) state.syncMedia();
   if (!state.patched) {{
     try {{
     function patchInsert(proto) {{
@@ -4322,6 +4375,14 @@ fn apply_device_chrome(app: &AppHandle, window: &str) {
     let Some((id, spec, env)) = plan else {
         return;
     };
+    let challenge = with_state(app, |state| {
+        state
+            .tab_mut(id)
+            .is_some_and(|tab| crate::page_rules::is_challenge_url(&tab.info.url))
+    });
+    if challenge {
+        return;
+    }
     if let Some(webview) = page_view(app, id) {
         let _ = webview.eval(device_chrome_script(&spec));
     }
@@ -4388,9 +4449,35 @@ fn watch_screencast(app: &AppHandle, id: u32) {
 }
 
 pub fn note_error(app: &AppHandle, id: u32) {
-    update(app, id, |tab| {
-        tab.info.errors = tab.info.errors.saturating_add(1);
+    let found = with_state(app, |state| match state.tab_mut(id) {
+        Some(tab) => {
+            tab.info.errors = tab.info.errors.saturating_add(1);
+            true
+        }
+        None => false,
     });
+    // A page that logs on a timer used to emit the whole tab list on every line.
+    // The marker still updates, at most once a second.
+    if found && note_error_due(id) {
+        emit_tabs(app);
+    }
+}
+
+fn note_error_due(id: u32) -> bool {
+    let mut seen = error_notes().lock().expect("error note");
+    let now = Instant::now();
+    let due = seen
+        .get(&id)
+        .is_none_or(|at| now.duration_since(*at) >= Duration::from_secs(1));
+    if due {
+        seen.insert(id, now);
+    }
+    due
+}
+
+fn error_notes() -> &'static Mutex<HashMap<u32, Instant>> {
+    static NOTES: OnceLock<Mutex<HashMap<u32, Instant>>> = OnceLock::new();
+    NOTES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Marks a background tab that just raised a site notification. Selecting the tab clears it.
@@ -7616,6 +7703,12 @@ pub fn scripting_panel_label(window: &str) -> String {
     format!("{SCRIPTING_PANEL_PREFIX}{window}")
 }
 
+pub const CONSOLE_PANEL_PREFIX: &str = "console-";
+
+pub fn console_panel_label(window: &str) -> String {
+    format!("{CONSOLE_PANEL_PREFIX}{window}")
+}
+
 pub fn is_fullscreen(app: &AppHandle, window: &str) -> bool {
     with_state(app, |state| {
         state.chrome(window).is_some_and(|chrome| chrome.fullscreen)
@@ -7662,6 +7755,7 @@ fn fallback_title(id: &str) -> String {
         AGENT_PANEL_ID => "Agent".to_string(),
         AUTOMATIONS_PANEL_ID => "Automations".to_string(),
         SCRIPTING_PANEL_ID => "Scripting".to_string(),
+        CONSOLE_PANEL_ID => "Console".to_string(),
         _ => extension_id_of(id).unwrap_or(id).to_string(),
     }
 }
@@ -8108,6 +8202,7 @@ fn panel_view_label(window: &str, id: &str) -> Option<String> {
         AGENT_PANEL_ID => Some(agent_panel_label(window)),
         AUTOMATIONS_PANEL_ID => Some(automation_panel_label(window)),
         SCRIPTING_PANEL_ID => Some(scripting_panel_label(window)),
+        CONSOLE_PANEL_ID => Some(console_panel_label(window)),
         _ => extension_id_of(id).map(|extension| host_panel_label(window, extension)),
     }
 }
@@ -8223,6 +8318,7 @@ fn park_closed_panels(app: &AppHandle, window: &str, placed: &HashSet<String>) {
         agent_panel_label(window),
         automation_panel_label(window),
         scripting_panel_label(window),
+        console_panel_label(window),
     ] {
         if !placed.contains(&label)
             && let Some(webview) = app.get_webview(&label)
@@ -10153,6 +10249,33 @@ mod tests {
         );
         assert_eq!(
             zoom_for_navigation("https://a.example/", "https://a.example/", 0.75, 0.5),
+            None
+        );
+        assert_eq!(
+            zoom_for_navigation(
+                "https://www.aliexpress.us/item/1",
+                "https://www.aliexpress.us/_____tmd_____/punish?x5step=1",
+                0.75,
+                0.75
+            ),
+            Some(1.0)
+        );
+        assert_eq!(
+            zoom_for_navigation(
+                "https://www.aliexpress.us/_____tmd_____/punish?x5step=1",
+                "https://www.aliexpress.us/",
+                1.0,
+                0.75
+            ),
+            Some(0.75)
+        );
+        assert_eq!(
+            zoom_for_navigation(
+                "https://www.aliexpress.us/_____tmd_____/punish?x5step=1",
+                "https://www.aliexpress.us/_____tmd_____/punish?x5step=2",
+                1.0,
+                0.75
+            ),
             None
         );
     }

@@ -364,9 +364,20 @@ pub fn scripts_enabled(app: &AppHandle, url: &str) -> bool {
     !control_for(app, url).block_script
 }
 
+/// AliExpress and Alibaba's punish page (`_____tmd_____`). Its checker calls host
+/// functions unbound and redraws when a native it captured is no longer native.
+pub fn is_challenge_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.contains("_____tmd_____")
+        || lower.contains("x5secdata=")
+        || lower.contains("x5step=")
+        || lower.contains("secaptcha")
+        || lower.contains("nocaptcha")
+}
+
 /// Script run as the document loads. Empty for pages that are not http(s).
 pub fn injection(app: &AppHandle, url: &str) -> String {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+    if !url.starts_with("http://") && !url.starts_with("https://") || is_challenge_url(url) {
         return String::new();
     }
     let host = settings::sleep_site_key(url);
@@ -753,6 +764,7 @@ const INJECTION_JS: &str = r#"(function () {
     if (!/^https?:/.test(location.protocol)) return;
     window.__ceSpec = spec;
     var root = document.documentElement;
+    if (!root) return;
     var style = document.getElementById("ce-page-controls");
     if (!style) {
       style = document.createElement("style");
@@ -1310,5 +1322,15 @@ mod tests {
         };
         assert!(zoom_disabled_in(&rules, "https://example.com/docs#section"));
         assert!(!zoom_disabled_in(&rules, "https://example.com/other"));
+    }
+
+    #[test]
+    fn a_punish_page_is_a_challenge_and_a_store_page_is_not() {
+        assert!(is_challenge_url(
+            "https://www.aliexpress.us/_____tmd_____/punish?x5secdata=abc&x5step=1"
+        ));
+        assert!(is_challenge_url("https://g.alicdn.com/secdev/entry/secaptcha/a.js"));
+        assert!(!is_challenge_url("https://www.aliexpress.us/item/123.html"));
+        assert!(!is_challenge_url("https://example.com/"));
     }
 }

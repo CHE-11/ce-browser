@@ -41,7 +41,7 @@ const RING_SIZE: usize = 2000;
 const FLUSH_EVERY: Duration = Duration::from_millis(150);
 const FEED_EVENT: &str = "debug-feed";
 
-/// Keep in sync with the Debug HUD id in `frontend/src/features/BuiltInExtensions/builtin.ts`.
+/// Keep in sync with the Debug HUD id in `frontend/src/built_in_extensions/builtin.ts`.
 pub const DEBUG_HUD_ID: &str = "debug-hud";
 
 static HUD_ON: AtomicBool = AtomicBool::new(false);

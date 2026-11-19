@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 
-/** Keep in sync with the Debug HUD id in `frontend/src/features/BuiltInExtensions/builtin.ts`. */
+/** Keep in sync with the Debug HUD id in `frontend/src/built_in_extensions/builtin.ts`. */
 const DEBUG_HUD_ID = "debug-hud";
 
 function currentLabel() {

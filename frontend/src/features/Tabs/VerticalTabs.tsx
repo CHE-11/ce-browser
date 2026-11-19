@@ -10,7 +10,7 @@ import { useTabMotion } from "../../lib/tab-motion";
 import { buildTabRows } from "../../lib/tab-rows";
 import { usePageRules, type WindowTabsState } from "../../lib/use-browser";
 import { zoomWheelStep } from "../../lib/zoom";
-import { pageZoomDisabled } from "../BuiltInExtensions/page-controls/site";
+import { pageZoomDisabled } from "../../built_in_extensions/page-controls/site";
 import { IconButton } from "../../components/IconButton";
 import { openTabOverview } from "./TabOverview";
 import { TabRowsView } from "./TabRowsView";

@@ -19,8 +19,8 @@ import {
   papersInGroup,
   presetHint,
   printFontStack,
-} from "@/features/BuiltInExtensions/print-to-pdf/print-options";
-import { storedFileNameTemplate } from "@/features/BuiltInExtensions/print-to-pdf/file-name";
+} from "@/built_in_extensions/print-to-pdf/print-options";
+import { storedFileNameTemplate } from "@/built_in_extensions/print-to-pdf/file-name";
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { inputClass, Segmented, useSettingChanged } from "../../SettingsControls";

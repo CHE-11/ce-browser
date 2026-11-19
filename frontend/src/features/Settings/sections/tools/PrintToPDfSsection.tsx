@@ -11,8 +11,8 @@ import {
   paperOptionLabel,
   papersInGroup,
   presetHint,
-} from "@/features/BuiltInExtensions/print-to-pdf/print-options";
-import { FILE_NAME_TOKENS } from "@/features/BuiltInExtensions/print-to-pdf/file-name";
+} from "@/built_in_extensions/print-to-pdf/print-options";
+import { FILE_NAME_TOKENS } from "@/built_in_extensions/print-to-pdf/file-name";
 import { SETTINGS_SECTIONS } from "../../settings-sections";
 import { inputClass, matchesQuery, Section, Segmented, useReportMatch, useSettingChanged, type SettingsSectionProps } from "../../SettingsControls";
 import { PRESETS_HINT, PRESETS_LABEL, PrintToPDfPresets } from "./PrintToPDfPresets";

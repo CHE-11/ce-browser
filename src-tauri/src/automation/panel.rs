@@ -89,6 +89,11 @@ pub fn toggle_scripting(app: &AppHandle, window: &str, open: Option<bool>) -> Re
     toggle_kind(app, window, tabs::SidePanel::Scripting, open, true)
 }
 
+/// Opens or closes the console panel in `window`. `open` forces a state. Returns whether it is open.
+pub fn toggle_console(app: &AppHandle, window: &str, open: Option<bool>) -> Result<bool, String> {
+    toggle_kind(app, window, tabs::SidePanel::Console, open, true)
+}
+
 fn toggle_kind(
     app: &AppHandle,
     window: &str,
@@ -128,6 +133,7 @@ fn panel_label(window: &str, kind: tabs::SidePanel) -> String {
     match kind {
         tabs::SidePanel::Automations => tabs::automation_panel_label(window),
         tabs::SidePanel::Scripting => tabs::scripting_panel_label(window),
+        tabs::SidePanel::Console => tabs::console_panel_label(window),
         tabs::SidePanel::Host | tabs::SidePanel::Agent | tabs::SidePanel::None => {
             tabs::agent_panel_label(window)
         }
@@ -151,6 +157,12 @@ fn ensure_kind(app: &AppHandle, window: &str, kind: tabs::SidePanel) -> Result<(
             &tabs::scripting_panel_label(window),
             "scripting-panel",
         ),
+        tabs::SidePanel::Console => ensure_view(
+            app,
+            window,
+            &tabs::console_panel_label(window),
+            "console-panel",
+        ),
         tabs::SidePanel::Host => Ok(()),
         tabs::SidePanel::None => Ok(()),
     }
@@ -162,6 +174,8 @@ fn saved_width(app: &AppHandle) -> f64 {
 
 /// The scripting editor needs more than the agent column's usual width.
 const SCRIPTING_MIN: f64 = 480.0;
+/// The console keeps object trees readable without covering the page.
+const CONSOLE_MIN: f64 = 420.0;
 
 /// Saved column width, limited to what this panel may take in `window`.
 fn fitted_width(app: &AppHandle, window: &str, kind: tabs::SidePanel, width: f64) -> f64 {
@@ -191,22 +205,26 @@ fn fitted_width(app: &AppHandle, window: &str, kind: tabs::SidePanel, width: f64
 }
 
 fn panel_min(kind: tabs::SidePanel) -> f64 {
-    if kind == tabs::SidePanel::Scripting {
-        SCRIPTING_MIN
-    } else {
-        f64::from(settings::AGENT_PANEL_WIDTH_PX.0)
+    match kind {
+        tabs::SidePanel::Scripting => SCRIPTING_MIN,
+        tabs::SidePanel::Console => CONSOLE_MIN,
+        _ => f64::from(settings::AGENT_PANEL_WIDTH_PX.0),
     }
 }
 
 fn wide_column(kind: tabs::SidePanel) -> bool {
-    kind == tabs::SidePanel::Automations || kind == tabs::SidePanel::Scripting
+    kind == tabs::SidePanel::Automations
+        || kind == tabs::SidePanel::Scripting
+        || kind == tabs::SidePanel::Console
 }
 
 fn wide_id(id: &str) -> bool {
-    id == tabs::AUTOMATIONS_PANEL_ID || id == tabs::SCRIPTING_PANEL_ID
+    id == tabs::AUTOMATIONS_PANEL_ID
+        || id == tabs::SCRIPTING_PANEL_ID
+        || id == tabs::CONSOLE_PANEL_ID
 }
 
-/// Automations and scripting may cover half the area the page and the column share.
+/// Automations, scripting, and the console may cover half the area the page and the column share.
 /// The agent panel stays narrower.
 fn column_max(kind: tabs::SidePanel, geom: &Geom) -> f64 {
     column_max_id(kind.dock_id(), geom)
@@ -272,6 +290,8 @@ fn resize_limits(
         .unwrap_or(AGENT_MAX);
     let min = if id == tabs::SCRIPTING_PANEL_ID {
         SCRIPTING_MIN
+    } else if id == tabs::CONSOLE_PANEL_ID {
+        CONSOLE_MIN
     } else {
         f64::from(settings::AGENT_PANEL_WIDTH_PX.0)
     };
@@ -860,7 +880,80 @@ fn builtin_kind(id: &str) -> Option<tabs::SidePanel> {
         tabs::AGENT_PANEL_ID => Some(tabs::SidePanel::Agent),
         tabs::AUTOMATIONS_PANEL_ID => Some(tabs::SidePanel::Automations),
         tabs::SCRIPTING_PANEL_ID => Some(tabs::SidePanel::Scripting),
+        tabs::CONSOLE_PANEL_ID => Some(tabs::SidePanel::Console),
         _ => None,
+    }
+}
+
+const CONSOLE_WINDOW: &str = crate::page_console::POPOUT_LABEL;
+
+/// Opens the console in its own window. A second request brings that window forward.
+/// The docked column closes. The window still talks to `owner`'s active tab.
+pub fn open_console_window(app: &AppHandle, owner: &str) -> Result<(), String> {
+    crate::page_console::note_popout(Some(owner.to_string()));
+    if let Some(existing) = app.get_window(CONSOLE_WINDOW) {
+        let _ = existing.unminimize();
+        let _ = existing.show();
+        let _ = existing.set_focus();
+    } else if let Err(error) = create_console_window(app, owner) {
+        crate::page_console::note_popout(None);
+        return Err(error);
+    }
+    if tabs::is_browser_label(owner) {
+        tabs::close_dock_panel(app, owner, tabs::CONSOLE_PANEL_ID);
+    }
+    Ok(())
+}
+
+fn create_console_window(app: &AppHandle, owner: &str) -> Result<(), String> {
+    let window = WindowBuilder::new(app, CONSOLE_WINDOW)
+        .title("Console")
+        .inner_size(560.0, 720.0)
+        .min_inner_size(420.0, 320.0)
+        .resizable(true)
+        .decorations(true)
+        .focused(true)
+        .shadow(true)
+        .build()
+        .map_err(|error| error.to_string())?;
+    crate::profiles::apply_window_icon(app, &window);
+    if let Some(owner_window) = app.get_window(owner)
+        && let Ok(position) = owner_window.outer_position()
+    {
+        let _ = window.set_position(PhysicalPosition::new(position.x + 48, position.y + 48));
+    }
+    let url = paths::internal_url(app, &format!("console-panel?owner={owner}"));
+    let host = app.clone();
+    let view = tabs::base_builder(app, CONSOLE_WINDOW, WebviewUrl::External(url))
+        .auto_resize()
+        .disable_drag_drop_handler()
+        .background_color(tabs::popup_surface_color(app))
+        .focused(true)
+        .on_new_window(move |url, features| tabs::new_window(&host, None, url, features));
+    let size = match window.inner_size() {
+        Ok(size) => size,
+        Err(error) => {
+            let _ = window.close();
+            return Err(error.to_string());
+        }
+    };
+    let webview = match window.add_child(view, PhysicalPosition::new(0, 0), size) {
+        Ok(webview) => webview,
+        Err(error) => {
+            let _ = window.close();
+            return Err(error.to_string());
+        }
+    };
+    webview2::attach_panel_hooks(app, &webview);
+    let _ = window.set_focus();
+    Ok(())
+}
+
+/// Closes the popped-out console so the process can exit with the last browser window.
+pub fn close_console_window(app: &AppHandle) {
+    crate::page_console::note_popout(None);
+    if let Some(window) = app.get_window(CONSOLE_WINDOW) {
+        let _ = window.close();
     }
 }
 

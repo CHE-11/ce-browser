@@ -11,7 +11,7 @@ import { useExtensions, useHostExtensions, useSettings } from "@/lib/use-browser
 import { ExtensionInfo, ExtensionOpenAs, HostPanelSide, ToolbarPlacement, ToolbarSide } from "@type/browser";
 import { FileArchive, FolderOpen, Puzzle } from "lucide-react";
 import { useState } from "react";
-import { builtinTool } from "../BuiltInExtensions/builtin";
+import { builtinTool } from "../../built_in_extensions/builtin";
 import { BuiltInExtensionsTable } from "./BuiltInExtensionsTable";
 import { ExtensionsToolbarSideControl } from "./ExtensionsToolbarSideControl";
 import { HostExtensionsSection } from "./HostExtensionsSection";

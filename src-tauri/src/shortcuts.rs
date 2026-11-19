@@ -59,6 +59,8 @@ pub enum Action {
     Flow(usize),
     /// Dev builds only.
     DebugHud,
+    /// Opens or closes the page console beside the active tab.
+    Console,
 }
 
 const VK_TAB: u32 = 0x09;
@@ -267,6 +269,7 @@ pub fn run(app: &AppHandle, action: Action) -> Result<(), String> {
             }
             crate::debug::toggle_hud(app, &window).map(|_| ())
         }
+        Action::Console => crate::automation::panel::toggle_console(app, &window, None).map(|_| ()),
     }
 }
 
@@ -319,9 +322,8 @@ fn category_of(action: &str) -> &'static str {
         | "toggle-bookmarks-bar"
         | "toggle-tools" => "Address bar and bookmarks",
         "reload" | "reload-key" | "back" | "forward" | "find" | "find-all" | "zoom-in"
-        | "zoom-in-shift" | "zoom-out" | "zoom-reset" | "devtools" | "inspect" | "debug-hud" => {
-            "Page"
-        }
+        | "zoom-in-shift" | "zoom-out" | "zoom-reset" | "devtools" | "inspect" | "debug-hud"
+        | "console" => "Page",
         _ => "Browser",
     }
 }
@@ -618,6 +620,7 @@ fn action_from(action: &str) -> Option<Action> {
         "agent-panel" => Action::AgentPanel,
         "record-flow" => Action::RecordFlow,
         "debug-hud" => Action::DebugHud,
+        "console" => Action::Console,
         _ => return None,
     })
 }
@@ -693,6 +696,7 @@ pub fn defaults() -> Vec<ShortcutBinding> {
         bind("zoom-reset", "Reset zoom", "ctrl+0"),
         bind("devtools", "Developer tools", "f12"),
         bind("inspect", "Inspect", "ctrl+shift+i"),
+        bind("console", "Console", "ctrl+shift+j"),
         bind("new-window", "New tab", "ctrl+n"),
         bind("close-f4", "Close tab", "ctrl+f4"),
         bind("next-page", "Next tab", "ctrl+pagedown"),

@@ -199,7 +199,9 @@ pub fn delete_script(app: &AppHandle, id: &str) -> Result<ScriptFile, String> {
 
 /// JavaScript injected as a matching http(s) document loads. Empty when nothing should run.
 pub fn injection(app: &AppHandle, url: &str) -> String {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
+    if !url.starts_with("http://") && !url.starts_with("https://")
+        || crate::page_rules::is_challenge_url(url)
+    {
         return String::new();
     }
     if app.try_state::<ScriptState>().is_none() {
