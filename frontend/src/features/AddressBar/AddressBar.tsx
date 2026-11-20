@@ -109,6 +109,26 @@ function addressText(tab: TabInfo | undefined) {
 }
 
 /**
+ * The address already on screen. `navigate` to that URL does not reload: WebView2 ignores a
+ * navigation whose target is the current document.
+ */
+function sameAddress(current: string | undefined, next: string) {
+  if (!current) {
+    return false;
+  }
+  const left = current.trim();
+  const right = next.trim();
+  if (left === right) {
+    return true;
+  }
+  try {
+    return new URL(left).href === new URL(right).href;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * A selection paints its own color, so `text-transparent` does not hide it. After the field blurs,
  * that highlight stays on the full URL while the formatted address (scheme omitted) is drawn too.
  */
@@ -597,10 +617,20 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         draftsRef.current.delete(activeRef.current.id);
       }
       finishEditing();
-      if (target.kind === "url" && looksLikeUrl(target.url)) {
+      const refreshId =
+        !inNewTab &&
+        target.kind !== "tab" &&
+        !(target.kind === "bookmark" && activePinned) &&
+        activeRef.current &&
+        sameAddress(activeRef.current.url, target.url)
+          ? activeRef.current.id
+          : null;
+      if (target.kind === "url" && looksLikeUrl(target.url) && refreshId === null) {
         void noteTyped(target.url);
       }
-      if (target.kind === "tab" && target.tabId !== undefined) {
+      if (refreshId !== null) {
+        void reload(refreshId);
+      } else if (target.kind === "tab" && target.tabId !== undefined) {
         void activateTab(target.tabId);
       } else if (inNewTab || activeId === null || (target.kind === "bookmark" && activePinned)) {
         void createTab(target.url);
