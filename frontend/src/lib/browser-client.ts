@@ -1964,6 +1964,11 @@ export function getWindowsColorScheme() {
   return invoke<WindowsColorScheme>("windows_color_scheme");
 }
 
+/** Writes Windows light or dark mode. Sites that support `prefers-color-scheme` follow it. */
+export function setWindowsColorScheme(scheme: WindowsColorScheme) {
+  return invoke<WindowsColorScheme>("set_windows_color_scheme", { scheme });
+}
+
 export function onWindowsColorScheme(handler: (scheme: WindowsColorScheme) => void): Promise<UnlistenFn> {
   return listen<WindowsColorScheme>("windows-color-scheme", (event) => handler(event.payload));
 }

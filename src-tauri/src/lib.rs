@@ -2295,6 +2295,22 @@ fn windows_color_scheme(app: AppHandle) -> String {
 }
 
 #[tauri::command]
+fn set_windows_color_scheme(app: AppHandle, scheme: String) -> Result<String, String> {
+    let light = match scheme.as_str() {
+        "light" => true,
+        "dark" => false,
+        _ => return Err("Color scheme must be light or dark.".into()),
+    };
+    settings::write_windows_color_scheme(light)?;
+    webview2::pin_windows_scheme(&app, light);
+    settings::notify_windows_color_scheme();
+    tabs::apply_page_background(&app);
+    let value = if light { "light" } else { "dark" };
+    let _ = app.emit("windows-color-scheme", value);
+    Ok(value.to_string())
+}
+
+#[tauri::command]
 fn get_user_styles(app: AppHandle) -> Result<user_styles::UserStyles, String> {
     user_styles::get(&app)
 }
@@ -3177,13 +3193,12 @@ pub fn run() {
                 }
                 WindowEvent::ThemeChanged(theme) => {
                     let app = window.app_handle().clone();
-                    webview2::apply_site_color_scheme(&app);
+                    let light = *theme == tauri::Theme::Light;
+                    if !webview2::pin_reported_scheme(&app, light) {
+                        return;
+                    }
                     tabs::apply_page_background(&app);
-                    let scheme = if *theme == tauri::Theme::Light {
-                        "light"
-                    } else {
-                        "dark"
-                    };
+                    let scheme = if light { "light" } else { "dark" };
                     let _ = app.emit("windows-color-scheme", scheme);
                 }
                 WindowEvent::CloseRequested { api, .. } => {
@@ -3535,6 +3550,7 @@ pub fn run() {
             release_notes,
             default_download_dir,
             windows_color_scheme,
+            set_windows_color_scheme,
             get_user_styles,
             save_user_styles,
             reload_user_styles,

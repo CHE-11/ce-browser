@@ -2495,6 +2495,51 @@ pub fn page_color(app: &AppHandle) -> Color {
     Color(r, g, b, 255)
 }
 
+/// Writes the Windows app and system theme. `1` is light and `0` is dark, matching `AppsUseLightTheme`.
+pub fn write_windows_color_scheme(light: bool) -> Result<(), String> {
+    use windows::Win32::Foundation::ERROR_SUCCESS;
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_DWORD, RegSetKeyValueW};
+    use windows::core::HSTRING;
+
+    let value: u32 = u32::from(light);
+    let subkey = HSTRING::from(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+    for name in ["AppsUseLightTheme", "SystemUsesLightTheme"] {
+        let status = unsafe {
+            RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                &subkey,
+                &HSTRING::from(name),
+                REG_DWORD.0,
+                Some((&raw const value).cast()),
+                4,
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err("Couldn't change Windows light and dark mode.".into());
+        }
+    }
+    Ok(())
+}
+
+/// Asks every window to read the theme written by `write_windows_color_scheme`.
+pub fn notify_windows_color_scheme() {
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        HWND_BROADCAST, SendNotifyMessageW, WM_SETTINGCHANGE,
+    };
+    use windows::core::w;
+
+    let notice = w!("ImmersiveColorSet");
+    let _ = unsafe {
+        SendNotifyMessageW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            WPARAM(0),
+            LPARAM(notice.as_ptr() as isize),
+        )
+    };
+}
+
 /// The Windows app theme. Browser light and dark mode do not change this.
 pub fn windows_uses_light(app: &AppHandle) -> bool {
     let theme_of = |label: &str| app.get_window(label).and_then(|window| window.theme().ok());

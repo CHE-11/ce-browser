@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -315,18 +315,66 @@ fn core(platform: &PlatformWebview) -> windows::core::Result<ICoreWebView2> {
     unsafe { platform.controller().CoreWebView2() }
 }
 
-/// `prefers-color-scheme` follows Windows. Sites that do not query it keep the colors they paint.
+/// `0` leaves `prefers-color-scheme` on Windows. `1` is light, `2` is dark.
+fn forced_scheme() -> &'static AtomicU8 {
+    static FORCED: AtomicU8 = AtomicU8::new(0);
+    &FORCED
+}
+
+fn scheme_stamp() -> &'static AtomicU64 {
+    static STAMP: AtomicU64 = AtomicU64::new(0);
+    &STAMP
+}
+
+fn scheme_millis() -> u64 {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    START
+        .get_or_init(Instant::now)
+        .elapsed()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
+fn chosen_scheme() -> COREWEBVIEW2_PREFERRED_COLOR_SCHEME {
+    match forced_scheme().load(Ordering::Relaxed) {
+        1 => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT,
+        2 => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK,
+        _ => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO,
+    }
+}
+
+/// `prefers-color-scheme` follows Windows until a light or dark choice is pinned.
 fn pin_profile_scheme(core: &ICoreWebView2) {
     let pinned = (|| unsafe {
         core.cast::<ICoreWebView2_13>()?
             .Profile()?
-            .SetPreferredColorScheme(COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO)
+            .SetPreferredColorScheme(chosen_scheme())
     })();
     if let Err(error) = pinned {
         if error.code() != E_NOINTERFACE {
             eprintln!("WebView2 color scheme: {error}");
         }
     }
+}
+
+/// Remembers light or dark and points every open profile at it. New pages keep the same choice.
+pub fn pin_windows_scheme(app: &AppHandle, light: bool) {
+    forced_scheme().store(if light { 1 } else { 2 }, Ordering::Relaxed);
+    scheme_stamp().store(scheme_millis(), Ordering::Relaxed);
+    apply_site_color_scheme(app);
+}
+
+/// Windows reported a theme. A report that contradicts a choice from the last moment is skipped,
+/// so a late event cannot undo the toolbar toggle. Returns whether the report was applied.
+pub fn pin_reported_scheme(app: &AppHandle, light: bool) -> bool {
+    let incoming = if light { 1 } else { 2 };
+    let current = forced_scheme().load(Ordering::Relaxed);
+    let age = scheme_millis().saturating_sub(scheme_stamp().load(Ordering::Relaxed));
+    if current != 0 && current != incoming && age < 800 {
+        return false;
+    }
+    pin_windows_scheme(app, light);
+    true
 }
 
 /// Points every open profile at the Windows scheme. `prefers-color-scheme` follows that,

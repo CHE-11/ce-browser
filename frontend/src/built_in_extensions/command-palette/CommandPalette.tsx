@@ -37,6 +37,7 @@ import { flattenBookmarks, useBookmarks, useExtensions, useHistory, useRecentlyC
 import { BUILTIN_TOOLS } from "@/built_in_extensions/builtin";
 import { builtinToolEnabled } from "@/lib/toolbar-pin";
 import { siteKey } from "@/built_in_extensions/page-controls/site";
+import { toggleSystemColorScheme } from "@/built_in_extensions/light-dark/toggle";
 import { tabParams } from "@/built_in_extensions/shared";
 import { SETTINGS_INDEX } from "@features/Settings/settings-index";
 import { SETTINGS_SECTIONS } from "@/features/Settings/settings-sections";
@@ -134,6 +135,7 @@ function toolReplacesPalette(id: string, hasTab: boolean) {
     case "present":
     case "rewrites":
     case "clear-cache":
+    case "light-dark":
       return false;
     case "font-picker":
     case "theme-picker":
@@ -274,6 +276,9 @@ export function CommandPalette() {
       run: () => {
         if (tool.id === "debug-hud") {
           return debugToggleHud();
+        }
+        if (tool.id === "light-dark") {
+          return toggleSystemColorScheme();
         }
         if (tool.id === "present") {
           return togglePresent();

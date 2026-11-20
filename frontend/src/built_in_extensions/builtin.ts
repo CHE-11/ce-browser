@@ -24,6 +24,7 @@ import {
   ShoppingCart,
   SlidersHorizontal,
   SquareTerminal,
+  SunMoon,
   Terminal,
   TableProperties,
   Workflow,
@@ -149,6 +150,13 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Theme",
     description: "Choose the browser theme and light or dark mode.",
     icon: Palette,
+    anywhere: true,
+  },
+  {
+    id: "light-dark",
+    name: "Light / dark",
+    description: "Switch Windows between light and dark mode.",
+    icon: SunMoon,
     anywhere: true,
   },
   {

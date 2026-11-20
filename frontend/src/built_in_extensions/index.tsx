@@ -26,6 +26,7 @@ import { RewritesButton } from "./rewrites/RewritesButton";
 import { ConsoleButton } from "./console/ConsoleButton";
 import { ScriptingButton } from "./scripting/ScriptingButton";
 import { StylePickerButton } from "./style-picker/StylePickerButton";
+import { LightDarkButton } from "./light-dark/LightDarkButton";
 import { ThemePickerButton } from "./theme-picker/ThemePickerButton";
 
 /** One pinned built-in tool. Unknown ids render nothing. */
@@ -65,6 +66,8 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <RewritesButton />;
     case "theme-picker":
       return <ThemePickerButton />;
+    case "light-dark":
+      return <LightDarkButton />;
     case "font-picker":
       return <FontPickerButton />;
     case "style-picker":
