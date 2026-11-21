@@ -31,25 +31,26 @@ export function toolbarOrder(saved: string[] | undefined, available: string[]) {
 
 /**
  * Primary shows next to the address bar. Secondary shows on the tools toolbar.
+ * AB shows inside the address field, to the left of the bookmark star.
  * An id with no saved choice keeps the previous default: built-in tools on the tools toolbar,
  * and extensions plus address-bar tools on the address bar. An id in the hidden list stays unpinned.
  */
 export function toolbarPlacement(settings: BrowserSettings | null, id: string): ToolbarPlacement {
   const saved = settings?.toolbarPlacements?.[id];
   if (saved) {
-    return { primary: !!saved.primary, secondary: !!saved.secondary };
+    return { primary: !!saved.primary, secondary: !!saved.secondary, ab: !!saved.ab };
   }
   if (settings?.hiddenToolbarExtensions?.includes(id)) {
-    return { primary: false, secondary: false };
+    return { primary: false, secondary: false, ab: false };
   }
   const tool = builtinTool(id);
   if (tool && !tool.address) {
-    return { primary: false, secondary: true };
+    return { primary: false, secondary: true, ab: false };
   }
   if (id.startsWith("host:")) {
-    return { primary: false, secondary: true };
+    return { primary: false, secondary: true, ab: false };
   }
-  return { primary: true, secondary: false };
+  return { primary: true, secondary: false, ab: false };
 }
 
 export type ToolbarSplit = {
@@ -57,7 +58,9 @@ export type ToolbarSplit = {
   tools: string[];
   /** Ids pinned next to the address bar, in saved order. */
   address: string[];
-  /** Every id pinned to either bar, in saved order. Dragging uses this list. */
+  /** Ids pinned inside the address field, to the left of the bookmark star. */
+  ab: string[];
+  /** Every id pinned to any bar, in saved order. Dragging uses this list. */
   all: string[];
 };
 
@@ -74,18 +77,19 @@ export function saveBuiltinEnabled(settings: BrowserSettings, id: string, enable
   return saveSettings({ ...settings, disabledBuiltinTools });
 }
 
-/** Splits pinned built-in tools and enabled extensions across the two bars. An id can be on both. */
+/** Splits pinned built-in tools and enabled extensions across the bars. An id can be on more than one. */
 export function splitToolbar(settings: BrowserSettings | null, extensionIds: string[]): ToolbarSplit {
   const builtinIds = BUILTIN_TOOLS.map((tool) => tool.id).filter((id) => builtinToolEnabled(settings, id));
   const extras = extensionIds.filter((id) => !builtinIds.includes(id));
   const available = [...builtinIds, ...extras].filter((id) => {
     const place = toolbarPlacement(settings, id);
-    return place.primary || place.secondary;
+    return place.primary || place.secondary || place.ab;
   });
   const all = toolbarOrder(settings?.toolbarOrder, available);
   return {
     tools: all.filter((id) => toolbarPlacement(settings, id).secondary),
     address: all.filter((id) => toolbarPlacement(settings, id).primary),
+    ab: all.filter((id) => toolbarPlacement(settings, id).ab),
     all,
   };
 }
@@ -190,7 +194,7 @@ export function toolbarDragHandlers(id: string, onMove: (from: string, to: strin
 export function saveToolbarPlacement(settings: BrowserSettings, id: string, placement: ToolbarPlacement) {
   const toolbarPlacements = { ...(settings.toolbarPlacements ?? {}), [id]: placement };
   const hidden = (settings.hiddenToolbarExtensions ?? []).filter((item) => item !== id);
-  if (!placement.primary && !placement.secondary) {
+  if (!placement.primary && !placement.secondary && !placement.ab) {
     hidden.push(id);
   }
   return saveSettings({ ...settings, toolbarPlacements, hiddenToolbarExtensions: hidden });

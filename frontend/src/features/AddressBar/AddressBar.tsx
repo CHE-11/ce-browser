@@ -81,6 +81,7 @@ import { IconButton } from "../../components/IconButton";
 import { LoadBar } from "../../components/LoadBar";
 import { WindowControls } from "../../components/WindowControls";
 import { AddressBarExtensions } from "./AddressBarExtensions";
+import { AddressBarFieldExtensions } from "./AddressBarFieldExtensions";
 import { ProfileSwitcherButton } from "./ProfileSwitcherButton";
 
 type AddressBarProps = {
@@ -921,15 +922,15 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
 
   const toolbarExtensions = extensions.filter((extension) => extension.enabled);
   const hostIds = hostToolbarIds(useHostExtensions().extensions);
-  const { address: addressExtensions, all: toolbarOrderIds } = splitToolbar(settings, [
+  const { address: addressExtensions, ab: fieldExtensions, all: toolbarOrderIds } = splitToolbar(settings, [
     ...toolbarExtensions.map((extension) => extension.id),
     ...hostIds,
   ]);
-  const moveToolbar = (from: string, dropIndex: number) => {
+  const moveToolbar = (visible: string[], from: string, dropIndex: number) => {
     if (!settings) {
       return;
     }
-    const next = reorderToolbarAt(toolbarOrderIds, addressExtensions, from, dropIndex);
+    const next = reorderToolbarAt(toolbarOrderIds, visible, from, dropIndex);
     if (next) {
       void saveSettings({ ...settings, toolbarOrder: next });
     }
@@ -1197,6 +1198,13 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
             <Mic id="address-microphone-icon" className="size-3.5" aria-hidden />
           </button>
         ) : null}
+        <AddressBarFieldExtensions
+          fieldExtensions={fieldExtensions}
+          toolbarExtensions={toolbarExtensions}
+          activeTab={activeTab}
+          settings={settings}
+          onMove={(from, dropIndex) => moveToolbar(fieldExtensions, from, dropIndex)}
+        />
         <button
           id="address-star"
           ref={starRef}
@@ -1220,7 +1228,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         toolbarExtensions={toolbarExtensions}
         activeTab={activeTab}
         settings={settings}
-        onMove={moveToolbar}
+        onMove={(from, dropIndex) => moveToolbar(addressExtensions, from, dropIndex)}
       />
       
       <div id="address-extensions-end" className="mx-0.5 h-4 w-px shrink-0 bg-zinc-600" />

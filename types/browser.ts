@@ -978,12 +978,14 @@ export type BookmarkDividerLine = "solid" | "dashed" | "dotted" | "double";
 /** Ends of a bookmark divider. */
 export type BookmarkDividerShape = "square" | "round" | "pill";
 
-/** Where a tool or extension is shown. Both can be set. Both clear means unpinned. */
+/** Where a tool or extension is shown. Any combination can be set. All clear means unpinned. */
 export type ToolbarPlacement = {
   /** Shown next to the address bar. */
   primary: boolean;
   /** Shown on the tools toolbar. */
   secondary: boolean;
+  /** Shown inside the address field, to the left of the bookmark star. */
+  ab: boolean;
 };
 
 export type BrowserSettings = {

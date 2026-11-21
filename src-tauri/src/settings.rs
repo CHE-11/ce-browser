@@ -372,12 +372,14 @@ fn clean_input_id(raw: &str) -> String {
         .collect()
 }
 
-/// Where one tool or extension is shown. Both can be set. Both clear means unpinned.
+/// Where one tool or extension is shown. Any combination can be set. All clear means unpinned.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ToolbarPlacement {
     pub primary: bool,
     pub secondary: bool,
+    /// Shown inside the address field, to the left of the bookmark star.
+    pub ab: bool,
 }
 
 impl Default for ToolbarPlacement {
@@ -385,6 +387,7 @@ impl Default for ToolbarPlacement {
         Self {
             primary: false,
             secondary: false,
+            ab: false,
         }
     }
 }
@@ -3370,6 +3373,7 @@ fn normalize_toolbar_placements(
             .and_modify(|kept: &mut ToolbarPlacement| {
                 kept.primary |= placement.primary;
                 kept.secondary |= placement.secondary;
+                kept.ab |= placement.ab;
             })
             .or_insert(placement);
     }
@@ -4221,15 +4225,17 @@ mod tests {
 
     fn toolbar_placements_keep_a_pin_on_both_bars() {
         let loaded: super::BrowserSettings = serde_json::from_str(
-            r#"{"toolbarPlacements":{" price ":{"primary":true,"secondary":true},"print-pdf":{"primary":true}," ":{"primary":true}}}"#,
+            r#"{"toolbarPlacements":{" price ":{"primary":true,"secondary":true},"print-pdf":{"primary":true}," ":{"primary":true},"shopping":{"ab":true}}}"#,
         )
         .expect("settings parse");
         let loaded = loaded.normalize();
         assert_eq!(loaded.toolbar_placements.len(), 2);
         assert!(loaded.toolbar_placements["shopping"].primary);
         assert!(loaded.toolbar_placements["shopping"].secondary);
+        assert!(loaded.toolbar_placements["shopping"].ab);
         assert!(loaded.toolbar_placements["print-pdf"].primary);
         assert!(!loaded.toolbar_placements["print-pdf"].secondary);
+        assert!(!loaded.toolbar_placements["print-pdf"].ab);
     }
 
     #[test]

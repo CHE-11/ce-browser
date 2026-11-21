@@ -11,10 +11,11 @@ type PinPlacementProps = {
 };
 
 export function PinPlacement({ id, placement, disabled, onChange }: PinPlacementProps) {
-  const unpinned = !placement.primary && !placement.secondary;
+  const unpinned = !placement.primary && !placement.secondary && !placement.ab;
   const options = [
     { value: "primary" as const, label: "P", name: "Primary", pressed: placement.primary, title: "Primary: show next to the address bar" },
     { value: "secondary" as const, label: "S", name: "Secondary", pressed: placement.secondary, title: "Secondary: show on the tools toolbar" },
+    { value: "ab" as const, label: "AB", name: "Address bar", pressed: placement.ab, title: "Address bar: show to the left of the bookmark star" },
     { value: "unpinned" as const, label: "", name: "Unpin", pressed: unpinned, title: "Unpin" },
   ];
   return (
@@ -29,14 +30,15 @@ export function PinPlacement({ id, placement, disabled, onChange }: PinPlacement
           disabled={disabled}
           title={option.title}
           className={cn(
-            "grid size-6 place-items-center rounded text-xs text-zinc-400 hover:text-zinc-100 disabled:hover:text-zinc-400",
+            "grid h-6 place-items-center rounded text-xs text-zinc-400 hover:text-zinc-100 disabled:hover:text-zinc-400",
+            option.value === "ab" ? "px-1" : "w-6",
             focusRing,
             option.pressed && "bg-zinc-700 text-zinc-100",
           )}
           onClick={() => {
             if (option.value === "unpinned") {
               if (!unpinned) {
-                onChange({ primary: false, secondary: false });
+                onChange({ primary: false, secondary: false, ab: false });
               }
               return;
             }
