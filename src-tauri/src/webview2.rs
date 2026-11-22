@@ -2215,6 +2215,28 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                             tabs::open_background_link(&message_app, id, url);
                         }
                     }
+                    Some("ce-form-post") => {
+                        let field = |name: &str| {
+                            message
+                                .get(name)
+                                .and_then(|value| value.as_str())
+                                .unwrap_or("")
+                        };
+                        let body = base64::engine::general_purpose::STANDARD
+                            .decode(field("body"))
+                            .ok();
+                        if let Some(body) = body {
+                            let page = read_pwstr(|value| args.Source(value));
+                            tabs::open_form_post(
+                                &message_app,
+                                id,
+                                field("url"),
+                                &page,
+                                field("contentType"),
+                                body,
+                            );
+                        }
+                    }
                     Some("ce-notify") => {
                         let title = message
                             .get("title")
@@ -4454,6 +4476,26 @@ pub fn run_script(webview: &Webview, script: &str) {
                 None::<&ICoreWebView2ExecuteScriptCompletedHandler>,
             )
         };
+    });
+}
+
+/// Navigates `webview` to `url` with a POST of `body`. `headers` are `\r\n`-separated.
+pub fn navigate_post(webview: &Webview, url: &str, headers: &str, body: Vec<u8>) {
+    let url = HSTRING::from(url);
+    let headers = HSTRING::from(headers);
+    with_core(webview, move |core| unsafe {
+        let core2 = core.cast::<ICoreWebView2_2>()?;
+        let environment = core2.Environment()?.cast::<ICoreWebView2Environment2>()?;
+        let Some(stream) = windows::Win32::UI::Shell::SHCreateMemStream(Some(&body)) else {
+            return Ok(());
+        };
+        let request = environment.CreateWebResourceRequest(
+            &url,
+            windows::core::w!("POST"),
+            &stream,
+            &headers,
+        )?;
+        core2.NavigateWithWebResourceRequest(&request)
     });
 }
 

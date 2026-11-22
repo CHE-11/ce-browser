@@ -1614,6 +1614,7 @@ fn build_page_view(app: &AppHandle, id: u32, label: &str, url: Url) -> Result<We
         .initialization_script(AUTOPLAY_GUARD_SCRIPT)
         .initialization_script(page_background_script(app))
         .initialization_script(PEEK_CLICK_SCRIPT)
+        .initialization_script(FORM_POST_SCRIPT)
         .initialization_script(ZOOM_WHEEL_SCRIPT)
         .on_page_load(move |_, payload| {
             // Back, Forward, or Stop already left this document. A late completion must
@@ -2172,6 +2173,152 @@ const PEEK_CLICK_SCRIPT: &str = r#"(function () {
     host.postMessage({ type: "ce-peek", url: href });
   }, true);
 })();"#;
+
+/// A POST form aimed at `_blank` (store hand-offs such as ExpertVoice's "Visit brand") is
+/// cancelled and posted to the browser, which replays it in a new tab with `open_form_post`.
+/// WebView2 can only carry the form body into a top-level window it is handed, and a tab is a
+/// child view, so the new-window request alone would reopen the action URL as an empty GET.
+const FORM_POST_SCRIPT: &str = r#"(function () {
+  if (!/^https?:$/.test(location.protocol)) return;
+  var LIMIT = 16 * 1024 * 1024;
+  var proto = HTMLFormElement.prototype;
+  var nativeSubmit = proto.submit;
+  function read(name, form) {
+    var descriptor = Object.getOwnPropertyDescriptor(proto, name);
+    return descriptor && descriptor.get ? descriptor.get.call(form) : "";
+  }
+  function pick(submitter, attr, name, form) {
+    if (submitter && submitter.hasAttribute && submitter.hasAttribute(attr)) return submitter[name];
+    return read(name, form);
+  }
+  function opensTab(form, submitter) {
+    var target = submitter && submitter.hasAttribute && submitter.hasAttribute("formtarget")
+      ? submitter.getAttribute("formtarget")
+      : form.getAttribute("target");
+    if (target === null) {
+      var base = document.querySelector("base[target]");
+      target = base ? base.getAttribute("target") : "";
+    }
+    return String(target || "").trim().toLowerCase() === "_blank";
+  }
+  function entries(data) {
+    var list = [];
+    data.forEach(function (value, key) {
+      list.push([key, typeof value === "string" ? value : value.name]);
+    });
+    return list;
+  }
+  function encode(action, type, data) {
+    if (type === "multipart/form-data") {
+      var request = new Request(action, { method: "POST", body: data });
+      var header = request.headers.get("content-type") || type;
+      return request.arrayBuffer().then(function (buffer) {
+        return { type: header, bytes: new Uint8Array(buffer) };
+      });
+    }
+    var text = type === "text/plain"
+      ? entries(data).map(function (pair) { return pair[0] + "=" + pair[1] + "\r\n"; }).join("")
+      : new URLSearchParams(entries(data)).toString();
+    return Promise.resolve({ type: type, bytes: new TextEncoder().encode(text) });
+  }
+  function base64(bytes) {
+    var out = "";
+    for (var i = 0; i < bytes.length; i += 0x8000) {
+      out += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(out);
+  }
+  function replay(form, submitter) {
+    var host = window.__ceHost || (window.chrome && window.chrome.webview);
+    if (!host || !(form instanceof HTMLFormElement)) return false;
+    if (String(pick(submitter, "formmethod", "formMethod", form) || read("method", form)).toLowerCase() !== "post") return false;
+    if (!opensTab(form, submitter)) return false;
+    var action = pick(submitter, "formaction", "formAction", form) || read("action", form);
+    if (!/^https?:/i.test(action)) return false;
+    var type = String(pick(submitter, "formenctype", "formEnctype", form) || read("enctype", form)).toLowerCase();
+    var data;
+    try { data = new FormData(form, submitter || undefined); } catch (error) { data = new FormData(form); }
+    encode(action, type, data).then(function (body) {
+      if (body.bytes.length > LIMIT) throw new Error("form too large");
+      host.postMessage({ type: "ce-form-post", url: action, contentType: body.type, body: base64(body.bytes) });
+    }).catch(function () {
+      nativeSubmit.call(form);
+    });
+    return true;
+  }
+  window.addEventListener("submit", function (event) {
+    if (event.defaultPrevented) return;
+    if (replay(event.target, event.submitter)) event.preventDefault();
+  });
+  proto.submit = function () {
+    if (!replay(this, null)) return nativeSubmit.call(this);
+  };
+})();"#;
+
+/// Largest form body `open_form_post` replays. Matches `LIMIT` in `FORM_POST_SCRIPT`.
+const FORM_POST_LIMIT: usize = 16 * 1024 * 1024;
+
+/// Opens a tab beside `opener` and sends the form from `FORM_POST_SCRIPT` there as a POST.
+/// The tab starts blank so the action URL is never requested without its body.
+pub fn open_form_post(app: &AppHandle, opener: u32, action: &str, page: &str, content_type: &str, body: Vec<u8>) {
+    let Some(url) = http_link(action).and_then(|url| Url::parse(&url).ok()) else {
+        return;
+    };
+    if body.len() > FORM_POST_LIMIT {
+        return;
+    }
+    let Some(headers) = form_post_headers(page, &url, content_type) else {
+        return;
+    };
+    let Ok(blank) = Url::parse("about:blank") else {
+        return;
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Ok(id) = open_beside(&app, opener, blank, false) else {
+            return;
+        };
+        crate::automation::effects::remember_tab(opener, id);
+        if let Some(webview) = page_view(&app, id) {
+            webview2::navigate_post(&webview, url.as_str(), &headers, body);
+        }
+    });
+}
+
+/// Request headers a browser sends with a form POST from `page` to `action`, with the
+/// default `strict-origin-when-cross-origin` referrer. `None` for a content type that is not
+/// one of the three form encodings.
+fn form_post_headers(page: &str, action: &Url, content_type: &str) -> Option<String> {
+    let content_type = content_type.trim();
+    let lower = content_type.to_ascii_lowercase();
+    let known = lower == "application/x-www-form-urlencoded"
+        || lower == "text/plain"
+        || lower.starts_with("multipart/form-data; boundary=");
+    if !known || content_type.chars().any(|c| c.is_control()) {
+        return None;
+    }
+    let mut headers = format!("Content-Type: {content_type}");
+    let Ok(mut page) = Url::parse(page) else {
+        return Some(headers);
+    };
+    if !matches!(page.scheme(), "http" | "https") {
+        return Some(headers);
+    }
+    page.set_fragment(None);
+    let origin = page.origin().ascii_serialization();
+    headers.push_str(&format!("\r\nOrigin: {origin}"));
+    let referrer = if page.origin() == action.origin() {
+        Some(page.to_string())
+    } else if page.scheme() == "https" && action.scheme() == "http" {
+        None
+    } else {
+        Some(format!("{origin}/"))
+    };
+    if let Some(referrer) = referrer {
+        headers.push_str(&format!("\r\nReferer: {referrer}"));
+    }
+    Some(headers)
+}
 
 /// How long the page message and the new-window request for one Ctrl+Shift+click count as
 /// the same open.
