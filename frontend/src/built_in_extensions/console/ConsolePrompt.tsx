@@ -7,7 +7,13 @@ type ConsolePromptProps = {
   origin: string;
   busy: boolean;
   onRun: (source: string) => void;
+  /** Text size relative to the default 13px. */
+  scale: number;
 };
+
+function fontOptions(scale: number) {
+  return { fontSize: Math.round(13 * scale), lineHeight: Math.round(20 * scale) };
+}
 
 const HISTORY_LIMIT = 100;
 const tabsByModel = new Map<string, () => number | null>();
@@ -97,7 +103,7 @@ function registerProvider(monaco: typeof Monaco) {
 }
 
 /** A JavaScript prompt. Enter runs it in the page. Up and down walk what you ran here before. */
-export function ConsolePrompt({ tabId, origin, busy, onRun }: ConsolePromptProps) {
+export function ConsolePrompt({ tabId, origin, busy, onRun, scale }: ConsolePromptProps) {
   const host = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
@@ -108,10 +114,16 @@ export function ConsolePrompt({ tabId, origin, busy, onRun }: ConsolePromptProps
   const busyRef = useRef(busy);
   const runRef = useRef(onRun);
   const originRef = useRef(origin);
+  const scaleRef = useRef(scale);
   tabRef.current = tabId;
   busyRef.current = busy;
   runRef.current = onRun;
   originRef.current = origin;
+  scaleRef.current = scale;
+
+  useEffect(() => {
+    editorRef.current?.updateOptions(fontOptions(scale));
+  }, [scale]);
 
   useEffect(() => {
     historyRef.current = readHistory(origin);
@@ -155,8 +167,7 @@ export function ConsolePrompt({ tabId, origin, busy, onRun }: ConsolePromptProps
         renderLineHighlight: "none",
         scrollBeyondLastLine: false,
         wordWrap: "on",
-        fontSize: 13,
-        lineHeight: 20,
+        ...fontOptions(scaleRef.current),
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
         padding: { top: 6, bottom: 6 },
         fixedOverflowWidgets: true,
@@ -253,7 +264,7 @@ export function ConsolePrompt({ tabId, origin, busy, onRun }: ConsolePromptProps
 
   return (
     <div id="console-prompt" className="flex min-h-0 flex-1 bg-zinc-900">
-      <span id="console-prompt-mark" className="select-none pl-3 pt-[7px] font-mono text-sm text-sky-400" aria-hidden>
+      <span id="console-prompt-mark" style={{ fontSize: fontOptions(scale).fontSize }} className="select-none pl-3 pt-[7px] font-mono text-sky-400" aria-hidden>
         ›
       </span>
       <div id="console-prompt-editor" ref={host} className="min-h-0 min-w-0 flex-1" />

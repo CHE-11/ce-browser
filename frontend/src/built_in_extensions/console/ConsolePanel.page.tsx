@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AppWindow, Clock, Crosshair, Terminal, Trash2, X } from "lucide-react";
+import { AppWindow, Clock, Crosshair, Minus, Plus, Terminal, Trash2, X } from "lucide-react";
 import type { TabsSnapshot } from "@type/browser";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
@@ -61,6 +61,27 @@ function writeFlag(key: string, value: boolean) {
   }
 }
 
+const FONT_SCALES = [0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.6, 1.8];
+const FONT_SCALE_KEY = "ce-console-font-scale";
+
+function readFontScale() {
+  try {
+    const saved = Number(localStorage.getItem(FONT_SCALE_KEY));
+    if (FONT_SCALES.includes(saved)) return saved;
+  } catch {
+    // The panel still works at the default size.
+  }
+  return 1;
+}
+
+function writeFontScale(value: number) {
+  try {
+    localStorage.setItem(FONT_SCALE_KEY, String(value));
+  } catch {
+    // A private window can refuse storage. The size still applies until reload.
+  }
+}
+
 function pageLabel(url: string) {
   if (!url) {
     return "No page";
@@ -116,6 +137,8 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
   const [query, setQuery] = useState("");
   const [preserve, setPreserve] = useState(() => readFlag("ce-console-preserve", false));
   const [timestamps, setTimestamps] = useState(() => readFlag("ce-console-timestamps", true));
+  const [fontScale, setFontScale] = useState(readFontScale);
+  const fontStep = FONT_SCALES.indexOf(fontScale);
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -189,7 +212,14 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
   useEffect(() => {
     let alive = true;
     let stops: UnlistenFn[] = [];
-    const bump = () => setTick((value) => value + 1);
+    let frame = 0;
+    const bump = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        setTick((value) => value + 1);
+      });
+    };
     const pending = Promise.all([
       onConsoleMessage((message) => {
         if (!alive) return;
@@ -244,6 +274,7 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
     });
     return () => {
       alive = false;
+      cancelAnimationFrame(frame);
       void pending.then(() => {
         for (const stop of stops) stop();
       });
@@ -255,7 +286,7 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
     if (node && stick.current) {
       node.scrollTop = node.scrollHeight;
     }
-  }, [tick, activeId, filter, query]);
+  }, [tick, activeId, filter, query, fontScale]);
 
   const run = (source: string) => {
     if (activeId == null) {
@@ -301,6 +332,15 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
     void notifyConsoleCleared(activeId);
   };
 
+  const stepFont = (delta: number) => {
+    const next = FONT_SCALES[fontStep + delta];
+    if (next === undefined) {
+      return;
+    }
+    setFontScale(next);
+    writeFontScale(next);
+  };
+
   const pick = () => {
     if (activeId == null) {
       return;
@@ -323,6 +363,24 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
         <span id="console-panel-origin" className="min-w-0 flex-1 truncate text-xs text-zinc-500" title={active?.url || "No page"}>
           {pageLabel(active?.url ?? "")}
         </span>
+        <IconButton
+          id="console-panel-font-smaller"
+          label={`Smaller text (${Math.round(fontScale * 100)}%)`}
+          className="size-7"
+          disabled={fontStep <= 0}
+          onClick={() => stepFont(-1)}
+        >
+          <Minus id="console-panel-font-smaller-icon" aria-hidden />
+        </IconButton>
+        <IconButton
+          id="console-panel-font-larger"
+          label={`Larger text (${Math.round(fontScale * 100)}%)`}
+          className="size-7"
+          disabled={fontStep >= FONT_SCALES.length - 1}
+          onClick={() => stepFont(1)}
+        >
+          <Plus id="console-panel-font-larger-icon" aria-hidden />
+        </IconButton>
         <IconButton id="console-panel-pick" label={picking ? "Stop picking an element" : "Pick an element"} active={picking} aria-pressed={picking} className="size-7" disabled={activeId == null} onClick={pick}>
           <Crosshair id="console-panel-pick-icon" aria-hidden />
         </IconButton>
@@ -429,22 +487,24 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
             Nothing matches.
           </p>
         ) : (
-          <ConsoleLog
-            entries={shown}
-            tabId={activeId ?? 0}
-            timestamps={timestamps}
-            pageOrigin={origin}
-            closed={closed}
-            onToggleGroup={(key) => {
-              setClosed((groups) => {
-                const next = new Set(groups);
-                if (next.has(key)) next.delete(key);
-                else next.add(key);
-                return next;
-              });
-            }}
-            onStatus={setStatus}
-          />
+          <div id="console-log-scale" style={{ zoom: fontScale }}>
+            <ConsoleLog
+              entries={shown}
+              tabId={activeId ?? 0}
+              timestamps={timestamps}
+              pageOrigin={origin}
+              closed={closed}
+              onToggleGroup={(key) => {
+                setClosed((groups) => {
+                  const next = new Set(groups);
+                  if (next.has(key)) next.delete(key);
+                  else next.add(key);
+                  return next;
+                });
+              }}
+              onStatus={setStatus}
+            />
+          </div>
         )}
       </div>
       {status ? (
@@ -480,7 +540,7 @@ export function ConsolePanelPage({ owner }: { owner: string }) {
             inputDrag.current = null;
           }}
         />
-        <ConsolePrompt tabId={activeId} origin={origin} busy={busy} onRun={run} />
+        <ConsolePrompt tabId={activeId} origin={origin} busy={busy} onRun={run} scale={fontScale} />
         <p id="console-hint" className="shrink-0 bg-zinc-900 px-3 py-1 text-[10px] text-zinc-500">
           {activeId == null
             ? "Open a tab to run JavaScript on a page."

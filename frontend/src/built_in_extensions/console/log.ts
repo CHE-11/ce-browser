@@ -155,6 +155,62 @@ export function counts(entries: Entry[]) {
   return totals;
 }
 
+/** Consecutive messages that only differ by the URLs in them. */
+export type Run = {
+  entries: Entry[];
+  /** Every entry has exactly the same text, so the run shows as one row with a count. */
+  identical: boolean;
+  /** The shared text with each URL replaced by `<URL>`. */
+  summary: string;
+};
+
+const URL_PATTERN = /\b[a-z][a-z0-9+.-]*:\/\/[^\s"'<>)]+/gi;
+
+function runKey(entry: Entry) {
+  if (entry.kind !== "message" || entry.level === "group" || entry.level === "groupCollapsed" || entry.table) {
+    return null;
+  }
+  if (entry.args.some((arg) => arg.objectId !== "")) {
+    return null;
+  }
+  return `${entry.level}\u0000${entry.depth}\u0000${entry.collected}\u0000${entry.text.replace(URL_PATTERN, "<URL>")}`;
+}
+
+/** Folds repeated messages into runs, like the DevTools console does. */
+export function collapseRuns(entries: Entry[]): Run[] {
+  const runs: Run[] = [];
+  let lastKey: string | null = null;
+  for (const entry of entries) {
+    const key = runKey(entry);
+    const last = runs[runs.length - 1];
+    if (key !== null && key === lastKey && last) {
+      last.entries.push(entry);
+      last.identical = last.identical && entry.text === last.entries[0].text;
+      continue;
+    }
+    runs.push({ entries: [entry], identical: true, summary: entry.text.replace(URL_PATTERN, "<URL>") });
+    lastKey = key;
+  }
+  return runs;
+}
+
+function valueText(arg: Entry["args"][number]) {
+  if (arg.type === "string" && typeof arg.value === "string") {
+    return arg.value;
+  }
+  return arg.description || arg.className || arg.type;
+}
+
+/** The row as plain text for the clipboard, with the stack for errors. */
+export function plainText(entry: Entry) {
+  const body = entry.kind === "input" || entry.args.length === 0 ? entry.text : entry.args.map(valueText).join(" ");
+  if (bucket(entry.level) !== "error" || entry.stack.length === 0) {
+    return body;
+  }
+  const frames = entry.stack.map((frame) => `    at ${frame.functionName || "(anonymous)"} (${frame.url}:${frame.line}:${frame.column})`);
+  return [body, ...frames].join("\n");
+}
+
 /** Drops rows that sit inside a collapsed group. */
 export function visibleEntries(entries: Entry[], closed: Set<string>) {
   const floors: number[] = [];

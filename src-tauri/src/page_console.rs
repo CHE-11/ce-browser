@@ -1,8 +1,12 @@
 //! The page console. While a window's console is open it listens to that tab's DevTools
 //! events and evaluates in the page's main world, so values stay as live objects.
+//! Out-of-process frames and workers are auto-attached as child sessions so their messages
+//! show too. Object ids from a child session carry its session id (see [`tag_object`]).
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Mutex, OnceLock};
@@ -14,7 +18,7 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Webview};
 use webview2_com::DevToolsProtocolEventReceivedEventHandler;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
-use windows::core::HSTRING;
+use windows::core::{HSTRING, Interface};
 
 use crate::{tabs, webview2};
 
@@ -27,13 +31,24 @@ const SHORT: Duration = Duration::from_secs(3);
 const COMPLETE_TIMEOUT: Duration = Duration::from_millis(800);
 const FAILURE: &str = "The console could not reach the page.";
 
-const LISTEN: [&str; 5] = [
+const LISTEN: [&str; 8] = [
     "Runtime.consoleAPICalled",
     "Runtime.exceptionThrown",
     "Runtime.executionContextCreated",
     "Runtime.executionContextsCleared",
+    "Log.entryAdded",
+    "Target.attachedToTarget",
+    "Target.detachedFromTarget",
     "Overlay.inspectNodeRequested",
 ];
+
+/// Starts an object id that belongs to a child session: `@<session>/<object id>`.
+/// V8 object ids never start with `@`, and session ids contain no `/`.
+const SESSION_MARK: char = '@';
+
+/// Holds both buffers DevTools replays when the console attaches (up to 1000 each).
+const EVENT_BACKLOG: usize = 4096;
+const SEEN_LIMIT: usize = 4096;
 
 const COMMAND_NAMES: [&str; 10] = [
     "$",
@@ -129,16 +144,25 @@ static EVENTS: OnceLock<SyncSender<Incoming>> = OnceLock::new();
 
 struct Watch {
     generation: u64,
-    contexts: HashMap<i64, String>,
+    /// Execution context origins, keyed by session (empty for the page) and context id.
+    contexts: HashMap<(String, i64), String>,
     default_origin: String,
     global_id: Option<String>,
     picking: bool,
+    /// Attached child sessions and the origin each one was attached at.
+    children: HashMap<String, String>,
+    /// Recent message fingerprints. DevTools replays its backlog again whenever a domain is
+    /// re-enabled or a child target re-attaches, and those copies must not show twice.
+    seen: HashSet<u64>,
+    seen_order: VecDeque<u64>,
 }
 
 struct Incoming {
     generation: u64,
     tab: u32,
     event: &'static str,
+    /// Empty for the page, otherwise the child session the event came from.
+    session: String,
     body: String,
 }
 
@@ -416,8 +440,10 @@ pub fn properties(
         return Ok(Vec::new());
     }
     let webview = watched_view(app, tab)?;
-    let response = cdp(
+    let (session, object_id) = split_object(object_id);
+    let response = cdp_in(
         &webview,
+        session,
         "Runtime.getProperties",
         json!({
             "objectId": object_id,
@@ -438,7 +464,7 @@ pub fn properties(
             continue;
         }
         let value = if let Some(remote) = prop.get("value") {
-            slim_remote(remote)
+            tag_object(session, slim_remote(remote))
         } else if prop.get("get").is_some() {
             ConsoleArg::text("getter", "(getter)")
         } else {
@@ -484,7 +510,8 @@ pub fn json_of(app: &AppHandle, tab: u32, object_id: &str) -> Result<String, Str
         return Ok(String::new());
     }
     let webview = watched_view(app, tab)?;
-    let response = call_on(&webview, object_id, JSON_JS, true)?;
+    let (session, object_id) = split_object(object_id);
+    let response = call_on(&webview, session, object_id, JSON_JS, true)?;
     Ok(response
         .pointer("/result/value")
         .and_then(Value::as_str)
@@ -497,14 +524,16 @@ pub fn reveal(app: &AppHandle, tab: u32, object_id: &str) -> Result<(), String> 
         return Ok(());
     }
     let webview = watched_view(app, tab)?;
+    let (session, object_id) = split_object(object_id);
     call_on(
         &webview,
+        session,
         object_id,
         "function(){ if (this && typeof this.scrollIntoView === 'function') this.scrollIntoView({ block: 'center', inline: 'nearest' }); }",
         false,
     )?;
-    if let Some(backend) = backend_of(&webview, object_id) {
-        flash_node(app, tab, backend);
+    if let Some(backend) = backend_of(&webview, session, object_id) {
+        flash_node(app, tab, session, backend);
     }
     Ok(())
 }
@@ -537,7 +566,7 @@ pub fn pick(app: &AppHandle, tab: u32, enabled: bool) -> Result<bool, String> {
 fn events(app: &AppHandle) -> SyncSender<Incoming> {
     EVENTS
         .get_or_init(|| {
-            let (tx, rx) = mpsc::sync_channel(512);
+            let (tx, rx) = mpsc::sync_channel(EVENT_BACKLOG);
             let app = app.clone();
             thread::spawn(move || pump(app, rx));
             tx
@@ -551,15 +580,102 @@ fn pump(app: AppHandle, rx: Receiver<Incoming>) {
             continue;
         }
         match incoming.event {
-            "Runtime.executionContextCreated" => {
-                note_context(incoming.tab, incoming.generation, &incoming.body)
-            }
-            "Runtime.executionContextsCleared" => clear_contexts(incoming.tab, incoming.generation),
+            "Runtime.executionContextCreated" => note_context(&incoming),
+            "Runtime.executionContextsCleared" => clear_contexts(&incoming),
             "Runtime.consoleAPICalled" => on_console(&app, &incoming),
             "Runtime.exceptionThrown" => on_exception(&app, &incoming),
+            "Log.entryAdded" => on_log(&app, &incoming),
+            "Target.attachedToTarget" => on_attached(&app, &incoming),
+            "Target.detachedFromTarget" => on_detached(&incoming),
             "Overlay.inspectNodeRequested" => on_inspect(&app, &incoming),
             _ => {}
         }
+    }
+}
+
+fn auto_attach(enabled: bool) -> Value {
+    json!({
+        "autoAttach": enabled,
+        "waitForDebuggerOnStart": false,
+        "flatten": true,
+    })
+}
+
+/// Turns on the domains the console reads in the page or in one child session. Runtime and
+/// Log replay the messages they buffered before the console attached.
+fn enable_session(webview: &Webview, session: &str) -> Result<(), String> {
+    cdp_in(webview, session, "Runtime.enable", json!({}), SHORT)?;
+    if let Err(error) = cdp_in(webview, session, "Log.enable", json!({}), SHORT) {
+        eprintln!("console Log.enable: {error}");
+    }
+    if let Err(error) = cdp_in(webview, session, "Target.setAutoAttach", auto_attach(true), SHORT) {
+        eprintln!("console auto-attach: {error}");
+    }
+    Ok(())
+}
+
+fn on_attached(app: &AppHandle, incoming: &Incoming) {
+    let Ok(body) = serde_json::from_str::<Value>(&incoming.body) else {
+        return;
+    };
+    let Some(session) = body.get("sessionId").and_then(Value::as_str) else {
+        return;
+    };
+    let url = body
+        .pointer("/targetInfo/url")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    {
+        let mut guard = watches();
+        let Some(watch) = guard.as_mut().expect("watches").get_mut(&incoming.tab) else {
+            return;
+        };
+        if watch.generation != incoming.generation {
+            return;
+        }
+        watch
+            .children
+            .insert(session.to_string(), origin_of_url(url));
+    }
+    let app = app.clone();
+    let tab = incoming.tab;
+    let session = session.to_string();
+    thread::spawn(move || {
+        if let Some(webview) = tabs::page_view(&app, tab)
+            && let Err(error) = enable_session(&webview, &session)
+        {
+            eprintln!("console child session: {error}");
+        }
+    });
+}
+
+fn on_detached(incoming: &Incoming) {
+    let Ok(body) = serde_json::from_str::<Value>(&incoming.body) else {
+        return;
+    };
+    let Some(session) = body.get("sessionId").and_then(Value::as_str) else {
+        return;
+    };
+    let mut guard = watches();
+    let Some(watch) = guard.as_mut().expect("watches").get_mut(&incoming.tab) else {
+        return;
+    };
+    if watch.generation != incoming.generation {
+        return;
+    }
+    watch.children.remove(session);
+    watch.contexts.retain(|(owner, _), _| owner != session);
+}
+
+fn origin_of_url(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return String::new();
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if host.is_empty() {
+        String::new()
+    } else {
+        format!("{scheme}://{host}")
     }
 }
 
@@ -578,10 +694,15 @@ fn on_console(app: &AppHandle, incoming: &Incoming) {
         return;
     }
     let level = level_of(raw).to_string();
+    let session = incoming.session.as_str();
     let args = body
         .get("args")
         .and_then(Value::as_array)
-        .map(|list| list.iter().map(slim_remote).collect::<Vec<_>>())
+        .map(|list| {
+            list.iter()
+                .map(|remote| tag_object(session, slim_remote(remote)))
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default();
     let table = if level == "table" {
         args.first()
@@ -597,13 +718,13 @@ fn on_console(app: &AppHandle, incoming: &Incoming) {
         id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         level,
         timestamp: body.get("timestamp").and_then(Value::as_f64).unwrap_or(0.0),
-        origin: origin_of(incoming.tab, context),
+        origin: origin_of(incoming.tab, session, context),
         text: text_of(&args),
         stack: stack_of(&body),
         table,
         args,
     };
-    let _ = app.emit("console-message", &message);
+    emit_message(app, &message);
 }
 
 fn on_exception(app: &AppHandle, incoming: &Incoming) {
@@ -612,8 +733,9 @@ fn on_exception(app: &AppHandle, incoming: &Incoming) {
     };
     let details = body.get("exceptionDetails").cloned().unwrap_or(Value::Null);
     let remote = details.get("exception").cloned().unwrap_or(Value::Null);
+    let session = incoming.session.as_str();
     let arg = if remote.is_object() {
-        slim_remote(&remote)
+        tag_object(session, slim_remote(&remote))
     } else {
         ConsoleArg::text(
             "error",
@@ -628,18 +750,92 @@ fn on_exception(app: &AppHandle, incoming: &Incoming) {
     } else {
         arg.description.clone()
     };
+    let context = details.get("executionContextId").and_then(Value::as_i64);
     let message = ConsoleMessage {
         tab_id: incoming.tab,
         id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         level: "error".to_string(),
         timestamp: body.get("timestamp").and_then(Value::as_f64).unwrap_or(0.0),
-        origin: String::new(),
+        origin: origin_of(incoming.tab, session, context),
         text,
         stack: stack_of(&details),
         table: None,
         args: vec![arg],
     };
-    let _ = app.emit("console-message", &message);
+    emit_message(app, &message);
+}
+
+fn emit_message(app: &AppHandle, message: &ConsoleMessage) {
+    if first_sighting(message) {
+        let _ = app.emit("console-message", message);
+    }
+}
+
+fn first_sighting(message: &ConsoleMessage) -> bool {
+    if message.timestamp == 0.0 {
+        return true;
+    }
+    let mut hasher = DefaultHasher::new();
+    message.level.hash(&mut hasher);
+    message.timestamp.to_bits().hash(&mut hasher);
+    message.text.hash(&mut hasher);
+    if let Some(frame) = message.stack.first() {
+        (&frame.url, frame.line, frame.column).hash(&mut hasher);
+    }
+    let key = hasher.finish();
+    let mut guard = watches();
+    let Some(watch) = guard.as_mut().expect("watches").get_mut(&message.tab_id) else {
+        return true;
+    };
+    if !watch.seen.insert(key) {
+        return false;
+    }
+    watch.seen_order.push_back(key);
+    if watch.seen_order.len() > SEEN_LIMIT
+        && let Some(old) = watch.seen_order.pop_front()
+    {
+        watch.seen.remove(&old);
+    }
+    true
+}
+
+/// Messages the browser itself logs: failed loads, blocked scripts, CSP, deprecations.
+fn on_log(app: &AppHandle, incoming: &Incoming) {
+    let Ok(body) = serde_json::from_str::<Value>(&incoming.body) else {
+        return;
+    };
+    let Some(entry) = body.get("entry") else {
+        return;
+    };
+    let level = match entry.get("level").and_then(Value::as_str).unwrap_or("") {
+        "error" => "error",
+        "warning" => "warn",
+        "info" => "info",
+        "verbose" => "debug",
+        _ => "log",
+    };
+    let mut text = entry
+        .get("text")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let url = entry.get("url").and_then(Value::as_str).unwrap_or("");
+    let source = entry.get("source").and_then(Value::as_str).unwrap_or("");
+    if source == "network" && !url.is_empty() && !text.contains(url) {
+        text = format!("{text} {url}");
+    }
+    let message = ConsoleMessage {
+        tab_id: incoming.tab,
+        id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+        level: level.to_string(),
+        timestamp: entry.get("timestamp").and_then(Value::as_f64).unwrap_or(0.0),
+        origin: origin_of(incoming.tab, &incoming.session, None),
+        text: clip(&text, 2000),
+        stack: stack_of(entry),
+        table: None,
+        args: Vec::new(),
+    };
+    emit_message(app, &message);
 }
 
 fn on_inspect(app: &AppHandle, incoming: &Incoming) {
@@ -668,7 +864,7 @@ fn on_inspect(app: &AppHandle, incoming: &Incoming) {
         eprintln!("console $0: {error}");
     }
     let value = slim_remote(&remote);
-    flash_node(app, incoming.tab, backend);
+    flash_node(app, incoming.tab, "", backend);
     let _ = app.emit(
         "console-picked",
         &ConsolePicked {
@@ -696,8 +892,8 @@ fn emit_note(app: &AppHandle, tab: u32, text: &str) {
     );
 }
 
-fn note_context(tab: u32, generation: u64, body: &str) {
-    let Ok(value) = serde_json::from_str::<Value>(body) else {
+fn note_context(incoming: &Incoming) {
+    let Ok(value) = serde_json::from_str::<Value>(&incoming.body) else {
         return;
     };
     let Some(id) = value.pointer("/context/id").and_then(Value::as_i64) else {
@@ -713,29 +909,35 @@ fn note_context(tab: u32, generation: u64, body: &str) {
         .and_then(Value::as_bool)
         .unwrap_or(false);
     let mut guard = watches();
-    let Some(watch) = guard.as_mut().expect("watches").get_mut(&tab) else {
+    let Some(watch) = guard.as_mut().expect("watches").get_mut(&incoming.tab) else {
         return;
     };
-    if watch.generation != generation {
+    if watch.generation != incoming.generation {
         return;
     }
-    if is_default {
+    if is_default && incoming.session.is_empty() {
         watch.default_origin.clone_from(&origin);
     }
-    watch.contexts.insert(id, origin);
+    watch
+        .contexts
+        .insert((incoming.session.clone(), id), origin);
 }
 
-fn clear_contexts(tab: u32, generation: u64) {
+fn clear_contexts(incoming: &Incoming) {
     let mut guard = watches();
-    let Some(watch) = guard.as_mut().expect("watches").get_mut(&tab) else {
+    let Some(watch) = guard.as_mut().expect("watches").get_mut(&incoming.tab) else {
         return;
     };
-    if watch.generation != generation {
+    if watch.generation != incoming.generation {
         return;
     }
-    watch.contexts.clear();
-    watch.default_origin.clear();
-    watch.global_id = None;
+    watch
+        .contexts
+        .retain(|(owner, _), _| *owner != incoming.session);
+    if incoming.session.is_empty() {
+        watch.default_origin.clear();
+        watch.global_id = None;
+    }
 }
 
 fn reset_after_navigation(app: &AppHandle, tab: u32) {
@@ -755,18 +957,14 @@ fn reset_after_navigation(app: &AppHandle, tab: u32) {
     if let Some(webview) = tabs::page_view(app, tab) {
         let _ = stop_pick(&webview);
         let _ = release_group(&webview, GROUP);
-        let _ = cdp(&webview, "Runtime.enable", json!({}), SHORT);
+        let _ = enable_session(&webview, "");
     }
 }
 
 fn attach_tab(app: &AppHandle, tab: u32) -> Result<(), String> {
     let webview = crate::automation::driver::view(app, tab)?;
     let generation = GENERATION.fetch_add(1, Ordering::Relaxed);
-    install_listeners(app, &webview, tab, generation)?;
-    if let Err(error) = cdp(&webview, "Runtime.enable", json!({}), SHORT) {
-        uninstall(&webview, tab);
-        return Err(error);
-    }
+    // Registered before enabling: the replayed backlog arrives before `Runtime.enable` answers.
     watches().as_mut().expect("watches").insert(
         tab,
         Watch {
@@ -775,14 +973,29 @@ fn attach_tab(app: &AppHandle, tab: u32) -> Result<(), String> {
             default_origin: String::new(),
             global_id: None,
             picking: false,
+            children: HashMap::new(),
+            seen: HashSet::new(),
+            seen_order: VecDeque::new(),
         },
     );
+    let attached = install_listeners(app, &webview, tab, generation)
+        .and_then(|()| enable_session(&webview, ""));
+    if let Err(error) = attached {
+        watches().as_mut().expect("watches").remove(&tab);
+        uninstall(&webview, tab);
+        return Err(error);
+    }
     Ok(())
 }
 
 fn release_tab(app: &AppHandle, tab: u32) {
     names().as_mut().expect("names").remove(&tab);
-    watches().as_mut().expect("watches").remove(&tab);
+    let children = watches()
+        .as_mut()
+        .expect("watches")
+        .remove(&tab)
+        .map(|watch| watch.children)
+        .unwrap_or_default();
     let Some(webview) = tabs::page_view(app, tab) else {
         drop_handlers(app, tab);
         return;
@@ -791,6 +1004,16 @@ fn release_tab(app: &AppHandle, tab: u32) {
     let _ = stop_pick(&webview);
     let _ = release_group(&webview, GROUP);
     uninstall(&webview, tab);
+    let _ = cdp(&webview, "Target.setAutoAttach", auto_attach(false), SHORT);
+    for session in children.keys() {
+        let _ = cdp(
+            &webview,
+            "Target.detachFromTarget",
+            json!({ "sessionId": session }),
+            SHORT,
+        );
+    }
+    let _ = cdp(&webview, "Log.disable", json!({}), SHORT);
 }
 
 fn tab_in_use(tab: u32) -> bool {
@@ -838,15 +1061,38 @@ fn take_picking(tab: u32) -> bool {
     true
 }
 
-fn origin_of(tab: u32, context: Option<i64>) -> String {
+fn origin_of(tab: u32, session: &str, context: Option<i64>) -> String {
     let guard = watches();
     let Some(watch) = guard.as_ref().expect("watches").get(&tab) else {
         return String::new();
     };
     context
-        .and_then(|id| watch.contexts.get(&id).cloned())
+        .and_then(|id| watch.contexts.get(&(session.to_string(), id)).cloned())
         .filter(|origin| !origin.is_empty())
+        .or_else(|| {
+            watch
+                .children
+                .get(session)
+                .filter(|origin| !origin.is_empty())
+                .cloned()
+        })
         .unwrap_or_else(|| watch.default_origin.clone())
+}
+
+/// Marks a child session's object id so later calls on it reach that session.
+fn tag_object(session: &str, mut arg: ConsoleArg) -> ConsoleArg {
+    if !session.is_empty() && !arg.object_id.is_empty() {
+        arg.object_id = format!("{SESSION_MARK}{session}/{}", arg.object_id);
+    }
+    arg
+}
+
+/// Splits a console object id into its session (empty for the page) and the DevTools id.
+fn split_object(object_id: &str) -> (&str, &str) {
+    object_id
+        .strip_prefix(SESSION_MARK)
+        .and_then(|rest| rest.split_once('/'))
+        .unwrap_or(("", object_id))
 }
 
 fn install_listeners(
@@ -912,10 +1158,15 @@ fn add_listener(
                 };
                 let body = webview2::read_pwstr(|value| args.ParameterObjectAsJson(value));
                 if !body.is_empty() {
+                    let session = args
+                        .cast::<ICoreWebView2DevToolsProtocolEventReceivedEventArgs2>()
+                        .map(|args| webview2::read_pwstr(|value| args.SessionId(value)))
+                        .unwrap_or_default();
                     let _ = sender.try_send(Incoming {
                         generation,
                         tab,
                         event,
+                        session,
                         body,
                     });
                 }
@@ -1088,12 +1339,14 @@ fn global_id(tab: u32, webview: &Webview) -> Result<String, String> {
 
 fn call_on(
     webview: &Webview,
+    session: &str,
     object_id: &str,
     function: &str,
     by_value: bool,
 ) -> Result<Value, String> {
-    cdp(
+    cdp_in(
         webview,
+        session,
         "Runtime.callFunctionOn",
         json!({
             "objectId": object_id,
@@ -1197,7 +1450,8 @@ fn filter_names(names: &[String], prefix: &str) -> Vec<String> {
 
 fn table_of(app: &AppHandle, tab: u32, object_id: &str) -> Option<ConsoleTable> {
     let webview = tabs::page_view(app, tab)?;
-    let response = call_on(&webview, object_id, TABLE_JS, true).ok()?;
+    let (session, object_id) = split_object(object_id);
+    let response = call_on(&webview, session, object_id, TABLE_JS, true).ok()?;
     let data = response.pointer("/result/value")?;
     let columns = data
         .get("columns")?
@@ -1231,9 +1485,10 @@ fn resolve_node(webview: &Webview, backend: u64) -> Result<Value, String> {
     Ok(response.get("object").cloned().unwrap_or(Value::Null))
 }
 
-fn backend_of(webview: &Webview, object_id: &str) -> Option<u64> {
-    let response = cdp(
+fn backend_of(webview: &Webview, session: &str, object_id: &str) -> Option<u64> {
+    let response = cdp_in(
         webview,
+        session,
         "DOM.describeNode",
         json!({ "objectId": object_id }),
         SHORT,
@@ -1244,12 +1499,13 @@ fn backend_of(webview: &Webview, object_id: &str) -> Option<u64> {
         .and_then(Value::as_u64)
 }
 
-fn flash_node(app: &AppHandle, tab: u32, backend: u64) {
+fn flash_node(app: &AppHandle, tab: u32, session: &str, backend: u64) {
     let Some(webview) = tabs::page_view(app, tab) else {
         return;
     };
-    let _ = cdp(
+    let _ = cdp_in(
         &webview,
+        session,
         "Overlay.highlightNode",
         json!({
             "backendNodeId": backend,
@@ -1258,10 +1514,11 @@ fn flash_node(app: &AppHandle, tab: u32, backend: u64) {
         SHORT,
     );
     let app = app.clone();
+    let session = session.to_string();
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(800));
         if let Some(webview) = tabs::page_view(&app, tab) {
-            let _ = cdp(&webview, "Overlay.hideHighlight", json!({}), SHORT);
+            let _ = cdp_in(&webview, &session, "Overlay.hideHighlight", json!({}), SHORT);
         }
     });
 }
@@ -1309,6 +1566,16 @@ fn highlight_config() -> Value {
 
 fn cdp(webview: &Webview, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
     webview2::call_cdp_json(webview, method, &params.to_string(), timeout, FAILURE)
+}
+
+fn cdp_in(
+    webview: &Webview,
+    session: &str,
+    method: &str,
+    params: Value,
+    timeout: Duration,
+) -> Result<Value, String> {
+    webview2::call_cdp_json_in(webview, session, method, &params.to_string(), timeout, FAILURE)
 }
 
 fn level_of(kind: &str) -> &'static str {
@@ -1651,7 +1918,26 @@ fn in_code_span(source: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{Query, completion_query};
+    use super::{ConsoleArg, Query, completion_query, origin_of_url, split_object, tag_object};
+
+    #[test]
+    fn child_object_ids_round_trip() {
+        let mut arg = ConsoleArg::text("object", "Window");
+        arg.object_id = "-4.1.7".into();
+        let tagged = tag_object("8F1A", arg.clone());
+        assert_eq!(split_object(&tagged.object_id), ("8F1A", "-4.1.7"));
+        assert_eq!(tag_object("", arg).object_id, "-4.1.7");
+        assert_eq!(split_object("{\"id\":2}"), ("", "{\"id\":2}"));
+    }
+
+    #[test]
+    fn origin_of_url_keeps_scheme_and_host() {
+        assert_eq!(
+            origin_of_url("https://ads.example.com:8443/frame.html?x=1"),
+            "https://ads.example.com:8443"
+        );
+        assert_eq!(origin_of_url("about:blank"), "");
+    }
 
     #[test]
     fn completion_reads_a_member_and_a_global() {

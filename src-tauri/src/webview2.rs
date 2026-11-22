@@ -4711,7 +4711,21 @@ pub fn call_cdp_json(
     timeout: Duration,
     failure: &str,
 ) -> std::result::Result<serde_json::Value, String> {
+    call_cdp_json_in(webview, "", method, params, timeout, failure)
+}
+
+/// Like [`call_cdp_json`], sent to an attached child target (an out-of-process frame or a
+/// worker) when `session` is not empty.
+pub fn call_cdp_json_in(
+    webview: &Webview,
+    session: &str,
+    method: &str,
+    params: &str,
+    timeout: Duration,
+    failure: &str,
+) -> std::result::Result<serde_json::Value, String> {
     let (tx, rx) = mpsc::channel::<std::result::Result<String, String>>();
+    let session = session.to_string();
     let method = method.to_string();
     let params = params.to_string();
     let message = failure.to_string();
@@ -4738,9 +4752,22 @@ pub fn call_cdp_json(
             ));
             let method = HSTRING::from(method);
             let params = HSTRING::from(params);
-            if let Err(error) =
+            let sent = if session.is_empty() {
                 unsafe { core.CallDevToolsProtocolMethod(&method, &params, &handler) }
-            {
+            } else {
+                match core.cast::<ICoreWebView2_11>() {
+                    Ok(core) => unsafe {
+                        core.CallDevToolsProtocolMethodForSession(
+                            &HSTRING::from(session),
+                            &method,
+                            &params,
+                            &handler,
+                        )
+                    },
+                    Err(error) => Err(error),
+                }
+            };
+            if let Err(error) = sent {
                 let _ = tx.send(Err(format!("{message} {error}")));
             }
         })
