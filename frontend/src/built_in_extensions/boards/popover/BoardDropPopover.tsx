@@ -3,13 +3,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Check, ImagePlus, LoaderCircle, Plus } from "lucide-react";
 import { Button } from "@/components/Button";
 import { PopupFrame } from "@/components/PopupFrame";
-import { closePopup, createBoard, sendBoardDropSignal, showNotice } from "@/lib/browser-client";
+import { closePopup, createBoardFolder, sendBoardDropSignal, showNotice } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { PopoverHeader } from "../../PopoverParts";
 import { readPopoverTab } from "../../shared";
 import { errorText } from "../../use-page-tool";
-import { boardChoices, boardLabel } from "../board-tree";
-import { isBoardFileDrag, readBoardDrop, saveBoardDrop, savedDropMessage, type BoardDropPayload } from "../drop-save";
+import { folderTargetName } from "../FolderPicker";
+import { UNCATEGORIZED, folderChoices } from "../folder-tree";
+import { isBoardFileDrag, isEmptyDrop, readBoardDrop, saveBoardDrop, savedDropMessage, type BoardDropPayload, type SavedDrop } from "../drop-save";
 import { useBoards } from "../use-boards";
 
 const SAVED_MS = 700;
@@ -20,17 +21,10 @@ const nameClass =
 
 type Row = { id: string; label: string };
 
-type DropHit = { elementId: string; boardId: string; fresh: boolean };
+type DropHit = { elementId: string; folderId: string; fresh: boolean };
 
 function rowDomId(id: string) {
   return `board-drop-row-${id}`;
-}
-
-function boardIdFromTarget(value: string | undefined) {
-  if (!value || value === "unsorted") {
-    return "";
-  }
-  return value;
 }
 
 function hitAt(target: EventTarget | null): DropHit | null {
@@ -39,9 +33,9 @@ function hitAt(target: EventTarget | null): DropHit | null {
     return null;
   }
   if (element.dataset.dropTarget === NEW_TARGET) {
-    return { elementId: element.id, boardId: "", fresh: true };
+    return { elementId: element.id, folderId: "", fresh: true };
   }
-  return { elementId: element.id, boardId: boardIdFromTarget(element.dataset.dropTarget), fresh: false };
+  return { elementId: element.id, folderId: element.dataset.dropTarget || UNCATEGORIZED, fresh: false };
 }
 
 export function BoardDropPopover({ params }: { params: URLSearchParams }) {
@@ -66,19 +60,14 @@ export function BoardDropPopover({ params }: { params: URLSearchParams }) {
   boardsRef.current = boards;
   tabIdRef.current = tab.id;
 
-  const choices = boardChoices(boards);
-  const lastId = boards.lastBoardId && choices.some((choice) => choice.board.id === boards.lastBoardId) ? boards.lastBoardId : "";
-  const rows: Row[] = choices
-    .map((choice) => ({ id: choice.board.id, label: choice.label }))
-    .sort((left, right) => {
-      if (left.id === lastId) {
-        return -1;
-      }
-      if (right.id === lastId) {
-        return 1;
-      }
-      return left.label.localeCompare(right.label, undefined, { sensitivity: "base", numeric: true });
-    });
+  const choices = folderChoices(boards);
+  const lastId = boards.lastFolderId && choices.some((choice) => choice.folder.id === boards.lastFolderId) ? boards.lastFolderId : UNCATEGORIZED;
+  const folderRows = choices.map((choice) => ({ id: choice.folder.id, label: choice.label }));
+  const last = folderRows.find((row) => row.id === lastId);
+  const uncategorized: Row = { id: UNCATEGORIZED, label: "Uncategorized" };
+  const rows: Row[] = last
+    ? [last, uncategorized, ...folderRows.filter((row) => row.id !== lastId)]
+    : [uncategorized, ...folderRows];
   const hotRow = rows.find((row) => rowDomId(row.id) === hot);
 
   useEffect(
@@ -115,21 +104,11 @@ export function BoardDropPopover({ params }: { params: URLSearchParams }) {
       void sendBoardDropSignal(state);
     };
 
-    const nameFor = (boardId: string) => {
-      const snapshot = boardsRef.current;
-      const board = snapshot.boards.find((item) => item.id === boardId);
-      if (board) {
-        return boardLabel(snapshot, board);
-      }
-      return boardId ? "board" : "Unsorted";
-    };
-
-    const saved = (boardId: string, result: { pins: { boardId: string }[]; skipped: number }) => {
+    const saved = (folderId: string, result: SavedDrop) => {
       if (!alive.current) {
         return;
       }
-      const savedId = result.pins[0]?.boardId || boardId;
-      const text = savedDropMessage(result.pins.length, nameFor(savedId), result.skipped);
+      const text = savedDropMessage(result, folderTargetName(boardsRef.current, folderId));
       setPhase("saved");
       setMessage(text);
       void showNotice(text).catch(() => undefined);
@@ -150,13 +129,13 @@ export function BoardDropPopover({ params }: { params: URLSearchParams }) {
       setMessage(errorText(error));
     };
 
-    const finish = (boardId: string, drop: BoardDropPayload) => {
+    const finish = (folderId: string, drop: BoardDropPayload) => {
       hold.current = true;
       mark("over");
       setPhase("saving");
       setMessage("");
-      void saveBoardDrop(drop, boardId, tabIdRef.current)
-        .then((result) => saved(boardId, result))
+      void saveBoardDrop(drop, folderId, tabIdRef.current)
+        .then((result) => saved(folderId, result))
         .catch(fail);
     };
 
@@ -197,10 +176,10 @@ export function BoardDropPopover({ params }: { params: URLSearchParams }) {
       mark("over");
       setHot(target.elementId);
       if (target.fresh) {
-        if (drop.files.length === 0 && drop.paths.length === 0 && drop.imageUrls.length === 0 && drop.links.length === 0) {
+        if (isEmptyDrop(drop)) {
           hold.current = false;
           setPhase("error");
-          setMessage("Drop an image, file, or link.");
+          setMessage("Drop an image, file, folder or link.");
           return;
         }
         pending.current = drop;
@@ -210,7 +189,7 @@ export function BoardDropPopover({ params }: { params: URLSearchParams }) {
         setPhase("name");
         return;
       }
-      finish(target.boardId, drop);
+      finish(target.folderId, drop);
     };
 
     const onDragLeave = (event: DragEvent) => {
@@ -254,13 +233,13 @@ export function BoardDropPopover({ params }: { params: URLSearchParams }) {
     setMessage("");
     void (async () => {
       try {
-        const boardId = createdId.current ?? (await createBoard(trimmed, null)).id;
-        createdId.current = boardId;
-        const result = await saveBoardDrop(drop, boardId, tabIdRef.current);
+        const folderId = createdId.current ?? (await createBoardFolder(trimmed, null)).id;
+        createdId.current = folderId;
+        const result = await saveBoardDrop(drop, folderId, tabIdRef.current);
         if (!alive.current) {
           return;
         }
-        const text = savedDropMessage(result.pins.length, trimmed, result.skipped);
+        const text = savedDropMessage(result, trimmed);
         setPhase("saved");
         setMessage(text);
         await showNotice(text).catch(() => undefined);
@@ -290,7 +269,7 @@ export function BoardDropPopover({ params }: { params: URLSearchParams }) {
 
   const subtitle =
     phase === "name"
-      ? "Name the new board"
+      ? "Name the new folder"
       : phase === "saving"
         ? "Saving…"
         : phase === "saved"
@@ -298,10 +277,10 @@ export function BoardDropPopover({ params }: { params: URLSearchParams }) {
           : phase === "error"
             ? "Couldn't save that"
             : hot === "board-drop-new"
-              ? "Release to add a new board"
+              ? "Release to add a new folder"
               : hotRow
                 ? `Release to save to ${hotRow.label}`
-                : "Drop on a board";
+                : "Drop on a folder";
 
   return (
     <PopupFrame id="board-drop" width={300} maxHeight={520} ready={loaded}>
@@ -318,13 +297,13 @@ export function BoardDropPopover({ params }: { params: URLSearchParams }) {
               }}
             >
               <label id="board-drop-name-label" htmlFor="board-drop-name" className="text-xs text-zinc-400">
-                Board name
+                Folder name
               </label>
               <input
                 id="board-drop-name"
                 ref={nameRef}
                 value={name}
-                placeholder="New board name"
+                placeholder="New folder name"
                 className={nameClass}
                 onChange={(event) => setName(event.target.value)}
               />
@@ -361,7 +340,7 @@ export function BoardDropPopover({ params }: { params: URLSearchParams }) {
               </p>
             </div>
           ) : (
-            <ul id="board-drop-list" className="flex max-h-72 flex-col gap-0.5 overflow-y-auto" aria-label="Boards">
+            <ul id="board-drop-list" className="flex max-h-72 flex-col gap-0.5 overflow-y-auto" aria-label="Folders">
               {rows.map((row) => {
                 const domId = rowDomId(row.id);
                 const active = hot === domId;
@@ -398,7 +377,7 @@ export function BoardDropPopover({ params }: { params: URLSearchParams }) {
                 >
                   <Plus id="board-drop-new-icon" className="size-4 shrink-0" aria-hidden />
                   <span id="board-drop-new-label" className="min-w-0 flex-1 truncate">
-                    Add new board
+                    Add new folder
                   </span>
                 </div>
               </li>

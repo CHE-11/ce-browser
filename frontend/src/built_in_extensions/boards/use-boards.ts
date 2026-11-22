@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { listBoards, onBoardsChanged } from "@/lib/browser-client";
 import type { BoardsSnapshot } from "@type/browser";
-import { EMPTY_BOARDS } from "./board-tree";
+import { EMPTY_BOARDS } from "./folder-tree";
 
-/** Folders, boards and pins, kept current through `boards-changed`. */
+/** Folders and pins, kept current through `boards-changed`. */
 export function useBoards() {
   const [boards, setBoards] = useState<BoardsSnapshot>(EMPTY_BOARDS);
   const [loaded, setLoaded] = useState(false);

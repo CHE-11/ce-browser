@@ -424,43 +424,28 @@ fn list_downloads(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
 
 fn pin_to_board(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     let wanted = arg_str(args, "board");
-    let snapshot = boards::snapshot(ctx.app);
-    let board = if wanted.trim().is_empty() {
-        snapshot
-            .last_board_id
+    let folder = if wanted.trim().is_empty() {
+        let snapshot = boards::snapshot(ctx.app);
+        match snapshot
+            .last_folder_id
             .as_ref()
-            .and_then(|id| snapshot.boards.iter().find(|board| &board.id == id))
-            .or_else(|| snapshot.boards.first())
-            .cloned()
+            .and_then(|id| snapshot.folders.iter().find(|folder| &folder.id == id))
+        {
+            Some(folder) => folder.id.clone(),
+            None => boards::folder_named(ctx.app, "Agent")?,
+        }
     } else {
-        snapshot
-            .boards
-            .iter()
-            .find(|board| board.name.eq_ignore_ascii_case(wanted.trim()))
-            .cloned()
-    };
-    let board = match board {
-        Some(board) => board,
-        None => boards::create_board(
-            ctx.app,
-            if wanted.trim().is_empty() {
-                "Agent"
-            } else {
-                wanted.trim()
-            },
-            None,
-        )?,
+        boards::folder_named(ctx.app, wanted.trim())?
     };
     halt(ctx)?;
-    boards::pin_page(
-        ctx.app,
-        ctx.tab,
-        &board.id,
-        arg_bool(args, "fullPage", false),
-    )?;
+    boards::pin_page(ctx.app, ctx.tab, &folder, arg_bool(args, "fullPage", false))?;
+    let name = boards::snapshot(ctx.app)
+        .folder_name(&folder)
+        .unwrap_or_default()
+        .to_string();
     step(
-        format!("Pin the page to \"{}\"", clip(&board.name, 40)),
-        format!("Pinned to the board \"{}\".", board.name),
+        format!("Pin the page to \"{}\"", clip(&name, 40)),
+        format!("Pinned to the folder \"{name}\"."),
     )
 }
 

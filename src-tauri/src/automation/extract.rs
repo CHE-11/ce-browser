@@ -797,11 +797,10 @@ pub fn to_board(app: &AppHandle, id: &str) -> Result<usize, String> {
     let item = BoardImportItem {
         name,
         mime: "text/csv".into(),
-        url: String::new(),
         data: base64::engine::general_purpose::STANDARD.encode(format!("\u{feff}{csv}")),
-        path: String::new(),
+        ..BoardImportItem::default()
     };
-    boards::import_items(app, "", &[item]).map(|pins| pins.len())
+    boards::import_items(app, "", &[item]).map(|result| result.pins.len())
 }
 
 #[cfg(test)]

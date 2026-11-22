@@ -33,11 +33,14 @@ import type {
   SniffedEndpoint,
   AiKeyStatus,
   BackdropSupport,
-  Board,
   BoardFolder,
   BoardImportItem,
+  BoardImportProgress,
+  BoardImportResult,
   BoardsSnapshot,
+  FolderPatch,
   Pin,
+  PinPatch,
   BookmarkNode,
   ExternalBrowser,
   RewriteRule,
@@ -498,6 +501,18 @@ export function onBoardsChanged(handler: (boards: BoardsSnapshot) => void): Prom
   return listen<BoardsSnapshot>("boards-changed", (event) => handler(event.payload));
 }
 
+const BOARD_ORIGIN = "http://ceboard.localhost";
+
+/** Thumbnail of a pin, served by the `ceboard` protocol. The query changes once Windows makes one. */
+export function boardThumbUrl(pin: Pick<Pin, "id" | "hasThumb">) {
+  return `${BOARD_ORIGIN}/thumb/${pin.id}${pin.hasThumb ? "?t=1" : ""}`;
+}
+
+/** The stored original of a pin, served with range support so video and audio can seek. */
+export function boardFileUrl(pin: Pick<Pin, "id" | "ext">) {
+  return `${BOARD_ORIGIN}/file/${pin.id}${pin.ext ? `.${pin.ext}` : ""}`;
+}
+
 export function createBoardFolder(name: string, parentId: string | null) {
   return invoke<BoardFolder>("create_board_folder", { name, parentId });
 }
@@ -510,71 +525,104 @@ export function moveBoardFolder(id: string, parentId: string | null) {
   return invoke<void>("move_board_folder", { id, parentId });
 }
 
+export function updateBoardFolder(id: string, patch: FolderPatch) {
+  return invoke<void>("update_board_folder", { id, patch });
+}
+
+/** Returns how many pins went to the trash because they were in no other folder. */
 export function deleteBoardFolder(id: string) {
-  return invoke<void>("delete_board_folder", { id });
+  return invoke<number>("delete_board_folder", { id });
 }
 
-export function createBoard(name: string, folderId: string | null) {
-  return invoke<Board>("create_board", { name, folderId });
+export function duplicateBoardFolder(id: string) {
+  return invoke<BoardFolder>("duplicate_board_folder", { id });
 }
 
-export function renameBoard(id: string, name: string) {
-  return invoke<void>("rename_board", { id, name });
+/** Copies the folder's files into `dir`, keeping subfolders. Returns the folder written. */
+export function exportBoardFolder(id: string, dir: string) {
+  return invoke<string>("export_board_folder", { id, dir });
 }
 
-export function moveBoard(id: string, folderId: string | null) {
-  return invoke<void>("move_board", { id, folderId });
+/** Returns how many files were written. */
+export function exportPins(ids: string[], dir: string) {
+  return invoke<number>("export_pins", { ids, dir });
 }
 
-export function setBoardCover(id: string, pinId: string | null) {
-  return invoke<void>("set_board_cover", { id, pinId });
+export function updatePin(id: string, patch: PinPatch) {
+  return invoke<void>("update_pin", { id, patch });
 }
 
-export function deleteBoard(id: string) {
-  return invoke<void>("delete_board", { id });
+export function addPinsToFolder(ids: string[], folderId: string) {
+  return invoke<void>("add_pins_to_folder", { ids, folderId });
 }
 
-export function updatePin(id: string, title: string, note: string) {
-  return invoke<void>("update_pin", { id, title, note });
+export function removePinsFromFolder(ids: string[], folderId: string) {
+  return invoke<void>("remove_pins_from_folder", { ids, folderId });
 }
 
-export function movePins(ids: string[], boardId: string) {
-  return invoke<void>("move_pins", { ids, boardId });
+/** Takes the pins out of `from` (or every folder when null) and puts them in `to`.
+ * `UNCATEGORIZED` as `to` leaves them in no folder. */
+export function movePins(ids: string[], from: string | null, to: string) {
+  return invoke<void>("move_pins", { ids, from, to });
 }
 
-export function deletePins(ids: string[]) {
-  return invoke<void>("delete_pins", { ids });
+export function addPinTags(ids: string[], tags: string[]) {
+  return invoke<void>("add_pin_tags", { ids, tags });
 }
 
-/** An empty `boardId` saves to the last board used. */
-export function pinPage(id: number, boardId: string, fullPage: boolean) {
-  return invoke<Pin>("pin_page", { id, boardId, fullPage });
+export function removePinTags(ids: string[], tags: string[]) {
+  return invoke<void>("remove_pin_tags", { ids, tags });
 }
 
-export function pinRegion(id: number, boardId: string) {
-  return invoke<Pin>("pin_region", { id, boardId });
+/** Renaming onto a tag that exists merges the two. */
+export function renameBoardTag(from: string, to: string) {
+  return invoke<void>("rename_board_tag", { from, to });
 }
 
-export function pinElement(id: number, boardId: string) {
-  return invoke<Pin>("pin_element", { id, boardId });
+export function deleteBoardTag(name: string) {
+  return invoke<void>("delete_board_tag", { name });
 }
 
-export function pinLink(id: number, boardId: string) {
-  return invoke<Pin>("pin_link", { id, boardId });
+export function trashPins(ids: string[]) {
+  return invoke<void>("trash_pins", { ids });
 }
 
-export function pinImages(id: number, boardId: string, urls: string[]) {
-  return invoke<Pin[]>("pin_images", { id, boardId, urls });
+export function restorePins(ids: string[]) {
+  return invoke<void>("restore_pins", { ids });
 }
 
-/** JPEG data URLs by pin id. Pins without an image are left out. */
-export function boardThumbnails(ids: string[]) {
-  return invoke<Record<string, string>>("board_thumbnails", { ids });
+export function deletePinsForever(ids: string[]) {
+  return invoke<void>("delete_pins_forever", { ids });
 }
 
-/** The full PNG of a pin as a data URL. */
-export function boardImage(id: string) {
-  return invoke<string>("board_image", { id });
+/** Returns how many pins were deleted. */
+export function emptyBoardTrash() {
+  return invoke<number>("empty_board_trash");
+}
+
+export function markPinsUsed(ids: string[]) {
+  return invoke<void>("mark_pins_used", { ids });
+}
+
+/** An empty `folderId` saves to the last folder used. */
+export function pinPage(id: number, folderId: string, fullPage: boolean) {
+  return invoke<Pin>("pin_page", { id, folderId, fullPage });
+}
+
+export function pinRegion(id: number, folderId: string) {
+  return invoke<Pin>("pin_region", { id, folderId });
+}
+
+export function pinElement(id: number, folderId: string) {
+  return invoke<Pin>("pin_element", { id, folderId });
+}
+
+export function pinLink(id: number, folderId: string) {
+  return invoke<Pin>("pin_link", { id, folderId });
+}
+
+export function pinImages(id: number, folderId: string, urls: string[]) {
+  return invoke<Pin[]>("pin_images", { id, folderId, urls });
 }
 
 export function copyPinImage(id: string) {
@@ -585,14 +633,33 @@ export function savePinImage(id: string, path: string) {
   return invoke<void>("save_pin_image", { id, path });
 }
 
-/** An empty `boardId` saves to the last board used, or creates Unsorted. */
-export function importBoardItems(boardId: string, items: BoardImportItem[]) {
-  return invoke<Pin[]>("import_board_items", { boardId, items });
+/** An empty `folderId` saves to the last folder used; `UNCATEGORIZED` saves to no folder. */
+export function importBoardItems(folderId: string, items: BoardImportItem[]) {
+  return invoke<BoardImportResult>("import_board_items", { folderId, items });
 }
 
-/** Saves the copied image, files, or links onto a board. An empty `boardId` uses the last board. */
-export function pasteBoardClipboard(boardId: string) {
-  return invoke<Pin[]>("paste_board_clipboard", { boardId });
+/** Imports files and whole folders from disk in the background. Returns the job id that
+ * `board-import-progress` events carry. */
+export function startBoardImport(paths: string[], folderId: string) {
+  return invoke<string>("start_board_import", { paths, folderId });
+}
+
+/** Imports an Eagle `.library` folder in the background. Returns the job id. */
+export function importEagleLibrary(path: string, folderId: string) {
+  return invoke<string>("import_eagle_library", { path, folderId });
+}
+
+export function cancelBoardImport(jobId: string) {
+  return invoke<void>("cancel_board_import", { jobId });
+}
+
+export function onBoardImportProgress(handler: (progress: BoardImportProgress) => void): Promise<UnlistenFn> {
+  return listen<BoardImportProgress>("board-import-progress", (event) => handler(event.payload));
+}
+
+/** Saves the copied image, files, or links. An empty `folderId` uses the last folder. */
+export function pasteBoardClipboard(folderId: string) {
+  return invoke<BoardImportResult>("paste_board_clipboard", { folderId });
 }
 
 /** The boards drop popover is under the pointer, or the drag left it, or it closed itself. */
@@ -616,13 +683,15 @@ export function openPinFile(id: string) {
   return invoke<void>("open_pin_file", { id });
 }
 
+export function revealPinFile(id: string) {
+  return invoke<void>("reveal_pin_file", { id });
+}
+
 export function savePinFile(id: string, path: string) {
   return invoke<void>("save_pin_file", { id, path });
 }
 
-/** Returns null when the dialog is cancelled. */
-export async function pickBoardFiles() {
-  const picked = await open({ multiple: true, title: "Add to board" });
+function pickedPaths(picked: string | string[] | null) {
   if (typeof picked === "string") {
     return [picked];
   }
@@ -630,6 +699,28 @@ export async function pickBoardFiles() {
     return picked;
   }
   return null;
+}
+
+/** Returns null when the dialog is cancelled. */
+export async function pickBoardFiles() {
+  return pickedPaths(await open({ multiple: true, title: "Add files" }));
+}
+
+/** Returns null when the dialog is cancelled. */
+export async function pickBoardFolders() {
+  return pickedPaths(await open({ multiple: true, directory: true, title: "Import folders" }));
+}
+
+/** Returns null when the dialog is cancelled. */
+export async function pickEagleLibrary() {
+  const picked = await open({ directory: true, title: "Choose an Eagle library (.library)" });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** Returns null when the dialog is cancelled. */
+export async function pickExportFolder() {
+  const picked = await open({ directory: true, title: "Export to" });
+  return typeof picked === "string" ? picked : null;
 }
 
 export function listPrices() {

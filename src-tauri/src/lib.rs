@@ -1811,7 +1811,7 @@ fn update_tracked_price(
     prices::update_tracked(&app, patch)
 }
 
-// Boards: pins saved from pages, on boards inside folders.
+// Boards: an asset library of pins in nested folders.
 
 #[tauri::command]
 fn list_boards(app: AppHandle) -> boards::BoardsSnapshot {
@@ -1838,100 +1838,145 @@ fn move_board_folder(app: AppHandle, id: String, parent_id: Option<String>) -> R
 }
 
 #[tauri::command]
-async fn delete_board_folder(app: AppHandle, id: String) -> Result<(), String> {
+fn update_board_folder(
+    app: AppHandle,
+    id: String,
+    patch: boards::FolderPatch,
+) -> Result<(), String> {
+    boards::update_folder(&app, &id, &patch)
+}
+
+#[tauri::command]
+async fn delete_board_folder(app: AppHandle, id: String) -> Result<usize, String> {
     blocking(move || boards::delete_folder(&app, &id)).await
 }
 
 #[tauri::command]
-fn create_board(
+fn duplicate_board_folder(app: AppHandle, id: String) -> Result<boards::BoardFolder, String> {
+    boards::duplicate_folder(&app, &id)
+}
+
+#[tauri::command]
+async fn export_board_folder(app: AppHandle, id: String, dir: String) -> Result<String, String> {
+    blocking(move || {
+        boards::export_folder(&app, &id, &PathBuf::from(dir))
+            .map(|path| path.to_string_lossy().into_owned())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn export_pins(app: AppHandle, ids: Vec<String>, dir: String) -> Result<usize, String> {
+    blocking(move || boards::export_pins(&app, &ids, &PathBuf::from(dir))).await
+}
+
+#[tauri::command]
+fn update_pin(app: AppHandle, id: String, patch: boards::PinPatch) -> Result<(), String> {
+    boards::update_pin(&app, &id, &patch)
+}
+
+#[tauri::command]
+fn add_pins_to_folder(app: AppHandle, ids: Vec<String>, folder_id: String) -> Result<(), String> {
+    boards::add_pins_to_folder(&app, &ids, &folder_id)
+}
+
+#[tauri::command]
+fn remove_pins_from_folder(
     app: AppHandle,
-    name: String,
-    folder_id: Option<String>,
-) -> Result<boards::Board, String> {
-    boards::create_board(&app, &name, folder_id.as_deref())
+    ids: Vec<String>,
+    folder_id: String,
+) -> Result<(), String> {
+    boards::remove_pins_from_folder(&app, &ids, &folder_id)
 }
 
 #[tauri::command]
-fn rename_board(app: AppHandle, id: String, name: String) -> Result<(), String> {
-    boards::rename_board(&app, &id, &name)
+fn move_pins(
+    app: AppHandle,
+    ids: Vec<String>,
+    from: Option<String>,
+    to: String,
+) -> Result<(), String> {
+    boards::move_pins(&app, &ids, from.as_deref(), &to)
 }
 
 #[tauri::command]
-fn move_board(app: AppHandle, id: String, folder_id: Option<String>) -> Result<(), String> {
-    boards::move_board(&app, &id, folder_id.as_deref())
+fn add_pin_tags(app: AppHandle, ids: Vec<String>, tags: Vec<String>) -> Result<(), String> {
+    boards::add_pin_tags(&app, &ids, &tags)
 }
 
 #[tauri::command]
-fn set_board_cover(app: AppHandle, id: String, pin_id: Option<String>) -> Result<(), String> {
-    boards::set_cover(&app, &id, pin_id.as_deref())
+fn remove_pin_tags(app: AppHandle, ids: Vec<String>, tags: Vec<String>) -> Result<(), String> {
+    boards::remove_pin_tags(&app, &ids, &tags)
 }
 
 #[tauri::command]
-async fn delete_board(app: AppHandle, id: String) -> Result<(), String> {
-    blocking(move || boards::delete_board(&app, &id)).await
+fn rename_board_tag(app: AppHandle, from: String, to: String) -> Result<(), String> {
+    boards::rename_tag(&app, &from, &to)
 }
 
 #[tauri::command]
-fn update_pin(app: AppHandle, id: String, title: String, note: String) -> Result<(), String> {
-    boards::update_pin(&app, &id, &title, &note)
+fn delete_board_tag(app: AppHandle, name: String) -> Result<(), String> {
+    boards::delete_tag(&app, &name)
 }
 
 #[tauri::command]
-fn move_pins(app: AppHandle, ids: Vec<String>, board_id: String) -> Result<(), String> {
-    boards::move_pins(&app, &ids, &board_id)
+fn trash_pins(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    boards::trash_pins(&app, &ids)
 }
 
 #[tauri::command]
-async fn delete_pins(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
-    blocking(move || boards::delete_pins(&app, &ids)).await
+fn restore_pins(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    boards::restore_pins(&app, &ids)
+}
+
+#[tauri::command]
+async fn delete_pins_forever(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    blocking(move || boards::delete_pins_forever(&app, &ids)).await
+}
+
+#[tauri::command]
+async fn empty_board_trash(app: AppHandle) -> Result<usize, String> {
+    blocking(move || boards::empty_trash(&app)).await
+}
+
+#[tauri::command]
+fn mark_pins_used(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    boards::mark_used(&app, &ids)
 }
 
 #[tauri::command]
 async fn pin_page(
     app: AppHandle,
     id: u32,
-    board_id: String,
+    folder_id: String,
     full_page: bool,
 ) -> Result<boards::Pin, String> {
-    blocking(move || boards::pin_page(&app, id, &board_id, full_page)).await
+    blocking(move || boards::pin_page(&app, id, &folder_id, full_page)).await
 }
 
 #[tauri::command]
-async fn pin_region(app: AppHandle, id: u32, board_id: String) -> Result<boards::Pin, String> {
-    blocking(move || boards::pin_region(&app, id, &board_id)).await
+async fn pin_region(app: AppHandle, id: u32, folder_id: String) -> Result<boards::Pin, String> {
+    blocking(move || boards::pin_region(&app, id, &folder_id)).await
 }
 
 #[tauri::command]
-async fn pin_element(app: AppHandle, id: u32, board_id: String) -> Result<boards::Pin, String> {
-    blocking(move || boards::pin_element(&app, id, &board_id)).await
+async fn pin_element(app: AppHandle, id: u32, folder_id: String) -> Result<boards::Pin, String> {
+    blocking(move || boards::pin_element(&app, id, &folder_id)).await
 }
 
 #[tauri::command]
-async fn pin_link(app: AppHandle, id: u32, board_id: String) -> Result<boards::Pin, String> {
-    blocking(move || boards::pin_link(&app, id, &board_id)).await
+async fn pin_link(app: AppHandle, id: u32, folder_id: String) -> Result<boards::Pin, String> {
+    blocking(move || boards::pin_link(&app, id, &folder_id)).await
 }
 
 #[tauri::command]
 async fn pin_images(
     app: AppHandle,
     id: u32,
-    board_id: String,
+    folder_id: String,
     urls: Vec<String>,
 ) -> Result<Vec<boards::Pin>, String> {
-    blocking(move || boards::pin_images(&app, id, &board_id, &urls)).await
-}
-
-#[tauri::command]
-async fn board_thumbnails(
-    app: AppHandle,
-    ids: Vec<String>,
-) -> Result<std::collections::HashMap<String, String>, String> {
-    blocking(move || Ok(boards::thumbnails(&app, &ids))).await
-}
-
-#[tauri::command]
-async fn board_image(app: AppHandle, id: String) -> Result<String, String> {
-    blocking(move || boards::image_data_url(&app, &id)).await
+    blocking(move || boards::pin_images(&app, id, &folder_id, &urls)).await
 }
 
 #[tauri::command]
@@ -1947,23 +1992,47 @@ async fn save_pin_image(app: AppHandle, id: String, path: String) -> Result<(), 
 #[tauri::command]
 async fn import_board_items(
     app: AppHandle,
-    board_id: String,
+    folder_id: String,
     items: Vec<boards::BoardImportItem>,
-) -> Result<Vec<boards::Pin>, String> {
-    blocking(move || boards::import_items(&app, &board_id, &items)).await
+) -> Result<boards::BoardImportResult, String> {
+    blocking(move || boards::import_items(&app, &folder_id, &items)).await
+}
+
+#[tauri::command]
+fn start_board_import(
+    app: AppHandle,
+    paths: Vec<String>,
+    folder_id: String,
+) -> Result<String, String> {
+    boards::start_import(&app, paths, &folder_id)
+}
+
+#[tauri::command]
+fn import_eagle_library(app: AppHandle, path: String, folder_id: String) -> Result<String, String> {
+    boards::import_eagle_library(&app, &path, &folder_id)
+}
+
+#[tauri::command]
+fn cancel_board_import(job_id: String) {
+    boards::cancel_import(&job_id);
 }
 
 #[tauri::command]
 async fn paste_board_clipboard(
     app: AppHandle,
-    board_id: String,
-) -> Result<Vec<boards::Pin>, String> {
-    blocking(move || boards::paste_clipboard(&app, &board_id)).await
+    folder_id: String,
+) -> Result<boards::BoardImportResult, String> {
+    blocking(move || boards::paste_clipboard(&app, &folder_id)).await
 }
 
 #[tauri::command]
 async fn open_pin_file(app: AppHandle, id: String) -> Result<(), String> {
     blocking(move || boards::open_pin_file(&app, &id)).await
+}
+
+#[tauri::command]
+async fn reveal_pin_file(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(move || boards::reveal_pin_file(&app, &id)).await
 }
 
 #[tauri::command]
@@ -3080,6 +3149,11 @@ pub fn run() {
         .plugin(page_dialogs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .register_asynchronous_uri_scheme_protocol("ceboard", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            let label = ctx.webview_label().to_string();
+            std::thread::spawn(move || responder.respond(boards::serve(&app, &label, &request)));
+        })
         .setup(|app| {
             let handle = app.handle().clone();
             debug::init(&handle);
@@ -3117,6 +3191,7 @@ pub fn run() {
             status::init(&handle);
             tab_sleep::init(&handle);
             update::init(&handle);
+            boards::init(&handle);
             build_window(&handle)?;
             extension_popouts::start(&handle);
             host_extensions::start(&handle);
@@ -3489,27 +3564,38 @@ pub fn run() {
             create_board_folder,
             rename_board_folder,
             move_board_folder,
+            update_board_folder,
             delete_board_folder,
-            create_board,
-            rename_board,
-            move_board,
-            set_board_cover,
-            delete_board,
+            duplicate_board_folder,
+            export_board_folder,
+            export_pins,
             update_pin,
+            add_pins_to_folder,
+            remove_pins_from_folder,
             move_pins,
-            delete_pins,
+            add_pin_tags,
+            remove_pin_tags,
+            rename_board_tag,
+            delete_board_tag,
+            trash_pins,
+            restore_pins,
+            delete_pins_forever,
+            empty_board_trash,
+            mark_pins_used,
             pin_page,
             pin_region,
             pin_element,
             pin_link,
             pin_images,
-            board_thumbnails,
-            board_image,
             copy_pin_image,
             save_pin_image,
             import_board_items,
+            start_board_import,
+            import_eagle_library,
+            cancel_board_import,
             paste_board_clipboard,
             open_pin_file,
+            reveal_pin_file,
             save_pin_file,
             find_deals,
             find_deals_for_product,

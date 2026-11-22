@@ -1887,10 +1887,32 @@ export type PageToolRequest =
       tabId: number;
       title: string;
       url: string;
-      boardId: string;
+      /** Empty saves to the last folder used. */
+      folderId: string;
     };
 
 export type PinKind = "page" | "region" | "element" | "link" | "image" | "file";
+
+export type FolderColor =
+  | "gray"
+  | "red"
+  | "orange"
+  | "yellow"
+  | "green"
+  | "aqua"
+  | "blue"
+  | "purple"
+  | "pink";
+
+export type PinSort =
+  | "newest"
+  | "oldest"
+  | "title"
+  | "kind"
+  | "size"
+  | "rating"
+  | "dimensions"
+  | "extension";
 
 /** One file, image or link sent to `import_board_items`. */
 export type BoardImportItem = {
@@ -1901,31 +1923,65 @@ export type BoardImportItem = {
   data: string;
   /** Local path from the file picker. Empty for a drop, paste or link. */
   path: string;
+  /** Folder path inside the target ("a/b") for files dropped as part of a folder. */
+  relativeDir?: string;
 };
 
-/** A folder on `ce://boards`. Folders nest; `parentId` is null at the top level. */
+export type BoardImportResult = {
+  pins: Pin[];
+  /** Files skipped because the same file is already in that folder. */
+  duplicates: number;
+  failed: number;
+};
+
+/** Sent as `board-import-progress` while a folder or Eagle library import runs. */
+export type BoardImportProgress = {
+  jobId: string;
+  total: number;
+  done: number;
+  imported: number;
+  duplicates: number;
+  failed: number;
+  /** File being read, or a step such as "Reading folders". */
+  current: string;
+  finished: boolean;
+  cancelled: boolean;
+  /** First error, when a file couldn't be added. */
+  error: string;
+  /** Folder made for the first picked folder, to open when the import ends. */
+  folderId: string | null;
+};
+
+/** A folder on `ce://boards`. Folders nest and hold pins; `parentId` is null at the top level. */
 export type BoardFolder = {
   id: string;
   name: string;
   parentId: string | null;
   createdAt: number;
-};
-
-export type Board = {
-  id: string;
-  name: string;
-  /** Null when the board sits at the top level. */
-  folderId: string | null;
-  /** Pin whose image shows for the board. Null uses the newest pin. */
-  coverPinId: string | null;
-  createdAt: number;
   updatedAt: number;
+  description: string;
+  /** One of `FOLDER_COLORS`, or empty for the default. */
+  color: FolderColor | "";
+  /** A lucide icon name, or empty for the folder icon. */
+  icon: string;
+  /** Pin whose image shows for the folder. Null uses the newest pins. */
+  coverPinId: string | null;
+  /** One of `PIN_SORTS`, or empty to use the page's sort. */
+  sort: PinSort | "";
+  /** The folder view also lists pins in its subfolders. */
+  showSubfolders: boolean;
 };
 
-/** One saved item on a board. Times are milliseconds since the epoch. */
+export type PaletteColor = {
+  /** `#rrggbb`. */
+  color: string;
+  /** Share of the image, 0 to 1. */
+  ratio: number;
+};
+
+/** One saved item. Times are milliseconds since the epoch. */
 export type Pin = {
   id: string;
-  boardId: string;
   kind: PinKind;
   title: string;
   /** Page the pin was saved from. */
@@ -1935,21 +1991,61 @@ export type Pin = {
   /** Section text or link description. */
   text: string;
   note: string;
+  /** The stored original is an image the app can decode. */
   hasImage: boolean;
+  /** A file pin with a thumbnail from Windows. */
+  hasThumb: boolean;
   width: number;
   height: number;
   createdAt: number;
   /** Original name for a file pin, and for an image added from a file. */
   fileName: string;
   mime: string;
+  /** Empty means Uncategorized. */
+  folderIds: string[];
+  tags: string[];
+  /** 0 to 5 stars. */
+  rating: number;
+  palette: PaletteColor[];
+  /** Extension of the stored original, lowercase without the dot. */
+  ext: string;
+  /** Bytes of the stored original. */
+  size: number;
+  /** Same hash, same file. Empty until the file has been read. */
+  hash: string;
+  fileModifiedAt: number;
+  lastOpenedAt: number;
+  /** Set while the pin is in the trash. */
+  deletedAt: number | null;
 };
 
 export type BoardsSnapshot = {
   folders: BoardFolder[];
-  boards: Board[];
+  /** Newest first. */
   pins: Pin[];
-  /** Board the toolbar and the page menu save to by default. */
-  lastBoardId: string | null;
+  /** Folder the toolbar and the page menu save to. Null saves to Uncategorized. */
+  lastFolderId: string | null;
+};
+
+/** Changes to a folder. Fields left out stay as they are. */
+export type FolderPatch = {
+  name?: string;
+  description?: string;
+  color?: FolderColor | "";
+  icon?: string;
+  sort?: PinSort | "";
+  showSubfolders?: boolean;
+  /** An empty id clears the cover. */
+  coverPinId?: string;
+};
+
+/** Changes to a pin. Fields left out stay as they are. */
+export type PinPatch = {
+  title?: string;
+  note?: string;
+  linkUrl?: string;
+  rating?: number;
+  tags?: string[];
 };
 
 /** A tab's document copied for the print editor: no scripts, absolute URLs. */

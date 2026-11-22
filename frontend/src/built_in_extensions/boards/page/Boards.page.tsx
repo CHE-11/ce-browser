@@ -1,116 +1,203 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
-import { LayoutGrid, SearchX } from "lucide-react";
+import { ClipboardPaste, Clock, FilePlus, FolderInput, FolderPlus, LayoutGrid, SearchX, SquareMousePointer, Trash2 } from "lucide-react";
 import { Button } from "@/components/Button";
+import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ContextMenu";
 import { Dialog } from "@/components/Dialog";
 import { EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/Skeleton";
 import {
+  addPinsToFolder,
+  cancelBoardImport,
   copyPinImage,
   copyText,
+  createBoardFolder,
   createTab,
-  deleteBoard,
   deleteBoardFolder,
-  deletePins,
+  deletePinsForever,
+  duplicateBoardFolder,
+  emptyBoardTrash,
+  exportBoardFolder,
+  exportPins,
   importBoardItems,
+  importEagleLibrary,
+  markPinsUsed,
+  moveBoardFolder,
   movePins,
+  onBoardImportProgress,
   openPinFile,
+  pasteBoardClipboard,
   pickBoardFiles,
-  setBoardCover,
+  pickBoardFolders,
+  pickEagleLibrary,
+  pickExportFolder,
+  removePinsFromFolder,
+  renameBoardFolder,
+  restorePins,
+  revealPinFile,
   showNotice,
+  startBoardImport,
+  trashPins,
+  updateBoardFolder,
+  updatePin,
 } from "@/lib/browser-client";
 import { useAppearanceFromSettings } from "@/lib/use-browser";
-import type { BoardImportItem, Pin, PinKind } from "@type/browser";
+import type { BoardFolder, BoardImportProgress, BoardImportResult, Pin, PinSort } from "@type/browser";
 import { errorText } from "@/built_in_extensions/use-page-tool";
-import { BoardCards } from "../BoardCards";
-import { BoardHeader } from "../BoardHeader";
-import { BoardsSidebar } from "./BoardsSidebar";
+import { FolderCards } from "../grid/FolderCards";
+import { PinGrid, type PinListHandlers, type SelectMode } from "../grid/PinGrid";
+import { PinTable } from "../grid/PinTable";
 import { MoveMenu } from "../MoveMenu";
-import { PinDialog } from "../PinDialog";
-import { PinGrid, type PinActions, type SelectMode } from "../PinGrid";
-import { PinTable } from "../PinTable";
-import {
-  DRAG_PINS,
-  folderContents,
-  pinAddress,
-  pinMatches,
-  pinsInFolder,
-  pinsOnBoard,
-  readPinSort,
-  readPinView,
-  sortPins,
-  writePinSort,
-  writePinView,
-  type BoardsScope,
-  type PinSort,
-  type PinView,
-} from "../board-tree";
 import { savePinFileAs } from "../file-pin";
-import { MAX_IMPORT, filesToImports, linksInText, linksToImports, pathsToImports } from "../import-items";
+import { EMPTY_FILTER, activeFilterCount, applyFilter, type PinFilter } from "../filters";
+import { DRAG_PINS, UNCATEGORIZED, childFolders, folderContents, livePins, pinAddress, pinMatches, sortPins } from "../folder-tree";
+import { importFiles, linksInText, linksToImports } from "../import-items";
+import { dropEntries, walkEntries, type DroppedFile } from "../import/walk-drop";
+import { sameScope, scopeExists, scopeFromParams, scopeHasOwnOrder, scopeKey, scopeLabel, scopePins, scopeSaveTarget, type BoardsScope } from "../scopes";
 import { useBoards } from "../use-boards";
+import { readViewPrefs, writeViewPrefs, type ViewPrefs } from "../view-prefs";
+import { BoardsSidebar, type PinDropTarget } from "./BoardsSidebar";
+import { BoardsToolbar } from "./BoardsToolbar";
+import { FilterBar } from "./FilterBar";
+import { FolderContextMenu } from "./FolderContextMenu";
+import { ImportProgress } from "./ImportProgress";
+import { Inspector } from "./Inspector";
+import { PinContextMenu, type PinMenuActions } from "./PinContextMenu";
+import { PinViewer } from "./PinViewer";
+import { TagsView } from "./TagsView";
 
-type Confirm = { kind: "pins"; ids: string[] } | { kind: "board"; id: string } | { kind: "folder"; id: string };
+type Confirm = { kind: "forever"; ids: string[] } | { kind: "empty-trash" } | { kind: "folder"; id: string };
+type MoveMenuState = { ids: string[]; x: number; y: number; mode: "add" | "move" };
+type History = { stack: BoardsScope[]; index: number };
+
+const OPEN_LIMIT = 20;
+const HISTORY_LIMIT = 50;
+const DONE_JOB_MS = 8000;
+const USED_DELAY_MS = 800;
 
 function isTyping(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
 }
 
-const OPEN_LIMIT = 20;
-
-function isFileDrag(event: DragEvent) {
+/** Files or links dragged in from outside, not pins dragged within the page. */
+function isOutsideDrag(event: DragEvent) {
   const types = [...event.dataTransfer.types];
-  return types.includes("Files") && !types.includes(DRAG_PINS);
+  return !types.includes(DRAG_PINS) && (types.includes("Files") || types.includes("text/uri-list"));
+}
+
+function plural(count: number, one: string, many = `${one}s`) {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
+function savedMessage(result: Pick<BoardImportResult, "duplicates" | "failed"> & { saved: number }, where: string) {
+  const parts = [result.saved > 0 ? `Saved ${plural(result.saved, "item")} to ${where}.` : "Nothing new was saved."];
+  if (result.duplicates > 0) {
+    parts.push(`${plural(result.duplicates, "item was", "items were")} already there.`);
+  }
+  if (result.failed > 0) {
+    parts.push(`${plural(result.failed, "item")} couldn't be read.`);
+  }
+  return parts.join(" ");
 }
 
 export function BoardsPage({ params }: { params: URLSearchParams }) {
   useAppearanceFromSettings();
   const { boards, loaded } = useBoards();
-  const requestedBoard = params.get("board");
-  const [scope, setScope] = useState<BoardsScope>(() => (requestedBoard ? { kind: "board", id: requestedBoard } : { kind: "all" }));
+  const requestedFolder = params.get("folder") ?? params.get("board");
+  const [history, setHistory] = useState<History>(() => ({ stack: [scopeFromParams(params)], index: 0 }));
+  const scope = history.stack[history.index];
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<PinFilter>(EMPTY_FILTER);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [prefs, setPrefs] = useState<ViewPrefs>(readViewPrefs);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [openPinId, setOpenPinId] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [moveMenu, setMoveMenu] = useState<{ ids: string[]; x: number; y: number } | null>(null);
+  const [anchorId, setAnchorId] = useState<string | null>(null);
+  const [viewerId, setViewerId] = useState<string | null>(null);
+  const [pinMenu, setPinMenu] = useState<{ ids: string[]; x: number; y: number } | null>(null);
+  const [folderMenu, setFolderMenu] = useState<{ folder: BoardFolder; x: number; y: number } | null>(null);
+  const [backgroundMenu, setBackgroundMenu] = useState<{ x: number; y: number } | null>(null);
+  const [moveMenu, setMoveMenu] = useState<MoveMenuState | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
-  const [error, setError] = useState("");
-  const [view, setView] = useState<PinView>(readPinView);
-  const [sort, setSort] = useState<PinSort>(readPinSort);
-  const [kind, setKind] = useState<PinKind | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameFolder, setRenameFolder] = useState<{ id: string; name: string } | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkValue, setLinkValue] = useState("");
+  const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
-  const lastPicked = useRef<string | null>(null);
-  const importing = useRef(false);
+  const [jobs, setJobs] = useState<BoardImportProgress[]>([]);
   const dragDepth = useRef(0);
-  const fileDrag = useRef(false);
-  const queryRef = useRef(query);
+  const cancelledDrops = useRef(new Set<string>());
+  const jobScopes = useRef(new Map<string, string>());
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
+
+  const fail = useCallback((reason: unknown) => setError(errorText(reason)), []);
 
   useEffect(() => {
     document.title = "Boards";
   }, []);
 
-  useEffect(() => {
-    if (requestedBoard) {
-      setScope({ kind: "board", id: requestedBoard });
-    }
-  }, [requestedBoard]);
+  const go = useCallback((next: BoardsScope) => {
+    setHistory((current) => {
+      const here = current.stack[current.index];
+      if (next.kind === "random" && here.kind === "random") {
+        const stack = [...current.stack];
+        stack[current.index] = next;
+        return { stack, index: current.index };
+      }
+      if (sameScope(here, next)) {
+        return current;
+      }
+      const stack = [...current.stack.slice(0, current.index + 1), next].slice(-HISTORY_LIMIT);
+      return { stack, index: stack.length - 1 };
+    });
+  }, []);
 
   useEffect(() => {
-    if (!loaded) {
-      return;
+    if (requestedFolder) {
+      go({ kind: "folder", id: requestedFolder });
     }
-    const exists =
-      scope.kind === "all" ||
-      (scope.kind === "board" ? boards.boards.some((board) => board.id === scope.id) : boards.folders.some((folder) => folder.id === scope.id));
-    if (!exists) {
-      setScope({ kind: "all" });
+  }, [requestedFolder, go]);
+
+  useEffect(() => {
+    if (loaded && !scopeExists(boards, scope)) {
+      setHistory((current) => {
+        const stack = [...current.stack];
+        stack[current.index] = { kind: "all" };
+        return { stack, index: current.index };
+      });
     }
   }, [loaded, boards, scope]);
 
+  const currentKey = scopeKey(scope);
   useEffect(() => {
     setSelected(new Set());
-    lastPicked.current = null;
-  }, [scope]);
+    setAnchorId(null);
+    setViewerId(null);
+  }, [currentKey]);
+
+  const updatePrefs = useCallback((patch: Partial<ViewPrefs>) => {
+    setPrefs((current) => {
+      const next = { ...current, ...patch };
+      writeViewPrefs(next);
+      return next;
+    });
+  }, []);
+
+  const library = useMemo(() => livePins(boards), [boards]);
+  const base = useMemo(() => scopePins(boards, scope), [boards, scope]);
+  const folder = scope.kind === "folder" ? boards.folders.find((item) => item.id === scope.id) : undefined;
+  const folderSort: PinSort | null = folder?.sort ? folder.sort : null;
+  const sort: PinSort | null = scopeHasOwnOrder(scope) ? null : (folderSort ?? prefs.sort);
+  const searched = useMemo(() => (query.trim() ? base.filter((pin) => pinMatches(pin, query)) : base), [base, query]);
+  const shown = useMemo(() => {
+    const filtered = applyFilter(searched, filter, library);
+    return sort ? sortPins(filtered, sort) : filtered;
+  }, [searched, filter, library, sort]);
+  const subfolders = useMemo(() => (scope.kind === "folder" && !query.trim() ? childFolders(boards, scope.id) : []), [boards, scope, query]);
+  const filterCount = activeFilterCount(filter);
+  const inTrash = scope.kind === "trash";
+  const saveTarget = scopeSaveTarget(scope);
+  const saveTargetName = saveTarget === UNCATEGORIZED ? "Uncategorized" : scopeLabel(boards, scope);
 
   useEffect(() => {
     const ids = new Set(boards.pins.map((pin) => pin.id));
@@ -118,280 +205,539 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
       const kept = [...current].filter((id) => ids.has(id));
       return kept.length === current.size ? current : new Set(kept);
     });
-    if (openPinId && !ids.has(openPinId)) {
-      setOpenPinId(null);
-    }
-  }, [boards, openPinId]);
+  }, [boards]);
 
-  const inScope = useMemo(() => {
-    return scope.kind === "board" ? pinsOnBoard(boards, scope.id) : scope.kind === "folder" ? pinsInFolder(boards, scope.id) : boards.pins;
-  }, [boards, scope]);
-
-  const scopePins = useMemo(() => {
-    const matched = inScope.filter((pin) => pinMatches(pin, query) && (kind === null || pin.kind === kind));
-    return sortPins(matched, sort);
-  }, [inScope, query, kind, sort]);
+  const pinsById = useMemo(() => new Map(boards.pins.map((pin) => [pin.id, pin])), [boards]);
+  const selectedPins = useMemo(() => shown.filter((pin) => selected.has(pin.id)), [shown, selected]);
+  const anchor = anchorId ? shown.findIndex((pin) => pin.id === anchorId) : -1;
+  const viewerIndex = viewerId ? shown.findIndex((pin) => pin.id === viewerId) : -1;
 
   useEffect(() => {
-    if (queryRef.current && !query) {
-      setKind(null);
+    if (viewerId && viewerIndex < 0) {
+      setViewerId(null);
     }
-    queryRef.current = query;
-  }, [query]);
+  }, [viewerId, viewerIndex]);
 
-  const fail = useCallback((reason: unknown) => setError(errorText(reason)), []);
+  useEffect(() => {
+    if (!viewerId) {
+      return;
+    }
+    const timer = window.setTimeout(() => void markPinsUsed([viewerId]).catch(() => undefined), USED_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [viewerId]);
 
-  const select = (pin: Pin, mode: SelectMode) => {
-    setSelected((current) => {
-      const next = new Set(current);
-      const anchor = lastPicked.current ? scopePins.findIndex((item) => item.id === lastPicked.current) : -1;
-      const index = scopePins.findIndex((item) => item.id === pin.id);
-      if (mode === "range" && anchor >= 0 && index >= 0) {
-        const [from, to] = anchor < index ? [anchor, index] : [index, anchor];
-        for (const item of scopePins.slice(from, to + 1)) {
-          next.add(item.id);
-        }
-      } else if (next.has(pin.id)) {
-        next.delete(pin.id);
-      } else {
-        next.add(pin.id);
+  const overlayOpen = Boolean(viewerId || pinMenu || folderMenu || backgroundMenu || moveMenu || confirm || linkOpen || renameFolder);
+
+  // Import jobs
+
+  const upsertJob = useCallback((progress: BoardImportProgress) => {
+    setJobs((current) => {
+      const index = current.findIndex((job) => job.jobId === progress.jobId);
+      if (index < 0) {
+        return [...current, progress];
       }
+      const next = [...current];
+      next[index] = progress;
       return next;
     });
-    lastPicked.current = pin.id;
+    if (progress.finished && !progress.error && progress.failed === 0) {
+      window.setTimeout(() => setJobs((current) => current.filter((job) => job.jobId !== progress.jobId)), DONE_JOB_MS);
+    }
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void onBoardImportProgress((progress) => {
+      upsertJob(progress);
+      if (progress.finished && !progress.cancelled && progress.folderId) {
+        const started = jobScopes.current.get(progress.jobId);
+        jobScopes.current.delete(progress.jobId);
+        if (started && started === scopeKey(scopeRef.current)) {
+          go({ kind: "folder", id: progress.folderId });
+        }
+      }
+    }).then((stop) => {
+      if (disposed) {
+        stop();
+      } else {
+        unlisten = stop;
+      }
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [upsertJob, go]);
+
+  const trackJob = useCallback(
+    (jobId: string) => {
+      jobScopes.current.set(jobId, scopeKey(scopeRef.current));
+      setJobs((current) =>
+        current.some((job) => job.jobId === jobId)
+          ? current
+          : [
+              ...current,
+              { jobId, total: 0, done: 0, imported: 0, duplicates: 0, failed: 0, current: "", finished: false, cancelled: false, error: "", folderId: null },
+            ],
+      );
+    },
+    [],
+  );
+
+  const importPaths = useCallback(
+    (paths: string[]) => {
+      if (paths.length === 0) {
+        return;
+      }
+      void startBoardImport(paths, saveTarget).then(trackJob).catch(fail);
+    },
+    [saveTarget, trackJob, fail],
+  );
+
+  const importDropped = useCallback(
+    (files: DroppedFile[]) => {
+      if (files.length === 0) {
+        return;
+      }
+      const jobId = `drop-${Date.now()}`;
+      const target = saveTarget;
+      void importFiles(files, target, jobId, upsertJob, () => cancelledDrops.current.has(jobId)).finally(() => cancelledDrops.current.delete(jobId));
+    },
+    [saveTarget, upsertJob],
+  );
+
+  const importLinks = useCallback(
+    (urls: string[]) => {
+      if (urls.length === 0) {
+        return;
+      }
+      void importBoardItems(saveTarget, linksToImports(urls))
+        .then((result) => showNotice(savedMessage({ ...result, saved: result.pins.length }, saveTargetName)))
+        .catch(fail);
+    },
+    [saveTarget, saveTargetName, fail],
+  );
+
+  const pasteNative = useCallback(() => {
+    void pasteBoardClipboard(saveTarget)
+      .then((result) => showNotice(savedMessage({ ...result, saved: result.pins.length }, saveTargetName)))
+      .catch(fail);
+  }, [saveTarget, saveTargetName, fail]);
+
+  const cancelJob = (jobId: string) => {
+    if (jobId.startsWith("drop-")) {
+      cancelledDrops.current.add(jobId);
+    } else {
+      void cancelBoardImport(jobId).catch(fail);
+    }
   };
 
-  const actions: PinActions = {
-    open: (pin) => setOpenPinId(pin.id),
-    openSource: (pin) => {
-      const url = pinAddress(pin);
-      if (url) {
-        void createTab(url).catch(fail);
+  const pickFiles = () => void pickBoardFiles().then((paths) => importPaths(paths ?? [])).catch(fail);
+  const pickFolders = () => void pickBoardFolders().then((paths) => importPaths(paths ?? [])).catch(fail);
+  const pickEagle = () =>
+    void pickEagleLibrary()
+      .then((path) => (path ? importEagleLibrary(path, saveTarget === UNCATEGORIZED ? "" : saveTarget).then(trackJob) : undefined))
+      .catch(fail);
+
+  // Selection
+
+  const select = useCallback(
+    (pin: Pin, mode: SelectMode) => {
+      const index = shown.findIndex((item) => item.id === pin.id);
+      setSelected((current) => {
+        if (mode === "range" && anchor >= 0 && index >= 0) {
+          const [from, to] = anchor < index ? [anchor, index] : [index, anchor];
+          return new Set(shown.slice(from, to + 1).map((item) => item.id));
+        }
+        if (mode === "toggle") {
+          const next = new Set(current);
+          if (next.has(pin.id)) {
+            next.delete(pin.id);
+          } else {
+            next.add(pin.id);
+          }
+          return next;
+        }
+        return new Set([pin.id]);
+      });
+      if (mode !== "range" || anchor < 0) {
+        setAnchorId(pin.id);
       }
     },
+    [shown, anchor],
+  );
+
+  const handlers: PinListHandlers = {
+    onSelect: select,
+    onMarquee: (ids) => {
+      setSelected(new Set(ids));
+      if (ids.length === 0) {
+        setAnchorId(null);
+      }
+    },
+    onOpen: (pin) => setViewerId(pin.id),
+    onMenu: (pin, x, y) => {
+      const ids = selected.has(pin.id) ? [...selected] : [pin.id];
+      setPinMenu({ ids, x, y });
+    },
+    onNavigate: (index, extend) => {
+      const pin = shown[index];
+      if (!pin) {
+        return;
+      }
+      if (extend && anchor >= 0) {
+        setSelected((current) => new Set([...current, pin.id]));
+      } else {
+        setSelected(new Set([pin.id]));
+      }
+      setAnchorId(pin.id);
+    },
+  };
+
+  // Pin actions
+
+  const dropFromSelection = (ids: string[]) => setSelected((current) => new Set([...current].filter((id) => !ids.includes(id))));
+
+  const exportTo = (work: (dir: string) => Promise<string | number>, message: (result: string | number) => string) =>
+    void pickExportFolder()
+      .then(async (dir) => {
+        if (dir) {
+          await showNotice(message(await work(dir)));
+        }
+      })
+      .catch(fail);
+
+  const actions: PinMenuActions = {
+    open: (pin) => setViewerId(pin.id),
+    openSource: (pins) => {
+      const urls = pins.map(pinAddress).filter(Boolean);
+      if (urls.length === 0) {
+        void showNotice(pins.length === 1 ? "This item has no address." : "These items have no address.");
+        return;
+      }
+      urls.slice(0, OPEN_LIMIT).forEach((url, index) => void createTab(url, urls.length > 1 || index > 0).catch(fail));
+      if (urls.length > OPEN_LIMIT) {
+        void showNotice(`Opened ${OPEN_LIMIT} of ${urls.length}`);
+      }
+    },
+    openFile: (pin) => void openPinFile(pin.id).catch(fail),
+    reveal: (pin) => void revealPinFile(pin.id).catch(fail),
     copyImage: (pin) =>
       void copyPinImage(pin.id)
-        .then(() => showNotice("Image copied"))
-        .catch(fail),
-    openFile: (pin) =>
-      void openPinFile(pin.id)
-        .then(() => showNotice("Opened file"))
-        .catch(fail),
-    saveFile: (pin) =>
-      void savePinFileAs(pin)
-        .then((saved) => {
-          if (saved) {
-            return showNotice("File saved");
-          }
+        .then(() => {
+          void markPinsUsed([pin.id]).catch(() => undefined);
+          return showNotice("Image copied");
         })
         .catch(fail),
-    move: (ids, x, y) => setMoveMenu({ ids, x, y }),
-    setCover: (pin) => void setBoardCover(pin.boardId, pin.id).catch(fail),
-    remove: (ids) => setConfirm({ kind: "pins", ids }),
+    copyAddress: (pins) => {
+      const urls = pins.map(pinAddress).filter(Boolean);
+      if (urls.length === 0) {
+        void showNotice("No address to copy.");
+        return;
+      }
+      void copyText(urls.join("\n"))
+        .then(() => showNotice(urls.length === 1 ? "Address copied" : `Copied ${urls.length} addresses`))
+        .catch(fail);
+    },
+    saveAs: (pin) =>
+      void savePinFileAs(pin)
+        .then((saved) => (saved ? showNotice("Saved") : undefined))
+        .catch(fail),
+    exportPins: (pins) =>
+      exportTo(
+        (dir) => exportPins(pins.map((pin) => pin.id), dir),
+        (count) => `Exported ${plural(Number(count), "file")}`,
+      ),
+    addToFolder: (pins, x, y) => setMoveMenu({ ids: pins.map((pin) => pin.id), x, y, mode: "add" }),
+    moveToFolder: (pins, x, y) => setMoveMenu({ ids: pins.map((pin) => pin.id), x, y, mode: "move" }),
+    removeFromFolder: (pins) => {
+      if (scope.kind === "folder") {
+        const ids = pins.map((pin) => pin.id);
+        void removePinsFromFolder(ids, scope.id).catch(fail);
+        dropFromSelection(ids);
+      }
+    },
+    setCover: (pin) => {
+      if (scope.kind === "folder") {
+        void updateBoardFolder(scope.id, { coverPinId: pin.id })
+          .then(() => showNotice("Cover set"))
+          .catch(fail);
+      }
+    },
+    rate: (pins, rating) => void Promise.all(pins.map((pin) => updatePin(pin.id, { rating }))).catch(fail),
+    trash: (pins) => {
+      const ids = pins.map((pin) => pin.id);
+      if (ids.length === 0) {
+        return;
+      }
+      void trashPins(ids)
+        .then(() => showNotice(`Moved ${plural(ids.length, "item")} to Trash`))
+        .catch(fail);
+      dropFromSelection(ids);
+    },
+    restore: (pins) => {
+      const ids = pins.map((pin) => pin.id);
+      void restorePins(ids)
+        .then(() => showNotice(`Restored ${plural(ids.length, "item")}`))
+        .catch(fail);
+      dropFromSelection(ids);
+    },
+    deleteForever: (pins) => setConfirm({ kind: "forever", ids: pins.map((pin) => pin.id) }),
   };
+
+  const exportFolder = (id: string) =>
+    exportTo(
+      (dir) => exportBoardFolder(id, dir),
+      (path) => `Exported to ${String(path)}`,
+    );
+
+  const dropPins = (ids: string[], target: PinDropTarget, move: boolean) => {
+    if (ids.length === 0) {
+      return;
+    }
+    const from = scope.kind === "folder" ? scope.id : null;
+    let work: Promise<void>;
+    if (target.kind === "trash") {
+      actions.trash(ids.map((id) => pinsById.get(id)).filter((pin): pin is Pin => Boolean(pin)));
+      return;
+    } else if (target.kind === "uncategorized") {
+      work = movePins(ids, null, UNCATEGORIZED);
+    } else if (move) {
+      work = movePins(ids, from, target.id);
+    } else {
+      work = addPinsToFolder(ids, target.id);
+    }
+    void work.catch(fail);
+  };
+
+  // Keyboard, paste and drop
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (openPinId || confirm || moveMenu || linkOpen || isTyping(event.target)) {
+      if (overlayOpen || isTyping(event.target)) {
         return;
       }
+      const ctrl = event.ctrlKey || event.metaKey;
       if (event.key === "Escape" && selected.size > 0) {
         setSelected(new Set());
-      } else if (event.key === "Delete" && selected.size > 0) {
+        setAnchorId(null);
+      } else if (event.key === "Delete" && selectedPins.length > 0) {
         event.preventDefault();
-        setConfirm({ kind: "pins", ids: [...selected] });
-      } else if (event.key.toLowerCase() === "a" && (event.ctrlKey || event.metaKey) && scopePins.length > 0) {
+        if (inTrash) {
+          actions.deleteForever(selectedPins);
+        } else {
+          actions.trash(selectedPins);
+        }
+      } else if (ctrl && event.key.toLowerCase() === "a" && shown.length > 0) {
         event.preventDefault();
-        setSelected(new Set(scopePins.map((pin) => pin.id)));
+        setSelected(new Set(shown.map((pin) => pin.id)));
+      } else if (ctrl && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        document.getElementById("boards-search-input")?.focus();
+      } else if (ctrl && event.key.toLowerCase() === "i") {
+        event.preventDefault();
+        updatePrefs({ inspector: !prefs.inspector });
+      } else if (ctrl && event.key.toLowerCase() === "c" && selectedPins.length === 1 && window.getSelection()?.isCollapsed !== false) {
+        const pin = selectedPins[0];
+        if (pin.hasImage || pin.kind === "image") {
+          event.preventDefault();
+          actions.copyImage(pin);
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openPinId, confirm, moveMenu, linkOpen, selected, scopePins]);
-
-  const selectedPins = boards.pins.filter((pin) => selected.has(pin.id));
-  const targetBoardId = scope.kind === "board" ? scope.id : (boards.lastBoardId ?? "");
-  const targetBoardName = boards.boards.find((board) => board.id === targetBoardId)?.name ?? "Unsorted";
-
-  const runImport = useCallback(
-    async (items: BoardImportItem[], skipped = 0) => {
-      if (importing.current || items.length === 0) {
-        return;
-      }
-      importing.current = true;
-      try {
-        const pins = await importBoardItems(targetBoardId, items);
-        const saved = boards.boards.find((board) => board.id === pins[0]?.boardId);
-        const count = pins.length === 1 ? "1 item" : `${pins.length} items`;
-        const extra = skipped > 0 ? ` ${skipped === 1 ? "1 was" : `${skipped} were`} left out.` : "";
-        await showNotice(`Saved ${count} to ${saved?.name ?? "Unsorted"}.${extra}`).catch(() => undefined);
-      } catch (reason) {
-        fail(reason);
-      } finally {
-        importing.current = false;
-      }
-    },
-    [boards.boards, fail, targetBoardId],
-  );
-
-  const addFiles = useCallback(
-    (files: File[]) => {
-      void filesToImports(files)
-        .then(({ items, skipped }) => runImport(items, skipped))
-        .catch(fail);
-    },
-    [fail, runImport],
-  );
+  });
 
   useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
-      if (openPinId || confirm || moveMenu || linkOpen || isTyping(event.target)) {
+      if (overlayOpen || isTyping(event.target) || inTrash) {
         return;
       }
       const data = event.clipboardData;
       if (!data) {
         return;
       }
-      const files = [...data.files];
+      event.preventDefault();
+      const files: File[] = [...data.files];
       if (files.length === 0) {
         for (const item of data.items) {
-          if (item.kind !== "file") {
-            continue;
-          }
-          const file = item.getAsFile();
+          const file = item.kind === "file" ? item.getAsFile() : null;
           if (file) {
             files.push(file);
           }
         }
       }
       if (files.length > 0) {
-        event.preventDefault();
-        addFiles(files);
+        importDropped(files.map((file) => ({ file, relativeDir: "" })));
         return;
       }
       const found = linksInText(data.getData("text/plain"));
       if (found.length > 0) {
-        event.preventDefault();
-        void runImport(linksToImports(found), Math.max(0, found.length - MAX_IMPORT));
+        importLinks(found);
+        return;
       }
+      pasteNative();
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [openPinId, confirm, moveMenu, linkOpen, addFiles, runImport]);
+  }, [overlayOpen, inTrash, importDropped, importLinks, pasteNative]);
 
-  const copySelected = () => {
-    const urls = selectedPins.map(pinAddress).filter(Boolean);
-    if (urls.length === 0) {
-      void showNotice("Those pins have no address.");
+  const onDragEnter = (event: DragEvent<HTMLElement>) => {
+    if (!isOutsideDrag(event) || inTrash) {
       return;
     }
-    void copyText(urls.join("\n"))
-      .then(() => showNotice(urls.length === 1 ? "Copied 1 address" : `Copied ${urls.length} addresses`))
-      .catch(fail);
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDragOver(true);
   };
 
-  const openSelected = () => {
-    const urls = selectedPins.map(pinAddress).filter(Boolean);
-    if (urls.length === 0) {
-      void showNotice("Those pins have no address.");
+  const onDragLeave = (event: DragEvent<HTMLElement>) => {
+    if (!isOutsideDrag(event)) {
       return;
     }
-    for (const url of urls.slice(0, OPEN_LIMIT)) {
-      void createTab(url, true).catch(fail);
-    }
-    if (urls.length > OPEN_LIMIT) {
-      void showNotice(`Opened ${OPEN_LIMIT} of ${urls.length}`);
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) {
+      setDragOver(false);
     }
   };
 
-  const pickFiles = () => {
-    void pickBoardFiles()
-      .then((paths) => {
-        if (!paths || paths.length === 0) {
-          return;
-        }
-        const skipped = Math.max(0, paths.length - MAX_IMPORT);
-        void runImport(pathsToImports(paths), skipped);
-      })
+  const onDrop = (event: DragEvent<HTMLElement>) => {
+    if (!isOutsideDrag(event) || inTrash) {
+      return;
+    }
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDragOver(false);
+    const entries = dropEntries(event.dataTransfer);
+    if (entries.length > 0) {
+      void walkEntries(entries).then(importDropped).catch(fail);
+      return;
+    }
+    const files = [...event.dataTransfer.files];
+    if (files.length > 0) {
+      importDropped(files.map((file) => ({ file, relativeDir: "" })));
+      return;
+    }
+    importLinks(linksInText(event.dataTransfer.getData("text/uri-list") || event.dataTransfer.getData("text/plain")));
+  };
+
+  // Folders
+
+  const newFolder = (parentId: string | null) =>
+    void createBoardFolder("New folder", parentId)
+      .then((created) => setRenameFolder({ id: created.id, name: created.name }))
       .catch(fail);
+
+  const submitRenameFolder = () => {
+    if (renameFolder && renameFolder.name.trim()) {
+      void renameBoardFolder(renameFolder.id, renameFolder.name.trim()).catch(fail);
+    }
+    setRenameFolder(null);
   };
 
   const submitLink = () => {
-    const urls = linksToImports(linksInText(linkValue));
+    const urls = linksInText(linkValue);
     if (urls.length === 0) {
       setError("That link needs to start with http:// or https://.");
       return;
     }
     setLinkOpen(false);
     setLinkValue("");
-    void runImport(urls);
-  };
-
-  const onDragEnter = (event: DragEvent<HTMLElement>) => {
-    if (!isFileDrag(event)) {
-      return;
-    }
-    event.preventDefault();
-    fileDrag.current = true;
-    dragDepth.current += 1;
-    setDragOver(true);
-  };
-
-  const onDragLeave = () => {
-    if (!fileDrag.current) {
-      return;
-    }
-    dragDepth.current = Math.max(0, dragDepth.current - 1);
-    if (dragDepth.current === 0) {
-      fileDrag.current = false;
-      setDragOver(false);
-    }
-  };
-
-  const onDrop = (event: DragEvent<HTMLElement>) => {
-    if (!fileDrag.current && !isFileDrag(event)) {
-      return;
-    }
-    event.preventDefault();
-    dragDepth.current = 0;
-    fileDrag.current = false;
-    setDragOver(false);
-    addFiles([...event.dataTransfer.files]);
+    importLinks(urls);
   };
 
   const runConfirm = () => {
     if (!confirm) {
       return;
     }
-    const work =
-      confirm.kind === "pins" ? deletePins(confirm.ids) : confirm.kind === "board" ? deleteBoard(confirm.id) : deleteBoardFolder(confirm.id);
-    if (confirm.kind === "pins") {
-      setSelected((current) => new Set([...current].filter((id) => !confirm.ids.includes(id))));
-      if (openPinId && confirm.ids.includes(openPinId)) {
-        setOpenPinId(null);
-      }
+    if (confirm.kind === "forever") {
+      void deletePinsForever(confirm.ids).catch(fail);
+      dropFromSelection(confirm.ids);
+    } else if (confirm.kind === "empty-trash") {
+      void emptyBoardTrash()
+        .then((count) => showNotice(`Deleted ${plural(count, "item")} for good`))
+        .catch(fail);
+      setSelected(new Set());
+    } else {
+      const id = confirm.id;
+      void deleteBoardFolder(id)
+        .then((trashed) => (trashed > 0 ? showNotice(`Moved ${plural(trashed, "item")} to Trash`) : undefined))
+        .catch(fail);
     }
     setConfirm(null);
-    void work.catch(fail);
   };
 
-  const openIndex = openPinId ? scopePins.findIndex((pin) => pin.id === openPinId) : -1;
-  const openPin = openPinId ? (boards.pins.find((pin) => pin.id === openPinId) ?? null) : null;
-  const moveCurrent = moveMenu && moveMenu.ids.length > 0 ? boards.pins.find((pin) => pin.id === moveMenu.ids[0])?.boardId : undefined;
-  const sameBoard = moveMenu ? moveMenu.ids.every((id) => boards.pins.find((pin) => pin.id === id)?.boardId === moveCurrent) : false;
+  // Rendering
+
+  const empty = (() => {
+    if (subfolders.length > 0) {
+      return null;
+    }
+    if (base.length > 0 || query.trim()) {
+      return (
+        <EmptyState
+          id="boards-no-match"
+          icon={SearchX}
+          title="Nothing matches"
+          hint={filterCount > 0 ? "Clear a filter or change the search." : "Search looks at names, notes, tags, page text, file names and addresses."}
+        />
+      );
+    }
+    switch (scope.kind) {
+      case "trash":
+        return <EmptyState id="boards-trash-empty" icon={Trash2} title="Trash is empty" hint="Deleted items wait here until you empty the trash." />;
+      case "recent":
+        return <EmptyState id="boards-recent-empty" icon={Clock} title="Nothing used yet" hint="Items you open, copy or view show up here." />;
+      case "folder":
+        return (
+          <EmptyState
+            id="boards-folder-empty"
+            icon={LayoutGrid}
+            title="This folder is empty"
+            hint="Drop files or folders here, paste, or drag items onto the folder in the sidebar."
+          />
+        );
+      default:
+        return (
+          <EmptyState
+            id="boards-empty"
+            icon={LayoutGrid}
+            title="Nothing here yet"
+            hint="Drop or paste files, folders, images and links, use Add, or save a page from the Boards button in the address bar."
+          />
+        );
+    }
+  })();
+
+  const header =
+    subfolders.length > 0 ? (
+      <FolderCards
+        boards={boards}
+        folders={subfolders}
+        size={prefs.size}
+        onOpen={(item) => go({ kind: "folder", id: item.id })}
+        onMenu={(item, x, y) => setFolderMenu({ folder: item, x, y })}
+        onDropPins={(ids, item, move) => dropPins(ids, { kind: "folder", id: item.id }, move)}
+      />
+    ) : null;
+
+  const menuPins = pinMenu ? pinMenu.ids.map((id) => pinsById.get(id)).filter((pin): pin is Pin => Boolean(pin)) : [];
+  const movePinsList = moveMenu ? moveMenu.ids.map((id) => pinsById.get(id)).filter((pin): pin is Pin => Boolean(pin)) : [];
+  const moveCurrent = movePinsList.length > 0 ? movePinsList[0].folderIds.filter((id) => movePinsList.every((pin) => pin.folderIds.includes(id))) : [];
 
   return (
     <div id="boards-page" className="flex h-full bg-zinc-950 text-zinc-100">
       <BoardsSidebar
         boards={boards}
         scope={scope}
-        onScope={setScope}
-        query={query}
-        onQuery={setQuery}
+        onScope={go}
         renaming={renaming}
         onRenaming={setRenaming}
         onDeleteFolder={(id) => setConfirm({ kind: "folder", id })}
-        onDeleteBoard={(id) => setConfirm({ kind: "board", id })}
+        onExportFolder={exportFolder}
+        onDropPins={dropPins}
         onError={fail}
       />
       <main
@@ -399,7 +745,7 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
         className="relative flex min-w-0 flex-1 flex-col"
         onDragEnter={onDragEnter}
         onDragOver={(event) => {
-          if (isFileDrag(event) || fileDrag.current) {
+          if (isOutsideDrag(event) && !inTrash) {
             event.preventDefault();
             event.dataTransfer.dropEffect = "copy";
           }
@@ -407,45 +753,47 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
         onDragLeave={onDragLeave}
         onDrop={onDrop}
       >
-        <BoardHeader
+        <BoardsToolbar
           boards={boards}
           scope={scope}
-          pinCount={scopePins.length}
+          count={scope.kind === "tags" ? 0 : shown.length}
           selectedCount={selected.size}
-          view={view}
+          canBack={history.index > 0}
+          canForward={history.index < history.stack.length - 1}
+          onBack={() => setHistory((current) => ({ ...current, index: Math.max(0, current.index - 1) }))}
+          onForward={() => setHistory((current) => ({ ...current, index: Math.min(current.stack.length - 1, current.index + 1) }))}
+          onScope={go}
+          query={query}
+          onQuery={setQuery}
+          prefs={prefs}
+          onPrefs={updatePrefs}
           sort={sort}
-          kind={kind}
-          onScope={setScope}
-          onView={(next) => {
-            setView(next);
-            writePinView(next);
-          }}
+          folderSort={Boolean(folderSort)}
           onSort={(next) => {
-            setSort(next);
-            writePinSort(next);
+            if (folderSort && scope.kind === "folder") {
+              void updateBoardFolder(scope.id, { sort: next }).catch(fail);
+            } else {
+              updatePrefs({ sort: next });
+            }
           }}
-          onKind={setKind}
-          onMoveSelected={(x, y) => setMoveMenu({ ids: [...selected], x, y })}
-          onDeleteSelected={() => setConfirm({ kind: "pins", ids: [...selected] })}
-          onClearSelection={() => setSelected(new Set())}
-          onCopySelected={copySelected}
-          onOpenSelected={openSelected}
-          onPickFiles={pickFiles}
+          filterOpen={filterOpen}
+          filterCount={filterCount}
+          onToggleFilter={() => setFilterOpen((current) => !current)}
+          onAddFiles={pickFiles}
+          onImportFolders={pickFolders}
           onAddLink={() => {
             setLinkValue("");
             setLinkOpen(true);
           }}
-          onError={fail}
+          onPaste={pasteNative}
+          onImportEagle={pickEagle}
+          onReshuffle={() => go({ kind: "random", seed: Date.now() })}
+          onEmptyTrash={() => setConfirm({ kind: "empty-trash" })}
+          onClearSelection={() => setSelected(new Set())}
         />
-        {dragOver ? (
-          <div id="boards-drop" className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-zinc-950/75">
-            <p id="boards-drop-label" className="rounded-xl border border-sky-500 bg-sky-950/90 px-6 py-4 text-sm text-sky-100">
-              Add to {targetBoardName}
-            </p>
-          </div>
-        ) : null}
+        {filterOpen && scope.kind !== "tags" ? <FilterBar filter={filter} onFilter={setFilter} pins={searched} /> : null}
         {error ? (
-          <div id="boards-error" role="alert" className="flex items-center gap-3 border-b border-amber-900/50 bg-amber-950/40 px-8 py-2 text-sm text-amber-200">
+          <div id="boards-error" role="alert" className="flex items-center gap-3 border-b border-amber-900/50 bg-amber-950/40 px-6 py-2 text-sm text-amber-200">
             <span id="boards-error-text" className="min-w-0 flex-1">
               {error}
             </span>
@@ -454,118 +802,240 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
             </Button>
           </div>
         ) : null}
-        <div id="boards-content" className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-          {!loaded ? (
-            <div id="boards-loading" className="columns-[15rem] gap-4">
-              {[180, 260, 220, 300, 200, 240].map((height, index) => (
-                <Skeleton key={index} id={`boards-loading-${index}`} className="mb-4 w-full rounded-xl" style={{ height }} />
-              ))}
-            </div>
-          ) : (
-            <>
-              {scope.kind === "folder" && !query ? (
-                <section id="boards-folder-overview" className="mb-8">
-                  <BoardCards boards={boards} folderId={scope.id} onScope={setScope} />
-                </section>
-              ) : null}
-              {scopePins.length > 0 ? (
-                <>
-                  {scope.kind === "folder" && !query ? (
-                    <h3 id="boards-folder-pins-title" className="mb-3 text-sm font-medium text-zinc-400">
-                      All pins in this folder
-                    </h3>
-                  ) : null}
-                  {view === "table" ? (
-                    <PinTable
-                      boards={boards}
-                      pins={scopePins}
-                      selected={selected}
-                      showBoard={scope.kind !== "board"}
-                      onSelect={select}
-                      onSelectAll={() => setSelected(new Set(scopePins.map((pin) => pin.id)))}
-                      onClear={() => setSelected(new Set())}
-                      actions={actions}
-                    />
-                  ) : (
-                    <PinGrid boards={boards} pins={scopePins} selected={selected} showBoard={scope.kind !== "board"} onSelect={select} actions={actions} />
-                  )}
-                </>
-              ) : query ? (
-                <EmptyState id="boards-no-match" icon={SearchX} title="No pins match" hint="Search looks at titles, notes, page text, file names and addresses." />
-              ) : kind && inScope.length > 0 ? (
-                <EmptyState id="boards-kind-empty" icon={SearchX} title="No pins of this kind" hint="Choose All to see every pin in this view." />
-              ) : scope.kind === "board" ? (
-                <EmptyState
-                  id="boards-board-empty"
-                  icon={LayoutGrid}
-                  title="This board is empty"
-                  hint="Drop or paste files, images and links here, use Add, or save from the Boards button in the address bar."
-                />
-              ) : scope.kind === "all" ? (
-                <EmptyState
-                  id="boards-empty"
-                  icon={LayoutGrid}
-                  title="Nothing saved yet"
-                  hint="Drop or paste files, images and links, use Add, or save a page from the Boards button in the address bar."
-                />
-              ) : folderContents(boards, scope.id).boards === 0 ? (
-                <EmptyState id="boards-folder-empty" icon={LayoutGrid} title="This folder is empty" hint="Add a board here, or drag boards onto the folder in the sidebar." />
-              ) : null}
-            </>
-          )}
-        </div>
+
+        {!loaded ? (
+          <div id="boards-loading" className="flex flex-wrap gap-3 px-6 py-4">
+            {[260, 180, 220, 300, 200, 240, 280, 190].map((width, index) => (
+              <Skeleton key={index} id={`boards-loading-${index}`} className="h-48 rounded-md" style={{ width }} />
+            ))}
+          </div>
+        ) : scope.kind === "tags" ? (
+          <TagsView boards={boards} query={query} onScope={go} onError={fail} />
+        ) : prefs.layout === "list" ? (
+          <PinTable
+            id="boards-list"
+            boards={boards}
+            pins={shown}
+            selected={selected}
+            anchor={anchor}
+            keyboard={!overlayOpen}
+            header={header}
+            empty={empty}
+            {...handlers}
+          />
+        ) : (
+          <PinGrid
+            id="boards-grid"
+            pins={shown}
+            layout={prefs.layout}
+            size={prefs.size}
+            captions={prefs.captions}
+            selected={selected}
+            anchor={anchor}
+            keyboard={!overlayOpen}
+            header={header}
+            empty={empty}
+            onBackgroundMenu={(x, y) => setBackgroundMenu({ x, y })}
+            {...handlers}
+          />
+        )}
+
+        {dragOver ? (
+          <div id="boards-drop" className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-zinc-950/75">
+            <p id="boards-drop-label" className="rounded-xl border border-sky-500 bg-sky-950/90 px-6 py-4 text-sm text-sky-100">
+              Add to {saveTargetName}. Folders keep their structure.
+            </p>
+          </div>
+        ) : null}
+
+        {viewerId && viewerIndex >= 0 ? (
+          <PinViewer pins={shown} index={viewerIndex} onIndex={(index) => setViewerId(shown[index]?.id ?? null)} onClose={() => setViewerId(null)} actions={actions} />
+        ) : null}
+
+        <ImportProgress
+          jobs={jobs}
+          onCancel={cancelJob}
+          onDismiss={(jobId) => setJobs((current) => current.filter((job) => job.jobId !== jobId))}
+          onOpenFolder={(id) => go({ kind: "folder", id })}
+        />
       </main>
 
-      <PinDialog
-        boards={boards}
-        pin={openPin}
-        onClose={() => setOpenPinId(null)}
-        onPrevious={openIndex > 0 ? () => setOpenPinId(scopePins[openIndex - 1].id) : undefined}
-        onNext={openIndex >= 0 && openIndex < scopePins.length - 1 ? () => setOpenPinId(scopePins[openIndex + 1].id) : undefined}
-        onOpenSource={actions.openSource}
-        onDelete={actions.remove}
-        onError={fail}
-      />
+      {prefs.inspector ? (
+        <Inspector
+          boards={boards}
+          scope={scope}
+          selected={selectedPins}
+          shown={shown}
+          actions={actions}
+          onScope={go}
+          onColor={(color) => {
+            setFilter((current) => ({ ...current, color }));
+            setFilterOpen(true);
+          }}
+          onExportFolder={exportFolder}
+          onError={fail}
+        />
+      ) : null}
+
+      {pinMenu && menuPins.length > 0 ? (
+        <PinContextMenu
+          pins={menuPins}
+          x={pinMenu.x}
+          y={pinMenu.y}
+          folderId={scope.kind === "folder" ? scope.id : null}
+          inTrash={inTrash}
+          actions={actions}
+          onClose={() => setPinMenu(null)}
+        />
+      ) : null}
+
+      {backgroundMenu ? (
+        <ContextMenu id="boards-background-menu" label="Boards" x={backgroundMenu.x} y={backgroundMenu.y} onClose={() => setBackgroundMenu(null)}>
+          {inTrash ? (
+            <ContextMenuItem
+              id="boards-background-menu-empty-trash"
+              icon={<Trash2 />}
+              label="Empty Trash…"
+              danger
+              onClick={() => {
+                setBackgroundMenu(null);
+                setConfirm({ kind: "empty-trash" });
+              }}
+            />
+          ) : (
+            <>
+              <ContextMenuItem
+                id="boards-background-menu-paste"
+                icon={<ClipboardPaste />}
+                label="Paste"
+                onClick={() => {
+                  setBackgroundMenu(null);
+                  pasteNative();
+                }}
+              />
+              <ContextMenuItem
+                id="boards-background-menu-files"
+                icon={<FilePlus />}
+                label="Add files…"
+                onClick={() => {
+                  setBackgroundMenu(null);
+                  pickFiles();
+                }}
+              />
+              <ContextMenuItem
+                id="boards-background-menu-folders"
+                icon={<FolderInput />}
+                label="Import folders…"
+                onClick={() => {
+                  setBackgroundMenu(null);
+                  pickFolders();
+                }}
+              />
+              <ContextMenuSeparator id="boards-background-menu-separator" />
+              <ContextMenuItem
+                id="boards-background-menu-new-folder"
+                icon={<FolderPlus />}
+                label={scope.kind === "folder" ? "New subfolder" : "New folder"}
+                onClick={() => {
+                  setBackgroundMenu(null);
+                  newFolder(scope.kind === "folder" ? scope.id : null);
+                }}
+              />
+            </>
+          )}
+          {shown.length > 0 ? (
+            <ContextMenuItem
+              id="boards-background-menu-select-all"
+              icon={<SquareMousePointer />}
+              label="Select all"
+              trailing="Ctrl+A"
+              onClick={() => {
+                setBackgroundMenu(null);
+                setSelected(new Set(shown.map((pin) => pin.id)));
+              }}
+            />
+          ) : null}
+        </ContextMenu>
+      ) : null}
+
+      {folderMenu ? (
+        <FolderContextMenu
+          folder={folderMenu.folder}
+          x={folderMenu.x}
+          y={folderMenu.y}
+          onClose={() => setFolderMenu(null)}
+          onNewSubfolder={() => newFolder(folderMenu.folder.id)}
+          onRename={() => setRenameFolder({ id: folderMenu.folder.id, name: folderMenu.folder.name })}
+          onUpdate={(patch) => void updateBoardFolder(folderMenu.folder.id, patch).catch(fail)}
+          onDuplicate={() => void duplicateBoardFolder(folderMenu.folder.id).catch(fail)}
+          onExport={() => exportFolder(folderMenu.folder.id)}
+          onMoveToTop={() => void moveBoardFolder(folderMenu.folder.id, null).catch(fail)}
+          onDelete={() => setConfirm({ kind: "folder", id: folderMenu.folder.id })}
+        />
+      ) : null}
 
       {moveMenu ? (
         <MoveMenu
           boards={boards}
           x={moveMenu.x}
           y={moveMenu.y}
-          currentBoardId={sameBoard ? moveCurrent : undefined}
-          onMove={(boardId) => {
-            void movePins(moveMenu.ids, boardId).catch(fail);
-            setSelected(new Set());
+          label={moveMenu.mode === "add" ? "Add to folder" : "Move to folder"}
+          current={moveCurrent}
+          allowUncategorized={moveMenu.mode === "move"}
+          onPick={(folderId) => {
+            const ids = moveMenu.ids;
+            const work = moveMenu.mode === "add" ? addPinsToFolder(ids, folderId) : movePins(ids, scope.kind === "folder" ? scope.id : null, folderId);
+            void work.catch(fail);
+            if (moveMenu.mode === "move" && scope.kind === "folder") {
+              dropFromSelection(ids);
+            }
           }}
           onClose={() => setMoveMenu(null)}
+          onError={fail}
         />
       ) : null}
 
-      <Dialog
-        id="boards-add-link-dialog"
-        title="Add a link"
-        open={linkOpen}
-        onClose={() => setLinkOpen(false)}
-        onEnter={submitLink}
-        panelClassName="max-w-md"
-      >
+      <Dialog id="boards-add-link-dialog" title="Add a link" open={linkOpen} onClose={() => setLinkOpen(false)} onEnter={submitLink} panelClassName="max-w-md">
         <label id="boards-add-link-label" className="flex flex-col gap-1 text-xs text-zinc-400">
           Address
-          <input
+          <textarea
             id="boards-add-link-input"
             autoFocus
+            rows={3}
             value={linkValue}
             placeholder="https://"
-            className="h-8 rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-sky-500"
+            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100 outline-none focus:border-sky-500"
             onChange={(event) => setLinkValue(event.target.value)}
           />
+          <span id="boards-add-link-hint" className="text-zinc-500">
+            Paste one or more links. Each becomes its own item in {saveTargetName}.
+          </span>
         </label>
         <div id="boards-add-link-actions" className="mt-4 flex justify-end gap-2">
           <Button id="boards-add-link-cancel" onClick={() => setLinkOpen(false)}>
             Cancel
           </Button>
           <Button id="boards-add-link-save" variant="primary" onClick={submitLink}>
-            Add link
+            Add
+          </Button>
+        </div>
+      </Dialog>
+
+      <Dialog id="boards-rename-folder" title="Folder name" open={renameFolder !== null} onClose={() => setRenameFolder(null)} onEnter={submitRenameFolder} panelClassName="max-w-sm">
+        <input
+          id="boards-rename-folder-input"
+          autoFocus
+          value={renameFolder?.name ?? ""}
+          className="h-8 w-full rounded-md border border-zinc-700 bg-zinc-950 px-2 text-sm text-zinc-100 outline-none focus:border-sky-500"
+          onFocus={(event) => event.currentTarget.select()}
+          onChange={(event) => setRenameFolder((current) => (current ? { ...current, name: event.target.value } : current))}
+        />
+        <div id="boards-rename-folder-actions" className="mt-4 flex justify-end gap-2">
+          <Button id="boards-rename-folder-cancel" size="sm" variant="ghost" onClick={() => setRenameFolder(null)}>
+            Cancel
+          </Button>
+          <Button id="boards-rename-folder-save" size="sm" variant="primary" onClick={submitRenameFolder}>
+            Save
           </Button>
         </div>
       </Dialog>
@@ -588,24 +1058,29 @@ function ConfirmDialog({
 }) {
   let title = "";
   let detail = "";
-  if (confirm?.kind === "pins") {
-    title = confirm.ids.length === 1 ? "Delete this pin?" : `Delete ${confirm.ids.length} pins?`;
-    detail = "Saved images are removed too. This can't be undone.";
-  } else if (confirm?.kind === "board") {
-    const board = boards.boards.find((item) => item.id === confirm.id);
-    const count = pinsOnBoard(boards, confirm.id).length;
-    title = `Delete "${board?.name ?? "board"}"?`;
-    detail = count === 0 ? "The board is empty." : `Its ${count === 1 ? "1 pin" : `${count} pins`} will be deleted too. This can't be undone.`;
+  let action = "Delete";
+  if (confirm?.kind === "forever") {
+    title = confirm.ids.length === 1 ? "Delete this item for good?" : `Delete ${confirm.ids.length} items for good?`;
+    detail = "Their saved files are removed too. This can't be undone.";
+  } else if (confirm?.kind === "empty-trash") {
+    const count = boards.pins.filter((pin) => pin.deletedAt !== null).length;
+    title = "Empty Trash?";
+    detail = count === 0 ? "The trash is already empty." : `${plural(count, "item")} and their saved files will be deleted. This can't be undone.`;
+    action = "Empty Trash";
   } else if (confirm?.kind === "folder") {
     const folder = boards.folders.find((item) => item.id === confirm.id);
     const contents = folderContents(boards, confirm.id);
     title = `Delete "${folder?.name ?? "folder"}"?`;
-    const parts = [
-      contents.folders ? `${contents.folders} ${contents.folders === 1 ? "folder" : "folders"}` : "",
-      contents.boards ? `${contents.boards} ${contents.boards === 1 ? "board" : "boards"}` : "",
-      contents.pins ? `${contents.pins} ${contents.pins === 1 ? "pin" : "pins"}` : "",
-    ].filter(Boolean);
-    detail = parts.length === 0 ? "The folder is empty." : `Everything inside it will be deleted: ${parts.join(", ")}. This can't be undone.`;
+    const parts = [contents.folders > 0 ? `its ${plural(contents.folders, "subfolder")} are deleted too` : ""];
+    if (contents.trashed > 0) {
+      parts.push(`${plural(contents.trashed, "item")} that ${contents.trashed === 1 ? "is" : "are"} in no other folder will move to the Trash`);
+    }
+    const kept = contents.pins - contents.trashed;
+    if (kept > 0) {
+      parts.push(`${plural(kept, "item")} that ${kept === 1 ? "is" : "are"} also in other folders will stay there`);
+    }
+    const said = parts.filter(Boolean);
+    detail = said.length === 0 ? "The folder is empty." : `${said.join("; ")}.`.replace(/^./, (first) => first.toUpperCase());
   }
 
   return (
@@ -618,7 +1093,7 @@ function ConfirmDialog({
           Cancel
         </Button>
         <Button id="boards-confirm-delete" variant="destructive" onClick={onConfirm}>
-          Delete
+          {action}
         </Button>
       </div>
     </Dialog>

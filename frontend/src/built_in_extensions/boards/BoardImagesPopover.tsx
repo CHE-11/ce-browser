@@ -8,9 +8,8 @@ import type { PageMedia } from "@type/browser";
 import { PopoverHeader } from "../PopoverParts";
 import { readPopoverTab } from "../shared";
 import { errorText } from "../use-page-tool";
-import { BoardPicker } from "./BoardPicker";
+import { FolderPicker, folderTargetName } from "./FolderPicker";
 import { useBoards } from "./use-boards";
-import { boardLabel } from "./board-tree";
 
 /** Images smaller than this on both sides are usually icons and spacers. */
 const MIN_SIDE = 48;
@@ -18,7 +17,7 @@ const MIN_SIDE = 48;
 export function BoardImagesPopover({ params }: { params: URLSearchParams }) {
   const tab = readPopoverTab(params);
   const { boards, loaded } = useBoards();
-  const [boardId, setBoardId] = useState(params.get("board") ?? "");
+  const [folderId, setFolderId] = useState(params.get("folder") ?? params.get("board") ?? "");
   const [items, setItems] = useState<PageMedia[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
@@ -71,9 +70,8 @@ export function BoardImagesPopover({ params }: { params: URLSearchParams }) {
     setBusy(true);
     setError("");
     try {
-      const pins = await pinImages(tab.id, boardId, [...selected]);
-      const board = boards.boards.find((item) => item.id === pins[0]?.boardId);
-      const where = board ? boardLabel(boards, board) : "the board";
+      const pins = await pinImages(tab.id, folderId, [...selected]);
+      const where = folderTargetName(boards, folderId);
       await showNotice(pins.length === 1 ? `Saved 1 image to ${where}` : `Saved ${pins.length} images to ${where}`).catch(() => undefined);
       void closePopup();
     } catch (reason) {
@@ -85,9 +83,9 @@ export function BoardImagesPopover({ params }: { params: URLSearchParams }) {
 
   return (
     <PopupFrame id="board-images" width={440} maxHeight={600} ready={loaded && items !== null}>
-      <PopoverHeader id="board-images-header" icon={<Images aria-hidden />} title="Save images to board" subtitle={tab.title || tab.url} />
+      <PopoverHeader id="board-images-header" icon={<Images aria-hidden />} title="Save images to Boards" subtitle={tab.title || tab.url} />
       <div id="board-images-body" className="flex flex-col gap-2 px-3 pb-3">
-        <BoardPicker id="board-images-picker" boards={boards} value={boardId} onChange={setBoardId} />
+        <FolderPicker id="board-images-picker" boards={boards} value={folderId} onChange={setFolderId} />
         {error ? (
           <p id="board-images-error" className="text-xs text-amber-300">
             {error}

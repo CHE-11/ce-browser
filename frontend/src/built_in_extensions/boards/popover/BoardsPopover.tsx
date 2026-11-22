@@ -1,24 +1,27 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { CircleAlert, ClipboardPaste, Crop, ExternalLink, Images, LayoutGrid, Link2, Monitor, MousePointerClick, RotateCcw, ScrollText, Trash2 } from "lucide-react";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import { PopupFrame } from "@/components/PopupFrame";
-import { closePopup, createTab, currentWindowLabel, deletePins, movePins, pasteBoardClipboard, requestPageTool } from "@/lib/browser-client";
+import { closePopup, createTab, currentWindowLabel, movePins, pasteBoardClipboard, requestPageTool, trashPins } from "@/lib/browser-client";
 import type { PageToolRequest } from "@type/browser";
 
 import { ActionTile, PopoverHeader } from "../../PopoverParts";
 import { capturable, readPopoverTab } from "../../shared";
 import { errorText } from "../../use-page-tool";
-import { BoardPicker } from "../BoardPicker";
-import { boardLabel } from "../board-tree";
-import { useThumbnail } from "../thumbnails";
+import { FolderPicker, folderTargetName, resolveFolder } from "../FolderPicker";
+import { UNCATEGORIZED, hasPreview, previewUrl } from "../folder-tree";
 import { useBoards } from "../use-boards";
 
 type BoardsAction = Extract<PageToolRequest, { tool: "boards" }>["action"];
 
-function openBoardsPage(boardId?: string) {
-  void createTab(boardId ? `ce://boards?board=${encodeURIComponent(boardId)}` : "ce://boards");
+function openBoardsPage(folderId?: string) {
+  void createTab(folderId && folderId !== UNCATEGORIZED ? `ce://boards?folder=${encodeURIComponent(folderId)}` : "ce://boards");
   void closePopup();
+}
+
+function requestedFolder(params: URLSearchParams) {
+  return params.get("folder") ?? params.get("board") ?? "";
 }
 
 export function BoardsPopover({ params }: { params: URLSearchParams }) {
@@ -26,33 +29,22 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
   const canCapture = capturable(tab.url);
   const status = params.get("status");
   const { boards, loaded } = useBoards();
-  const [boardId, setBoardId] = useState(params.get("board") ?? "");
+  const [folderId, setFolderId] = useState(() => requestedFolder(params));
   const [showResult, setShowResult] = useState(status !== null);
   const [pasting, setPasting] = useState(false);
   const [pasteError, setPasteError] = useState("");
   const [pasted, setPasted] = useState<URLSearchParams | null>(null);
 
-  useEffect(() => {
-    if (!loaded) {
-      return;
-    }
-    setBoardId((current) => {
-      if (current && boards.boards.some((board) => board.id === current)) {
-        return current;
-      }
-      return boards.lastBoardId ?? boards.boards[0]?.id ?? "";
-    });
-  }, [loaded, boards]);
-
   const paste = () => {
     setPasting(true);
     setPasteError("");
-    void pasteBoardClipboard(boardId)
-      .then((pins) => {
+    void pasteBoardClipboard(folderId)
+      .then((result) => {
+        const pin = result.pins[0];
         const next = new URLSearchParams();
         next.set("status", "saved");
-        next.set("pin", pins[0]?.id ?? "");
-        next.set("board", pins[0]?.boardId ?? boardId);
+        next.set("pin", pin?.id ?? "");
+        next.set("folder", pin?.folderIds[0] ?? resolveFolder(boards, folderId));
         setPasted(next);
       })
       .catch((reason: unknown) => setPasteError(errorText(reason)))
@@ -67,7 +59,7 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
       tabId: tab.id,
       title: tab.title,
       url: tab.url,
-      boardId,
+      folderId,
     });
     void closePopup();
   };
@@ -77,10 +69,10 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
       <PopoverHeader
         id="boards-header"
         icon={<LayoutGrid aria-hidden />}
-        title="Save to board"
+        title="Save to Boards"
         subtitle={tab.title || tab.url}
         action={
-          <IconButton id="boards-open" label="Open board" onClick={() => openBoardsPage(undefined)}>
+          <IconButton id="boards-open" label="Open Boards" onClick={() => openBoardsPage(undefined)}>
             <ExternalLink id="boards-open-icon" aria-hidden />
           </IconButton>
         }
@@ -91,10 +83,10 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
         <SaveResult params={params} onAgain={() => setShowResult(false)} />
       ) : (
         <div id="boards-form" className="flex flex-col gap-2 px-3 pb-3">
-          <BoardPicker id="boards-picker" boards={boards} value={boardId} onChange={setBoardId} />
+          <FolderPicker id="boards-picker" boards={boards} value={folderId} onChange={setFolderId} />
           {canCapture ? null : (
             <p id="boards-not-web" className="rounded-lg bg-zinc-800/60 px-3 py-2 text-xs text-zinc-400">
-              Saving works on web pages. Open a site to save from it, or open your boards below.
+              Saving works on web pages. Open a site to save from it, or open Boards below.
             </p>
           )}
           <ActionTile
@@ -162,11 +154,11 @@ function SaveResult({ params, onAgain }: { params: URLSearchParams; onAgain: () 
   const { boards } = useBoards();
   const failed = params.get("status") === "error";
   const pinId = params.get("pin");
-  const [boardId, setBoardId] = useState(params.get("board") ?? "");
+  const [folderId, setFolderId] = useState(() => requestedFolder(params) || UNCATEGORIZED);
   const [moveError, setMoveError] = useState("");
   const [removing, setRemoving] = useState(false);
-  const thumbnail = useThumbnail(failed ? null : pinId);
-  const board = boards.boards.find((item) => item.id === boardId);
+  const pin = pinId && !failed ? boards.pins.find((item) => item.id === pinId) : undefined;
+  const thumbnail = pin && hasPreview(pin) ? previewUrl(pin) : "";
 
   const remove = () => {
     if (!pinId || removing) {
@@ -174,7 +166,7 @@ function SaveResult({ params, onAgain }: { params: URLSearchParams; onAgain: () 
     }
     setRemoving(true);
     setMoveError("");
-    void deletePins([pinId])
+    void trashPins([pinId])
       .then(() => onAgain())
       .catch((reason: unknown) => {
         setMoveError(errorText(reason));
@@ -182,16 +174,16 @@ function SaveResult({ params, onAgain }: { params: URLSearchParams; onAgain: () 
       });
   };
 
-  const changeBoard = (next: string) => {
-    if (!pinId || next === boardId) {
-      setBoardId(next);
+  const changeFolder = (next: string) => {
+    if (!pinId || next === folderId) {
+      setFolderId(next);
       return;
     }
-    const previous = boardId;
-    setBoardId(next);
+    const previous = folderId;
+    setFolderId(next);
     setMoveError("");
-    void movePins([pinId], next).catch((reason: unknown) => {
-      setBoardId(previous);
+    void movePins([pinId], null, next).catch((reason: unknown) => {
+      setFolderId(previous);
       setMoveError(errorText(reason));
     });
   };
@@ -202,7 +194,7 @@ function SaveResult({ params, onAgain }: { params: URLSearchParams; onAgain: () 
         <div id="boards-result-error" className="rounded-lg bg-amber-500/10 p-3 text-amber-200">
           <p id="boards-result-error-title" className="flex items-center gap-2 text-sm font-medium">
             <CircleAlert id="boards-result-error-icon" className="size-4 shrink-0" aria-hidden />
-            Couldn't save to the board
+            Couldn't save to Boards
           </p>
           <p id="boards-result-error-detail" className="mt-1 wrap-break-word text-xs opacity-80">
             {params.get("message")}
@@ -210,13 +202,14 @@ function SaveResult({ params, onAgain }: { params: URLSearchParams; onAgain: () 
         </div>
       ) : (
         <>
-          {thumbnail ? (
-            <img id="boards-result-thumb" src={thumbnail} alt="" className="max-h-56 w-full rounded-lg bg-zinc-800 object-contain" />
-          ) : null}
+          {thumbnail ? <img id="boards-result-thumb" src={thumbnail} alt="" className="max-h-56 w-full rounded-lg bg-zinc-800 object-contain" /> : null}
           <p id="boards-result-message" className="truncate text-sm text-sky-100">
-            Saved to <span id="boards-result-board" className="font-medium">{board ? boardLabel(boards, board) : "board"}</span>
+            Saved to{" "}
+            <span id="boards-result-board" className="font-medium">
+              {folderTargetName(boards, folderId)}
+            </span>
           </p>
-          <BoardPicker id="boards-result-picker" boards={boards} value={boardId} onChange={changeBoard} />
+          <FolderPicker id="boards-result-picker" boards={boards} value={folderId} onChange={changeFolder} />
           {moveError ? (
             <p id="boards-result-move-error" className="text-xs text-amber-200">
               {moveError}
@@ -228,14 +221,14 @@ function SaveResult({ params, onAgain }: { params: URLSearchParams; onAgain: () 
         {failed || !pinId ? null : (
           <Button id="boards-result-delete" variant="destructiveOutline" disabled={removing} onClick={remove}>
             <Trash2 id="boards-result-delete-icon" className="size-4" aria-hidden />
-            {removing ? "Deleting…" : "Delete"}
+            {removing ? "Moving to Trash…" : "Move to Trash"}
           </Button>
         )}
         <div id="boards-result-actions-row" className="flex gap-2">
           {failed ? null : (
-            <Button id="boards-result-open" variant="primary" className="flex-1" disabled={removing} onClick={() => openBoardsPage(boardId || undefined)}>
+            <Button id="boards-result-open" variant="primary" className="flex-1" disabled={removing} onClick={() => openBoardsPage(folderId)}>
               <ExternalLink id="boards-result-open-icon" className="size-4" aria-hidden />
-              Open board
+              Open folder
             </Button>
           )}
           <Button id="boards-result-again" className="flex-1" disabled={removing} onClick={onAgain}>

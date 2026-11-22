@@ -3,7 +3,7 @@ import { Check, Copy, Download, Pin, Workflow } from "lucide-react";
 import type { AgentRun } from "@type/browser";
 import { Button } from "@/components/Button";
 import { Markdown } from "@/components/Markdown";
-import { chooseSavePath, copyText, createBoard, listBoards, pinPage, writeTextFile } from "@/lib/browser-client";
+import { chooseSavePath, copyText, pinPage, writeTextFile } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { AgentError } from "./AgentError";
 
@@ -49,11 +49,7 @@ export function AgentResult({ run, onSaveFlow, onError }: Props) {
       })
       .catch((reason: unknown) => onError(errorOf(reason)));
   };
-  const pin = async () => {
-    const boards = await listBoards();
-    const board = boards.boards.find((item) => item.id === boards.lastBoardId) ?? boards.boards[0] ?? (await createBoard("Agent", null));
-    await pinPage(run.tabId, board.id, false);
-  };
+  const pin = () => pinPage(run.tabId, "", false);
   const save = async () => {
     const path = await chooseSavePath(fileName(run.goal), "Markdown", ["md"]);
     if (!path) {

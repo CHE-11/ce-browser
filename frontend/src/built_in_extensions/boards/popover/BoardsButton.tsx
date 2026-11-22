@@ -6,8 +6,9 @@ import { cn } from "@/lib/cn";
 import type { PageToolRequest, Pin, TabInfo } from "@type/browser";
 import { errorText, usePageToolRequests, useToolStatus } from "../../use-page-tool";
 import { tabParams } from "../../shared";
-import { boardLabel } from "../board-tree";
 import { isBoardFileDrag, readBoardDrop, saveBoardDrop, savedDropMessage } from "../drop-save";
+import { folderTargetName } from "../FolderPicker";
+import { UNCATEGORIZED } from "../folder-tree";
 
 type BoardsRequest = Extract<PageToolRequest, { tool: "boards" }>;
 
@@ -181,11 +182,9 @@ export function BoardsButton({ activeTab }: { activeTab: TabInfo | undefined }) 
     void saveBoardDrop(drop, "", tab.id)
       .then(async (saved) => {
         const snapshot = await listBoards().catch(() => null);
-        const savedId = saved.pins[0]?.boardId ?? "";
-        const board = snapshot?.boards.find((item) => item.id === savedId);
-        const name = board && snapshot ? boardLabel(snapshot, board) : "Unsorted";
+        const name = snapshot ? folderTargetName(snapshot, "") : "Uncategorized";
         setStatus("done");
-        await showNotice(savedDropMessage(saved.pins.length, name, saved.skipped)).catch(() => undefined);
+        await showNotice(savedDropMessage(saved, name)).catch(() => undefined);
       })
       .catch((error: unknown) => {
         setStatus("failed");
@@ -196,22 +195,22 @@ export function BoardsButton({ activeTab }: { activeTab: TabInfo | undefined }) 
   const capture = (request: BoardsRequest): Promise<Pin> => {
     switch (request.action) {
       case "full-page":
-        return pinPage(request.tabId, request.boardId, true);
+        return pinPage(request.tabId, request.folderId, true);
       case "region":
-        return pinRegion(request.tabId, request.boardId);
+        return pinRegion(request.tabId, request.folderId);
       case "element":
-        return pinElement(request.tabId, request.boardId);
+        return pinElement(request.tabId, request.folderId);
       case "link":
-        return pinLink(request.tabId, request.boardId);
+        return pinLink(request.tabId, request.folderId);
       default:
-        return pinPage(request.tabId, request.boardId, false);
+        return pinPage(request.tabId, request.folderId, false);
     }
   };
 
   const run = async (request: BoardsRequest) => {
     const result = new URLSearchParams({ tab: String(request.tabId), title: request.title, url: request.url });
     if (request.action === "images") {
-      result.set("board", request.boardId);
+      result.set("folder", request.folderId);
       showPopover("board-images", result);
       return;
     }
@@ -220,7 +219,7 @@ export function BoardsButton({ activeTab }: { activeTab: TabInfo | undefined }) 
       const pin = await capture(request);
       result.set("status", "saved");
       result.set("pin", pin.id);
-      result.set("board", pin.boardId);
+      result.set("folder", pin.folderIds[0] ?? UNCATEGORIZED);
       setStatus("done");
     } catch (error) {
       const message = errorText(error);

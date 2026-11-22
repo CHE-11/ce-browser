@@ -1,13 +1,16 @@
 import { importBoardItems, pinImages } from "@/lib/browser-client";
 import { BOOKMARK_DRAG_TYPE } from "@/lib/use-browser";
-import type { Pin } from "@type/browser";
-import { DRAG_BOARD, DRAG_FOLDER, DRAG_PINS } from "./board-tree";
-import { MAX_IMPORT, filesToImports, linksInText, linksToImports, pathsToImports } from "./import-items";
+import { DRAG_FOLDER, DRAG_PINS } from "./folder-tree";
+import { MAX_LINKS, importFiles, linksInText, linksToImports, pathsToImports } from "./import-items";
+import { dropEntries, walkEntries } from "./import/walk-drop";
 
-const INTERNAL_DRAG = new Set([BOOKMARK_DRAG_TYPE, DRAG_PINS, DRAG_BOARD, DRAG_FOLDER]);
+const INTERNAL_DRAG = new Set([BOOKMARK_DRAG_TYPE, DRAG_PINS, DRAG_FOLDER]);
 const IMAGE_EXT = /\.(apng|avif|bmp|gif|jpe?g|png|webp)$/i;
 
 export type BoardDropPayload = {
+  /** Dropped files and folders. Folders are walked so their structure is kept. */
+  entries: FileSystemEntry[];
+  /** Files when the drop gave no entries. */
   files: File[];
   paths: string[];
   imageUrls: string[];
@@ -15,9 +18,14 @@ export type BoardDropPayload = {
 };
 
 export type SavedDrop = {
-  pins: Pin[];
-  skipped: number;
+  saved: number;
+  duplicates: number;
+  failed: number;
 };
+
+export function isEmptyDrop(drop: BoardDropPayload) {
+  return drop.entries.length === 0 && drop.files.length === 0 && drop.paths.length === 0 && drop.imageUrls.length === 0 && drop.links.length === 0;
+}
 
 /** A drag the boards button can accept. Toolbar reordering is a move of plain text, so it is left alone. */
 export function isBoardFileDrag(data: DataTransfer) {
@@ -34,11 +42,15 @@ export function isBoardFileDrag(data: DataTransfer) {
   return types.includes("text/uri-list") || types.includes("URL") || types.includes("text/html") || types.includes("text/plain");
 }
 
-/** Reads a drop synchronously. `getData` is empty once the drop event has finished. */
+/** Reads a drop synchronously. `getData` and the entries are gone once the drop event has finished. */
 export function readBoardDrop(data: DataTransfer, pageUrl = ""): BoardDropPayload {
+  const entries = dropEntries(data);
+  if (entries.length > 0) {
+    return { entries, files: [], paths: [], imageUrls: [], links: [] };
+  }
   const files = [...data.files].filter((file) => file.size > 0);
   if (files.length > 0) {
-    return { files, paths: [], imageUrls: [], links: [] };
+    return { entries: [], files, paths: [], imageUrls: [], links: [] };
   }
 
   const listed = uriList(data);
@@ -70,58 +82,61 @@ export function readBoardDrop(data: DataTransfer, pageUrl = ""): BoardDropPayloa
       }
     }
   }
-  return { files: [], paths: unique(paths), imageUrls, links };
+  return { entries: [], files: [], paths: unique(paths), imageUrls, links };
 }
 
-export function savedDropMessage(count: number, boardName: string, skipped: number) {
-  const items = count === 1 ? "1 item" : `${count} items`;
-  const extra = skipped > 0 ? ` ${skipped === 1 ? "1 was" : `${skipped} were`} left out.` : "";
-  return `Saved ${items} to ${boardName}.${extra}`;
+export function savedDropMessage(result: SavedDrop, folderName: string) {
+  const parts = [result.saved > 0 ? `Saved ${result.saved === 1 ? "1 item" : `${result.saved} items`} to ${folderName}.` : "Nothing new was saved."];
+  if (result.duplicates > 0) {
+    parts.push(`${result.duplicates === 1 ? "1 was" : `${result.duplicates} were`} already there.`);
+  }
+  if (result.failed > 0) {
+    parts.push(`${result.failed === 1 ? "1 was" : `${result.failed} were`} left out.`);
+  }
+  return parts.join(" ");
 }
 
-/** Saves a drop onto `boardId`. An empty id uses the last board, or creates Unsorted. */
-export async function saveBoardDrop(drop: BoardDropPayload, boardId: string, tabId: number): Promise<SavedDrop> {
-  if (drop.files.length === 0 && drop.paths.length === 0 && drop.imageUrls.length === 0 && drop.links.length === 0) {
-    throw new Error("Drop an image, file, or link.");
+/** Saves a drop to `folderId`: a folder id, `UNCATEGORIZED`, or empty for the folder used last. */
+export async function saveBoardDrop(drop: BoardDropPayload, folderId: string, tabId: number): Promise<SavedDrop> {
+  if (isEmptyDrop(drop)) {
+    throw new Error("Drop an image, file, folder or link.");
   }
 
-  let board = boardId;
-  let skipped = 0;
+  const result: SavedDrop = { saved: 0, duplicates: 0, failed: 0 };
   let firstError: unknown;
-  const pins: Pin[] = [];
 
-  const take = (saved: Pin[]) => {
-    const last = saved[saved.length - 1];
-    if (last) {
-      board = last.boardId;
-    }
-    pins.push(...saved);
-  };
-
-  const run = async (work: () => Promise<Pin[]>) => {
+  const run = async (work: () => Promise<{ pins: unknown[]; duplicates: number; failed: number }>) => {
     try {
-      take(await work());
+      const done = await work();
+      result.saved += done.pins.length;
+      result.duplicates += done.duplicates;
+      result.failed += done.failed;
     } catch (error) {
       firstError ??= error;
     }
   };
 
-  if (drop.files.length > 0) {
-    const imported = await filesToImports(drop.files);
-    skipped += imported.skipped;
-    await run(() => importBoardItems(board, imported.items));
+  const files = drop.entries.length > 0 ? await walkEntries(drop.entries) : drop.files.map((file) => ({ file, relativeDir: "" }));
+  if (files.length > 0) {
+    const progress = await importFiles(files, folderId, `drop-${Date.now()}`, () => undefined, () => false);
+    result.saved += progress.imported;
+    result.duplicates += progress.duplicates;
+    result.failed += progress.failed;
+    if (progress.error) {
+      firstError ??= new Error(progress.error);
+    }
   }
   if (drop.paths.length > 0) {
-    skipped += Math.max(0, drop.paths.length - MAX_IMPORT);
-    await run(() => importBoardItems(board, pathsToImports(drop.paths)));
+    await run(() => importBoardItems(folderId, pathsToImports(drop.paths)));
   }
 
   let images = drop.imageUrls;
   if (images.length > 0 && tabId > 0) {
-    const batch = images.slice(0, MAX_IMPORT);
+    const batch = images.slice(0, MAX_LINKS);
     try {
-      take(await pinImages(tabId, board, batch));
-      skipped += Math.max(0, images.length - MAX_IMPORT);
+      const pins = await pinImages(tabId, folderId, batch);
+      result.saved += pins.length;
+      result.failed += Math.max(0, images.length - MAX_LINKS);
       images = [];
     } catch (error) {
       firstError ??= error;
@@ -129,16 +144,16 @@ export async function saveBoardDrop(drop: BoardDropPayload, boardId: string, tab
   }
   const links = images.length > 0 ? [...drop.links, ...images] : drop.links;
   if (links.length > 0) {
-    skipped += Math.max(0, links.length - MAX_IMPORT);
-    await run(() => importBoardItems(board, linksToImports(links)));
+    result.failed += Math.max(0, links.length - MAX_LINKS);
+    await run(() => importBoardItems(folderId, linksToImports(links)));
   }
-  if (pins.length === 0) {
+  if (result.saved === 0 && result.duplicates === 0) {
     if (firstError instanceof Error || typeof firstError === "string") {
       throw firstError;
     }
     throw new Error("Nothing could be saved.");
   }
-  return { pins, skipped };
+  return result;
 }
 
 function uriList(data: DataTransfer) {
