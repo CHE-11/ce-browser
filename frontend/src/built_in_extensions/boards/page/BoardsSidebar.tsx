@@ -7,7 +7,8 @@ import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import type { BoardsSnapshot } from "@type/browser";
 import { FolderGlyph } from "../folder-icons";
-import { DRAG_FOLDER, DRAG_PINS, childFolders, folderCounts, folderPath, tagCounts } from "../folder-tree";
+import { DRAG_FOLDER, DRAG_PINS, UNCATEGORIZED, childFolders, folderCounts, folderPath, tagCounts } from "../folder-tree";
+import { dropEntries } from "../import/walk-drop";
 import { LIBRARY_LABELS, RECENT_LIMIT, sameScope, type BoardsScope, type LibraryScopeKind } from "../scopes";
 import { FolderContextMenu } from "./FolderContextMenu";
 
@@ -28,6 +29,8 @@ type BoardsSidebarProps = {
   onExportFolder: (id: string) => void;
   /** `move` is true when Shift was held: the pins leave the folder they were dragged from. */
   onDropPins: (ids: string[], target: PinDropTarget, move: boolean) => void;
+  /** Files and folders dropped from outside. `folderId` is a folder, or `UNCATEGORIZED` for the top level. */
+  onDropFiles: (entries: FileSystemEntry[], folderId: string) => void;
   onError: (reason: unknown) => void;
 };
 
@@ -44,6 +47,11 @@ function dragHas(event: DragEvent, type: string) {
   return event.dataTransfer.types.includes(type);
 }
 
+/** Files or folders dragged in from outside the browser. */
+function isFileDrag(event: DragEvent) {
+  return dragHas(event, "Files") && !dragHas(event, DRAG_PINS) && !dragHas(event, DRAG_FOLDER);
+}
+
 function draggedPins(event: DragEvent): string[] {
   try {
     const ids: unknown = JSON.parse(event.dataTransfer.getData(DRAG_PINS) || "[]");
@@ -53,7 +61,7 @@ function draggedPins(event: DragEvent): string[] {
   }
 }
 
-export function BoardsSidebar({ boards, scope, onScope, renaming, onRenaming, onDeleteFolder, onExportFolder, onDropPins, onError }: BoardsSidebarProps) {
+export function BoardsSidebar({ boards, scope, onScope, renaming, onRenaming, onDeleteFolder, onExportFolder, onDropPins, onDropFiles, onError }: BoardsSidebarProps) {
   const [expanded, setExpanded] = useState<Set<string>>(readExpanded);
   const [foldersOpen, setFoldersOpen] = useState(() => localStorage.getItem(FOLDERS_OPEN_KEY) !== "0");
   const [menu, setMenu] = useState<{ id: string | null; x: number; y: number } | null>(null);
@@ -156,6 +164,13 @@ export function BoardsSidebar({ boards, scope, onScope, renaming, onRenaming, on
   };
 
   const allowDrop = (event: DragEvent, key: string, folders: boolean) => {
+    if (folders && isFileDrag(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "copy";
+      setDropTarget(key);
+      return;
+    }
     const pins = dragHas(event, DRAG_PINS);
     if (!pins && !(folders && dragHas(event, DRAG_FOLDER))) {
       return;
@@ -170,6 +185,16 @@ export function BoardsSidebar({ boards, scope, onScope, renaming, onRenaming, on
     event.preventDefault();
     event.stopPropagation();
     setDropTarget(null);
+    if (isFileDrag(event)) {
+      const entries = dropEntries(event.dataTransfer);
+      if (entries.length > 0) {
+        onDropFiles(entries, folderId ?? UNCATEGORIZED);
+        if (folderId) {
+          expand(folderId, true);
+        }
+      }
+      return;
+    }
     const pins = draggedPins(event);
     if (pins.length > 0 && folderId) {
       onDropPins(pins, { kind: "folder", id: folderId }, event.shiftKey);
@@ -258,7 +283,28 @@ export function BoardsSidebar({ boards, scope, onScope, renaming, onRenaming, on
   const closeMenu = () => setMenu(null);
 
   return (
-    <aside id="boards-sidebar" className="flex w-60 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950">
+    <aside
+      id="boards-sidebar"
+      className={cn("relative flex w-60 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950", dropTarget === "sidebar" && "ring-2 ring-inset ring-sky-500")}
+      onDragOver={(event) => {
+        if (isFileDrag(event)) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          setDropTarget("sidebar");
+        }
+      }}
+      onDragLeave={(event) => {
+        const next = event.relatedTarget;
+        if (!(next instanceof Node && event.currentTarget.contains(next))) {
+          setDropTarget(null);
+        }
+      }}
+      onDrop={(event) => {
+        if (isFileDrag(event)) {
+          dropOnFolder(event, null);
+        }
+      }}
+    >
       <div id="boards-sidebar-header" className="flex items-center gap-1 px-4 pb-2 pt-4">
         <h1 id="boards-sidebar-title" className="flex-1 text-base font-semibold">
           Boards
@@ -290,14 +336,15 @@ export function BoardsSidebar({ boards, scope, onScope, renaming, onRenaming, on
 
         <div
           id="boards-folders-header"
-          className={cn("group mt-3 flex h-7 items-center gap-1 rounded-md pl-1 pr-1 text-xs font-medium text-zinc-500", dropTarget === "root" && "bg-sky-900/60 ring-1 ring-sky-500")}
+          className={cn("group mt-3 flex h-7 items-center gap-1 rounded-md pl-1 pr-1 text-xs font-medium text-zinc-500", (dropTarget === "root" || dropTarget === "root-files") && "bg-sky-900/60 ring-1 ring-sky-500")}
           onDragOver={(event) => {
-            if (dragHas(event, DRAG_FOLDER)) {
+            if (dragHas(event, DRAG_FOLDER) || isFileDrag(event)) {
               event.preventDefault();
-              setDropTarget("root");
+              event.stopPropagation();
+              setDropTarget(isFileDrag(event) ? "root-files" : "root");
             }
           }}
-          onDragLeave={() => setDropTarget((current) => (current === "root" ? null : current))}
+          onDragLeave={() => setDropTarget((current) => (current === "root" || current === "root-files" ? null : current))}
           onDrop={(event) => dropOnFolder(event, null)}
         >
           <button
@@ -393,6 +440,11 @@ export function BoardsSidebar({ boards, scope, onScope, renaming, onRenaming, on
             }}
           />
         </ContextMenu>
+      ) : null}
+      {dropTarget === "sidebar" || dropTarget === "root-files" ? (
+        <p id="boards-sidebar-drop-hint" className="pointer-events-none absolute inset-x-2 bottom-12 rounded-md bg-sky-950/95 px-3 py-2 text-center text-xs text-sky-100 ring-1 ring-sky-500">
+          Folders become new folders. Drop on a folder to import into it.
+        </p>
       ) : null}
     </aside>
   );

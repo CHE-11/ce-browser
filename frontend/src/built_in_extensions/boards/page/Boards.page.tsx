@@ -296,15 +296,22 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
   );
 
   const importDropped = useCallback(
-    (files: DroppedFile[]) => {
+    (files: DroppedFile[], target: string = saveTarget) => {
       if (files.length === 0) {
         return;
       }
       const jobId = `drop-${Date.now()}`;
-      const target = saveTarget;
       void importFiles(files, target, jobId, upsertJob, () => cancelledDrops.current.has(jobId)).finally(() => cancelledDrops.current.delete(jobId));
     },
     [saveTarget, upsertJob],
+  );
+
+  const importEntries = useCallback(
+    (entries: FileSystemEntry[], target: string) =>
+      void walkEntries(entries)
+        .then((files) => importDropped(files, target))
+        .catch(fail),
+    [importDropped, fail],
   );
 
   const importLinks = useCallback(
@@ -612,7 +619,7 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
     setDragOver(false);
     const entries = dropEntries(event.dataTransfer);
     if (entries.length > 0) {
-      void walkEntries(entries).then(importDropped).catch(fail);
+      importEntries(entries, saveTarget);
       return;
     }
     const files = [...event.dataTransfer.files];
@@ -738,6 +745,7 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
         onDeleteFolder={(id) => setConfirm({ kind: "folder", id })}
         onExportFolder={exportFolder}
         onDropPins={dropPins}
+        onDropFiles={importEntries}
         onError={fail}
       />
       <main
