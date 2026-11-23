@@ -181,7 +181,13 @@ fn try_image(app: &AppHandle, pin: &mut Pin, bytes: &[u8], name_ext: &str) -> Re
     };
     let ext = storage::image_ext(bytes)
         .map(str::to_string)
-        .unwrap_or_else(|| if name_ext.is_empty() { "png".into() } else { name_ext.to_string() });
+        .unwrap_or_else(|| {
+            if name_ext.is_empty() {
+                "png".into()
+            } else {
+                name_ext.to_string()
+            }
+        });
     let stored = (|| {
         storage::write_original(app, &pin.id, &ext, bytes)?;
         storage::write_thumb(app, &pin.id, &image)
@@ -241,7 +247,11 @@ pub(super) fn prepare(app: &AppHandle, item: &BoardImportItem) -> Result<Pin, St
     let name_ext = ext_of(&name);
     let mut pin = draft("file", &title_from_name(&name), "", "", "");
     pin.file_name = clip_text(&name, FILE_NAME_LIMIT);
-    let file_ext = if name_ext.is_empty() { "bin".to_string() } else { name_ext.clone() };
+    let file_ext = if name_ext.is_empty() {
+        "bin".to_string()
+    } else {
+        name_ext.clone()
+    };
 
     if has_path {
         let path = PathBuf::from(item.path.trim());
@@ -257,14 +267,16 @@ pub(super) fn prepare(app: &AppHandle, item: &BoardImportItem) -> Result<Pin, St
         }
         pin.file_modified_at = storage::modified_ms(&path);
         if looks_like_image(&name, mime) && meta.len() <= storage::MAX_DECODE_BYTES {
-            let bytes = fs::read(&path).map_err(|error| format!("Couldn't read {name}. {error}"))?;
+            let bytes =
+                fs::read(&path).map_err(|error| format!("Couldn't read {name}. {error}"))?;
             if try_image(app, &mut pin, &bytes, &name_ext)? {
                 return Ok(pin);
             }
         }
-        let (size, hash) = storage::copy_original(app, &pin.id, &file_ext, &path).inspect_err(|_| {
-            storage::remove_new_files(app, &pin.id, &file_ext);
-        })?;
+        let (size, hash) =
+            storage::copy_original(app, &pin.id, &file_ext, &path).inspect_err(|_| {
+                storage::remove_new_files(app, &pin.id, &file_ext);
+            })?;
         finish_file(app, &mut pin, &file_ext, size, hash, mime);
         return Ok(pin);
     }
@@ -283,7 +295,11 @@ pub(super) fn prepare(app: &AppHandle, item: &BoardImportItem) -> Result<Pin, St
 
 /// Saves prepared pins. `base` is a folder id or `UNCATEGORIZED`. Pins whose file is already
 /// in their folder are left out and their files removed.
-fn commit(app: &AppHandle, base: &str, batch: Vec<(Pin, String)>) -> Result<(Vec<Pin>, usize), String> {
+fn commit(
+    app: &AppHandle,
+    base: &str,
+    batch: Vec<(Pin, String)>,
+) -> Result<(Vec<Pin>, usize), String> {
     if batch.is_empty() {
         return Ok((Vec::new(), 0));
     }
@@ -405,7 +421,10 @@ fn walk_dir(dir: &Path, relative: &str, depth: usize, out: &mut Walked, cancel: 
         return;
     };
     let mut entries: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
-    entries.sort_by_key(|path| path.file_name().map(|name| name.to_string_lossy().to_lowercase()));
+    entries.sort_by_key(|path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+    });
     let mut subdirs = Vec::new();
     for path in entries {
         if skipped(&path) {
@@ -569,7 +588,9 @@ fn run_job(app: &AppHandle, job: &str, paths: &[String], base: &str, cancel: &At
             }
         }
         progress.done += 1;
-        if pending.len() >= COMMIT_EVERY || (!pending.is_empty() && last_commit.elapsed() >= COMMIT_INTERVAL) {
+        if pending.len() >= COMMIT_EVERY
+            || (!pending.is_empty() && last_commit.elapsed() >= COMMIT_INTERVAL)
+        {
             flush(&mut pending, &mut progress);
             last_commit = Instant::now();
         }
@@ -614,8 +635,15 @@ mod tests {
         fs::write(top.join("Day 1").join("a.jpg"), b"x").expect("file");
         fs::write(top.join("Thumbs.db"), b"x").expect("file");
         fs::write(top.join(".git").join("config"), b"x").expect("file");
-        let walked = walk(&[top.to_string_lossy().into_owned()], &AtomicBool::new(false));
-        let relatives: Vec<&str> = walked.files.iter().map(|(_, relative)| relative.as_str()).collect();
+        let walked = walk(
+            &[top.to_string_lossy().into_owned()],
+            &AtomicBool::new(false),
+        );
+        let relatives: Vec<&str> = walked
+            .files
+            .iter()
+            .map(|(_, relative)| relative.as_str())
+            .collect();
         assert_eq!(relatives, vec!["Trip", "Trip/Day 1"]);
         assert_eq!(walked.dirs, vec!["Trip", "Trip/Day 1", "Trip/Day 1/Empty"]);
         let _ = fs::remove_dir_all(&root);

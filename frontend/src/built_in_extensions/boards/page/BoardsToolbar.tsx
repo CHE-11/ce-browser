@@ -26,7 +26,8 @@ import { IconButton } from "@/components/IconButton";
 import { cn } from "@/lib/cn";
 import type { BoardsSnapshot, PinSort } from "@type/browser";
 import { FolderGlyph } from "../folder-icons";
-import { PIN_SORTS, PIN_SORT_LABELS, folderPath } from "../folder-tree";
+import { dragHas, draggedFolder, draggedPins, isBoardsDrag, pinDropEffect } from "../drag";
+import { DRAG_PINS, PIN_SORTS, PIN_SORT_LABELS, folderPath } from "../folder-tree";
 import { scopeTitle, type BoardsScope } from "../scopes";
 import { MAX_TILE_SIZE, MIN_TILE_SIZE, PIN_LAYOUT_LABELS, type PinLayout, type ViewPrefs } from "../view-prefs";
 
@@ -63,6 +64,10 @@ type BoardsToolbarProps = {
   onReshuffle: () => void;
   onEmptyTrash: () => void;
   onClearSelection: () => void;
+  /** Pins dropped on a parent folder in the path. `copy` is true when Ctrl was held. */
+  onDropPins: (ids: string[], folderId: string, copy: boolean) => void;
+  /** Folder `id` dropped on a parent folder in the path. */
+  onDropFolder: (id: string, folderId: string) => void;
 };
 
 const LAYOUT_ICONS: Record<PinLayout, typeof LayoutGrid> = {
@@ -100,8 +105,11 @@ export function BoardsToolbar({
   onReshuffle,
   onEmptyTrash,
   onClearSelection,
+  onDropPins,
+  onDropFolder,
 }: BoardsToolbarProps) {
   const [menu, setMenu] = useState<Menu | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const path = scope.kind === "folder" ? folderPath(boards, scope.id) : [];
   const LayoutIcon = LAYOUT_ICONS[prefs.layout];
 
@@ -135,8 +143,39 @@ export function BoardsToolbar({
                   id={`boards-toolbar-path-${folder.id}-button`}
                   type="button"
                   aria-current={last ? "page" : undefined}
-                  className={cn("flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 hover:bg-zinc-800", last ? "font-semibold text-zinc-100" : "text-zinc-400")}
+                  className={cn(
+                    "flex min-w-0 items-center gap-1.5 rounded px-1 py-0.5 hover:bg-zinc-800",
+                    last ? "font-semibold text-zinc-100" : "text-zinc-400",
+                    dropTarget === folder.id && "bg-sky-900/60 text-sky-100 ring-1 ring-sky-500",
+                  )}
                   onClick={() => onScope({ kind: "folder", id: folder.id })}
+                  onDragOver={
+                    last
+                      ? undefined
+                      : (event) => {
+                          if (isBoardsDrag(event)) {
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = dragHas(event, DRAG_PINS) ? pinDropEffect(event) : "move";
+                            setDropTarget(folder.id);
+                          }
+                        }
+                  }
+                  onDragLeave={() => setDropTarget((current) => (current === folder.id ? null : current))}
+                  onDrop={
+                    last
+                      ? undefined
+                      : (event) => {
+                          event.preventDefault();
+                          setDropTarget(null);
+                          const pins = draggedPins(event);
+                          const dragged = draggedFolder(event);
+                          if (pins.length > 0) {
+                            onDropPins(pins, folder.id, event.ctrlKey);
+                          } else if (dragged) {
+                            onDropFolder(dragged, folder.id);
+                          }
+                        }
+                  }
                 >
                   {last ? <FolderGlyph id={`boards-toolbar-path-${folder.id}-icon`} folder={folder} className="text-zinc-400" /> : null}
                   <span id={`boards-toolbar-path-${folder.id}-name`} className="truncate">

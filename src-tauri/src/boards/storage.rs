@@ -129,7 +129,11 @@ fn thumbnail_image(image: &RgbaImage) -> RgbaImage {
 }
 
 /// Writes the thumbnail and returns the palette taken from it.
-pub fn write_thumb(app: &AppHandle, id: &str, image: &RgbaImage) -> Result<Vec<super::model::PaletteColor>, String> {
+pub fn write_thumb(
+    app: &AppHandle,
+    id: &str,
+    image: &RgbaImage,
+) -> Result<Vec<super::model::PaletteColor>, String> {
     ensure_dir(app)?;
     let small = thumbnail_image(image);
     let jpeg = thumbnail_jpeg(&small)?;
@@ -154,12 +158,18 @@ pub fn write_original(app: &AppHandle, id: &str, ext: &str, bytes: &[u8]) -> Res
 }
 
 /// Copies a file into the store. Returns its size and hash.
-pub fn copy_original(app: &AppHandle, id: &str, ext: &str, from: &Path) -> Result<(u64, String), String> {
+pub fn copy_original(
+    app: &AppHandle,
+    id: &str,
+    ext: &str,
+    from: &Path,
+) -> Result<(u64, String), String> {
     ensure_dir(app)?;
-    let mut source =
-        fs::File::open(from).map_err(|error| format!("Couldn't read {}. {error}", from.display()))?;
+    let mut source = fs::File::open(from)
+        .map_err(|error| format!("Couldn't read {}. {error}", from.display()))?;
     let target = original_at(app, id, ext);
-    let mut out = fs::File::create(&target).map_err(|error| format!("Couldn't save the file. {error}"))?;
+    let mut out =
+        fs::File::create(&target).map_err(|error| format!("Couldn't save the file. {error}"))?;
     let mut hasher = Sha256::new();
     let mut buffer = vec![0u8; 256 * 1024];
     let mut size = 0u64;
@@ -199,7 +209,11 @@ pub fn hash_file(path: &Path) -> Option<(u64, String)> {
 }
 
 fn hex_prefix(digest: &[u8]) -> String {
-    digest.iter().take(16).map(|byte| format!("{byte:02x}")).collect()
+    digest
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 pub fn modified_ms(path: &Path) -> u64 {
@@ -369,8 +383,12 @@ static TRIED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
 /// True the first time it is called for `id`.
 fn first_try(id: &str) -> bool {
-    let mut tried = TRIED.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    tried.get_or_insert_with(HashSet::new).insert(id.to_string())
+    let mut tried = TRIED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    tried
+        .get_or_insert_with(HashSet::new)
+        .insert(id.to_string())
 }
 
 /// What the backfill found for one pin.
@@ -413,11 +431,19 @@ fn fill(app: &AppHandle, pin: &Pin) -> Filled {
     let mut path = original_path(app, pin);
 
     if pin.ext.is_empty() {
-        let ext = match path.as_ref().and_then(|path| path.extension()).and_then(|ext| ext.to_str()) {
+        let ext = match path
+            .as_ref()
+            .and_then(|path| path.extension())
+            .and_then(|ext| ext.to_str())
+        {
             Some("png") => "png".to_string(),
             Some("bin") => {
                 let ext = file_ext(&pin.file_name);
-                let ext = if ext.is_empty() { "bin".to_string() } else { ext };
+                let ext = if ext.is_empty() {
+                    "bin".to_string()
+                } else {
+                    ext
+                };
                 if ext != "bin" {
                     let target = original_at(app, &pin.id, &ext);
                     if let Some(from) = &path {
@@ -431,7 +457,11 @@ fn fill(app: &AppHandle, pin: &Pin) -> Filled {
             Some(other) => clean_ext(other),
             None if pin.kind == "file" => {
                 let ext = file_ext(&pin.file_name);
-                if ext.is_empty() { "bin".to_string() } else { ext }
+                if ext.is_empty() {
+                    "bin".to_string()
+                } else {
+                    ext
+                }
             }
             None => "png".to_string(),
         };

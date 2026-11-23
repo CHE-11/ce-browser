@@ -2260,7 +2260,14 @@ const FORM_POST_LIMIT: usize = 16 * 1024 * 1024;
 
 /// Opens a tab beside `opener` and sends the form from `FORM_POST_SCRIPT` there as a POST.
 /// The tab starts blank so the action URL is never requested without its body.
-pub fn open_form_post(app: &AppHandle, opener: u32, action: &str, page: &str, content_type: &str, body: Vec<u8>) {
+pub fn open_form_post(
+    app: &AppHandle,
+    opener: u32,
+    action: &str,
+    page: &str,
+    content_type: &str,
+    body: Vec<u8>,
+) {
     let Some(url) = http_link(action).and_then(|url| Url::parse(&url).ok()) else {
         return;
     };

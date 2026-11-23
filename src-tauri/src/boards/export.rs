@@ -11,7 +11,11 @@ use crate::files;
 
 /// File name for a pin's original: its file name, or its title with the stored extension.
 pub fn file_name_for(pin: &Pin) -> String {
-    let ext = if pin.ext.is_empty() { "png" } else { pin.ext.as_str() };
+    let ext = if pin.ext.is_empty() {
+        "png"
+    } else {
+        pin.ext.as_str()
+    };
     let base = if !pin.file_name.trim().is_empty() {
         pin.file_name.trim().to_string()
     } else if !pin.title.trim().is_empty() {
@@ -23,7 +27,11 @@ pub fn file_name_for(pin: &Pin) -> String {
     let has_ext = name
         .rsplit_once('.')
         .is_some_and(|(_, current)| current.eq_ignore_ascii_case(ext));
-    if has_ext { name } else { format!("{name}.{ext}") }
+    if has_ext {
+        name
+    } else {
+        format!("{name}.{ext}")
+    }
 }
 
 /// Writes one pin into `dir`. Links without a file become `.url` shortcuts.
@@ -34,11 +42,19 @@ fn write_pin(app: &AppHandle, pin: &Pin, dir: &Path) -> Result<(), String> {
             .map(|_| ())
             .map_err(|error| format!("Couldn't export {}. {error}", pin.title))
     } else {
-        let url = if pin.link_url.is_empty() { &pin.page_url } else { &pin.link_url };
+        let url = if pin.link_url.is_empty() {
+            &pin.page_url
+        } else {
+            &pin.link_url
+        };
         if url.is_empty() {
             return Ok(());
         }
-        let title = if pin.title.trim().is_empty() { "Link" } else { pin.title.trim() };
+        let title = if pin.title.trim().is_empty() {
+            "Link"
+        } else {
+            pin.title.trim()
+        };
         let target = files::unique_path(dir, &format!("{}.url", files::sanitize_file_name(title)));
         fs::write(&target, format!("[InternetShortcut]\r\nURL={url}\r\n"))
             .map_err(|error| format!("Couldn't export {}. {error}", pin.title))
@@ -86,7 +102,12 @@ pub fn export_folder(app: &AppHandle, id: &str, dir: &Path) -> Result<PathBuf, S
     Ok(target)
 }
 
-fn write_folder(app: &AppHandle, boards: &BoardsSnapshot, id: &str, dir: &Path) -> Result<(), String> {
+fn write_folder(
+    app: &AppHandle,
+    boards: &BoardsSnapshot,
+    id: &str,
+    dir: &Path,
+) -> Result<(), String> {
     ensure(dir)?;
     for pin in boards
         .pins
@@ -100,7 +121,12 @@ fn write_folder(app: &AppHandle, boards: &BoardsSnapshot, id: &str, dir: &Path) 
         .iter()
         .filter(|folder| folder.parent_id.as_deref() == Some(id))
     {
-        write_folder(app, boards, &child.id, &files::unique_path(dir, &child.name))?;
+        write_folder(
+            app,
+            boards,
+            &child.id,
+            &files::unique_path(dir, &child.name),
+        )?;
     }
     Ok(())
 }

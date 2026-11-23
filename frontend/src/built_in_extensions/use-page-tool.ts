@@ -4,6 +4,28 @@ import { currentWindowLabel, onPageToolRequest } from "../lib/browser-client";
 
 export type ToolStatus = "idle" | "busy" | "done" | "failed";
 
+type ToolHandler = (request: PageToolRequest) => void;
+
+const listeners = new Map<string, Set<ToolHandler>>();
+let listening = false;
+
+function listenerKey(windowLabel: string, tool: string) {
+  return `${windowLabel}\0${tool}`;
+}
+
+/** One app-wide listener. A tool pinned on two bars would otherwise save twice. */
+function ensurePageToolListener() {
+  if (listening) {
+    return;
+  }
+  listening = true;
+  void onPageToolRequest((request) => {
+    const handlers = listeners.get(listenerKey(request.window, request.tool));
+    const handler = handlers?.values().next().value;
+    handler?.(request);
+  });
+}
+
 /** Runs `handler` for requests to `tool` that target this browser window. */
 export function usePageToolRequests<T extends PageToolRequest["tool"]>(
   tool: T,
@@ -13,14 +35,19 @@ export function usePageToolRequests<T extends PageToolRequest["tool"]>(
   handlerRef.current = handler;
 
   useEffect(() => {
-    const window = currentWindowLabel();
-    const unlisten = onPageToolRequest((request) => {
-      if (request.tool === tool && request.window === window) {
-        handlerRef.current(request as Extract<PageToolRequest, { tool: T }>);
-      }
-    });
+    ensurePageToolListener();
+    const key = listenerKey(currentWindowLabel(), tool);
+    const wrapped: ToolHandler = (request) => {
+      handlerRef.current(request as Extract<PageToolRequest, { tool: T }>);
+    };
+    const handlers = listeners.get(key) ?? new Set<ToolHandler>();
+    handlers.add(wrapped);
+    listeners.set(key, handlers);
     return () => {
-      void unlisten.then((stop) => stop());
+      handlers.delete(wrapped);
+      if (handlers.size === 0) {
+        listeners.delete(key);
+      }
     };
   }, [tool]);
 }

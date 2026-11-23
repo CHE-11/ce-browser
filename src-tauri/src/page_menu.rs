@@ -81,9 +81,39 @@ pub fn page_address(settings: &settings::BrowserSettings, page: &str) -> String 
 pub fn copy_page_address(app: &AppHandle, id: u32, page: &str) {
     let window = window_of(app, id);
     let address = page_address(&settings::get(app), page);
-    match ocr::copy_text(&address) {
-        Ok(()) => undo::notice(app, &window, "Copied the page address"),
-        Err(error) => undo::notice(app, &window, &error),
+    copy_titled(
+        app,
+        &window,
+        &address,
+        &page_title(app, id),
+        "Copied the page address",
+    );
+}
+
+/// Copies a link from the page. The label is the link's own text, or the page title when the
+/// link has none, such as an image.
+pub fn copy_link_address(app: &AppHandle, id: u32, link: &str, link_text: &str) {
+    let window = window_of(app, id);
+    let address = page_address(&settings::get(app), link);
+    let text = link_text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let title = if text.is_empty() {
+        page_title(app, id)
+    } else {
+        text
+    };
+    copy_titled(app, &window, &address, &title, "Copied the link");
+}
+
+fn page_title(app: &AppHandle, id: u32) -> String {
+    tabs::tab_info(app, id)
+        .map(|info| info.title)
+        .unwrap_or_default()
+}
+
+fn copy_titled(app: &AppHandle, window: &str, url: &str, title: &str, done: &str) {
+    match ocr::copy_link(url, title) {
+        Ok(()) => undo::notice(app, window, done),
+        Err(error) => undo::notice(app, window, &error),
     }
 }
 
@@ -97,10 +127,13 @@ pub fn bookmark_page(app: &AppHandle, id: u32) {
 pub fn copy_link_to_text(app: &AppHandle, id: u32, page: &str, selection: &str) {
     let window = window_of(app, id);
     match link_to_text(&settings::get(app), page, selection) {
-        Some(link) => match ocr::copy_text(&link) {
-            Ok(()) => undo::notice(app, &window, "Copied a link to the highlighted text"),
-            Err(error) => undo::notice(app, &window, &error),
-        },
+        Some(link) => copy_titled(
+            app,
+            &window,
+            &link,
+            &page_title(app, id),
+            "Copied a link to the highlighted text",
+        ),
         None => undo::notice(app, &window, "Only web pages can link to text."),
     }
 }

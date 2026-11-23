@@ -5,7 +5,7 @@ import { openPopup, defaultDownloadDir, chooseSavePath, printTabToPdf, extractPa
 import { cn } from "@/lib/cn";
 import { TabInfo, BrowserSettings, ExtractedPage, PageToolRequest } from "@type/browser";
 import { LoaderCircle, Check, Printer } from "lucide-react";
-import { tabParams, joinPath, fileNameFor, capturable } from "../shared";
+import { tabParams, joinPath, capturable } from "../shared";
 import { fileNameFromTemplate, storedFileNameTemplate, type FileNameSource } from "./file-name";
 import { contentStateFrom, buildDocument, parsePage, renderOffscreen } from "./print-document";
 import { DEFAULT_PRINT_SETTINGS, applyPrintPreset, pdfOptions, contentBox } from "./print-options";
@@ -14,6 +14,9 @@ type PrintPdfButtonProps = {
   activeTab: TabInfo | undefined;
   settings: BrowserSettings | null;
 };
+
+/** Shared by every mounted print button, so a tool on two bars only saves once. */
+let saveInFlight = false;
 
 export function PrintPdfButton({ activeTab, settings }: PrintPdfButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -35,6 +38,10 @@ export function PrintPdfButton({ activeTab, settings }: PrintPdfButtonProps) {
   };
 
   const run = async (request: Extract<PageToolRequest, { tool: "print-pdf" }>) => {
+    if (saveInFlight) {
+      return;
+    }
+    saveInFlight = true;
     const stored = settingsRef.current?.printEditor ?? DEFAULT_PRINT_SETTINGS;
     const preset =
       request.action === "quick" && request.presetId ? stored.presets.find((item) => item.id === request.presetId) : undefined;
@@ -56,7 +63,8 @@ export function PrintPdfButton({ activeTab, settings }: PrintPdfButtonProps) {
         lang: page?.lang ?? "",
         preset: preset?.name ?? "",
       };
-      const name = preset ? fileNameFromTemplate(storedFileNameTemplate(preset), source) : fileNameFor(source.title, source.url, "pdf");
+      const template = preset ? storedFileNameTemplate(preset) : "";
+      const name = fileNameFromTemplate(template, source);
       const path = await chooseSavePath(joinPath(folder, name), "PDF document", ["pdf"]);
       if (!path) {
         setStatus("idle");
@@ -92,6 +100,8 @@ export function PrintPdfButton({ activeTab, settings }: PrintPdfButtonProps) {
       result.set("status", "error");
       result.set("message", errorText(error));
       setStatus("failed");
+    } finally {
+      saveInFlight = false;
     }
     showPopover(result);
   };

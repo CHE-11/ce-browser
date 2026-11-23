@@ -268,4 +268,3 @@ mod tests {
         assert_eq!(image.get_pixel(1, 0).0, [0, 255, 0, 255]);
     }
 }
-

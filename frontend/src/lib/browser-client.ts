@@ -1049,6 +1049,11 @@ export function closePeek() {
   return invoke<void>("close_peek");
 }
 
+/** Shows a web address in a peek card over the current window. */
+export function peekUrl(url: string) {
+  return invoke<void>("peek_url", { url });
+}
+
 export function peekToTab() {
   return invoke<number>("peek_to_tab");
 }

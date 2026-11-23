@@ -26,6 +26,7 @@ import {
   onBoardImportProgress,
   openPinFile,
   pasteBoardClipboard,
+  peekUrl,
   pickBoardFiles,
   pickBoardFolders,
   pickEagleLibrary,
@@ -44,12 +45,13 @@ import { useAppearanceFromSettings } from "@/lib/use-browser";
 import type { BoardFolder, BoardImportProgress, BoardImportResult, Pin, PinSort } from "@type/browser";
 import { errorText } from "@/built_in_extensions/use-page-tool";
 import { FolderCards } from "../grid/FolderCards";
+import { canMoveFolder } from "../drag";
 import { PinGrid, type PinListHandlers, type SelectMode } from "../grid/PinGrid";
 import { PinTable } from "../grid/PinTable";
 import { MoveMenu } from "../MoveMenu";
 import { savePinFileAs } from "../file-pin";
 import { EMPTY_FILTER, activeFilterCount, applyFilter, type PinFilter } from "../filters";
-import { DRAG_PINS, UNCATEGORIZED, childFolders, folderContents, livePins, pinAddress, pinMatches, sortPins } from "../folder-tree";
+import { DRAG_PINS, UNCATEGORIZED, childFolders, folderContents, livePins, pinAddress, pinMatches, previewableAddress, sortPins } from "../folder-tree";
 import { importFiles, linksInText, linksToImports } from "../import-items";
 import { dropEntries, walkEntries, type DroppedFile } from "../import/walk-drop";
 import { sameScope, scopeExists, scopeFromParams, scopeHasOwnOrder, scopeKey, scopeLabel, scopePins, scopeSaveTarget, type BoardsScope } from "../scopes";
@@ -99,6 +101,29 @@ function savedMessage(result: Pick<BoardImportResult, "duplicates" | "failed"> &
   return parts.join(" ");
 }
 
+const MOUSE_BACK = 3;
+const MOUSE_FORWARD = 4;
+const WHEEL_NAV_MIN = 4;
+/** One step per gesture: a held tilt wheel or a trackpad swipe keeps firing until it has been quiet this long. */
+const WHEEL_NAV_QUIET_MS = 350;
+
+/** True when an element under the pointer can still scroll horizontally in the wheel's direction. */
+function scrollsSideways(target: EventTarget | null, deltaX: number) {
+  for (let node = target instanceof Element ? target : null; node; node = node.parentElement) {
+    if (node.scrollWidth <= node.clientWidth) {
+      continue;
+    }
+    const overflow = getComputedStyle(node).overflowX;
+    if (overflow !== "auto" && overflow !== "scroll") {
+      continue;
+    }
+    if (deltaX < 0 ? node.scrollLeft > 0 : node.scrollLeft + node.clientWidth < node.scrollWidth - 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function BoardsPage({ params }: { params: URLSearchParams }) {
   useAppearanceFromSettings();
   const { boards, loaded } = useBoards();
@@ -129,6 +154,8 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
   const jobScopes = useRef(new Map<string, string>());
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
+  const viewerOpen = useRef(false);
+  viewerOpen.current = viewerId !== null;
 
   const fail = useCallback((reason: unknown) => setError(errorText(reason)), []);
 
@@ -151,6 +178,62 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
       return { stack, index: stack.length - 1 };
     });
   }, []);
+
+  const back = useCallback(() => setHistory((current) => ({ ...current, index: Math.max(0, current.index - 1) })), []);
+  const forward = useCallback(() => setHistory((current) => ({ ...current, index: Math.min(current.stack.length - 1, current.index + 1) })), []);
+
+  useEffect(() => {
+    let lockedUntil = 0;
+    const onWheel = (event: WheelEvent) => {
+      if (viewerOpen.current || Math.abs(event.deltaX) < WHEEL_NAV_MIN || Math.abs(event.deltaX) <= Math.abs(event.deltaY) || scrollsSideways(event.target, event.deltaX)) {
+        return;
+      }
+      const now = performance.now();
+      const locked = now < lockedUntil;
+      lockedUntil = now + WHEEL_NAV_QUIET_MS;
+      if (locked) {
+        return;
+      }
+      if (event.deltaX < 0) {
+        back();
+      } else {
+        forward();
+      }
+    };
+    window.addEventListener("wheel", onWheel, { passive: true });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, [back, forward]);
+
+  useEffect(() => {
+    const isSideButton = (event: MouseEvent) => event.button === MOUSE_BACK || event.button === MOUSE_FORWARD;
+    const onMouseDown = (event: MouseEvent) => {
+      if (isSideButton(event)) {
+        event.preventDefault();
+      }
+    };
+    // Cancelling mouseup stops WebView2 from navigating the tab's own history.
+    const onMouseUp = (event: MouseEvent) => {
+      if (!isSideButton(event)) {
+        return;
+      }
+      event.preventDefault();
+      if (event.button === MOUSE_BACK && viewerOpen.current) {
+        setViewerId(null);
+      } else if (!viewerOpen.current) {
+        if (event.button === MOUSE_BACK) {
+          back();
+        } else {
+          forward();
+        }
+      }
+    };
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [back, forward]);
 
   useEffect(() => {
     if (requestedFolder) {
@@ -437,6 +520,14 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
           return showNotice("Image copied");
         })
         .catch(fail),
+    previewPage: (pin) => {
+      const address = previewableAddress(pin);
+      if (!address) {
+        void showNotice("This item has no web address.");
+        return;
+      }
+      void peekUrl(address).catch(fail);
+    },
     copyAddress: (pins) => {
       const urls = pins.map(pinAddress).filter(Boolean);
       if (urls.length === 0) {
@@ -499,7 +590,8 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
       (path) => `Exported to ${String(path)}`,
     );
 
-  const dropPins = (ids: string[], target: PinDropTarget, move: boolean) => {
+  /** Pins dragged out of a folder view leave that folder. Elsewhere they are added, so pins keep their other folders. */
+  const dropPins = (ids: string[], target: PinDropTarget, copy: boolean) => {
     if (ids.length === 0) {
       return;
     }
@@ -510,12 +602,20 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
       return;
     } else if (target.kind === "uncategorized") {
       work = movePins(ids, null, UNCATEGORIZED);
-    } else if (move) {
+    } else if (target.id === from) {
+      return;
+    } else if (from && !copy) {
       work = movePins(ids, from, target.id);
     } else {
       work = addPinsToFolder(ids, target.id);
     }
     void work.catch(fail);
+  };
+
+  const dropFolder = (id: string, target: string | null) => {
+    if (canMoveFolder(boards, id, target)) {
+      void moveBoardFolder(id, target).catch(fail);
+    }
   };
 
   // Keyboard, paste and drop
@@ -726,7 +826,8 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
         size={prefs.size}
         onOpen={(item) => go({ kind: "folder", id: item.id })}
         onMenu={(item, x, y) => setFolderMenu({ folder: item, x, y })}
-        onDropPins={(ids, item, move) => dropPins(ids, { kind: "folder", id: item.id }, move)}
+        onDropPins={(ids, item, copy) => dropPins(ids, { kind: "folder", id: item.id }, copy)}
+        onDropFolder={(id, item) => dropFolder(id, item.id)}
       />
     ) : null;
 
@@ -768,8 +869,10 @@ export function BoardsPage({ params }: { params: URLSearchParams }) {
           selectedCount={selected.size}
           canBack={history.index > 0}
           canForward={history.index < history.stack.length - 1}
-          onBack={() => setHistory((current) => ({ ...current, index: Math.max(0, current.index - 1) }))}
-          onForward={() => setHistory((current) => ({ ...current, index: Math.min(current.stack.length - 1, current.index + 1) }))}
+          onBack={back}
+          onForward={forward}
+          onDropPins={(ids, folderId, copy) => dropPins(ids, { kind: "folder", id: folderId }, copy)}
+          onDropFolder={dropFolder}
           onScope={go}
           query={query}
           onQuery={setQuery}

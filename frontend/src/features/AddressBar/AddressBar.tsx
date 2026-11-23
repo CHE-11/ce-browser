@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -127,6 +127,39 @@ function sameAddress(current: string | undefined, next: string) {
   } catch {
     return false;
   }
+}
+
+function escapeHtml(text: string) {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+/** An HTML link whose label is the page title. A blank title, or a title that is the URL, uses the URL. */
+function linkHtml(url: string, title: string) {
+  const label = title.trim();
+  const text = label && label !== url ? label : url;
+  return `<a href="${escapeHtml(url)}">${escapeHtml(text)}</a>`;
+}
+
+/**
+ * A copy of the whole committed page address. Rich-text paste shows the page title, and plain
+ * paste still gets the URL. A partial selection, or text the user typed, stays a plain copy.
+ */
+function copyCommittedLink(event: ClipboardEvent<HTMLInputElement>, tab: TabInfo | undefined) {
+  const input = event.currentTarget;
+  const start = input.selectionStart ?? 0;
+  const end = input.selectionEnd ?? 0;
+  const value = input.value;
+  const wholeField = value.length > 0 && start === 0 && end === value.length;
+  if (!wholeField || !sameAddress(addressText(tab), value) || !event.clipboardData) {
+    return;
+  }
+  event.preventDefault();
+  event.clipboardData.setData("text/plain", value);
+  event.clipboardData.setData("text/html", linkHtml(value, tab?.title ?? ""));
 }
 
 /**
@@ -1100,6 +1133,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
             const inputType = (event.nativeEvent as InputEvent).inputType ?? "";
             onChange(event.target.value, inputType.startsWith("insert"));
           }}
+          onCopy={(event) => copyCommittedLink(event, activeRef.current)}
           onKeyDown={onKeyDown}
           onFocus={(event) => {
             if (blurTimer.current !== null) {

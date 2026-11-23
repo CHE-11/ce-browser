@@ -2,6 +2,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  Eye,
   File,
   FolderInput,
   FolderMinus,
@@ -18,11 +19,13 @@ import {
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from "@/components/ContextMenu";
 import { cn } from "@/lib/cn";
 import type { Pin } from "@type/browser";
-import { hasPreview, pinAddress } from "../folder-tree";
+import { hasPreview, pinAddress, previewableAddress } from "../folder-tree";
 
 export type PinMenuActions = {
   open: (pin: Pin) => void;
   openSource: (pins: Pin[]) => void;
+  /** Shows the pin's web page in a peek card, without opening a tab. */
+  previewPage: (pin: Pin) => void;
   openFile: (pin: Pin) => void;
   reveal: (pin: Pin) => void;
   copyImage: (pin: Pin) => void;
@@ -85,6 +88,13 @@ export function PinContextMenu({ pins, x, y, folderId, inTrash, actions, onClose
         label={many ? `Open ${withAddress.length} addresses` : "Open source page"}
         disabled={withAddress.length === 0}
         onClick={run(() => actions.openSource(withAddress))}
+      />
+      <ContextMenuItem
+        id="boards-pin-menu-preview"
+        icon={<Eye />}
+        label="Preview page"
+        disabled={many || !previewableAddress(pin)}
+        onClick={run(() => actions.previewPage(pin))}
       />
       {isFile ? (
         <>

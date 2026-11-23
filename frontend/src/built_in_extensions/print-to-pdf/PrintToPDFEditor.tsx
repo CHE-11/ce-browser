@@ -7,7 +7,8 @@ import { ExtractedPage, PrintEditorSettings, PaperSize, PrintFont, PrintPageNumb
 import { CircleAlert, RotateCcw, LoaderCircle, Printer, Undo2, Redo2, ArrowUpToLine, Trash2, Copy, X, PencilLine, MousePointerClick, FileDown, FileCheck, FolderOpen } from "lucide-react";
 import { useState, useRef, useEffect, useMemo, useCallback, ReactNode } from "react";
 import { Segmented, OptionRow } from "../PopoverParts";
-import { joinPath, fileNameFor } from "../shared";
+import { joinPath } from "../shared";
+import { fileNameFromTemplate, type FileNameSource } from "./file-name";
 import { errorText } from "../use-page-tool";
 import { CleanupKind } from "./cleanup";
 import { FrameEditor } from "./editor-dom";
@@ -326,7 +327,16 @@ export function PrintToPDFEditor({ tabId }: PrintEditorProps) {
       return;
     }
     const folder = settingsRef.current?.downloadDir || (await defaultDownloadDir());
-    const path = await chooseSavePath(joinPath(folder, fileNameFor(page.title, page.url, "pdf")), "PDF document", ["pdf"]);
+    const source: FileNameSource = {
+      title: page.title,
+      url: page.url,
+      author: page.byline,
+      site: page.siteName,
+      published: page.published,
+      lang: page.lang,
+      preset: "",
+    };
+    const path = await chooseSavePath(joinPath(folder, fileNameFromTemplate("", source)), "PDF document", ["pdf"]);
     if (!path) {
       return;
     }

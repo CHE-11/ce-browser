@@ -1,17 +1,21 @@
-import { useState } from "react";
-import { CircleAlert, ClipboardPaste, Crop, ExternalLink, Images, LayoutGrid, Link2, Monitor, MousePointerClick, RotateCcw, ScrollText, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, CircleAlert, ClipboardPaste, Crop, ExternalLink, ImagePlus, Images, LayoutGrid, Link2, LoaderCircle, Monitor, MousePointerClick, RotateCcw, ScrollText, Trash2 } from "lucide-react";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import { PopupFrame } from "@/components/PopupFrame";
-import { closePopup, createTab, currentWindowLabel, movePins, pasteBoardClipboard, requestPageTool, trashPins } from "@/lib/browser-client";
+import { closePopup, createTab, currentWindowLabel, movePins, pasteBoardClipboard, requestPageTool, showNotice, trashPins } from "@/lib/browser-client";
+import { cn } from "@/lib/cn";
 import type { PageToolRequest } from "@type/browser";
 
 import { ActionTile, PopoverHeader } from "../../PopoverParts";
 import { capturable, readPopoverTab } from "../../shared";
 import { errorText } from "../../use-page-tool";
 import { FolderPicker, folderTargetName, resolveFolder } from "../FolderPicker";
+import { isBoardFileDrag, readBoardDrop, saveBoardDrop, savedDropMessage } from "../drop-save";
 import { UNCATEGORIZED, hasPreview, previewUrl } from "../folder-tree";
 import { useBoards } from "../use-boards";
+
+type DropState = { phase: "saving" | "saved" | "error"; message: string };
 
 type BoardsAction = Extract<PageToolRequest, { tool: "boards" }>["action"];
 
@@ -34,6 +38,84 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
   const [pasting, setPasting] = useState(false);
   const [pasteError, setPasteError] = useState("");
   const [pasted, setPasted] = useState<URLSearchParams | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [dropState, setDropState] = useState<DropState | null>(null);
+  const latest = useRef({ folderId, boards, tab });
+  latest.current = { folderId, boards, tab };
+
+  useEffect(() => {
+    let alive = true;
+    let leaveTimer: number | null = null;
+    const cancelLeave = () => {
+      if (leaveTimer !== null) {
+        window.clearTimeout(leaveTimer);
+        leaveTimer = null;
+      }
+    };
+
+    const onDragOver = (event: DragEvent) => {
+      if (!event.dataTransfer || !isBoardFileDrag(event.dataTransfer)) {
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+      cancelLeave();
+      setDragging(true);
+    };
+
+    const onDragLeave = (event: DragEvent) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && document.documentElement.contains(next)) {
+        return;
+      }
+      cancelLeave();
+      leaveTimer = window.setTimeout(() => {
+        leaveTimer = null;
+        setDragging(false);
+      }, 80);
+    };
+
+    const onDrop = (event: DragEvent) => {
+      if (!event.dataTransfer || !isBoardFileDrag(event.dataTransfer)) {
+        return;
+      }
+      event.preventDefault();
+      cancelLeave();
+      setDragging(false);
+      const { folderId: target, tab: source } = latest.current;
+      const drop = readBoardDrop(event.dataTransfer, source.url);
+      setPasted(null);
+      setShowResult(false);
+      setDropState({ phase: "saving", message: "" });
+      void saveBoardDrop(drop, target, source.id)
+        .then((result) => {
+          if (!alive) {
+            return;
+          }
+          const text = savedDropMessage(result, folderTargetName(latest.current.boards, target));
+          setDropState({ phase: "saved", message: text });
+          void showNotice(text).catch(() => undefined);
+        })
+        .catch((reason: unknown) => {
+          if (alive) {
+            setDropState({ phase: "error", message: errorText(reason) });
+          }
+        });
+    };
+
+    window.addEventListener("dragenter", onDragOver);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      alive = false;
+      cancelLeave();
+      window.removeEventListener("dragenter", onDragOver);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
 
   const paste = () => {
     setPasting(true);
@@ -84,6 +166,47 @@ export function BoardsPopover({ params }: { params: URLSearchParams }) {
       ) : (
         <div id="boards-form" className="flex flex-col gap-2 px-3 pb-3">
           <FolderPicker id="boards-picker" boards={boards} value={folderId} onChange={setFolderId} />
+          <div
+            id="boards-drop-zone"
+            className={cn(
+              "flex min-h-11 items-center justify-center gap-2 rounded-lg border border-dashed px-3 py-2 text-center text-xs",
+              dragging
+                ? "border-sky-400 bg-sky-500/15 text-sky-100"
+                : dropState?.phase === "error"
+                  ? "border-amber-500/50 bg-amber-500/10 text-amber-200"
+                  : dropState?.phase === "saved"
+                    ? "border-sky-500/40 bg-sky-500/10 text-sky-100"
+                    : "border-zinc-700 text-zinc-500",
+            )}
+          >
+            {dragging ? (
+              <>
+                <ImagePlus id="boards-drop-zone-icon" className="size-4 shrink-0" aria-hidden />
+                <span id="boards-drop-zone-label">Release to save to {folderTargetName(boards, folderId)}</span>
+              </>
+            ) : dropState?.phase === "saving" ? (
+              <>
+                <LoaderCircle id="boards-drop-zone-icon" className="size-4 shrink-0 animate-spin" aria-hidden />
+                <span id="boards-drop-zone-label">Saving…</span>
+              </>
+            ) : dropState ? (
+              <>
+                {dropState.phase === "saved" ? (
+                  <Check id="boards-drop-zone-icon" className="size-4 shrink-0" aria-hidden />
+                ) : (
+                  <CircleAlert id="boards-drop-zone-icon" className="size-4 shrink-0" aria-hidden />
+                )}
+                <span id="boards-drop-zone-label" className="wrap-break-word">
+                  {dropState.message}
+                </span>
+              </>
+            ) : (
+              <>
+                <ImagePlus id="boards-drop-zone-icon" className="size-4 shrink-0" aria-hidden />
+                <span id="boards-drop-zone-label">Drag an image, GIF, file or link here</span>
+              </>
+            )}
+          </div>
           {canCapture ? null : (
             <p id="boards-not-web" className="rounded-lg bg-zinc-800/60 px-3 py-2 text-xs text-zinc-400">
               Saving works on web pages. Open a site to save from it, or open Boards below.

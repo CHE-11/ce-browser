@@ -486,6 +486,16 @@ async fn close_peek(app: AppHandle, window: Window) {
     peek::close(&app, &browser_window(&window));
 }
 
+/// Shows `url` in a peek over the caller's window, as Shift+click on a link does.
+#[tauri::command]
+async fn peek_url(app: AppHandle, window: Window, url: String) -> Result<(), String> {
+    let url = url::Url::parse(url.trim()).map_err(|_| "That address isn't valid.".to_string())?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("Only web addresses can be previewed.".into());
+    }
+    peek::open(&app, &browser_window(&window), url)
+}
+
 #[tauri::command]
 async fn peek_to_tab(app: AppHandle, window: Window) -> Result<u32, String> {
     peek::to_tab(&app, &browser_window(&window))
@@ -3376,6 +3386,7 @@ pub fn run() {
             move_tabs_to_workspace,
             peek_state,
             close_peek,
+            peek_url,
             peek_to_tab,
             peek_to_split,
             zoom_tab,

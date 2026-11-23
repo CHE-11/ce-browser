@@ -608,7 +608,13 @@ fn enable_session(webview: &Webview, session: &str) -> Result<(), String> {
     if let Err(error) = cdp_in(webview, session, "Log.enable", json!({}), SHORT) {
         eprintln!("console Log.enable: {error}");
     }
-    if let Err(error) = cdp_in(webview, session, "Target.setAutoAttach", auto_attach(true), SHORT) {
+    if let Err(error) = cdp_in(
+        webview,
+        session,
+        "Target.setAutoAttach",
+        auto_attach(true),
+        SHORT,
+    ) {
         eprintln!("console auto-attach: {error}");
     }
     Ok(())
@@ -828,7 +834,10 @@ fn on_log(app: &AppHandle, incoming: &Incoming) {
         tab_id: incoming.tab,
         id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         level: level.to_string(),
-        timestamp: entry.get("timestamp").and_then(Value::as_f64).unwrap_or(0.0),
+        timestamp: entry
+            .get("timestamp")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0),
         origin: origin_of(incoming.tab, &incoming.session, None),
         text: clip(&text, 2000),
         stack: stack_of(entry),
@@ -1518,7 +1527,13 @@ fn flash_node(app: &AppHandle, tab: u32, session: &str, backend: u64) {
     thread::spawn(move || {
         thread::sleep(Duration::from_millis(800));
         if let Some(webview) = tabs::page_view(&app, tab) {
-            let _ = cdp_in(&webview, &session, "Overlay.hideHighlight", json!({}), SHORT);
+            let _ = cdp_in(
+                &webview,
+                &session,
+                "Overlay.hideHighlight",
+                json!({}),
+                SHORT,
+            );
         }
     });
 }
@@ -1575,7 +1590,14 @@ fn cdp_in(
     params: Value,
     timeout: Duration,
 ) -> Result<Value, String> {
-    webview2::call_cdp_json_in(webview, session, method, &params.to_string(), timeout, FAILURE)
+    webview2::call_cdp_json_in(
+        webview,
+        session,
+        method,
+        &params.to_string(),
+        timeout,
+        FAILURE,
+    )
 }
 
 fn level_of(kind: &str) -> &'static str {

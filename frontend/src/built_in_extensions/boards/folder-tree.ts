@@ -258,6 +258,12 @@ export function pinAddress(pin: Pin) {
   return pin.kind === "link" && pin.linkUrl ? pin.linkUrl : pin.pageUrl || pin.linkUrl;
 }
 
+/** The pin's address when it is a web page that can be previewed, otherwise empty. */
+export function previewableAddress(pin: Pin) {
+  const address = pinAddress(pin);
+  return /^https?:\/\//i.test(address) ? address : "";
+}
+
 export function hostOf(url: string) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");

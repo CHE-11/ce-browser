@@ -64,7 +64,8 @@ struct EaglePalette {
 /// `metadata.json`.
 fn library_root(path: &Path) -> Option<PathBuf> {
     let root = if path.is_file() { path.parent()? } else { path };
-    (root.join("metadata.json").is_file() && root.join("images").is_dir()).then(|| root.to_path_buf())
+    (root.join("metadata.json").is_file() && root.join("images").is_dir())
+        .then(|| root.to_path_buf())
 }
 
 /// Starts importing the library at `path` into `folder` (empty or `UNCATEGORIZED` for the top
@@ -103,10 +104,13 @@ fn make_folders(
 ) -> Result<HashMap<String, String>, String> {
     change(app, |boards| {
         let mut ids = HashMap::new();
-        let mut stack: Vec<(&EagleFolder, Option<String>)> =
-            folders.iter().map(|folder| (folder, base.clone())).collect();
+        let mut stack: Vec<(&EagleFolder, Option<String>)> = folders
+            .iter()
+            .map(|folder| (folder, base.clone()))
+            .collect();
         while let Some((folder, parent)) = stack.pop() {
-            let Some(id) = boards.folder_path(parent.as_deref(), &folder.name.replace(['/', '\\'], "-"))
+            let Some(id) =
+                boards.folder_path(parent.as_deref(), &folder.name.replace(['/', '\\'], "-"))
             else {
                 continue;
             };
@@ -154,24 +158,39 @@ fn item_file(dir: &Path, item: &EagleItem) -> Option<PathBuf> {
     if named.is_file() {
         return Some(named);
     }
-    fs::read_dir(dir).ok()?.flatten().map(|entry| entry.path()).find(|path| {
-        let name = path
-            .file_name()
-            .map(|name| name.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        path.is_file() && name != "metadata.json" && !name.contains("_thumbnail.")
-    })
+    fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            path.is_file() && name != "metadata.json" && !name.contains("_thumbnail.")
+        })
 }
 
 fn item_thumbnail(dir: &Path) -> Option<PathBuf> {
-    fs::read_dir(dir).ok()?.flatten().map(|entry| entry.path()).find(|path| {
-        path.file_name()
-            .is_some_and(|name| name.to_string_lossy().to_lowercase().contains("_thumbnail."))
-    })
+    fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name().is_some_and(|name| {
+                name.to_string_lossy()
+                    .to_lowercase()
+                    .contains("_thumbnail.")
+            })
+        })
 }
 
 fn palette_of(item: &EagleItem) -> Vec<PaletteColor> {
-    let total: f32 = item.palettes.iter().map(|palette| palette.ratio.max(0.0)).sum();
+    let total: f32 = item
+        .palettes
+        .iter()
+        .map(|palette| palette.ratio.max(0.0))
+        .sum();
     if total <= 0.0 {
         return Vec::new();
     }
@@ -190,7 +209,12 @@ fn palette_of(item: &EagleItem) -> Vec<PaletteColor> {
 }
 
 /// A pin for one Eagle item, with its file stored. None when the item has nothing to import.
-fn item_pin(app: &AppHandle, dir: &Path, item: &EagleItem, folders: &HashMap<String, String>) -> Result<Option<Pin>, String> {
+fn item_pin(
+    app: &AppHandle,
+    dir: &Path,
+    item: &EagleItem,
+    folders: &HashMap<String, String>,
+) -> Result<Option<Pin>, String> {
     let thumbnail = item_thumbnail(dir);
     let is_bookmark = item.ext.eq_ignore_ascii_case("url");
     let mut pin = if is_bookmark {
@@ -269,7 +293,12 @@ fn item_pin(app: &AppHandle, dir: &Path, item: &EagleItem, folders: &HashMap<Str
 }
 
 /// Saves the pins, leaving out any whose file is already in each of its folders.
-fn commit(app: &AppHandle, base: &Option<String>, batch: Vec<Pin>, progress: &mut BoardImportProgress) {
+fn commit(
+    app: &AppHandle,
+    base: &Option<String>,
+    batch: Vec<Pin>,
+    progress: &mut BoardImportProgress,
+) {
     if batch.is_empty() {
         return;
     }

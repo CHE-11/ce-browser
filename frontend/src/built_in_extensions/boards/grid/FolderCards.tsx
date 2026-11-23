@@ -3,7 +3,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
 import type { BoardFolder, BoardsSnapshot } from "@type/browser";
 import { FolderGlyph } from "../folder-icons";
-import { DRAG_PINS, folderPreviewPins, pinsInFolder, previewUrl } from "../folder-tree";
+import { canMoveFolder, dragHas, draggedFolder, draggedPins, isBoardsDrag, pinDropEffect } from "../drag";
+import { DRAG_FOLDER, DRAG_PINS, folderPreviewPins, pinsInFolder, previewUrl } from "../folder-tree";
 
 const OPEN_KEY = "ce-boards-subfolders-open";
 
@@ -14,12 +15,14 @@ type FolderCardsProps = {
   size: number;
   onOpen: (folder: BoardFolder) => void;
   onMenu: (folder: BoardFolder, x: number, y: number) => void;
-  /** `move` is true when Shift was held. */
-  onDropPins: (ids: string[], folder: BoardFolder, move: boolean) => void;
+  /** `copy` is true when Ctrl was held: the pins stay where they were as well. */
+  onDropPins: (ids: string[], folder: BoardFolder, copy: boolean) => void;
+  /** Folder `id` was dropped on `folder` to go inside it. */
+  onDropFolder: (id: string, folder: BoardFolder) => void;
 };
 
 /** "Subfolder (n)" cards above a folder's pins, each a mosaic of the newest images inside. */
-export function FolderCards({ boards, folders, size, onOpen, onMenu, onDropPins }: FolderCardsProps) {
+export function FolderCards({ boards, folders, size, onOpen, onMenu, onDropPins, onDropFolder }: FolderCardsProps) {
   const [open, setOpen] = useState(() => localStorage.getItem(OPEN_KEY) !== "0");
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   if (folders.length === 0) {
@@ -36,18 +39,16 @@ export function FolderCards({ boards, folders, size, onOpen, onMenu, onDropPins 
 
   const drop = (event: DragEvent, folder: BoardFolder) => {
     event.preventDefault();
+    event.stopPropagation();
     setDropTarget(null);
-    try {
-      const ids: unknown = JSON.parse(event.dataTransfer.getData(DRAG_PINS) || "[]");
-      if (Array.isArray(ids) && ids.length > 0) {
-        onDropPins(
-          ids.filter((id): id is string => typeof id === "string"),
-          folder,
-          event.shiftKey,
-        );
-      }
-    } catch {
-      // Not pins.
+    const pins = draggedPins(event);
+    if (pins.length > 0) {
+      onDropPins(pins, folder, event.ctrlKey);
+      return;
+    }
+    const dragged = draggedFolder(event);
+    if (dragged && canMoveFolder(boards, dragged, folder.id)) {
+      onDropFolder(dragged, folder);
     }
   };
 
@@ -74,10 +75,16 @@ export function FolderCards({ boards, folders, size, onOpen, onMenu, onDropPins 
                     event.preventDefault();
                     onMenu(folder, event.clientX, event.clientY);
                   }}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData(DRAG_FOLDER, folder.id);
+                    event.dataTransfer.effectAllowed = "move";
+                  }}
                   onDragOver={(event) => {
-                    if (event.dataTransfer.types.includes(DRAG_PINS)) {
+                    if (isBoardsDrag(event)) {
                       event.preventDefault();
-                      event.dataTransfer.dropEffect = event.shiftKey ? "move" : "copy";
+                      event.stopPropagation();
+                      event.dataTransfer.dropEffect = dragHas(event, DRAG_PINS) ? pinDropEffect(event) : "move";
                       setDropTarget(folder.id);
                     }
                   }}

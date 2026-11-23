@@ -134,7 +134,11 @@ pub fn add_pins_to_folder(app: &AppHandle, ids: &[String], folder: &str) -> Resu
     change(app, |boards| boards.add_to_folder(ids, folder))
 }
 
-pub fn remove_pins_from_folder(app: &AppHandle, ids: &[String], folder: &str) -> Result<(), String> {
+pub fn remove_pins_from_folder(
+    app: &AppHandle,
+    ids: &[String],
+    folder: &str,
+) -> Result<(), String> {
     change(app, |boards| boards.remove_from_folder(ids, folder))
 }
 

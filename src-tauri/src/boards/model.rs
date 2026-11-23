@@ -20,7 +20,14 @@ pub const FOLDER_COLORS: [&str; 9] = [
     "gray", "red", "orange", "yellow", "green", "aqua", "blue", "purple", "pink",
 ];
 pub const PIN_SORTS: [&str; 8] = [
-    "newest", "oldest", "title", "kind", "size", "rating", "dimensions", "extension",
+    "newest",
+    "oldest",
+    "title",
+    "kind",
+    "size",
+    "rating",
+    "dimensions",
+    "extension",
 ];
 
 pub const TITLE_LIMIT: usize = 300;
@@ -71,7 +78,11 @@ pub fn clean_name(name: &str, fallback: &str) -> String {
 /// Lowercase letters and digits only, so the extension can name a file.
 pub fn clean_ext(ext: &str) -> String {
     let ext = ext.trim().trim_start_matches('.').to_ascii_lowercase();
-    if ext.len() > EXT_LIMIT || !ext.chars().all(|character| character.is_ascii_alphanumeric()) {
+    if ext.len() > EXT_LIMIT
+        || !ext
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
         return String::new();
     }
     ext
@@ -82,7 +93,10 @@ pub fn clean_tags(tags: &[String]) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for tag in tags {
-        let tag = clip_text(&tag.split_whitespace().collect::<Vec<_>>().join(" "), TAG_LIMIT);
+        let tag = clip_text(
+            &tag.split_whitespace().collect::<Vec<_>>().join(" "),
+            TAG_LIMIT,
+        );
         if tag.is_empty() || !seen.insert(tag.to_lowercase()) {
             continue;
         }
@@ -687,7 +701,11 @@ impl BoardsSnapshot {
                 if folder.id == source.id {
                     copy.name = clean_name(&format!("{} copy", folder.name), "Folder copy");
                 } else {
-                    copy.parent_id = folder.parent_id.as_ref().and_then(|parent| ids.get(parent)).cloned();
+                    copy.parent_id = folder
+                        .parent_id
+                        .as_ref()
+                        .and_then(|parent| ids.get(parent))
+                        .cloned();
                 }
                 copy.created_at = now;
                 copy.updated_at = now;
@@ -854,7 +872,11 @@ impl BoardsSnapshot {
         });
         let gone: HashSet<&String> = ids.iter().collect();
         for folder in &mut self.folders {
-            if folder.cover_pin_id.as_ref().is_some_and(|pin| gone.contains(pin)) {
+            if folder
+                .cover_pin_id
+                .as_ref()
+                .is_some_and(|pin| gone.contains(pin))
+            {
                 folder.cover_pin_id = None;
             }
         }
@@ -1018,7 +1040,11 @@ mod tests {
         )
         .expect("parse default");
         let default = default.normalize();
-        let names: Vec<&str> = default.folders.iter().map(|folder| folder.name.as_str()).collect();
+        let names: Vec<&str> = default
+            .folders
+            .iter()
+            .map(|folder| folder.name.as_str())
+            .collect();
         assert_eq!(names, vec!["Clothing", "Funny"]);
         assert_eq!(default.folders[1].created_at, 1794616835645);
         let pin = &default.pins[0];
@@ -1044,7 +1070,12 @@ mod tests {
         let media = media.normalize();
         assert!(media.folders.is_empty());
         assert_eq!(media.pins.len(), 2);
-        assert!(media.pins.iter().all(|pin| pin.folder_ids.is_empty() && pin.has_image));
+        assert!(
+            media
+                .pins
+                .iter()
+                .all(|pin| pin.folder_ids.is_empty() && pin.has_image)
+        );
         assert_eq!(media.last_folder_id, None);
         let written = serde_json::to_string(&media).expect("write");
         let again: BoardsSnapshot = serde_json::from_str(&written).expect("read back");
@@ -1074,10 +1105,19 @@ mod tests {
         let boards = boards.normalize();
         assert!(boards.legacy_boards.is_empty());
         assert_eq!(boards.folders.len(), 3);
-        let ideas = boards.folders.iter().find(|folder| folder.id == "b1").expect("b1");
+        let ideas = boards
+            .folders
+            .iter()
+            .find(|folder| folder.id == "b1")
+            .expect("b1");
         assert_eq!(ideas.parent_id.as_deref(), Some("f1"));
         assert_eq!(ideas.cover_pin_id.as_deref(), Some("p1"));
-        assert!(boards.folders.iter().any(|folder| folder.id == "b3" && folder.parent_id.is_none()));
+        assert!(
+            boards
+                .folders
+                .iter()
+                .any(|folder| folder.id == "b3" && folder.parent_id.is_none())
+        );
         assert!(!boards.folders.iter().any(|folder| folder.name == UNSORTED));
         assert_eq!(boards.pins[0].folder_ids, vec!["b1".to_string()]);
         assert!(boards.pins[1].folder_ids.is_empty());
@@ -1160,11 +1200,16 @@ mod tests {
     #[test]
     fn folder_paths_are_found_again_by_name() {
         let mut boards = BoardsSnapshot::default();
-        let first = boards.folder_path(None, "Photos/2024\\Trips").expect("path");
+        let first = boards
+            .folder_path(None, "Photos/2024\\Trips")
+            .expect("path");
         let second = boards.folder_path(None, "photos/2024/trips").expect("path");
         assert_eq!(first, second);
         assert_eq!(boards.folders.len(), 3);
-        assert_eq!(boards.folder_label(&first).as_deref(), Some("Photos / 2024 / Trips"));
+        assert_eq!(
+            boards.folder_label(&first).as_deref(),
+            Some("Photos / 2024 / Trips")
+        );
         assert_eq!(boards.folder_path(None, ""), None);
     }
 
@@ -1179,7 +1224,9 @@ mod tests {
         let kept = folder_id(&boards, "Kept");
         let inner = folder_id(&boards, "Inner");
         boards.add_to_folder(&["p1".into()], &inner).expect("add");
-        boards.move_pins(&["p1".into()], Some(&kept), None).expect("move");
+        boards
+            .move_pins(&["p1".into()], Some(&kept), None)
+            .expect("move");
         let p1 = boards.pins.iter().find(|pin| pin.id == "p1").expect("p1");
         assert_eq!(p1.folder_ids, vec![inner.clone()]);
         boards.move_pins(&["p1".into()], None, None).expect("move");

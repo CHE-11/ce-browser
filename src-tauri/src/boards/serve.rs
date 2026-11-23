@@ -168,7 +168,10 @@ mod tests {
         assert_eq!(parse_range("bytes=0-99", 1000), Some((0, 99)));
         assert_eq!(parse_range("bytes=900-", 1000), Some((900, 999)));
         assert_eq!(parse_range("bytes=-100", 1000), Some((900, 999)));
-        assert_eq!(parse_range("bytes=0-", 10 * RANGE_CHUNK), Some((0, RANGE_CHUNK - 1)));
+        assert_eq!(
+            parse_range("bytes=0-", 10 * RANGE_CHUNK),
+            Some((0, RANGE_CHUNK - 1))
+        );
         assert_eq!(parse_range("bytes=1000-", 1000), None);
         assert_eq!(parse_range("items=0-1", 1000), None);
     }

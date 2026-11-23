@@ -65,7 +65,11 @@ export function readBoardDrop(data: DataTransfer, pageUrl = ""): BoardDropPayloa
     }
   }
 
-  const imagesInHtml = imageSources(data.getData("text/html"), pageUrl);
+  const html = data.getData("text/html");
+  const imagesInHtml = imageSources(html, pageUrl);
+  if (imagesInHtml.length > 0 && isImageOnly(html)) {
+    return { entries: [], files: [], paths: unique(paths), imageUrls: unique(imagesInHtml), links: [] };
+  }
   const imageUrls: string[] = [];
   const links: string[] = [];
   for (const url of unique(urls)) {
@@ -177,6 +181,15 @@ function imageSources(html: string, pageUrl: string) {
     }
   }
   return found;
+}
+
+/** An image dragged on its own, even inside a link: the markup has no text besides the image. */
+function isImageOnly(html: string) {
+  const text = html
+    .replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;|&#160;/g, "");
+  return text.trim().length === 0;
 }
 
 function resolveUrl(raw: string, base: string) {

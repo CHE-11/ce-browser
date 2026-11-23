@@ -1398,6 +1398,18 @@ pub fn foreground_window() -> isize {
     unsafe { GetForegroundWindow() }.0 as isize
 }
 
+/// The physical left mouse button is held, as during a drag.
+pub fn left_button_down() -> bool {
+    async_key(windows::Win32::UI::Input::KeyboardAndMouse::VK_LBUTTON)
+}
+
+/// The pointer in screen px.
+pub fn cursor_position() -> Option<(i32, i32)> {
+    let mut point = POINT::default();
+    unsafe { GetCursorPos(&mut point) }.ok()?;
+    Some((point.x, point.y))
+}
+
 /// True when `x`, `y` (screen px) lie in the window's client area. The shadow frame is outside it.
 pub fn client_contains_screen_point(hwnd: isize, x: i32, y: i32) -> bool {
     if hwnd == 0 {
@@ -2423,6 +2435,7 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
                     if let Some(args) = args {
                         let _ = add_page_items(&menu_app, &environment, &args, id);
                         let _ = add_plain_page_items(&menu_app, &environment, &args, id);
+                        let _ = replace_copy_link(&menu_app, &environment, &args, id);
                         let _ = redirect_inspect(&menu_app, &environment, &args, id);
                     }
                     Ok(())
@@ -4151,6 +4164,53 @@ fn add_plain_page_items(
         }
         Ok(())
     }
+}
+
+/// The built-in Copy link row writes only the URL. This one also writes an HTML link, so a
+/// rich-text paste shows the link text or the page title.
+fn replace_copy_link(
+    app: &AppHandle,
+    environment: &ICoreWebView2Environment9,
+    args: &ICoreWebView2ContextMenuRequestedEventArgs,
+    id: u32,
+) -> windows::core::Result<()> {
+    unsafe {
+        let items = args.MenuItems()?;
+        let mut count = 0u32;
+        items.Count(&mut count)?;
+        for index in 0..count {
+            let item = items.GetValueAtIndex(index)?;
+            if !is_copy_link_item(&item) {
+                continue;
+            }
+            let label = read_pwstr(|value| item.Label(value));
+            let label = if label.is_empty() {
+                "Copy link".to_string()
+            } else {
+                label
+            };
+            let target = args.ContextMenuTarget()?;
+            let link = read_pwstr(|value| target.LinkUri(value));
+            if link.is_empty() {
+                return Ok(());
+            }
+            let link_text = read_pwstr(|value| target.LinkText(value));
+            drop(item);
+            items.RemoveValueAtIndex(index)?;
+            let menu_app = app.clone();
+            let replacement = menu_command(environment, &label, move || {
+                crate::page_menu::copy_link_address(&menu_app, id, &link, &link_text);
+            })?;
+            items.InsertValueAtIndex(index, &replacement)?;
+            return Ok(());
+        }
+        Ok(())
+    }
+}
+
+fn is_copy_link_item(item: &ICoreWebView2ContextMenuItem) -> bool {
+    let name = read_pwstr(|value| unsafe { item.Name(value) });
+    name.eq_ignore_ascii_case("copyLink")
 }
 
 /// WebView2 names this row `inspectElement`. Older runtimes used `inspect`.

@@ -527,6 +527,13 @@ pub fn copy_script() -> String {
       return dropped ? url.toString() : value;
     } catch (e) { return value; }
   }
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
   document.addEventListener("copy", function (event) {
     var link = event.target && event.target.closest && event.target.closest("a[href]");
     var text = link ? link.href : String(window.getSelection ? window.getSelection() : "");
@@ -534,6 +541,10 @@ pub fn copy_script() -> String {
     if (!cleaned || cleaned === text || !event.clipboardData) return;
     event.preventDefault();
     event.clipboardData.setData("text/plain", cleaned);
+    if (!link) return;
+    var label = String(link.innerText || link.textContent || "").replace(/\s+/g, " ").trim();
+    if (!label) label = cleaned;
+    event.clipboardData.setData("text/html", "<a href=\"" + escapeHtml(cleaned) + "\">" + escapeHtml(label) + "</a>");
   }, true);
 })();"#
         .replace(
@@ -998,6 +1009,14 @@ mod tests {
         settings.strip_tracking = true;
         settings.https_only = true;
         settings
+    }
+
+    #[test]
+    fn a_rewritten_link_copy_keeps_an_html_anchor() {
+        let script = copy_script();
+        assert!(script.contains("setData(\"text/plain\", cleaned)"));
+        assert!(script.contains("setData(\"text/html\""));
+        assert!(script.contains("if (!link) return;"));
     }
 
     #[test]

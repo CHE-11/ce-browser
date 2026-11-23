@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use base64::Engine;
 use image::RgbaImage;
 use tauri::AppHandle;
 
@@ -13,6 +14,8 @@ use crate::{capture, page_menu, tabs, undo, webview2};
 /// Images saved by one "Images on this page" request.
 const MAX_IMAGES: usize = 60;
 const PICK_FAILURE: &str = "Couldn't read this page.";
+/// Largest image read from a page. Animated GIFs are often several megabytes.
+const MAX_SAVED_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// A pin with its text fields filled in and nothing stored yet.
 pub(super) fn draft(kind: &str, title: &str, page_url: &str, link_url: &str, text: &str) -> Pin {
@@ -45,7 +48,12 @@ pub(super) fn commit(app: &AppHandle, folder: &str, pin: Pin) -> Result<Pin, Str
 }
 
 /// Stores a capture as PNG with its thumbnail and palette.
-fn save_capture(app: &AppHandle, folder: &str, mut pin: Pin, image: &RgbaImage) -> Result<Pin, String> {
+fn save_capture(
+    app: &AppHandle,
+    folder: &str,
+    mut pin: Pin,
+    image: &RgbaImage,
+) -> Result<Pin, String> {
     let stored = (|| {
         let png = storage::write_capture(app, &pin.id, image)?;
         pin.palette = storage::write_thumb(app, &pin.id, image)?;
@@ -66,7 +74,12 @@ fn save_capture(app: &AppHandle, folder: &str, mut pin: Pin, image: &RgbaImage) 
 }
 
 /// Stores downloaded image bytes as they are, with a thumbnail.
-fn save_image_bytes(app: &AppHandle, folder: &str, mut pin: Pin, bytes: &[u8]) -> Result<Pin, String> {
+fn save_image_bytes(
+    app: &AppHandle,
+    folder: &str,
+    mut pin: Pin,
+    bytes: &[u8],
+) -> Result<Pin, String> {
     let ext = storage::image_ext(bytes).ok_or("That image format isn't supported.")?;
     let image = storage::decode_image(bytes)?;
     let stored = (|| {
@@ -196,7 +209,7 @@ pub fn pin_images(
         .filter(|source| !source.is_empty() && seen.insert(source.to_string()))
         .take(MAX_IMAGES)
     {
-        let saved = page_menu::image_bytes(source).and_then(|bytes| {
+        let saved = tab_image_bytes(app, id, source).and_then(|bytes| {
             let mut pin = draft("image", &title, &url, source, "");
             pin.file_name = file_name_from_url(source);
             save_image_bytes(app, &target, pin, &bytes)
@@ -220,6 +233,129 @@ pub fn pin_images(
     }
     Ok(pins)
 }
+
+/// Image bytes as the tab has them: what the page already loaded, then the page's own fetch
+/// through its HTTP cache. A direct download is the last resort, since CDNs often refuse
+/// requests without the page's cookies and referrer.
+fn tab_image_bytes(app: &AppHandle, id: u32, source: &str) -> Result<Vec<u8>, String> {
+    if source.starts_with("data:") {
+        return page_menu::image_bytes(source);
+    }
+    if let Some(webview) = tabs::page_view(app, id) {
+        if let Some(bytes) =
+            loaded_resource(&webview, source).or_else(|| page_fetch(&webview, source))
+        {
+            return Ok(bytes);
+        }
+    }
+    page_menu::image_bytes(source)
+}
+
+/// The resource's bytes from the page's memory cache. Makes no network request.
+fn loaded_resource(webview: &tauri::Webview, source: &str) -> Option<Vec<u8>> {
+    let tree = webview2::call_cdp_json(
+        webview,
+        "Page.getResourceTree",
+        "{}",
+        Duration::from_secs(5),
+        PICK_FAILURE,
+    )
+    .ok()?;
+    let root = tree.get("frameTree")?;
+    let wanted = without_fragment(source);
+    let mut frames = Vec::new();
+    resource_frames(root, &wanted, &mut frames);
+    if frames.is_empty() {
+        frames.push(root.pointer("/frame/id")?.as_str()?.to_string());
+    }
+    frames.into_iter().find_map(|frame_id| {
+        let params = serde_json::json!({ "frameId": frame_id, "url": source }).to_string();
+        let value = webview2::call_cdp_json(
+            webview,
+            "Page.getResourceContent",
+            &params,
+            Duration::from_secs(10),
+            PICK_FAILURE,
+        )
+        .ok()?;
+        let content = value.get("content")?.as_str()?;
+        let bytes = if value
+            .get("base64Encoded")
+            .and_then(|item| item.as_bool())
+            .unwrap_or(false)
+        {
+            base64::engine::general_purpose::STANDARD
+                .decode(content)
+                .ok()?
+        } else {
+            content.as_bytes().to_vec()
+        };
+        (!bytes.is_empty()
+            && bytes.len() as u64 <= MAX_SAVED_IMAGE_BYTES
+            && storage::image_ext(&bytes).is_some())
+        .then_some(bytes)
+    })
+}
+
+/// Ids of the frames whose resources include `wanted`.
+fn resource_frames(node: &serde_json::Value, wanted: &str, out: &mut Vec<String>) {
+    let frame_id = node
+        .pointer("/frame/id")
+        .and_then(|item| item.as_str())
+        .unwrap_or("");
+    let listed = node
+        .get("resources")
+        .and_then(|item| item.as_array())
+        .is_some_and(|resources| {
+            resources
+                .iter()
+                .filter_map(|resource| resource.get("url").and_then(|item| item.as_str()))
+                .any(|url| without_fragment(url) == wanted)
+        });
+    if listed && !frame_id.is_empty() {
+        out.push(frame_id.to_string());
+    }
+    for child in node
+        .get("childFrames")
+        .and_then(|item| item.as_array())
+        .into_iter()
+        .flatten()
+    {
+        resource_frames(child, wanted, out);
+    }
+}
+
+fn without_fragment(url: &str) -> &str {
+    url.split_once('#').map_or(url, |(base, _)| base)
+}
+
+/// The page fetches the image itself, so its cache, cookies and referrer apply.
+fn page_fetch(webview: &tauri::Webview, source: &str) -> Option<Vec<u8>> {
+    let script = PAGE_FETCH_SCRIPT
+        .replace("__SOURCE__", &serde_json::to_string(source).ok()?)
+        .replace("__MAX__", &MAX_SAVED_IMAGE_BYTES.to_string());
+    let value = webview2::evaluate(webview, &script, Duration::from_secs(30), PICK_FAILURE).ok()?;
+    let data_url = value.as_str().filter(|text| text.starts_with("data:"))?;
+    let bytes = page_menu::image_bytes(data_url).ok()?;
+    storage::image_ext(&bytes).is_some().then_some(bytes)
+}
+
+const PAGE_FETCH_SCRIPT: &str = r#"(async function () {
+  try {
+    var response = await fetch(__SOURCE__, { cache: "force-cache" });
+    if (!response.ok) return "";
+    var blob = await response.blob();
+    if (!blob.size || blob.size > __MAX__) return "";
+    return await new Promise(function (resolve) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result)); };
+      reader.onerror = function () { resolve(""); };
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    return "";
+  }
+})()"#;
 
 fn file_name_from_url(source: &str) -> String {
     if source.starts_with("data:") {

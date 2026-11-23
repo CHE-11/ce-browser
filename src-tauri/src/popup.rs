@@ -31,6 +31,8 @@ const SHOW_FALLBACK: Duration = Duration::from_millis(150);
 const EXTENSION_FALLBACK: Duration = Duration::from_millis(600);
 /// Focus moving from one window of a stack to another reports the loss before the gain.
 const BLUR_SETTLE: Duration = Duration::from_millis(40);
+/// Longest a held button keeps a drop-accepting popup open after it lost focus.
+const DRAG_HOLD_LIMIT: Duration = Duration::from_secs(60);
 const POOL_SIZE: usize = 2;
 /// Logical size a parked app popup lays out at, so its content measures at its natural size.
 const PARK_WIDTH: f64 = 900.0;
@@ -1604,6 +1606,12 @@ fn close_unless_focused(app: &AppHandle, window: String) {
         if labels.is_empty() {
             return;
         }
+        if accepts_page_drops(&app, &window) && dropped_inside(&app, &labels) {
+            if let Some(top) = labels.last() {
+                focus_popup(&app, top);
+            }
+            return;
+        }
         let foreground = webview2::foreground_window();
         let inside = labels.iter().any(|label| {
             app.get_window(label)
@@ -1622,6 +1630,37 @@ fn close_unless_focused(app: &AppHandle, window: String) {
             let _ = app.run_on_main_thread(move || webview2::release_owner(owner));
         }
     });
+}
+
+/// Popups that take images dragged from the page. Starting that drag takes focus from them.
+fn accepts_page_drops(app: &AppHandle, window: &str) -> bool {
+    with(app, |state| {
+        let first = state.stacks.get(window)?.levels.first()?;
+        (first.kind == "boards").then_some(())
+    })
+    .is_some()
+}
+
+/// Waits while the left button is held. True when it was released over one of `labels`,
+/// which is a drop into the popup.
+fn dropped_inside(app: &AppHandle, labels: &[String]) -> bool {
+    if !webview2::left_button_down() {
+        return false;
+    }
+    let started = Instant::now();
+    while webview2::left_button_down() {
+        if started.elapsed() > DRAG_HOLD_LIMIT {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let Some((x, y)) = webview2::cursor_position() else {
+        return false;
+    };
+    labels.iter().any(|label| {
+        app.get_window(label)
+            .is_some_and(|popup| webview2::client_contains_screen_point(hwnd_of(&popup), x, y))
+    })
 }
 
 /// The popup page for `label` asks what it should show. A page that finished booting after

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
-import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, File, FileText, Maximize, Minus, Music, Plus, Scan } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Eye, File, FileText, Maximize, Minus, Music, Plus, Scan } from "lucide-react";
 import { Button } from "@/components/Button";
 import { FavIcon } from "@/components/FavIcon";
 import { IconButton } from "@/components/IconButton";
 import { boardFileUrl } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import type { Pin } from "@type/browser";
-import { formatDimensions, hostOf, pinAddress, pinName, previewUrl, viewerKind } from "../folder-tree";
+import { formatDimensions, hostOf, pinAddress, pinName, previewUrl, previewableAddress, viewerKind } from "../folder-tree";
 import type { PinMenuActions } from "./PinContextMenu";
 
 type PinViewerProps = {
@@ -55,11 +55,14 @@ export function PinViewer({ pins, index, onIndex, onClose, actions }: PinViewerP
         zoomApi.fit();
       } else if (event.key === "1" && zoomApi) {
         zoomApi.actual();
+      } else if (event.key.toLowerCase() === "p" && pin && previewableAddress(pin)) {
+        event.preventDefault();
+        actions.previewPage(pin);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, previous, next, zoomApi]);
+  }, [onClose, previous, next, zoomApi, pin, actions]);
 
   if (!pin) {
     return null;
@@ -67,6 +70,7 @@ export function PinViewer({ pins, index, onIndex, onClose, actions }: PinViewerP
   const kind = viewerKind(pin);
   const address = pinAddress(pin);
   const isFile = pin.kind === "file" || pin.kind === "image";
+  const openLink = pin.kind === "link" && address ? () => actions.openSource([pin]) : undefined;
 
   return (
     <div id="boards-viewer" className="absolute inset-0 z-30 flex flex-col bg-zinc-950">
@@ -81,6 +85,11 @@ export function PinViewer({ pins, index, onIndex, onClose, actions }: PinViewerP
           </span>
         </h2>
         {kind === "image" && zoomApi ? <ZoomControls api={zoomApi} /> : null}
+        {previewableAddress(pin) ? (
+          <IconButton id="boards-viewer-preview" label="Preview page (P)" onClick={() => actions.previewPage(pin)}>
+            <Eye aria-hidden />
+          </IconButton>
+        ) : null}
         {address ? (
           <IconButton id="boards-viewer-source" label="Open source page" onClick={() => actions.openSource([pin])}>
             <ExternalLink aria-hidden />
@@ -104,7 +113,7 @@ export function PinViewer({ pins, index, onIndex, onClose, actions }: PinViewerP
 
       <div id="boards-viewer-stage" className="relative min-h-0 flex-1 overflow-hidden">
         {kind === "image" ? (
-          <ImageStage key={pin.id} pin={pin} onApi={setZoomApi} />
+          <ImageStage key={pin.id} pin={pin} onApi={setZoomApi} onOpen={openLink} />
         ) : kind === "video" ? (
           <video id="boards-viewer-video" key={pin.id} src={boardFileUrl(pin)} controls autoPlay loop className="size-full bg-black object-contain" />
         ) : kind === "audio" ? (
@@ -117,7 +126,7 @@ export function PinViewer({ pins, index, onIndex, onClose, actions }: PinViewerP
         ) : kind === "text" ? (
           <TextStage key={pin.id} pin={pin} />
         ) : kind === "link" ? (
-          <LinkStage pin={pin} onOpen={() => actions.openSource([pin])} />
+          <LinkStage pin={pin} onOpen={() => actions.openSource([pin])} onPreview={() => actions.previewPage(pin)} />
         ) : (
           <FileStage pin={pin} onOpen={() => actions.openFile(pin)} onReveal={() => actions.reveal(pin)} />
         )}
@@ -201,7 +210,8 @@ function ZoomControls({ api }: { api: ZoomApi }) {
 }
 
 /** An image that zooms around the pointer with the wheel and pans by dragging. */
-function ImageStage({ pin, onApi }: { pin: Pin; onApi: (api: ZoomApi | null) => void }) {
+/** `onOpen` replaces double-click zoom: link pins open their page instead. */
+function ImageStage({ pin, onApi, onOpen }: { pin: Pin; onApi: (api: ZoomApi | null) => void; onOpen?: () => void }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const [natural, setNatural] = useState({ width: pin.width, height: pin.height });
   const [stage, setStage] = useState({ width: 0, height: 0 });
@@ -305,7 +315,11 @@ function ImageStage({ pin, onApi }: { pin: Pin; onApi: (api: ZoomApi | null) => 
     <div
       id="boards-viewer-image-stage"
       ref={stageRef}
-      className={cn("relative size-full touch-none select-none overflow-hidden", panning ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in")}
+      title={onOpen ? "Double-click to open the page in a new tab" : undefined}
+      className={cn(
+        "relative size-full touch-none select-none overflow-hidden",
+        panning ? "cursor-grab active:cursor-grabbing" : onOpen ? "cursor-pointer" : "cursor-zoom-in",
+      )}
       style={{ backgroundImage: "repeating-conic-gradient(#18181b 0% 25%, #111113 0% 50%)", backgroundSize: "24px 24px" }}
       onWheel={onWheel}
       onPointerDown={onPointerDown}
@@ -313,6 +327,10 @@ function ImageStage({ pin, onApi }: { pin: Pin; onApi: (api: ZoomApi | null) => 
       onPointerUp={() => (drag.current = null)}
       onPointerCancel={() => (drag.current = null)}
       onDoubleClick={(event) => {
+        if (onOpen) {
+          onOpen();
+          return;
+        }
         if (!view) {
           return;
         }
@@ -396,11 +414,21 @@ function TextStage({ pin }: { pin: Pin }) {
   );
 }
 
-function LinkStage({ pin, onOpen }: { pin: Pin; onOpen: () => void }) {
+function LinkStage({ pin, onOpen, onPreview }: { pin: Pin; onOpen: () => void; onPreview: () => void }) {
   const address = pinAddress(pin);
+  const previewable = Boolean(previewableAddress(pin));
   return (
     <div id="boards-viewer-link" className="flex size-full items-center justify-center p-8">
-      <div id="boards-viewer-link-card" className="flex max-w-xl flex-col gap-4 rounded-xl bg-zinc-900 p-6 ring-1 ring-zinc-800">
+      <div
+        id="boards-viewer-link-card"
+        title={address ? "Double-click to open the page in a new tab" : undefined}
+        className="flex max-w-xl flex-col gap-4 rounded-xl bg-zinc-900 p-6 ring-1 ring-zinc-800"
+        onDoubleClick={(event) => {
+          if (address && !(event.target instanceof Element && event.target.closest("button"))) {
+            onOpen();
+          }
+        }}
+      >
         <div id="boards-viewer-link-heading" className="flex items-center gap-3">
           <FavIcon id="boards-viewer-link-icon" url={address} className="size-8" />
           <div id="boards-viewer-link-text" className="min-w-0">
@@ -418,10 +446,18 @@ function LinkStage({ pin, onOpen }: { pin: Pin; onOpen: () => void }) {
           </p>
         ) : null}
         {address ? (
-          <Button id="boards-viewer-link-open" variant="primary" onClick={onOpen}>
-            <ExternalLink id="boards-viewer-link-open-icon" className="size-4" aria-hidden />
-            Open page
-          </Button>
+          <div id="boards-viewer-link-actions" className="flex gap-2">
+            {previewable ? (
+              <Button id="boards-viewer-link-preview" className="flex-1" onClick={onPreview}>
+                <Eye id="boards-viewer-link-preview-icon" className="size-4" aria-hidden />
+                Preview page
+              </Button>
+            ) : null}
+            <Button id="boards-viewer-link-open" variant="primary" className="flex-1" onClick={onOpen}>
+              <ExternalLink id="boards-viewer-link-open-icon" className="size-4" aria-hidden />
+              Open page
+            </Button>
+          </div>
         ) : null}
       </div>
     </div>

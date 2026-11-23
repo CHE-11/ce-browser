@@ -120,6 +120,10 @@ export function previewFileName(template: string, presetName: string) {
 /** The PDF name for a preset template. A blank template, or one that fills in to nothing, uses the page title. */
 export function fileNameFromTemplate(template: string, source: FileNameSource, extension = "pdf") {
   const fallback = () => fileNameFor(source.title, source.url, extension);
+  const xName = xFileName(source, extension);
+  if (xName) {
+    return xName;
+  }
   const trimmed = template.trim();
   if (!trimmed) {
     return fallback();
@@ -165,6 +169,70 @@ function stamp(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+const X_HOSTS = new Set(["x.com", "twitter.com", "mobile.twitter.com"]);
+
+/**
+ * X posts and Articles save as `x.com-handle - Name on X - Headline`.
+ * The byline is a profile URL and the title ends in `/ X`, which otherwise
+ * becomes a leading `https` and a trailing site name.
+ */
+function xFileName(source: FileNameSource, extension: string) {
+  if (!isXPage(source.url)) {
+    return "";
+  }
+  const account = xAccount(source.author) || xAccount(source.url) || "x.com";
+  const article = xArticleTitle(source.title);
+  const base = sanitizeBase(article ? `${account} - ${article}` : account);
+  if (!base) {
+    return "";
+  }
+  return `${base}.${extension.replace(/^\./, "")}`;
+}
+
+function isXPage(url: string) {
+  return X_HOSTS.has(hostOf(url).toLowerCase());
+}
+
+function xAccount(value: string) {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return "";
+  }
+  if (!X_HOSTS.has(url.hostname.replace(/^www\./i, "").toLowerCase())) {
+    return "";
+  }
+  const raw = url.pathname.split("/").filter(Boolean)[0] ?? "";
+  let handle = raw;
+  try {
+    handle = decodeURIComponent(raw);
+  } catch {
+    handle = raw;
+  }
+  if (!handle || /^(i|intent|share|search|home|explore|compose|messages|settings|notifications|tos|privacy)$/i.test(handle)) {
+    return "";
+  }
+  return `x.com-${handle}`;
+}
+
+/** Drops the trailing `/ X` and turns `Name on X: "Headline"` into `Name on X - Headline`. */
+function xArticleTitle(title: string) {
+  let name = title.trim().replace(/^\(\d+\)\s+/, "");
+  name = name.replace(/\s*[|–—·•:/\\-]+\s*(?:X(?:\s*\(formerly Twitter\))?|Twitter)\s*$/i, "").trim();
+  name = name.replace(/[“”„]/g, "\"").replace(/[‘’]/g, "'");
+  const quoted = name.match(/^(.*?)\s*:\s*"([^"]+)"\s*$/);
+  if (quoted) {
+    const lead = quoted[1].trim();
+    const headline = quoted[2].trim();
+    name = lead ? `${lead} - ${headline}` : headline;
+  } else {
+    name = name.replace(/"([^"]*)"/g, "$1");
+    name = name.replace(/\s*:\s*/g, " - ");
+  }
+  return tidy(name);
 }
 
 function hostOf(url: string) {

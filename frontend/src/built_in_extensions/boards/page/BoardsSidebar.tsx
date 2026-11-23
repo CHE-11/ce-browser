@@ -9,6 +9,7 @@ import type { BoardsSnapshot } from "@type/browser";
 import { FolderGlyph } from "../folder-icons";
 import { DRAG_FOLDER, DRAG_PINS, UNCATEGORIZED, childFolders, folderCounts, folderPath, tagCounts } from "../folder-tree";
 import { dropEntries } from "../import/walk-drop";
+import { canMoveFolder, dragHas, draggedFolder, draggedPins, isBoardsDrag, pinDropEffect } from "../drag";
 import { LIBRARY_LABELS, RECENT_LIMIT, sameScope, type BoardsScope, type LibraryScopeKind } from "../scopes";
 import { FolderContextMenu } from "./FolderContextMenu";
 
@@ -27,8 +28,8 @@ type BoardsSidebarProps = {
   onRenaming: (id: string | null) => void;
   onDeleteFolder: (id: string) => void;
   onExportFolder: (id: string) => void;
-  /** `move` is true when Shift was held: the pins leave the folder they were dragged from. */
-  onDropPins: (ids: string[], target: PinDropTarget, move: boolean) => void;
+  /** `copy` is true when Ctrl was held: the pins stay where they were as well. */
+  onDropPins: (ids: string[], target: PinDropTarget, copy: boolean) => void;
   /** Files and folders dropped from outside. `folderId` is a folder, or `UNCATEGORIZED` for the top level. */
   onDropFiles: (entries: FileSystemEntry[], folderId: string) => void;
   onError: (reason: unknown) => void;
@@ -43,22 +44,9 @@ function readExpanded() {
   }
 }
 
-function dragHas(event: DragEvent, type: string) {
-  return event.dataTransfer.types.includes(type);
-}
-
 /** Files or folders dragged in from outside the browser. */
 function isFileDrag(event: DragEvent) {
-  return dragHas(event, "Files") && !dragHas(event, DRAG_PINS) && !dragHas(event, DRAG_FOLDER);
-}
-
-function draggedPins(event: DragEvent): string[] {
-  try {
-    const ids: unknown = JSON.parse(event.dataTransfer.getData(DRAG_PINS) || "[]");
-    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
-  } catch {
-    return [];
-  }
+  return dragHas(event, "Files") && !isBoardsDrag(event);
 }
 
 export function BoardsSidebar({ boards, scope, onScope, renaming, onRenaming, onDeleteFolder, onExportFolder, onDropPins, onDropFiles, onError }: BoardsSidebarProps) {
@@ -177,7 +165,7 @@ export function BoardsSidebar({ boards, scope, onScope, renaming, onRenaming, on
     }
     event.preventDefault();
     event.stopPropagation();
-    event.dataTransfer.dropEffect = pins && !event.shiftKey ? "copy" : "move";
+    event.dataTransfer.dropEffect = pins ? pinDropEffect(event) : "move";
     setDropTarget(key);
   };
 
@@ -197,11 +185,11 @@ export function BoardsSidebar({ boards, scope, onScope, renaming, onRenaming, on
     }
     const pins = draggedPins(event);
     if (pins.length > 0 && folderId) {
-      onDropPins(pins, { kind: "folder", id: folderId }, event.shiftKey);
+      onDropPins(pins, { kind: "folder", id: folderId }, event.ctrlKey);
       return;
     }
-    const folder = event.dataTransfer.getData(DRAG_FOLDER);
-    if (folder && folder !== folderId) {
+    const folder = draggedFolder(event);
+    if (folder && canMoveFolder(boards, folder, folderId)) {
       void moveBoardFolder(folder, folderId).catch(onError);
       if (folderId) {
         expand(folderId, true);
@@ -232,7 +220,7 @@ export function BoardsSidebar({ boards, scope, onScope, renaming, onRenaming, on
                 setDropTarget(null);
                 const pins = draggedPins(event);
                 if (pins.length > 0) {
-                  onDropPins(pins, drop, true);
+                  onDropPins(pins, drop, false);
                 }
               }
             : undefined
