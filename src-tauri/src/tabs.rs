@@ -5587,7 +5587,9 @@ pub fn send_command(app: &AppHandle, window: &str, command: &str) {
     });
     if let Some(ui) = ui.and_then(|label| app.get_webview(&label)) {
         let _ = ui.set_focus();
-        let _ = ui.emit("browser-command", command);
+        // `emit` reaches every webview. Address this window's UI so other windows stay put.
+        let label = ui.label().to_string();
+        let _ = ui.emit_to(&label, "browser-command", command);
     }
 }
 

@@ -25,11 +25,12 @@ export function BrowserPage() {
   const headerRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const toolbarRef = useRef<HTMLElement>(null);
-  const [findToken, setFindToken] = useState<number | null>(null);
+  const [findTab, setFindTab] = useState<number | null>(null);
+  const [findToken, setFindToken] = useState(0);
   const [findAllToken, setFindAllToken] = useState(0);
   const [findPanel, setFindPanel] = useState(false);
-  const findOpen = useRef(false);
-  const findTabId = useRef<number | undefined>(undefined);
+  const findTabRef = useRef<number | null>(null);
+  const activeIdRef = useRef<number | undefined>(undefined);
   const toolbarRecorded = useRef(false);
 
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
@@ -94,14 +95,21 @@ export function BrowserPage() {
     }
   }, [hoverPreview]);
 
-  findOpen.current = findToken !== null;
-  findTabId.current = activeTab?.id;
+  activeIdRef.current = activeTab?.id;
+  findTabRef.current = findTab;
+  const findShown = findTab !== null && activeTab?.id === findTab;
 
   useEffect(() => {
-    if (findToken === null) {
+    if (findTab === null) {
       setFindPanel(false);
     }
-  }, [findToken]);
+  }, [findTab]);
+
+  useEffect(() => {
+    if (findTab !== null && !snapshot.tabs.some((tab) => tab.id === findTab)) {
+      setFindTab(null);
+    }
+  }, [snapshot.tabs, findTab]);
 
   useEffect(() => {
     /** Centred across the window, `top` px down. */
@@ -109,21 +117,38 @@ export function BrowserPage() {
       void openPopup(kind, { x: 0, y: 0, width: window.innerWidth, height: top - 4 }, { params, placement: "bottom-center" });
     const unlisten = onBrowserCommand((command) => {
       switch (command) {
-        case "find":
-          if (findOpen.current) {
-            const id = findTabId.current;
-            if (id !== undefined) {
-              void clearFind(id);
-            }
-            setFindToken(null);
+        case "find": {
+          const current = activeIdRef.current;
+          if (current === undefined) {
             break;
           }
-          setFindToken((token) => (token ?? 0) + 1);
+          const openOn = findTabRef.current;
+          if (openOn === current) {
+            void clearFind(current);
+            setFindTab(null);
+            break;
+          }
+          if (openOn !== null) {
+            void clearFind(openOn);
+          }
+          setFindTab(current);
+          setFindToken((token) => token + 1);
           break;
-        case "find-all":
-          setFindToken((token) => (token ?? 0) + 1);
+        }
+        case "find-all": {
+          const current = activeIdRef.current;
+          if (current === undefined) {
+            break;
+          }
+          const openOn = findTabRef.current;
+          if (openOn !== null && openOn !== current) {
+            void clearFind(openOn);
+          }
+          setFindTab(current);
+          setFindToken((token) => token + 1);
           setFindAllToken((token) => token + 1);
           break;
+        }
         case "palette":
           centered("command-palette", 52);
           break;
@@ -185,7 +210,7 @@ export function BrowserPage() {
       observer.observe(results);
     }
     return () => observer.disconnect();
-  }, [vertical, snapshot.fullscreen, showToolStrip, toolSide, settings?.verticalToolbarLabels, findPanel]);
+  }, [vertical, snapshot.fullscreen, showToolStrip, toolSide, settings?.verticalToolbarLabels, findPanel, findShown]);
 
   const showBookmarksBar = settings?.showBookmarksBar ?? true;
 
@@ -203,12 +228,13 @@ export function BrowserPage() {
         showBookmarksBar={showBookmarksBar}
         showToolsToolbar={showTools && toolSide === "top"}
         toolbarRef={toolSide === "top" ? toolbarRef : undefined}
+        findTab={findTab}
         findToken={findToken}
         findAllToken={findAllToken}
         findPanel={findPanel}
         onFindPanelChange={setFindPanel}
         activeTab={activeTab}
-        onCloseFind={() => setFindToken(null)}
+        onCloseFind={() => setFindTab(null)}
       />
       <BrowserBody
         snapshot={snapshot}

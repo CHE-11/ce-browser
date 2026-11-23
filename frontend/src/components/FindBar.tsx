@@ -8,7 +8,10 @@ import { FindResultsPanel } from "./FindResultsPanel";
 import { IconButton } from "./IconButton";
 
 type FindBarProps = {
+  /** The tab this session searches. Switching tabs does not move it. */
   tabId: number;
+  /** False while another tab is in front. The field and highlights stay with `tabId`. */
+  shown: boolean;
   /** Bumped when find opens, so the input focuses. Ctrl+F closes it again. */
   focusToken: number;
   /** Bumped by Ctrl+Shift+F. Opens Find in all tabs when the field has a query. */
@@ -27,7 +30,7 @@ type SearchOptions = {
   select?: number;
 };
 
-export function FindBar({ tabId, focusToken, openAllToken, panelOpen, onPanelChange, fullscreen, onClose }: FindBarProps) {
+export function FindBar({ tabId, shown, focusToken, openAllToken, panelOpen, onPanelChange, fullscreen, onClose }: FindBarProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -53,9 +56,13 @@ export function FindBar({ tabId, focusToken, openAllToken, panelOpen, onPanelCha
   };
 
   useEffect(() => {
+    if (!shown) {
+      inputRef.current?.blur();
+      return;
+    }
     inputRef.current?.focus();
     inputRef.current?.select();
-  }, [focusToken]);
+  }, [focusToken, shown]);
 
   useEffect(() => {
     if (seenAll.current === openAllToken) {
@@ -67,13 +74,6 @@ export function FindBar({ tabId, focusToken, openAllToken, panelOpen, onPanelCha
       openAllTabs(button);
     }
   }, [openAllToken]);
-
-  useEffect(() => {
-    setResult(null);
-    if (optionsRef.current.query) {
-      void searchRef.current(false, false);
-    }
-  }, [tabId]);
 
   const search = async (backwards: boolean, step: boolean, value = query, options: SearchOptions = { caseSensitive, wholeWord }) => {
     const ticket = ++request.current;
@@ -121,11 +121,12 @@ export function FindBar({ tabId, focusToken, openAllToken, panelOpen, onPanelCha
     onClose();
   };
 
-  const showPanel = panelOpen && !fullscreen;
+  const showPanel = shown && panelOpen && !fullscreen;
   const slot = showPanel ? document.getElementById("find-results-slot") : null;
   const none = !!query && result?.count === 0;
 
   return (
+    <div id="find-bar-host" className={shown ? "contents" : "hidden"}>
     <div id="find-bar" role="search" className="flex h-9 shrink-0 items-center justify-end gap-1 border-b border-zinc-800 bg-zinc-900 px-3">
       <div
         id="find-bar-field"
@@ -220,6 +221,7 @@ export function FindBar({ tabId, focusToken, openAllToken, panelOpen, onPanelCha
             slot,
           )
         : null}
+    </div>
     </div>
   );
 }

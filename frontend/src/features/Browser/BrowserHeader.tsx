@@ -25,7 +25,10 @@ type BrowserHeaderProps = {
   /** Built-in tools in a row above the bookmarks bar. */
   showToolsToolbar: boolean;
   toolbarRef?: RefObject<HTMLElement | null>;
-  findToken: number | null;
+  /** The tab whose find session is open. Other tabs leave the bar hidden. */
+  findTab: number | null;
+  /** Bumped when that tab opens find, so the input focuses. */
+  findToken: number;
   /** Bumped by Ctrl+Shift+F. The find bar opens Find in all tabs when it has a query. */
   findAllToken: number;
   /** Results list beside the page. */
@@ -47,6 +50,7 @@ export function BrowserHeader({
   showBookmarksBar,
   showToolsToolbar,
   toolbarRef,
+  findTab,
   findToken,
   findAllToken,
   findPanel,
@@ -89,9 +93,11 @@ export function BrowserHeader({
           divider={verticalDividerMetrics(settings)}
         />
       ) : null}
-      {findToken !== null && activeTab ? (
+      {findTab !== null ? (
         <FindBar
-          tabId={activeTab.id}
+          key={findTab}
+          tabId={findTab}
+          shown={activeTab?.id === findTab}
           focusToken={findToken}
           openAllToken={findAllToken}
           panelOpen={findPanel}

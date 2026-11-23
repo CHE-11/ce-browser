@@ -1117,7 +1117,8 @@ export function onStatusText(handler: (status: StatusText) => void): Promise<Unl
 }
 
 export function onBrowserCommand(handler: (command: BrowserCommand) => void): Promise<UnlistenFn> {
-  return listen<BrowserCommand>("browser-command", (event) => handler(event.payload));
+  // A plain `listen` hears every window. This UI only hears commands addressed to it.
+  return getCurrentWebview().listen<BrowserCommand>("browser-command", (event) => handler(event.payload));
 }
 
 /** The browser window `label` belongs to. Popups are their own windows, owned by one. */
