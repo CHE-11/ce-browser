@@ -11,7 +11,7 @@ import { useHostExtensions, useSettings, useTabs } from "@/lib/use-browser";
 import { cn } from "@/lib/cn";
 import {
   openToolbarPinMenu,
-  reorderToolbarAt,
+  movedToolbarOrder,
   hostToolbarIds,
   splitToolbar,
   toolbarDragHandlers,
@@ -252,7 +252,7 @@ export const ExtensionsToolbar = forwardRef<HTMLElement, ExtensionsToolbarProps>
     event.preventDefault();
     const index = toolbarIndexAt(event.currentTarget, vertical ? event.clientY : event.clientX, vertical ? "y" : "x");
     if (settings) {
-      const next = reorderToolbarAt(all, tools, from, index);
+      const next = movedToolbarOrder(settings, all, tools, from, index);
       if (next) {
         void saveSettings({ ...settings, toolbarOrder: next });
       }

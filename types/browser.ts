@@ -978,6 +978,13 @@ export type BookmarkDividerLine = "solid" | "dashed" | "dotted" | "double";
 /** Ends of a bookmark divider. */
 export type BookmarkDividerShape = "square" | "round" | "pill";
 
+/** Default pin for one built-in tool. A profile records this when it has no choice of its own yet. */
+export type BuiltinToolbarSeed = {
+  id: string;
+  /** Shown next to the address bar when this profile has not saved a pin. Otherwise the tools toolbar. */
+  address: boolean;
+};
+
 /** Where a tool or extension is shown. Any combination can be set. All clear means unpinned. */
 export type ToolbarPlacement = {
   /** Shown next to the address bar. */

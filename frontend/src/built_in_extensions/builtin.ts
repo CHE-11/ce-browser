@@ -44,7 +44,7 @@ export type BuiltinTool = {
   dev?: boolean;
 };
 
-/** Tools that ship on the address bar. Their ids are stored when they are unpinned. */
+/** Built-in tools. Each profile stores where they are pinned, whether they are pinned, and their order. */
 export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     id: "print-pdf",

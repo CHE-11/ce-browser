@@ -1,4 +1,5 @@
 
+import { saveBuiltinToolbarState } from "@/built_in_extensions/toolbar-state";
 import { backdropSupport, clearFind, onBrowserCommand, openPopup, setUiInsets } from "@/lib/browser-client";
 import { leaveTab } from "@/lib/tab-hover";
 import { hostToolbarIds, splitToolbar } from "@/lib/toolbar-pin";
@@ -29,6 +30,7 @@ export function BrowserPage() {
   const [findPanel, setFindPanel] = useState(false);
   const findOpen = useRef(false);
   const findTabId = useRef<number | undefined>(undefined);
+  const toolbarRecorded = useRef(false);
 
   const activeTab = snapshot.tabs.find((tab) => tab.id === snapshot.activeId);
   const vertical = settings?.tabLayout === "vertical";
@@ -48,6 +50,16 @@ export function BrowserPage() {
   useEffect(() => {
     document.title = activeTab ? `${activeTab.title || activeTab.url} - ce-browser` : "ce-browser";
   }, [activeTab]);
+
+  useEffect(() => {
+    if (!settings || toolbarRecorded.current) {
+      return;
+    }
+    toolbarRecorded.current = true;
+    void saveBuiltinToolbarState().catch((error: unknown) => {
+      console.error(error);
+    });
+  }, [settings]);
 
   const backdrop = settings?.windowBackdrop && settings.windowBackdrop !== "none" ? settings.windowBackdrop : null;
   useEffect(() => {

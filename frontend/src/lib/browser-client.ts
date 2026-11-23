@@ -57,6 +57,7 @@ import type {
   BrowserProfile,
   ProfileCopyPart,
   BrowserSettings,
+  BuiltinToolbarSeed,
   ClosedEntry,
   ProfileIconChoice,
   ReleaseNotes,
@@ -2006,6 +2007,11 @@ export function getSettings() {
 
 export function saveSettings(settings: BrowserSettings) {
   return invoke<BrowserSettings>("save_settings", { settings });
+}
+
+/** Records built-in pin location, pin status, and toolbar order on this profile when they are missing. */
+export function ensureBuiltinToolbar(tools: BuiltinToolbarSeed[]) {
+  return invoke<BrowserSettings>("ensure_builtin_toolbar", { tools });
 }
 
 /** Writes print choices onto the active profile. */

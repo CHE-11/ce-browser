@@ -660,7 +660,6 @@ fn state_changed(app: &AppHandle, id: u32, operation: &ICoreWebView2DownloadOper
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or(path.clone());
-        crate::system::toast_download(&name, &path);
         crate::automation::scheduler::on_download(app, &name, &path);
     }
     changed(app, true);
@@ -1334,7 +1333,6 @@ fn mark_completed(app: &AppHandle, id: u32) {
     });
     jobs().remove(&id);
     if let Ok(item) = item(app, id) {
-        crate::system::toast_download(&item.file_name, &item.path);
         crate::automation::scheduler::on_download(app, &item.file_name, &item.path);
     }
     changed(app, true);

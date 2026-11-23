@@ -71,7 +71,7 @@ import { storeListing } from "../../lib/extension-store";
 import { accentTint } from "../../lib/accent";
 import { cn } from "../../lib/cn";
 import { useHostExtensions } from "@/lib/use-browser";
-import { hostToolbarIds, reorderToolbarAt, splitToolbar } from "../../lib/toolbar-pin";
+import { hostToolbarIds, movedToolbarOrder, splitToolbar } from "../../lib/toolbar-pin";
 import { buildSuggestions, inlineCompletion, looksLikeUrl } from "../../lib/omnibox";
 import { flattenBookmarks, useUpdateStatus, type WindowTabsState } from "../../lib/use-browser";
 import { focusRing } from "../../lib/focus-ring";
@@ -963,7 +963,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     if (!settings) {
       return;
     }
-    const next = reorderToolbarAt(toolbarOrderIds, visible, from, dropIndex);
+    const next = movedToolbarOrder(settings, toolbarOrderIds, visible, from, dropIndex);
     if (next) {
       void saveSettings({ ...settings, toolbarOrder: next });
     }

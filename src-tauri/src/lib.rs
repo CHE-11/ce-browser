@@ -2301,6 +2301,19 @@ fn get_settings(app: AppHandle) -> BrowserSettings {
     settings::get(&app)
 }
 
+/// Writes pin location, pin status, and toolbar order for built-in tools this profile has not saved yet.
+#[tauri::command]
+fn ensure_builtin_toolbar(
+    app: AppHandle,
+    tools: Vec<settings::BuiltinToolbarSeed>,
+) -> Result<BrowserSettings, String> {
+    let mut current = settings::get(&app);
+    if !settings::fill_builtin_toolbar(&mut current, &tools) {
+        return Ok(current);
+    }
+    settings::save(&app, current)
+}
+
 #[tauri::command]
 fn save_settings(app: AppHandle, settings: BrowserSettings) -> Result<BrowserSettings, String> {
     let saved = settings::save(&app, settings)?;
@@ -3637,6 +3650,7 @@ pub fn run() {
             reader_page,
             show_reader_original,
             get_settings,
+            ensure_builtin_toolbar,
             save_settings,
             save_print_settings,
             default_settings,

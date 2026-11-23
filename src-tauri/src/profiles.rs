@@ -1547,7 +1547,7 @@ fn migrate_icon_colors(file: &mut ProfilesFile) {
 }
 
 fn save(app: &AppHandle, file: &ProfilesFile) -> Result<(), String> {
-    crate::sync_conflicts::store(app, &registry_path(app), file)
+    crate::sync_conflicts::store(app, &registry_path(app), file).map(|_| ())
 }
 
 fn registry_path(app: &AppHandle) -> PathBuf {

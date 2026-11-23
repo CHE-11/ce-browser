@@ -148,6 +148,36 @@ export function toolbarDropEdge(
   return null;
 }
 
+/**
+ * Saved toolbar order, including tools that are currently unpinned.
+ * Pinned ids that the save does not mention yet are added at the end.
+ */
+export function preservedToolbarOrder(saved: string[] | undefined, pinned: string[]) {
+  const ordered: string[] = [];
+  for (const id of saved ?? []) {
+    if (id && !ordered.includes(id)) {
+      ordered.push(id);
+    }
+  }
+  for (const id of pinned) {
+    if (!ordered.includes(id)) {
+      ordered.push(id);
+    }
+  }
+  return ordered;
+}
+
+/** New order after a drag. Unpinned ids keep the places already saved for this profile. */
+export function movedToolbarOrder(
+  settings: BrowserSettings,
+  pinned: string[],
+  visible: string[],
+  from: string,
+  dropIndex: number,
+) {
+  return reorderToolbarAt(preservedToolbarOrder(settings.toolbarOrder, pinned), visible, from, dropIndex);
+}
+
 export function reorderToolbarAt(order: string[], visible: string[], from: string, dropIndex: number) {
   const fromIndex = visible.indexOf(from);
   if (fromIndex < 0 || dropIndex < 0 || dropIndex > visible.length) {
@@ -197,7 +227,9 @@ export function saveToolbarPlacement(settings: BrowserSettings, id: string, plac
   if (!placement.primary && !placement.secondary && !placement.ab) {
     hidden.push(id);
   }
-  return saveSettings({ ...settings, toolbarPlacements, hiddenToolbarExtensions: hidden });
+  const savedOrder = settings.toolbarOrder ?? [];
+  const toolbarOrder = savedOrder.includes(id) ? savedOrder : [...savedOrder, id];
+  return saveSettings({ ...settings, toolbarPlacements, hiddenToolbarExtensions: hidden, toolbarOrder });
 }
 
 /** Right-click menu for an icon that is currently on a toolbar. */

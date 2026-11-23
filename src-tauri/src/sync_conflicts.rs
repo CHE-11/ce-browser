@@ -39,6 +39,10 @@ struct SyncStamp {
     revision: u64,
     machine_id: String,
     base_revision: u64,
+    /// When this computer wrote the file. A shared folder's revision counters diverge, so a
+    /// later edit from the other computer is recognized by this time.
+    #[serde(default)]
+    written_at: u64,
 }
 
 impl Default for SyncStamp {
@@ -47,6 +51,7 @@ impl Default for SyncStamp {
             revision: 0,
             machine_id: String::new(),
             base_revision: 0,
+            written_at: 0,
         }
     }
 }
@@ -59,7 +64,18 @@ struct LedgerRow {
     machine_id: String,
     base_revision: u64,
     #[serde(default)]
+    written_at: u64,
+    #[serde(default)]
     inflight: bool,
+}
+
+/// What `store` did with the shared file.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SyncWrite {
+    /// The file now contains this save.
+    Stored,
+    /// A newer copy from the other computer was kept. Read the file back.
+    KeptDisk,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -162,10 +178,10 @@ pub fn rebase(app: &AppHandle) {
     publish(app, &[]);
 }
 
-/// Writes a watched profile file, or holds both copies when another computer changed it first.
-pub fn store(app: &AppHandle, path: &Path, value: &impl Serialize) -> Result<(), String> {
+/// Writes a watched profile file, or folds this save onto a newer copy from the other computer.
+pub fn store(app: &AppHandle, path: &Path, value: &impl Serialize) -> Result<SyncWrite, String> {
     let Some(key) = relative_key(app, path) else {
-        return files::write_json(path, value);
+        return files::write_json(path, value).map(|_| SyncWrite::Stored);
     };
     let content = content_of(value)?;
     let new_hash = content_hash(&content);
@@ -176,20 +192,36 @@ pub fn store(app: &AppHandle, path: &Path, value: &impl Serialize) -> Result<(),
     let mut conflicts = load_conflicts(app);
     let disk = read_doc(path);
 
-    if let Some(item) = conflicts
+    let settings_file = key.ends_with("settings.json");
+    if let Some(index) = conflicts
         .items
-        .iter_mut()
-        .find(|item| item.path == key && item.cloud.is_empty())
+        .iter()
+        .position(|item| item.path == key && item.cloud.is_empty())
     {
         if syncing {
-            item.ours = content;
-            item.time = now_ms();
-            if let Some(disk) = &disk {
-                item.theirs = disk.content.clone();
+            if settings_file && let Some(disk) = &disk {
+                let base = conflicts.items[index].base.clone();
+                conflicts.items.remove(index);
+                save_conflicts(app, &conflicts)?;
+                publish(app, &conflicts.items);
+                return finish_merge(
+                    app,
+                    path,
+                    &key,
+                    &content,
+                    disk,
+                    &base,
+                    &mut ledger,
+                    &machine,
+                );
+            }
+            if let Some(item) = conflicts.items.get_mut(index) {
+                item.ours = content;
+                item.time = now_ms();
             }
             save_conflicts(app, &conflicts)?;
             publish(app, &conflicts.items);
-            return Ok(());
+            return Ok(SyncWrite::Stored);
         }
         conflicts
             .items
@@ -214,7 +246,7 @@ pub fn store(app: &AppHandle, path: &Path, value: &impl Serialize) -> Result<(),
         pending().retain(|item| item != &key);
         save_conflicts(app, &conflicts)?;
         publish(app, &conflicts.items);
-        return Ok(());
+        return Ok(SyncWrite::Stored);
     }
 
     let disk_hash = disk.as_ref().map(|doc| content_hash(&doc.content));
@@ -223,11 +255,32 @@ pub fn store(app: &AppHandle, path: &Path, value: &impl Serialize) -> Result<(),
             ledger.files.insert(key, row_from(&disk, &machine));
             let _ = save_ledger(app, &ledger);
         }
-        return Ok(());
+        return Ok(SyncWrite::Stored);
     }
 
     let row = ledger.files.get(&key).cloned();
     let disk_rev = disk.as_ref().map(|doc| doc.stamp.revision).unwrap_or(0);
+    let newer_disk = disk.as_ref().is_some_and(|disk| {
+        disk.stamp.revision > row.as_ref().map(|row| row.revision).unwrap_or(0)
+            || row.as_ref().is_some_and(|row| remote_is_newer(disk, row))
+    });
+    if syncing
+        && settings_file
+        && newer_disk
+        && let Some(disk) = &disk
+    {
+        let base = read_base_value(app, &key).unwrap_or_else(|| disk.content.clone());
+        return finish_merge(
+            app,
+            path,
+            &key,
+            &content,
+            disk,
+            &base,
+            &mut ledger,
+            &machine,
+        );
+    }
     let diverged = syncing
         && disk.is_some()
         && match &row {
@@ -248,7 +301,7 @@ pub fn store(app: &AppHandle, path: &Path, value: &impl Serialize) -> Result<(),
         )?;
         save_conflicts(app, &conflicts)?;
         publish(app, &conflicts.items);
-        return Ok(());
+        return Ok(SyncWrite::Stored);
     }
 
     let parent = row.as_ref().map(|row| row.revision).unwrap_or(disk_rev);
@@ -256,6 +309,7 @@ pub fn store(app: &AppHandle, path: &Path, value: &impl Serialize) -> Result<(),
         revision: parent.saturating_add(1).max(1),
         machine_id: machine,
         base_revision: disk_rev,
+        written_at: now_ms(),
     };
     let bytes = write_stamped(path, &content, &stamp)?;
     save_base(app, &key, &bytes);
@@ -264,13 +318,70 @@ pub fn store(app: &AppHandle, path: &Path, value: &impl Serialize) -> Result<(),
         LedgerRow {
             hash: new_hash,
             revision: stamp.revision,
-            machine_id: stamp.machine_id,
+            machine_id: stamp.machine_id.clone(),
             base_revision: stamp.base_revision,
+            written_at: stamp.written_at,
             inflight: false,
         },
     );
     save_ledger(app, &ledger)?;
-    Ok(())
+    Ok(SyncWrite::Stored)
+}
+
+/// Folds this computer's edits onto a newer shared file. Fields it did not change, including
+/// theme, stay as the other computer wrote them.
+fn finish_merge(
+    app: &AppHandle,
+    path: &Path,
+    key: &str,
+    content: &Value,
+    disk: &DiskDoc,
+    base: &Value,
+    ledger: &mut LedgerFile,
+    machine: &str,
+) -> Result<SyncWrite, String> {
+    if shared_eq(content, base) {
+        ledger
+            .files
+            .insert(key.to_string(), row_from(disk, machine));
+        save_ledger(app, ledger)?;
+        return Ok(SyncWrite::KeptDisk);
+    }
+    let mut merged = disk.content.clone();
+    overlay_shared_edits(base, content, &mut merged);
+    copy_machine_local(content, &mut merged);
+    if shared_eq(&merged, &disk.content) {
+        ledger
+            .files
+            .insert(key.to_string(), row_from(disk, machine));
+        save_ledger(app, ledger)?;
+        return Ok(SyncWrite::KeptDisk);
+    }
+    let parent = disk
+        .stamp
+        .revision
+        .max(ledger.files.get(key).map(|row| row.revision).unwrap_or(0));
+    let stamp = SyncStamp {
+        revision: parent.saturating_add(1).max(1),
+        machine_id: machine.to_string(),
+        base_revision: disk.stamp.revision,
+        written_at: now_ms(),
+    };
+    let bytes = write_stamped(path, &merged, &stamp)?;
+    save_base(app, key, &bytes);
+    ledger.files.insert(
+        key.to_string(),
+        LedgerRow {
+            hash: content_hash(&merged),
+            revision: stamp.revision,
+            machine_id: stamp.machine_id,
+            base_revision: stamp.base_revision,
+            written_at: stamp.written_at,
+            inflight: false,
+        },
+    );
+    save_ledger(app, ledger)?;
+    Ok(SyncWrite::Stored)
 }
 
 fn hold(
@@ -358,16 +469,64 @@ pub fn scan(app: &AppHandle) {
             .iter()
             .any(|item| item.path == key && item.cloud.is_empty())
         {
-            if let Some(disk) = read_doc(&path)
-                && let Some(item) = conflicts
+            if let Some(disk) = read_doc(&path) {
+                let row = ledger.files.get(&key).cloned();
+                let newer = row.as_ref().is_some_and(|row| {
+                    disk.stamp.revision > row.revision || remote_is_newer(&disk, row)
+                });
+                if newer && key.ends_with("settings.json") {
+                    if let Some(index) = conflicts
+                        .items
+                        .iter()
+                        .position(|item| item.path == key && item.cloud.is_empty())
+                    {
+                        let item = conflicts.items.remove(index);
+                        let mut merged = disk.content.clone();
+                        overlay_shared_edits(&item.base, &item.ours, &mut merged);
+                        copy_machine_local(&item.ours, &mut merged);
+                        if shared_eq(&merged, &disk.content) {
+                            ledger.files.insert(key.clone(), row_from(&disk, &machine));
+                        } else {
+                            let parent = disk
+                                .stamp
+                                .revision
+                                .max(row.as_ref().map(|row| row.revision).unwrap_or(0));
+                            let stamp = SyncStamp {
+                                revision: parent.saturating_add(1).max(1),
+                                machine_id: machine.clone(),
+                                base_revision: disk.stamp.revision,
+                                written_at: now_ms(),
+                            };
+                            if let Ok(bytes) = write_stamped(&path, &merged, &stamp) {
+                                save_base(app, &key, &bytes);
+                                if let Some(written) = read_doc(&path) {
+                                    ledger
+                                        .files
+                                        .insert(key.clone(), row_from(&written, &machine));
+                                }
+                            }
+                        }
+                        if let Some(slot) = ledger.files.get_mut(&key) {
+                            slot.inflight = true;
+                        }
+                        let mut waiting = pending();
+                        if !waiting.iter().any(|item| item == &key) {
+                            waiting.push(key.clone());
+                        }
+                        changed = true;
+                        continue;
+                    }
+                }
+                if let Some(item) = conflicts
                     .items
                     .iter_mut()
                     .find(|item| item.path == key && item.cloud.is_empty())
-                && content_hash(&disk.content) != content_hash(&item.theirs)
-            {
-                item.theirs = disk.content;
-                item.time = now_ms();
-                changed = true;
+                    && content_hash(&disk.content) != content_hash(&item.theirs)
+                {
+                    item.theirs = disk.content;
+                    item.time = now_ms();
+                    changed = true;
+                }
             }
             continue;
         }
@@ -384,19 +543,32 @@ pub fn scan(app: &AppHandle) {
             continue;
         }
         let hash = content_hash(&disk.content);
+        if hash != row.hash
+            && read_base_value(app, &key).is_some_and(|base| shared_eq(&disk.content, &base))
+        {
+            ledger.files.insert(key, row_from(&disk, &machine));
+            changed = true;
+            continue;
+        }
         if hash == row.hash {
-            if disk.stamp.revision > row.revision {
+            if disk.stamp.revision > row.revision || disk.stamp.written_at > row.written_at {
                 if let Some(slot) = ledger.files.get_mut(&key) {
-                    slot.revision = disk.stamp.revision;
-                    slot.machine_id = disk.stamp.machine_id.clone();
-                    slot.base_revision = disk.stamp.base_revision;
+                    if disk.stamp.revision > slot.revision {
+                        slot.revision = disk.stamp.revision;
+                        slot.machine_id = disk.stamp.machine_id.clone();
+                        slot.base_revision = disk.stamp.base_revision;
+                    }
+                    if disk.stamp.written_at > slot.written_at {
+                        slot.written_at = disk.stamp.written_at;
+                    }
                 }
                 changed = true;
-            } else if disk.stamp.revision < row.revision {
+            } else if disk.stamp.revision < row.revision && !remote_is_newer(&disk, &row) {
                 let stamp = SyncStamp {
                     revision: row.revision,
                     machine_id: row.machine_id.clone(),
                     base_revision: row.base_revision,
+                    written_at: row.written_at.max(disk.stamp.written_at),
                 };
                 if let Ok(bytes) = write_stamped(&path, &disk.content, &stamp) {
                     save_base(app, &key, &bytes);
@@ -404,7 +576,9 @@ pub fn scan(app: &AppHandle) {
             }
             continue;
         }
-        if disk.stamp.revision > row.revision {
+        if disk.stamp.revision > row.revision
+            || (key.ends_with("settings.json") && remote_is_newer(&disk, &row))
+        {
             if let Some(slot) = ledger.files.get_mut(&key) {
                 slot.inflight = true;
             }
@@ -583,6 +757,7 @@ pub fn resolve(app: &AppHandle, id: &str, choice: &str) -> Result<(), String> {
             revision: parent.saturating_add(1).max(1),
             machine_id: machine.clone(),
             base_revision: disk_rev,
+            written_at: now_ms(),
         };
         let bytes = write_stamped(&target, &chosen, &stamp)?;
         save_base(app, &item.path, &bytes);
@@ -593,6 +768,7 @@ pub fn resolve(app: &AppHandle, id: &str, choice: &str) -> Result<(), String> {
                 revision: stamp.revision,
                 machine_id: stamp.machine_id,
                 base_revision: stamp.base_revision,
+                written_at: stamp.written_at,
                 inflight: false,
             },
         );
@@ -1105,9 +1281,83 @@ fn content_of(value: &impl Serialize) -> Result<Value, String> {
     Ok(value)
 }
 
+/// Paths and counters that belong to one computer. They stay in the file, but a difference
+/// here is not a settings change and must not push the other computer's theme aside.
+const MACHINE_LOCAL: &[&str] = &[
+    "syncFolder",
+    "syncFile",
+    "syncRevision",
+    "syncBookmarksRevision",
+    "syncExtensionsRevision",
+    "syncSettingsRevision",
+    "syncHistoryRevision",
+    "downloadDir",
+    "assistantKey",
+    "legacyAssistantKey",
+];
+
+fn is_machine_local(key: &str) -> bool {
+    MACHINE_LOCAL.contains(&key)
+}
+
+fn shared_value(value: &Value) -> Value {
+    let mut value = value.clone();
+    if let Some(object) = value.as_object_mut() {
+        object.remove("syncStamp");
+        for key in MACHINE_LOCAL {
+            object.remove(*key);
+        }
+    }
+    value
+}
+
+fn shared_eq(left: &Value, right: &Value) -> bool {
+    shared_value(left) == shared_value(right)
+}
+
+/// Copies fields `edited` changed after `base` onto `onto`. Machine-local fields stay put.
+fn overlay_shared_edits(base: &Value, edited: &Value, onto: &mut Value) {
+    let (Some(base), Some(edited), Some(onto)) =
+        (base.as_object(), edited.as_object(), onto.as_object_mut())
+    else {
+        return;
+    };
+    for (key, value) in edited {
+        if key == "syncStamp" || is_machine_local(key) {
+            continue;
+        }
+        if base.get(key) != Some(value) {
+            onto.insert(key.clone(), value.clone());
+        }
+    }
+}
+
+fn copy_machine_local(from: &Value, onto: &mut Value) {
+    let (Some(from), Some(onto)) = (from.as_object(), onto.as_object_mut()) else {
+        return;
+    };
+    for key in MACHINE_LOCAL {
+        if let Some(value) = from.get(*key) {
+            onto.insert((*key).to_string(), value.clone());
+        } else {
+            onto.remove(*key);
+        }
+    }
+}
+
+/// The other computer wrote this file after the copy we remember. Revision counters on a
+/// shared folder are not a single timeline, so the write time decides.
+fn remote_is_newer(disk: &DiskDoc, row: &LedgerRow) -> bool {
+    if disk.stamp.written_at == 0 {
+        return false;
+    }
+    let same_machine = !disk.stamp.machine_id.is_empty() && disk.stamp.machine_id == row.machine_id;
+    !same_machine && disk.stamp.written_at > row.written_at
+}
+
 fn content_hash(value: &Value) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(canonical(value).as_bytes());
+    hasher.update(canonical(&shared_value(value)).as_bytes());
     hasher
         .finalize()
         .iter()
@@ -1179,6 +1429,7 @@ fn row_from(disk: &DiskDoc, machine: &str) -> LedgerRow {
             disk.stamp.machine_id.clone()
         },
         base_revision: disk.stamp.base_revision,
+        written_at: disk.stamp.written_at,
         inflight: false,
     }
 }
@@ -1403,5 +1654,69 @@ mod tests {
         assert!(chosen.get("assistantKey").is_none());
         assert_eq!(chosen["theme"], "zinc");
         assert_eq!(chosen["aiProvider"], "openai");
+    }
+
+    #[test]
+    fn a_download_folder_does_not_count_as_a_different_theme() {
+        let here = serde_json::json!({"theme": "graphite", "downloadDir": "C:\\mine"});
+        let there = serde_json::json!({"theme": "graphite", "downloadDir": "D:\\theirs"});
+        assert_eq!(content_hash(&here), content_hash(&there));
+        let changed = serde_json::json!({"theme": "nord", "downloadDir": "D:\\theirs"});
+        assert_ne!(content_hash(&here), content_hash(&changed));
+    }
+
+    #[test]
+    fn a_theme_from_the_other_computer_survives_a_local_edit() {
+        let base = serde_json::json!({"theme": "zinc", "homePage": "ce://newtab", "downloadDir": "C:\\mine"});
+        let edited = serde_json::json!({"theme": "zinc", "homePage": "https://example.com", "downloadDir": "C:\\mine"});
+        let mut disk = serde_json::json!({"theme": "nord", "homePage": "ce://newtab", "downloadDir": "D:\\theirs"});
+        overlay_shared_edits(&base, &edited, &mut disk);
+        copy_machine_local(&edited, &mut disk);
+        assert_eq!(disk["theme"], "nord");
+        assert_eq!(disk["homePage"], "https://example.com");
+        assert_eq!(disk["downloadDir"], "C:\\mine");
+    }
+
+    #[test]
+    fn a_local_theme_change_replaces_the_other_computers_theme() {
+        let base = serde_json::json!({"theme": "zinc", "homePage": "ce://newtab"});
+        let edited = serde_json::json!({"theme": "graphite", "homePage": "ce://newtab"});
+        let mut disk = serde_json::json!({"theme": "nord", "homePage": "https://example.com"});
+        overlay_shared_edits(&base, &edited, &mut disk);
+        assert_eq!(disk["theme"], "graphite");
+        assert_eq!(disk["homePage"], "https://example.com");
+    }
+
+    #[test]
+    fn a_later_write_from_another_computer_is_newer_than_a_higher_revision() {
+        let disk = DiskDoc {
+            bytes: Vec::new(),
+            content: serde_json::json!({"theme": "nord"}),
+            stamp: SyncStamp {
+                revision: 12,
+                machine_id: "other".into(),
+                base_revision: 11,
+                written_at: 200,
+            },
+        };
+        let row = LedgerRow {
+            hash: String::new(),
+            revision: 400,
+            machine_id: "this".into(),
+            base_revision: 399,
+            written_at: 100,
+            inflight: false,
+        };
+        assert!(remote_is_newer(&disk, &row));
+        let echo = DiskDoc {
+            stamp: SyncStamp {
+                revision: 12,
+                machine_id: "this".into(),
+                base_revision: 11,
+                written_at: 500,
+            },
+            ..disk
+        };
+        assert!(!remote_is_newer(&echo, &row));
     }
 }

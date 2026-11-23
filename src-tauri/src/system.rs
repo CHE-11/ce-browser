@@ -1156,10 +1156,6 @@ fn notifier() -> Option<windows::UI::Notifications::ToastNotifier> {
     .ok()
 }
 
-pub fn toast_download(name: &str, path: &str) {
-    toast("Download finished", name, &format!("--open={path}"));
-}
-
 fn xml_text(text: &str) -> String {
     let cleaned: String = text
         .chars()

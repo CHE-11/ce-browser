@@ -372,6 +372,16 @@ fn clean_input_id(raw: &str) -> String {
         .collect()
 }
 
+/// Default pin for one built-in tool. The profile records it when that tool has no choice yet.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuiltinToolbarSeed {
+    pub id: String,
+    /// Shown next to the address bar when this profile has not saved a pin. Otherwise the tools toolbar.
+    #[serde(default)]
+    pub address: bool,
+}
+
 /// Where one tool or extension is shown. Any combination can be set. All clear means unpinned.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
@@ -2776,6 +2786,8 @@ pub fn reload(app: &AppHandle) {
         let state = app.state::<SettingsState>();
         let mut guard = state.0.lock().expect("settings lock");
         settle_dev_tools(&mut loaded, guard.dev_tools_settled, !tauri::is_dev());
+        keep_this_computer(&mut loaded, &guard);
+        apply_shared_sync_folder(&mut loaded);
         let previous_page_zoom = guard.page_zoom;
         let previous_ui_zoom = guard.ui_zoom;
         *guard = loaded.clone();
@@ -2845,7 +2857,17 @@ pub fn store(
         let previous_page_zoom = guard.page_zoom;
         let previous_ui_zoom = guard.ui_zoom;
         settle_dev_tools(&mut settings, guard.dev_tools_settled, !tauri::is_dev());
-        crate::sync_conflicts::store(app, &paths::data_file(app, FILE), &settings)?;
+        let path = paths::data_file(app, FILE);
+        crate::sync_conflicts::store(app, &path, &settings)?;
+        if paths::storage_root().is_some() {
+            let mut loaded: BrowserSettings = crate::sync_conflicts::read_json(app, &path);
+            loaded = loaded.normalize();
+            settle_dev_tools(&mut loaded, settings.dev_tools_settled, !tauri::is_dev());
+            keep_this_computer(&mut loaded, &settings);
+            apply_shared_sync_folder(&mut loaded);
+            loaded.pinned_tabs = canonicalize_pins(app, &loaded);
+            settings = loaded;
+        }
         crate::adblock::configure(&settings.adblock);
         *guard = settings.clone();
         (settings, previous_page_zoom, previous_ui_zoom)
@@ -2862,6 +2884,18 @@ pub fn store(
     crate::tabs::apply_audio_all(app);
     crate::tabs::place_all_toasts(app);
     Ok(saved)
+}
+
+/// Download folder and sync bookkeeping stay on this computer. Theme and the other shared
+/// fields come from the file the other computer wrote.
+fn keep_this_computer(loaded: &mut BrowserSettings, previous: &BrowserSettings) {
+    loaded.download_dir.clone_from(&previous.download_dir);
+    loaded.sync_folder.clone_from(&previous.sync_folder);
+    loaded.sync_revision = previous.sync_revision;
+    loaded.sync_bookmarks_revision = previous.sync_bookmarks_revision;
+    loaded.sync_extensions_revision = previous.sync_extensions_revision;
+    loaded.sync_settings_revision = previous.sync_settings_revision;
+    loaded.sync_history_revision = previous.sync_history_revision;
 }
 
 /// The sync folder belongs to the Default profile. A storage root already chosen on this
@@ -3418,6 +3452,68 @@ fn canonicalize_pins(app: &AppHandle, settings: &BrowserSettings) -> Vec<String>
         }
     }
     pins
+}
+
+/// Records each built-in tool's pin location, pin status, and place in the toolbar order.
+///
+/// A saved placement stays as it is, and a saved place in `toolbar_order` stays as it is.
+/// A tool the hidden list already names, with no placement yet, is stored as unpinned.
+/// Returns whether anything was filled in.
+pub fn fill_builtin_toolbar(settings: &mut BrowserSettings, seeds: &[BuiltinToolbarSeed]) -> bool {
+    let mut changed = false;
+    for seed in seeds {
+        let Some(id) = extension_setting_id(&seed.id) else {
+            continue;
+        };
+        let id = id.to_string();
+        if !settings.toolbar_placements.contains_key(&id) {
+            let unpinned = settings
+                .hidden_toolbar_extensions
+                .iter()
+                .any(|item| item == &id);
+            settings.toolbar_placements.insert(
+                id.clone(),
+                if unpinned {
+                    ToolbarPlacement::default()
+                } else if seed.address {
+                    ToolbarPlacement {
+                        primary: true,
+                        secondary: false,
+                        ab: false,
+                    }
+                } else {
+                    ToolbarPlacement {
+                        primary: false,
+                        secondary: true,
+                        ab: false,
+                    }
+                },
+            );
+            changed = true;
+        }
+        let pinned = settings
+            .toolbar_placements
+            .get(&id)
+            .is_some_and(|place| place.primary || place.secondary || place.ab);
+        let was_hidden = settings
+            .hidden_toolbar_extensions
+            .iter()
+            .any(|item| item == &id);
+        if pinned && was_hidden {
+            settings
+                .hidden_toolbar_extensions
+                .retain(|item| item != &id);
+            changed = true;
+        } else if !pinned && !was_hidden {
+            settings.hidden_toolbar_extensions.push(id.clone());
+            changed = true;
+        }
+        if !settings.toolbar_order.iter().any(|item| item == &id) {
+            settings.toolbar_order.push(id);
+            changed = true;
+        }
+    }
+    changed
 }
 
 pub fn update(
@@ -4115,6 +4211,25 @@ mod tests {
     }
 
     #[test]
+    fn a_synced_file_keeps_this_computers_folders_and_takes_the_theme() {
+        let mut loaded = super::BrowserSettings::default();
+        loaded.theme = "nord".into();
+        loaded.download_dir = "D:\\theirs".into();
+        loaded.sync_folder = "D:\\sync".into();
+        loaded.sync_revision = 9;
+        let mut previous = super::BrowserSettings::default();
+        previous.theme = "zinc".into();
+        previous.download_dir = "C:\\mine".into();
+        previous.sync_folder = "C:\\sync".into();
+        previous.sync_revision = 4;
+        super::keep_this_computer(&mut loaded, &previous);
+        assert_eq!(loaded.theme, "nord");
+        assert_eq!(loaded.download_dir, "C:\\mine");
+        assert_eq!(loaded.sync_folder, "C:\\sync");
+        assert_eq!(loaded.sync_revision, 4);
+    }
+
+    #[test]
     fn paused_sites_are_cleaned_up() {
         let loaded: super::BrowserSettings = serde_json::from_str(
             r#"{"adblock":{"enabled":false,"allowedSites":[" WWW.Example.com ","example.com","","a b"]}}"#,
@@ -4518,6 +4633,88 @@ mod tests {
         let again = custom.clone().normalize();
         assert_eq!(again.ai_max_input_tokens, custom.ai_max_input_tokens);
         assert_eq!(again.ai_max_output_tokens, custom.ai_max_output_tokens);
+    }
+
+    #[test]
+    fn builtin_toolbar_pins_are_recorded_for_this_profile() {
+        let mut settings = super::BrowserSettings::default();
+        settings.hidden_toolbar_extensions = vec!["print-pdf".into()];
+        settings.toolbar_order = vec!["shopping".into()];
+        settings.toolbar_placements.insert(
+            "shopping".into(),
+            super::ToolbarPlacement {
+                primary: true,
+                secondary: true,
+                ab: false,
+            },
+        );
+        let seeds = [
+            super::BuiltinToolbarSeed {
+                id: "print-pdf".into(),
+                address: false,
+            },
+            super::BuiltinToolbarSeed {
+                id: "media-hub".into(),
+                address: true,
+            },
+            super::BuiltinToolbarSeed {
+                id: "shopping".into(),
+                address: false,
+            },
+            super::BuiltinToolbarSeed {
+                id: " ".into(),
+                address: true,
+            },
+        ];
+        assert!(super::fill_builtin_toolbar(&mut settings, &seeds));
+        assert_eq!(
+            settings.toolbar_placements["print-pdf"].clone(),
+            super::ToolbarPlacement::default()
+        );
+        assert!(
+            settings
+                .hidden_toolbar_extensions
+                .iter()
+                .any(|id| id == "print-pdf")
+        );
+        assert!(settings.toolbar_placements["media-hub"].primary);
+        assert!(!settings.toolbar_placements["media-hub"].secondary);
+        assert!(settings.toolbar_placements["shopping"].primary);
+        assert!(settings.toolbar_placements["shopping"].secondary);
+        assert_eq!(
+            settings.toolbar_order,
+            vec![
+                "shopping".to_string(),
+                "print-pdf".to_string(),
+                "media-hub".to_string()
+            ]
+        );
+        assert!(!super::fill_builtin_toolbar(&mut settings, &seeds));
+    }
+
+    #[test]
+    fn a_saved_pin_leaves_the_hidden_list() {
+        let mut settings = super::BrowserSettings::default();
+        settings.hidden_toolbar_extensions = vec!["media-hub".into()];
+        settings.toolbar_placements.insert(
+            "media-hub".into(),
+            super::ToolbarPlacement {
+                primary: true,
+                secondary: false,
+                ab: true,
+            },
+        );
+        assert!(super::fill_builtin_toolbar(
+            &mut settings,
+            &[super::BuiltinToolbarSeed {
+                id: "media-hub".into(),
+                address: false,
+            }],
+        ));
+        assert!(settings.hidden_toolbar_extensions.is_empty());
+        assert!(settings.toolbar_placements["media-hub"].primary);
+        assert!(settings.toolbar_placements["media-hub"].ab);
+        assert_eq!(settings.toolbar_order, vec!["media-hub".to_string()]);
     }
 
     #[test]
