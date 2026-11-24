@@ -1375,7 +1375,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           aria-label={update.installing ? "Downloading the update…" : "Click to Update!"}
           disabled={update.installing}
           className={cn(
-            "relative inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-sky-500 px-2.5 text-xs font-medium text-white ring-2 ring-sky-300 shadow-[0_0_12px_var(--app-sky-400)] hover:bg-sky-400 disabled:pointer-events-none disabled:bg-sky-600 disabled:opacity-100",
+            "relative inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-sky-500 px-2.5 text-xs font-medium text-white ring-2 ring-sky-300 shadow-[0_0_12px_var(--app-sky-400)] hover:bg-sky-400 disabled:pointer-events-none disabled:bg-sky-600 disabled:opacity-100",
             focusRing,
           )}
           onClick={() => void installUpdate()}
@@ -1387,12 +1387,6 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
             className={cn("size-4", update.installing && "animate-spin")}
           />
           <span id="address-update-label">{update.installing ? "Updating…" : "Click to Update!"}</span>
-          {update.installing ? null : (
-            <span id="address-update-badge" className="pointer-events-none absolute -top-0.5 -right-0.5 flex size-2.5">
-              <span id="address-update-badge-ping" className="absolute inline-flex size-full animate-ping rounded-full bg-amber-300 opacity-75" />
-              <span id="address-update-badge-dot" className="relative inline-flex size-2.5 rounded-full bg-amber-400 ring-2 ring-zinc-900" />
-            </span>
-          )}
         </button>
       ) : null}
 
