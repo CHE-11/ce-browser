@@ -1,5 +1,5 @@
 import { Fragment, useEffect, type ReactNode } from "react";
-import { Bookmark, Download, Folder, History, LayoutGrid, Paintbrush, Puzzle, Settings } from "lucide-react";
+import { Bookmark, Download, Folder, History, Keyboard, LayoutGrid, Paintbrush, Puzzle, Settings } from "lucide-react";
 import { chromeVarStyle, menuIconClass, menuRowClass } from "../lib/chrome-metrics";
 import { cn } from "../lib/cn";
 import { focusRing } from "../lib/focus-ring";
@@ -14,6 +14,7 @@ export const PAGE_NAV = [
   { page: "history", label: "History", icon: History },
   { page: "extensions", label: "Extensions", icon: Puzzle },
   { page: "styles", label: "Styles", icon: Paintbrush },
+  { page: "shortcuts", label: "Shortcuts", icon: Keyboard },
   { page: "settings", label: "Settings", icon: Settings },
 ] as const;
 

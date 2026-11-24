@@ -30,6 +30,7 @@ import type {
   OmniboxState,
   OmniboxSuggestion,
   PermissionGrant,
+  ShortcutBinding,
   TabInfo,
 } from "../../../../types/browser";
 import {
@@ -42,6 +43,7 @@ import {
   goBack,
   goForward,
   listPermissions,
+  listShortcuts,
   navigate,
   noteTyped,
   omniboxExtra,
@@ -55,6 +57,7 @@ import {
   onOmniboxRemove,
   onPermissionsChanged,
   onPopupChanged,
+  onShortcutsChanged,
   openPopup,
   reload,
   restorePinnedTabs,
@@ -75,6 +78,7 @@ import { hostToolbarIds, movedToolbarOrder, splitToolbar } from "../../lib/toolb
 import { buildSuggestions, inlineCompletion, looksLikeUrl } from "../../lib/omnibox";
 import { flattenBookmarks, useUpdateStatus, type WindowTabsState } from "../../lib/use-browser";
 import { focusRing } from "../../lib/focus-ring";
+import { formatKeys } from "../../lib/shortcut-keys";
 import { registerNewTabTyping } from "../../lib/new-tab-typing";
 import { useStickyAudio } from "../../lib/use-sticky-audio";
 import { IconButton } from "../../components/IconButton";
@@ -238,6 +242,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const [storeBusy, setStoreBusy] = useState(false);
   const [grants, setGrants] = useState<PermissionGrant[]>([]);
   const [micCapture, setMicCapture] = useState<ReadonlySet<number>>(() => new Set());
+  const [paletteKeys, setPaletteKeys] = useState("");
   const omniboxRef = useRef(omnibox);
   const popupOpenRef = useRef(false);
   /** Bumped when the suggestions are dismissed, so a late search result cannot open them again. */
@@ -364,6 +369,26 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       }
     }
   }, [snapshot.windowTabs]);
+
+  useEffect(() => {
+    let closed = false;
+    const applyShortcuts = (bindings: ShortcutBinding[]) => {
+      const palette = bindings.find((binding) => binding.action === "command-palette");
+      setPaletteKeys(palette && palette.keys.length > 0 ? formatKeys(palette.keys) : "");
+    };
+    void listShortcuts()
+      .then((bindings) => {
+        if (!closed) {
+          applyShortcuts(bindings);
+        }
+      })
+      .catch(() => undefined);
+    const shortcutsListen = onShortcutsChanged(applyShortcuts);
+    return () => {
+      closed = true;
+      void shortcutsListen.then((stop) => stop());
+    };
+  }, []);
 
   useEffect(() => {
     let closed = false;
@@ -1239,6 +1264,15 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           settings={settings}
           onMove={(from, dropIndex) => moveToolbar(fieldExtensions, from, dropIndex)}
         />
+        {paletteKeys ? (
+          <kbd
+            id="address-command-palette-kbd"
+            title="Open the command palette"
+            className="shrink-0 rounded border border-zinc-600 bg-zinc-900/60 px-1.5 py-px font-sans text-[10px] leading-4 text-zinc-400"
+          >
+            {paletteKeys}
+          </kbd>
+        ) : null}
         <button
           id="address-star"
           ref={starRef}

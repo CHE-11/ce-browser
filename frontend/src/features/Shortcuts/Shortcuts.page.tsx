@@ -3,11 +3,11 @@ import { Search, SearchX } from "lucide-react";
 import { listShortcuts, onShortcutsChanged, resetShortcut, resetShortcuts, saveShortcuts } from "@/lib/browser-client";
 import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/EmptyState";
+import { PageShell } from "@/components/PageShell";
 import { SkeletonRows } from "@/components/Skeleton";
 import { cn } from "@/lib/cn";
 import { formatKeys, formatKeyToken } from "@/lib/shortcut-keys";
-import { useAppearanceFromSettings, useSettings } from "@/lib/use-browser";
-import type { ShortcutBinding } from "@type/browser";
+import { useSettings } from "@/lib/use-browser";import type { ShortcutBinding } from "@type/browser";
 
 /** Punctuation keys by physical position, so Shift and the keyboard layout don't change the name. */
 const CODE_NAMES: Record<string, string> = {
@@ -66,7 +66,6 @@ function matchesQuery(binding: ShortcutBinding, needle: string) {
 }
 
 export function ShortcutsPage() {
-  useAppearanceFromSettings();
   const settings = useSettings();
   const [bindings, setBindings] = useState<ShortcutBinding[] | null>(null);
   const [recording, setRecording] = useState<string | null>(null);
@@ -77,7 +76,6 @@ export function ShortcutsPage() {
   bindingsRef.current = bindings;
 
   useEffect(() => {
-    document.title = "Shortcuts";
     void listShortcuts().then(setBindings).catch((reason: unknown) => setError(String(reason)));
     const unlisten = onShortcutsChanged(setBindings);
     return () => {
@@ -138,39 +136,39 @@ export function ShortcutsPage() {
   }, [bindings, query, settings?.workspacesEnabled]);
 
   return (
-    <main id="shortcuts-page" className="h-full overflow-y-auto bg-zinc-950 text-zinc-100">
-      <div id="shortcuts-body" className="mx-auto flex max-w-3xl flex-col gap-4 px-6 py-8">
-        <header id="shortcuts-header" className="flex items-end justify-between gap-3">
-          <div id="shortcuts-heading">
-            <h1 id="shortcuts-title" className="text-lg font-semibold">
-              Keyboard shortcuts
-            </h1>
-            <p id="shortcuts-hint" className="mt-1 text-sm text-zinc-500">
-              Record keeps the first key, then a second key within one second makes a chord. Esc still closes menus.
-            </p>
-          </div>
-          <div id="shortcuts-header-actions" className="flex shrink-0 items-center gap-2">
-            <label id="shortcuts-search" className="flex h-8 w-64 items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900 px-2">
-              <Search id="shortcuts-search-icon" className="size-4 text-zinc-500" aria-hidden />
-              <input
-                id="shortcuts-search-input"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search shortcuts"
-                aria-label="Search shortcuts"
-                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-500"
-              />
-            </label>
-            <Button
-              id="shortcuts-reset-all"
-              size="sm"
-              variant="outline"
-              onClick={() => void resetShortcuts().then(setBindings).catch((reason: unknown) => setError(String(reason)))}
-            >
-              Reset all
-            </Button>
-          </div>
-        </header>
+    <PageShell
+      id="shortcuts-page"
+      page="shortcuts"
+      title="Keyboard shortcuts"
+      lockHorizontalScroll
+      actions={
+        <>
+          <label id="shortcuts-search" className="flex h-8 w-64 items-center gap-2 rounded-md border border-zinc-700 bg-zinc-900 px-2">
+            <Search id="shortcuts-search-icon" className="size-4 text-zinc-500" aria-hidden />
+            <input
+              id="shortcuts-search-input"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search shortcuts"
+              aria-label="Search shortcuts"
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-zinc-500"
+            />
+          </label>
+          <Button
+            id="shortcuts-reset-all"
+            size="sm"
+            variant="outline"
+            onClick={() => void resetShortcuts().then(setBindings).catch((reason: unknown) => setError(String(reason)))}
+          >
+            Reset all
+          </Button>
+        </>
+      }
+    >
+      <div id="shortcuts-body" className="mx-auto flex max-w-3xl flex-col gap-4">
+        <p id="shortcuts-hint" className="text-sm text-zinc-500">
+          Record keeps the first key, then a second key within one second makes a chord. Esc still closes menus.
+        </p>
         {error ? (
           <p id="shortcuts-error" className="text-sm text-red-300">
             {error}
@@ -231,6 +229,6 @@ export function ShortcutsPage() {
           })}
         </ul>
       </div>
-    </main>
+    </PageShell>
   );
 }
