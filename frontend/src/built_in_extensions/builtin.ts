@@ -4,6 +4,7 @@ import {
   CircleDot,
   Clapperboard,
   Eraser,
+  Landmark,
   SquareCode,
   FileText,
   Gauge,
@@ -94,6 +95,12 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     name: "Clear cache",
     description: "Clear cached files for the site in the current tab.",
     icon: Eraser,
+  },
+  {
+    id: "wayback",
+    name: "Wayback Machine",
+    description: "Open the current page in the Internet Archive.",
+    icon: Landmark,
   },
   {
     id: "what-runs",

@@ -39,6 +39,7 @@ import { builtinToolEnabled } from "@/lib/toolbar-pin";
 import { siteKey } from "@/built_in_extensions/page-controls/site";
 import { toggleSystemColorScheme } from "@/built_in_extensions/light-dark/toggle";
 import { tabParams } from "@/built_in_extensions/shared";
+import { waybackUrl } from "@/built_in_extensions/wayback/WaybackButton";
 import { SETTINGS_INDEX } from "@features/Settings/settings-index";
 import { SETTINGS_SECTIONS } from "@/features/Settings/settings-sections";
 import type { ClosedEntry, HistoryHit, PopupKind, TabInfo } from "@type/browser";
@@ -135,6 +136,7 @@ function toolReplacesPalette(id: string, hasTab: boolean) {
     case "present":
     case "rewrites":
     case "clear-cache":
+    case "wayback":
     case "light-dark":
       return false;
     case "font-picker":
@@ -299,6 +301,10 @@ export function CommandPalette() {
         }
         if (tool.id === "clear-cache") {
           return clearSiteCache(active.id);
+        }
+        if (tool.id === "wayback") {
+          const archiveUrl = waybackUrl(active.url);
+          return archiveUrl ? createTab(archiveUrl) : undefined;
         }
         if (tool.id === "network") {
           return openHere("network", `id=${active.id}`);

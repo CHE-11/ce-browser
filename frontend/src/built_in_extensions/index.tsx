@@ -2,6 +2,7 @@ import type { BrowserSettings, TabInfo } from "../../../types/browser";
 import { AdBlockerButton } from "./ad-blocker/AdBlockerButton";
 import { PageControlsButton } from "./page-controls/PageControlsButton";
 import { ClearCacheButton } from "./clear-cache/ClearCacheButton";
+import { WaybackButton } from "./wayback/WaybackButton";
 import { PageCaptureButton } from "./page-capture/PageCaptureButton";
 import { PresentButton } from "./present/PresentButton";
 import { RecordingButton } from "./recording/RecordingButton";
@@ -48,6 +49,8 @@ export function ToolbarIcon({ id, activeTab, settings }: { id: string; activeTab
       return <MediaHubButton />;
     case "clear-cache":
       return <ClearCacheButton activeTab={activeTab} />;
+    case "wayback":
+      return <WaybackButton activeTab={activeTab} />;
     case "what-runs":
       return <WhatRunsButton activeTab={activeTab} />;
     case "ad-blocker":

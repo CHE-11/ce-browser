@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "ce-browser"
-version = "0.1.129"
+version = "0.1.130"
 dependencies = [
  "aes-gcm",
  "argon2",
