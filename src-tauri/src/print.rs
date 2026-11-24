@@ -1,5 +1,6 @@
 //! Print to PDF: reads a tab's document for the editor, and prints edited HTML or a tab to PDF.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, mpsc};
@@ -315,6 +316,283 @@ const SETTLE_SCRIPT: &str = r#"(async () => {
   return true;
 })()"#;
 
+/// Title, author and date from a downloaded page. Same fields as `extract_page`, without the document.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PrintPageFacts {
+    pub title: String,
+    pub url: String,
+    pub lang: String,
+    pub byline: String,
+    pub site_name: String,
+    pub published: String,
+}
+
+const PAGE_FACTS_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+const PAGE_FACTS_LIMIT: u64 = 512 * 1024;
+
+/// Reads the same title, author, site and date a live extract would, from the page's HTML.
+pub fn page_facts(input: &str) -> Result<PrintPageFacts, String> {
+    let url = Url::parse(input.trim()).map_err(|_| "Enter a web address.".to_string())?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err("Enter a web address.".into());
+    }
+    let (final_url, html) = download_html(&url)?;
+    Ok(facts_from_html(&final_url, &html))
+}
+
+fn download_html(url: &Url) -> Result<(String, String), String> {
+    let response = match ureq::get(url.as_str())
+        .timeout(Duration::from_secs(12))
+        .set("User-Agent", PAGE_FACTS_AGENT)
+        .set("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8")
+        .call()
+    {
+        Ok(response) => response,
+        Err(ureq::Error::Status(404, _)) => return Err("That page was not found.".into()),
+        Err(_) => return Err(READ_FAILURE.into()),
+    };
+    let final_url = response.get_url().to_string();
+    let parsed = Url::parse(&final_url).map_err(|_| READ_FAILURE.to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(READ_FAILURE.into());
+    }
+    let kind = response.content_type().to_ascii_lowercase();
+    let html = if kind.is_empty() || kind.contains("html") || kind.contains("xml") {
+        let mut body = Vec::new();
+        response
+            .into_reader()
+            .take(PAGE_FACTS_LIMIT)
+            .read_to_end(&mut body)
+            .map_err(|_| READ_FAILURE.to_string())?;
+        String::from_utf8_lossy(&body).into_owned()
+    } else {
+        String::new()
+    };
+    Ok((parsed.to_string(), html))
+}
+
+fn facts_from_html(url: &str, html: &str) -> PrintPageFacts {
+    let host = Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_string))
+        .unwrap_or_default();
+    let site = meta_content(html, "property", "og:site_name");
+    PrintPageFacts {
+        title: first_text(&[
+            meta_content(html, "property", "og:title"),
+            element_text(html, "title"),
+        ]),
+        url: url.to_string(),
+        lang: html_lang(html),
+        byline: first_text(&[
+            meta_content(html, "name", "author"),
+            meta_content(html, "property", "article:author"),
+        ]),
+        site_name: if site.is_empty() { host } else { site },
+        published: first_text(&[
+            meta_content(html, "property", "article:published_time"),
+            meta_content(html, "name", "date"),
+        ]),
+    }
+}
+
+fn first_text(values: &[String]) -> String {
+    values
+        .iter()
+        .find(|value| !value.is_empty())
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn meta_content(html: &str, attr: &str, key: &str) -> String {
+    let lower = html.to_ascii_lowercase();
+    let mut search = 0;
+    while let Some(relative) = lower[search..].find("<meta") {
+        let start = search + relative;
+        let after = start + 5;
+        let boundary = match html.as_bytes().get(after) {
+            Some(byte) => byte.is_ascii_whitespace() || *byte == b'/' || *byte == b'>',
+            None => true,
+        };
+        if !boundary {
+            search = after;
+            continue;
+        }
+        let end = html[start..]
+            .find('>')
+            .map(|relative| start + relative)
+            .unwrap_or(html.len());
+        let tag = &html[start..=end.min(html.len().saturating_sub(1))];
+        if attr_value(tag, attr).is_some_and(|value| value.eq_ignore_ascii_case(key)) {
+            if let Some(content) = attr_value(tag, "content") {
+                let decoded = decode_entities(&content);
+                if !decoded.is_empty() {
+                    return decoded;
+                }
+            }
+        }
+        search = end.saturating_add(1);
+        if search >= html.len() {
+            break;
+        }
+    }
+    String::new()
+}
+
+fn element_text(html: &str, name: &str) -> String {
+    let lower = html.to_ascii_lowercase();
+    let open = format!("<{name}");
+    let close = format!("</{name}");
+    let mut search = 0;
+    while let Some(relative) = lower[search..].find(&open) {
+        let start = search + relative;
+        let after = start + open.len();
+        let boundary = match html.as_bytes().get(after) {
+            Some(byte) => byte.is_ascii_whitespace() || *byte == b'>' || *byte == b'/',
+            None => true,
+        };
+        if !boundary {
+            search = after;
+            continue;
+        }
+        let content_start = html[start..]
+            .find('>')
+            .map(|relative| start + relative + 1)
+            .unwrap_or(html.len());
+        if let Some(relative) = lower[content_start..].find(&close) {
+            let decoded = decode_entities(html[content_start..content_start + relative].trim());
+            if !decoded.is_empty() {
+                return decoded;
+            }
+        }
+        search = content_start.max(after);
+        if search >= html.len() {
+            break;
+        }
+    }
+    String::new()
+}
+
+fn html_lang(html: &str) -> String {
+    let lower = html.to_ascii_lowercase();
+    let Some(start) = lower.find("<html") else {
+        return String::new();
+    };
+    let after = start + 5;
+    let boundary = match html.as_bytes().get(after) {
+        Some(byte) => byte.is_ascii_whitespace() || *byte == b'>' || *byte == b'/',
+        None => true,
+    };
+    if !boundary {
+        return String::new();
+    }
+    let end = html[start..]
+        .find('>')
+        .map(|relative| start + relative)
+        .unwrap_or(html.len());
+    decode_entities(
+        &attr_value(&html[start..=end.min(html.len().saturating_sub(1))], "lang")
+            .unwrap_or_default(),
+    )
+}
+
+fn attr_value(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_ascii_lowercase();
+    let name = name.to_ascii_lowercase();
+    let mut search = 0;
+    while let Some(relative) = lower[search..].find(&name) {
+        let index = search + relative;
+        let before = index
+            .checked_sub(1)
+            .and_then(|at| lower.as_bytes().get(at))
+            .copied();
+        let boundary = before.is_none_or(|byte| byte.is_ascii_whitespace() || byte == b'<');
+        let after_name = index + name.len();
+        if !boundary {
+            search = index + 1;
+            continue;
+        }
+        let after = &lower[after_name..];
+        let trimmed = after.trim_start();
+        if !trimmed.starts_with('=') {
+            search = index + 1;
+            continue;
+        }
+        let skipped = after.len() - trimmed.len();
+        let past_eq = trimmed[1..].trim_start();
+        let eq_gap = trimmed[1..].len() - past_eq.len();
+        let value_at = after_name + skipped + 1 + eq_gap;
+        if past_eq.is_empty() {
+            return None;
+        }
+        let quote = past_eq.as_bytes()[0] as char;
+        if quote == '"' || quote == '\'' {
+            let start = value_at + 1;
+            let end = tag[start..].find(quote)? + start;
+            return Some(tag[start..end].to_string());
+        }
+        let end = tag[value_at..]
+            .find(|character: char| character.is_whitespace() || character == '>')
+            .map(|relative| value_at + relative)
+            .unwrap_or(tag.len());
+        return Some(tag[value_at..end].to_string());
+    }
+    None
+}
+
+fn decode_entities(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(index) = rest.find('&') {
+        out.push_str(&rest[..index]);
+        rest = &rest[index..];
+        let Some(end) = rest.find(';') else {
+            out.push_str(rest);
+            return collapse(&out);
+        };
+        if end > 16 {
+            out.push('&');
+            rest = &rest[1..];
+            continue;
+        }
+        let entity = &rest[1..end];
+        let character = match entity {
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "quot" => Some('"'),
+            "apos" | "#39" => Some('\''),
+            "nbsp" => Some(' '),
+            _ if entity.len() > 2
+                && (entity.as_bytes()[1] == b'x' || entity.as_bytes()[1] == b'X')
+                && entity.starts_with('#') =>
+            {
+                u32::from_str_radix(&entity[2..], 16)
+                    .ok()
+                    .and_then(char::from_u32)
+            }
+            _ => entity
+                .strip_prefix('#')
+                .and_then(|digits| digits.parse::<u32>().ok())
+                .and_then(char::from_u32),
+        };
+        if let Some(character) = character {
+            out.push(character);
+            rest = &rest[end + 1..];
+        } else {
+            out.push('&');
+            rest = &rest[1..];
+        }
+    }
+    out.push_str(rest);
+    collapse(&out)
+}
+
+fn collapse(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 pub fn extract_page(app: &AppHandle, id: u32) -> Result<ExtractedPage, String> {
     let webview =
         tabs::page_view(app, id).ok_or("That tab is closed or its page is not loaded.")?;
@@ -453,7 +731,7 @@ fn open_host(app: &AppHandle, html: &str) -> Result<(Webview, PathBuf), String> 
 
 #[cfg(test)]
 mod tests {
-    use super::{page_number_footer, page_number_header};
+    use super::{facts_from_html, page_number_footer, page_number_header};
 
     #[test]
     fn page_numbers_are_current_over_total_at_the_chosen_side() {
@@ -487,5 +765,43 @@ mod tests {
         let header = page_number_header(false);
         assert!(!header.contains("title"));
         assert!(page_number_header(true).contains(r#"class="title""#));
+    }
+
+    #[test]
+    fn page_facts_read_the_same_fields_as_a_live_extract() {
+        let html = r#"
+            <html lang="en">
+              <head>
+                <title>Why the sky is blue | Example Times</title>
+                <meta property="og:title" content="Why the sky is blue">
+                <meta name="author" content="Ada &amp; Lovelace">
+                <meta property="og:site_name" content="Example Times">
+                <meta property="article:published_time" content="2026-03-14T15:00:00Z">
+              </head>
+            </html>
+        "#;
+        let facts = facts_from_html("https://www.example.com/science/why-the-sky-is-blue", html);
+        assert_eq!(facts.title, "Why the sky is blue");
+        assert_eq!(facts.byline, "Ada & Lovelace");
+        assert_eq!(facts.site_name, "Example Times");
+        assert_eq!(facts.published, "2026-03-14T15:00:00Z");
+        assert_eq!(facts.lang, "en");
+        assert_eq!(
+            facts.url,
+            "https://www.example.com/science/why-the-sky-is-blue"
+        );
+    }
+
+    #[test]
+    fn page_facts_fall_back_to_the_title_and_the_host() {
+        let facts = facts_from_html(
+            "https://www.example.com/news/story",
+            "<html><head><title>Hello &amp; co</title><meta property=\"article:author\" content=\"Grace Hopper\"><meta name=\"date\" content=\"2024-01-02\"></head></html>",
+        );
+        assert_eq!(facts.title, "Hello & co");
+        assert_eq!(facts.byline, "Grace Hopper");
+        assert_eq!(facts.published, "2024-01-02");
+        assert_eq!(facts.site_name, "www.example.com");
+        assert_eq!(facts.lang, "");
     }
 }

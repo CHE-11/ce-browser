@@ -15,6 +15,7 @@ import {
 import { FILE_NAME_TOKENS } from "@/built_in_extensions/print-to-pdf/file-name";
 import { SETTINGS_SECTIONS } from "../../settings-sections";
 import { inputClass, matchesQuery, Section, Segmented, useReportMatch, useSettingChanged, type SettingsSectionProps } from "../../SettingsControls";
+import { TRY_HINT, TRY_LABEL } from "./PrintFileNameTry";
 import { PRESETS_HINT, PRESETS_LABEL, PrintToPDfPresets } from "./PrintToPDfPresets";
 
 const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-print")!;
@@ -102,6 +103,8 @@ export function PrintToPDfSsection({ settings, query, onUpdate, onMatch }: Setti
     "file name",
     "filename",
     "template",
+    TRY_LABEL,
+    TRY_HINT,
     ...FILE_NAME_TOKENS.flatMap((token) => [token.token, token.label]),
     ...FONT_OPTIONS.map((option) => option.label),
     ...labels,

@@ -64,6 +64,7 @@ import type {
   UpdateStatus,
   DownloadItem,
   ExtractedPage,
+  PrintPageFacts,
   FindResult,
   FindTabResult,
   HistoryItem,
@@ -1561,6 +1562,11 @@ export function ocrRegion(id: number) {
 
 export function extractPage(id: number) {
   return invoke<ExtractedPage>("extract_page", { id });
+}
+
+/** Title, author and date from a page address, for the print file-name preview. */
+export function printPageFacts(url: string) {
+  return invoke<PrintPageFacts>("print_page_facts", { url });
 }
 
 export function detectTechnologies(id: number) {

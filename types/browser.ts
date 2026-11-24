@@ -2066,6 +2066,16 @@ export type ExtractedPage = {
   published: string;
 };
 
+/** Title, author and date read from a page, so a print preset can preview its file name. */
+export type PrintPageFacts = {
+  title: string;
+  url: string;
+  lang: string;
+  byline: string;
+  siteName: string;
+  published: string;
+};
+
 export type TechnologyCategory =
   | "platform"
   | "framework"

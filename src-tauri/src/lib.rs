@@ -1032,6 +1032,11 @@ async fn extract_page(app: AppHandle, id: u32) -> Result<ExtractedPage, String> 
 }
 
 #[tauri::command]
+async fn print_page_facts(url: String) -> Result<print::PrintPageFacts, String> {
+    blocking(move || print::page_facts(&url)).await
+}
+
+#[tauri::command]
 async fn detect_technologies(app: AppHandle, id: u32) -> Result<PageTechnologies, String> {
     blocking(move || what_runs::detect_technologies(&app, id)).await
 }
@@ -3474,6 +3479,7 @@ pub fn run() {
             ocr_visible,
             ocr_region,
             extract_page,
+            print_page_facts,
             detect_technologies,
             print_tab_to_pdf,
             print_html_to_pdf,

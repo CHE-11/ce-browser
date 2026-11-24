@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   FILE_NAME_GROUPS,
   FILE_NAME_TEMPLATE_MAX,
@@ -9,9 +9,15 @@ import {
 import { cn } from "@/lib/cn";
 import { focusRing } from "@/lib/focus-ring";
 import { inputClass } from "../../SettingsControls";
+import { PrintFileNameTry } from "./PrintFileNameTry";
 
 const FILE_NAME_HINT =
   "Suggested when you save with this preset. Click a placeholder to insert it. A published date or author the page does not name is skipped, and the dash beside it is dropped. Leave this blank to use the page title.";
+
+/** Settings echo the template after a save, and that round trip puts the caret at the end. The draft is what is on screen. */
+function cleanTemplate(raw: string) {
+  return raw.replace(/[\u0000-\u001F\u007F-\u009F]/g, "").slice(0, FILE_NAME_TEMPLATE_MAX);
+}
 
 function spliceToken(current: string, token: string, start: number, end: number) {
   const piece = `{${token}}`;
@@ -39,10 +45,20 @@ export function PrintFileNameField({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const cursor = useRef<number | null>(null);
+  const committed = useRef(value);
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? value;
   const suggested = suggestedFileNameTemplate(presetId);
-  const preview = previewFileName(value, presetName);
+  const preview = previewFileName(shown, presetName);
 
   useEffect(() => {
+    if (value !== committed.current) {
+      committed.current = value;
+      setDraft(null);
+    }
+  }, [value]);
+
+  useLayoutEffect(() => {
     if (cursor.current === null) {
       return;
     }
@@ -51,18 +67,28 @@ export function PrintFileNameField({
     cursor.current = null;
     input?.focus();
     input?.setSelectionRange(place, place);
-  }, [value]);
+  }, [shown]);
+
+  const publish = (next: string) => {
+    const visible = cleanTemplate(next);
+    setDraft(visible);
+    const stored = visible.trim();
+    if (stored !== value) {
+      committed.current = stored;
+      onChange(stored);
+    }
+  };
 
   const insert = (token: string) => {
     const input = inputRef.current;
-    const start = input?.selectionStart ?? value.length;
-    const end = input?.selectionEnd ?? value.length;
-    const result = spliceToken(value, token, start, end);
+    const start = input?.selectionStart ?? shown.length;
+    const end = input?.selectionEnd ?? shown.length;
+    const result = spliceToken(shown, token, start, end);
     if (!result) {
       return;
     }
     cursor.current = result.cursor;
-    onChange(result.next);
+    publish(result.next);
   };
 
   return (
@@ -71,12 +97,18 @@ export function PrintFileNameField({
         <span id={`${id}-legend`} className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
           File name
         </span>
-        {value.trim() !== suggested ? (
+        {shown.trim() !== suggested ? (
           <button
             id={`${id}-suggested`}
             type="button"
             className={cn("text-xs text-sky-400 hover:text-sky-300", focusRing)}
-            onClick={() => onChange(suggested)}
+            onClick={() => {
+              committed.current = suggested;
+              setDraft(null);
+              if (suggested !== value) {
+                onChange(suggested);
+              }
+            }}
           >
             Use suggested
           </button>
@@ -89,8 +121,13 @@ export function PrintFileNameField({
         maxLength={FILE_NAME_TEMPLATE_MAX}
         spellCheck={false}
         placeholder="{title}"
-        value={value}
-        onChange={(event) => onChange(event.target.value.replace(/[\r\n]/g, "").slice(0, FILE_NAME_TEMPLATE_MAX))}
+        value={shown}
+        onChange={(event) => publish(event.target.value)}
+        onBlur={() => {
+          if (draft !== null && draft.trim() === value) {
+            setDraft(null);
+          }
+        }}
       />
       <p id={`${id}-hint`} className="text-xs text-zinc-500">
         {FILE_NAME_HINT}
@@ -101,6 +138,7 @@ export function PrintFileNameField({
           {preview}
         </span>
       </p>
+      <PrintFileNameTry id={`${id}-try`} template={shown} presetName={presetName} />
       <div id={`${id}-tokens`} className="flex flex-col gap-1.5">
         {FILE_NAME_GROUPS.map((group) => (
           <div id={`${id}-tokens-${group.id}`} key={group.id} className="flex flex-wrap items-center gap-1">
@@ -118,6 +156,7 @@ export function PrintFileNameField({
                   "rounded-md bg-zinc-800 px-1.5 py-0.5 font-mono text-[11px] text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100",
                   focusRing,
                 )}
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => insert(token.token)}
               >
                 {`{${token.token}}`}
