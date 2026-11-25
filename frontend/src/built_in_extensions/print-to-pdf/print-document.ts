@@ -1,6 +1,7 @@
 import { ExtractedPage, PrintEditorSettings, PrintMode } from "@type/browser";
 import { type CleanupKind, type CleanupStats, extractArticle, removeClutter } from "./cleanup";
 import { printFontStack } from "./print-options";
+import { X_PAGE_CSS, isXPage, readXPage, renderXPage, xHeaderPage, xPageUsed } from "./x-post";
 
 /** Every element of the source page gets a stable id, so edits survive a rebuild. */
 export const ID_ATTR = "data-ce-id";
@@ -264,8 +265,40 @@ export function buildDocument(
   const kinds = cleanupKinds(state);
   let doc = source.cloneNode(true) as Document;
   let articleFound = false;
+  let headerPage = page;
 
-  if (state.mode === "article") {
+  // X renders its own posts. Article scoring keeps the app shell and drops the line breaks.
+  const xPage = isXPage(page.url) ? readXPage(doc, page.url) : null;
+  if (xPage) {
+    const reader = document.implementation.createHTMLDocument(page.title);
+    if (page.lang) {
+      reader.documentElement.lang = page.lang;
+    }
+    const root = reader.createElement("article");
+    root.setAttribute("data-ce-root", "");
+    root.setAttribute(ID_ATTR, "ce-root");
+    const xStats = renderXPage(reader, root, xPage, {
+      pageUrl: page.url,
+      showAuthor: !format.showHeader,
+      removeAds: state.removeAds,
+      removeSocial: state.removeSocial,
+      removeMedia: state.removeMedia,
+    });
+    if (xPageUsed(root)) {
+      articleFound = true;
+      for (const kind of kinds) {
+        stats[kind] += xStats[kind];
+      }
+      reader.body.appendChild(root);
+      doc = reader;
+      ensureHead(doc, page);
+      addStyle(doc, "ce-print-reader", READER_CSS);
+      addStyle(doc, "ce-print-x", X_PAGE_CSS);
+      headerPage = xHeaderPage(page, xPage);
+    }
+  }
+
+  if (!articleFound && state.mode === "article") {
     // Clutter goes first so it cannot win the article scoring.
     for (const kind of kinds) {
       stats[kind] += removeClutter(doc, kind);
@@ -303,7 +336,7 @@ export function buildDocument(
   }
 
   if (format.showHeader && doc.body) {
-    doc.body.prepend(buildHeader(doc, page));
+    doc.body.prepend(buildHeader(doc, headerPage));
   }
   applyOps(doc, state.ops);
   addStyle(doc, "ce-print-header", HEADER_CSS);
