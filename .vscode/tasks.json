@@ -147,6 +147,28 @@
         "reveal": "always",
         "close": true
       }
+    },
+    {
+      "label": "Cargo Clean",
+      "type": "shell",
+      "command": "cargo clean",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "statusbar": {
+          "hide": false,
+          "color": "#ff0202"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "close": true
+      }
     }
   ]
 }
