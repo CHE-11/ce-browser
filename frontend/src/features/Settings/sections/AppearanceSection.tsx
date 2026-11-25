@@ -27,8 +27,6 @@ const section = SETTINGS_SECTIONS.find((item) => item.id === "settings-appearanc
 
 const ACCENT_LABEL = "Site accent";
 const ACCENT_HINT = "Tints the active tab and address bar from the site's theme color or favicon.";
-const PIN_BORDER_LABEL = "Pin tab border";
-const PIN_BORDER_HINT = "Draws the site's theme color or favicon along the top of pinned tabs.";
 const MODE_LABEL = "Mode";
 const MODE_HINT = "Colors the browser. Websites follow Windows light or dark mode when they support it.";
 const BACKDROP_LABEL = "Window backdrop";
@@ -69,8 +67,6 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
     section.title,
     ACCENT_LABEL,
     ACCENT_HINT,
-    PIN_BORDER_LABEL,
-    PIN_BORDER_HINT,
     MODE_LABEL,
     MODE_HINT,
     ...COLOR_MODE_OPTIONS.map((option) => option.label),
@@ -120,13 +116,6 @@ export function AppearanceSection({ settings, query, onUpdate, onError, onMatch 
       <StylesLink id="settings-styles-link" search={["sizes", "height", "icon", "padding", "toolbar", "menu"]} />
       <Row id="settings-site-accent" setting="siteAccent" label={ACCENT_LABEL} hint={ACCENT_HINT}>
         <Toggle id="settings-site-accent-toggle" checked={settings.siteAccent} onChange={(value) => onUpdate({ siteAccent: value })} />
-      </Row>
-      <Row id="settings-pin-tab-border" setting="pinTabBorder" label={PIN_BORDER_LABEL} hint={PIN_BORDER_HINT}>
-        <Toggle
-          id="settings-pin-tab-border-toggle"
-          checked={settings.pinTabBorder}
-          onChange={(value) => onUpdate({ pinTabBorder: value })}
-        />
       </Row>
       <Row
         id="settings-color-mode"

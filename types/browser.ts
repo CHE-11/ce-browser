@@ -1212,6 +1212,8 @@ export type BrowserSettings = {
   lastSeenVersion: string;
   /** Resting on a tab shows a small preview of its page. */
   tabHoverPreview: boolean;
+  /** Console errors on a page draw the red line along the bottom of its tab. */
+  tabConsoleErrors: boolean;
   /** Preferred width of a horizontal tab, in CSS pixels. Tabs shrink when the strip is full. */
   tabWidth: number;
   /** Text size of a tab title, in rem. */

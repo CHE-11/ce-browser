@@ -14,6 +14,7 @@ import { StylePreview } from "./StylePreview";
 import { STYLE_SURFACES, styleChoiceValue, styleSurface, withStyleChoice, type StyleChoice, type StyleChoiceKey, type StyleControl } from "./surfaces";
 
 const SAVE_DELAY_MS = 150;
+const SORTED_SURFACES = [...STYLE_SURFACES].sort((a, b) => a.label.localeCompare(b.label));
 
 function formatMetric(value: number, unit: StyleControl["unit"]) {
   if (unit === "rem") {
@@ -134,7 +135,7 @@ export function StylesPage() {
           <div id="styles-surfaces-label" className="px-3 pb-2 text-xs font-medium text-zinc-500">
             Chrome
           </div>
-          {STYLE_SURFACES.map((item) => (
+          {SORTED_SURFACES.map((item) => (
             <button
               key={item.id}
               id={`styles-surface-${item.id}`}

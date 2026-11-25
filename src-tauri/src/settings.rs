@@ -762,6 +762,9 @@ pub struct BrowserSettings {
     /// Resting on a tab shows a small preview of its page.
     #[serde(default = "default_true")]
     pub tab_hover_preview: bool,
+    /// Console errors on a page draw the red line along the bottom of its tab. An older file omits this and gets the line.
+    #[serde(default = "default_true")]
+    pub tab_console_errors: bool,
     /// Preferred width of a horizontal tab, in CSS pixels. Tabs shrink when the strip is full.
     #[serde(default = "default_tab_width")]
     pub tab_width: u32,
@@ -1827,6 +1830,7 @@ impl Default for BrowserSettings {
             tab_cycle_order: default_tab_cycle_order(),
             tab_switcher: true,
             tab_hover_preview: true,
+            tab_console_errors: true,
             tab_width: default_tab_width(),
             tab_item_text_size: default_tab_item_text_size(),
             tab_item_padding: default_tab_item_padding(),
@@ -3842,6 +3846,8 @@ mod tests {
         assert!(!loaded.mute_background_tabs);
         assert!(loaded.peek_on_shift_click);
         assert!(loaded.tab_hover_preview);
+        assert!(loaded.tab_console_errors);
+        assert!(loaded.pin_tab_border);
         assert_eq!(loaded.tab_width, 220);
         assert_eq!(loaded.tab_item_text_size, 0.6875);
         assert_eq!(loaded.tab_item_padding, 0.625);

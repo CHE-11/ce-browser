@@ -35,7 +35,7 @@ function failureReason(failure: TabFailure) {
 }
 
 /** Why a tab should show a red line along its bottom edge. Empty when the tab is fine. */
-export function tabProblemTitle(tab: ProblemTab, heavy: HeavyTab | null) {
+export function tabProblemTitle(tab: ProblemTab, heavy: HeavyTab | null, consoleErrors = true) {
   const reasons: string[] = [];
   if (tab.unresponsive) {
     reasons.push("Page isn't responding");
@@ -43,7 +43,7 @@ export function tabProblemTitle(tab: ProblemTab, heavy: HeavyTab | null) {
   if (tab.failure) {
     reasons.push(failureReason(tab.failure));
   }
-  if (tab.errors > 0) {
+  if (consoleErrors && tab.errors > 0) {
     reasons.push(tab.errors === 1 ? "1 page error" : `${tab.errors} page errors`);
   }
   if (heavy) {

@@ -1,13 +1,13 @@
 [package]
 name = "ce-browser"
-version = "0.1.132"
+version = "0.1.133"
 description = "Tabbed WebView2 browser"
 authors = ["you"]
 edition = "2024"
 
 [lib]
 name = "ce_browser_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -84,6 +84,12 @@ windows = { version = "0.61", features = [
     "Storage_Streams",
 ] }
 windows-core = "0.61"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
 
 [profile.release]
 panic = "abort"

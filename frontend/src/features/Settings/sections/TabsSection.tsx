@@ -21,6 +21,10 @@ const SWITCHER_LABEL = "Show the tab switcher";
 const SWITCHER_HINT = "With recently used order, Ctrl+Tab shows thumbnails until you let go of Ctrl.";
 const HOVER_LABEL = "Show a preview when hovering a tab";
 const HOVER_HINT = "After a moment, a small card shows the page, its title, and its address.";
+const CONSOLE_ERRORS_LABEL = "Show console errors";
+const CONSOLE_ERRORS_HINT = "Draws a red line along the bottom of a tab when its page logs errors. Crashes, hangs and high memory still show the line.";
+const PIN_BORDER_LABEL = "Pin tab border";
+const PIN_BORDER_HINT = "Draws the site's theme color or favicon along the top of pinned tabs.";
 const PEEK_LABEL = "Shift+click opens links in a peek";
 const PEEK_HINT = "A peek shows the page over the current tab. Esc closes it.";
 const MUTE_LABEL = "Mute tabs in the background";
@@ -67,6 +71,14 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
     HOVER_LABEL,
     HOVER_HINT,
     "thumbnail",
+    CONSOLE_ERRORS_LABEL,
+    CONSOLE_ERRORS_HINT,
+    "page errors",
+    "red line",
+    "bottom border",
+    PIN_BORDER_LABEL,
+    PIN_BORDER_HINT,
+    "pinned",
     PEEK_LABEL,
     PEEK_HINT,
     MUTE_LABEL,
@@ -150,6 +162,26 @@ export function TabsSection({ settings, query, onUpdate, onMatch }: SettingsSect
           id="settings-tab-hover-toggle"
           checked={settings.tabHoverPreview}
           onChange={(tabHoverPreview) => onUpdate({ tabHoverPreview })}
+        />
+      </Row>
+      <Row
+        id="settings-tab-console-errors"
+        setting="tabConsoleErrors"
+        label={CONSOLE_ERRORS_LABEL}
+        hint={CONSOLE_ERRORS_HINT}
+        search={["page errors", "red line", "bottom border"]}
+      >
+        <Toggle
+          id="settings-tab-console-errors-toggle"
+          checked={settings.tabConsoleErrors}
+          onChange={(tabConsoleErrors) => onUpdate({ tabConsoleErrors })}
+        />
+      </Row>
+      <Row id="settings-pin-tab-border" setting="pinTabBorder" label={PIN_BORDER_LABEL} hint={PIN_BORDER_HINT} search={["pinned"]}>
+        <Toggle
+          id="settings-pin-tab-border-toggle"
+          checked={settings.pinTabBorder}
+          onChange={(pinTabBorder) => onUpdate({ pinTabBorder })}
         />
       </Row>
       <Row id="settings-peek" setting="peekOnShiftClick" label={PEEK_LABEL} hint={PEEK_HINT}>

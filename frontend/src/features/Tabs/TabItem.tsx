@@ -88,7 +88,7 @@ export function TabItem({
   const domId = `tab-${tab.id}`;
   const underPointer = useTabUnderPointer();
   const closeShown = underPointer.tabId === tab.id;
-  const alert = tabProblemTitle(tab, heavy);
+  const alert = tabProblemTitle(tab, heavy, settings?.tabConsoleErrors !== false);
   const notification = tabNotificationTitle(tab);
   const accentFill = accent && active ? accentTint(accent, 0.28) : undefined;
   const chromeTab = !vertical && active;
