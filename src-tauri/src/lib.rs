@@ -1251,6 +1251,36 @@ async fn open_download(app: AppHandle, window: Window, id: u32) -> Result<(), St
 }
 
 #[tauri::command]
+async fn print_download(app: AppHandle, webview: Webview, id: u32) -> Result<(), String> {
+    let label = webview.label().to_string();
+    let from_popup = popup::is_popup_label(&label);
+    let window = if from_popup {
+        popup::owner_of(&label)
+    } else {
+        webview.window().label().to_string()
+    };
+    blocking(move || {
+        let path = downloads::completed_path(&app, id)?;
+        // The downloads panel is an owned window, so it stays above a print dialog.
+        if from_popup {
+            popup::close_all(&app, &window, false);
+        }
+        print::print_saved_file(&app, &path).inspect_err(|error| {
+            if !from_popup {
+                return;
+            }
+            let params = url::form_urlencoded::Serializer::new(String::new())
+                .append_pair("id", "0")
+                .append_pair("message", error)
+                .append_pair("undo", "0")
+                .finish();
+            let _ = tabs::show_toast(&app, &window, &params);
+        })
+    })
+    .await
+}
+
+#[tauri::command]
 async fn show_download_in_folder(app: AppHandle, id: u32) -> Result<(), String> {
     blocking(move || downloads::show_in_folder(&app, id)).await
 }
@@ -1274,6 +1304,16 @@ async fn remove_download(app: AppHandle, id: u32) -> Result<(), String> {
 #[tauri::command]
 fn clear_downloads(app: AppHandle) {
     downloads::clear(&app);
+}
+
+#[tauri::command]
+async fn open_downloads_folder(app: AppHandle) -> Result<(), String> {
+    blocking(move || {
+        let dir = settings::get(&app).download_dir(&app);
+        std::fs::create_dir_all(&dir).map_err(|error| format!("Could not create {}: {error}", dir.display()))?;
+        files::reveal_path(&dir)
+    })
+    .await
 }
 
 // History. Saved as history.json beside this profile's other data files.
@@ -3505,11 +3545,13 @@ pub fn run() {
             resume_download,
             cancel_download,
             open_download,
+            print_download,
             show_download_in_folder,
             rename_download,
             drag_download,
             remove_download,
             clear_downloads,
+            open_downloads_folder,
             list_history,
             search_history,
             remove_history,

@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { IconButton } from "@/components/IconButton";
-import { openDownload, createTab, pauseDownload, resumeDownload, cancelDownload, showDownloadInFolder, removeDownload, dragDownload, renameDownload } from "@/lib/browser-client";
+import { openDownload, printDownload, createTab, pauseDownload, resumeDownload, cancelDownload, showDownloadInFolder, dragDownload, renameDownload } from "@/lib/browser-client";
 import { downloadsIconClass, downloadsRowClass, downloadsTextClass } from "@/lib/chrome-metrics";
 import { cn } from "@/lib/cn";
 import { formatBytes, hostOf } from "@/lib/format";
@@ -17,13 +17,11 @@ import {
   FileText,
   FileVideoCamera,
   Folder,
-  FolderOpen,
   Pause,
   Pencil,
   Play,
+  Printer,
   RotateCw,
-  SquareArrowOutUpRight,
-  Trash2,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -42,6 +40,36 @@ const AUDIO = new Set(["mp3", "wav", "flac", "ogg", "m4a", "aac"]);
 const ARCHIVES = new Set(["zip", "rar", "7z", "tar", "gz", "bz2", "tgz"]);
 const SHEETS = new Set(["xls", "xlsx", "csv", "ods"]);
 const CODE = new Set(["js", "ts", "tsx", "jsx", "json", "html", "css", "rs", "py", "xml", "md", "txt", "log"]);
+const PRINTABLE = new Set([
+  "pdf",
+  "html",
+  "htm",
+  "xhtml",
+  "svg",
+  "xml",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "txt",
+  "md",
+  "markdown",
+  "log",
+  "csv",
+  "json",
+  "doc",
+  "docx",
+  "rtf",
+  "odt",
+  "xls",
+  "xlsx",
+  "ods",
+  "ppt",
+  "pptx",
+  "odp",
+]);
 
 function extension(name: string) {
   return name.split(".").pop()?.toLowerCase() ?? "";
@@ -52,14 +80,14 @@ function previewable(name: string) {
   return ext === "json" || ext === "csv" || ext === "md" || ext === "markdown" || ext === "log" || ext === "txt";
 }
 
-function failure(reason: unknown) {
+function failure(reason: unknown, fallback: string) {
   if (typeof reason === "string" && reason.trim()) {
     return reason;
   }
   if (reason instanceof Error && reason.message.trim()) {
     return reason.message;
   }
-  return "Could not rename the file.";
+  return fallback;
 }
 
 /** Selects the name and leaves the extension unselected, the way Explorer does. */
@@ -119,6 +147,9 @@ function statusText(item: DownloadItem, compact: boolean, here: boolean) {
     const size = total ?? received;
     return compact ? `${where} • ${size}` : `${where}, ${size}`;
   }
+  if (here && item.missing && item.state === "completed") {
+    return "No longer on disk";
+  }
   switch (item.state) {
     case "inProgress":
       return total ? `${received} of ${total}` : `${received} so far`;
@@ -142,10 +173,14 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
   const running = here && (item.state === "inProgress" || item.state === "paused");
   const fraction = item.totalBytes ? Math.min(1, item.receivedBytes / item.totalBytes) : null;
   const completed = item.state === "completed" && here;
-  const canRename = Boolean(renamable && completed);
+  const gone = completed && item.missing;
+  const usable = completed && !gone;
+  const canRename = Boolean(renamable && usable);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.fileName);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [printing, setPrinting] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
   const dragging = useRef(false);
   const suppressClickUntil = useRef(0);
   const editingRef = useRef(false);
@@ -153,7 +188,9 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
   const { icon: TypeIcon, className: typeClass } = fileType(item.fileName);
   const elsewhere = savedOn(item) ? `Saved on ${savedOn(item)}` : "Saved on another computer";
   let nameTitle = item.fileName;
-  if (completed) {
+  if (gone) {
+    nameTitle = "No longer on disk";
+  } else if (usable) {
     nameTitle = `Open ${item.fileName}`;
   } else if (!here) {
     nameTitle = elsewhere;
@@ -197,7 +234,7 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
       setRenameError(null);
     } catch (reason: unknown) {
       if (editingRef.current) {
-        setRenameError(failure(reason));
+        setRenameError(failure(reason, "Could not rename the file."));
       }
     } finally {
       committing.current = false;
@@ -209,8 +246,21 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
     void commitRename();
   }
 
+  function printDownloaded() {
+    if (!usable || printing) {
+      return;
+    }
+    setPrintError(null);
+    setPrinting(true);
+    void printDownload(item.id)
+      .catch((reason: unknown) => {
+        setPrintError(failure(reason, "Couldn't print this file."));
+      })
+      .finally(() => setPrinting(false));
+  }
+
   function openDownloaded() {
-    if (!here || editing || performance.now() < suppressClickUntil.current) {
+    if (!usable || editing || performance.now() < suppressClickUntil.current) {
       return;
     }
     if (previewable(item.fileName)) {
@@ -221,7 +271,7 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
   }
 
   function beginFileDrag(event: ReactPointerEvent<HTMLDivElement>) {
-    if (!completed || !here || event.button !== 0) {
+    if (!usable || event.button !== 0) {
       return;
     }
     const target = event.target;
@@ -266,14 +316,15 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
       className={cn(
         "group flex items-center gap-3 rounded-md hover:bg-zinc-800/70",
         compact ? downloadsRowClass : "px-3 py-2",
-        completed && !editing && "cursor-grab",
+        usable && !editing && "cursor-grab",
+        gone && "text-zinc-500",
         !here && "opacity-60",
         !compact && "border border-zinc-800 bg-zinc-900 py-3",
       )}
-      aria-disabled={!here}
-      onPointerDown={completed && !editing ? beginFileDrag : undefined}
+      aria-disabled={!here || gone}
+      onPointerDown={usable && !editing ? beginFileDrag : undefined}
     >
-      <TypeIcon id={`${domId}-icon`} className={cn("shrink-0", compact ? downloadsIconClass : "size-6", typeClass)} aria-hidden />
+      <TypeIcon id={`${domId}-icon`} className={cn("shrink-0", compact ? downloadsIconClass : "size-6", gone ? "text-zinc-600" : typeClass)} aria-hidden />
       <div id={`${domId}-body`} className="min-w-0 flex-1">
         {editing ? (
           <form id={`${domId}-rename`} onSubmit={submitRename}>
@@ -304,14 +355,14 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
           <button
             id={`${domId}-name`}
             type="button"
-            disabled={!completed}
+            disabled={!usable}
             title={nameTitle}
-            style={{cursor: 'pointer'}}
+            style={usable ? { cursor: "pointer" } : undefined}
             className={cn(
               "block max-w-full truncate text-left",
               compact ? downloadsTextClass : "text-sm",
-              completed ? "cursor-grab text-zinc-100 hover:underline" : "cursor-default text-zinc-300",
-              !here && "cursor-not-allowed",
+              usable ? "cursor-grab text-zinc-100 hover:underline" : "cursor-default text-zinc-500",
+              !here && "cursor-not-allowed text-zinc-300",
               (item.state === "cancelled" || item.state === "interrupted") && "line-through decoration-zinc-500",
             )}
             onClick={openDownloaded}
@@ -330,18 +381,27 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
             id={`${domId}-url`}
             type="button"
             title={item.url}
-            className="block max-w-full cursor-pointer truncate text-left text-xs text-zinc-500 hover:text-sky-400"
+            className={cn(
+              "block max-w-full truncate text-left text-xs",
+              gone ? "cursor-default text-zinc-600" : "cursor-pointer text-zinc-500 hover:text-sky-400",
+            )}
+            disabled={gone}
             onClick={() => void createTab(item.url)}
           >
             {hostOf(item.url)}
           </button>
         ) : null}
-        <div id={`${domId}-status`} className="truncate text-xs text-zinc-400">
+        <div id={`${domId}-status`} className={cn("truncate text-xs", gone ? "text-zinc-500" : "text-zinc-400")}>
           {statusText(item, compact ?? false, here)}
         </div>
         {renameError ? (
           <p id={`${domId}-rename-error`} title={renameError} className="truncate text-xs text-red-300">
             {renameError}
+          </p>
+        ) : null}
+        {printError ? (
+          <p id={`${domId}-print-error`} title={printError} className="truncate text-xs text-red-300">
+            {printError}
           </p>
         ) : null}
         {running ? (
@@ -379,33 +439,24 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
             <RotateCw id={`${domId}-retry-icon`} aria-hidden />
           </IconButton>
         ) : null}
-        {canRename && !editing ? (
-          <IconButton id={`${domId}-rename-button`} label="Rename" onClick={beginRename}>
+        {(renamable && completed && !editing) ? (
+          <IconButton id={`${domId}-rename-button`} label="Rename" disabled={gone} onClick={beginRename}>
             <Pencil id={`${domId}-rename-icon`} aria-hidden />
           </IconButton>
         ) : null}
         {completed ? (
-          <IconButton id={`${domId}-folder`} label="Show in folder" onClick={() => void showDownloadInFolder(item.id)}>
-            {compact ? (
-              <Folder id={`${domId}-folder-icon`} aria-hidden />
-            ) : (
-              <FolderOpen id={`${domId}-folder-icon`} aria-hidden />
-            )}
-          </IconButton>
-        ) : null}
-        {completed && compact ? (
-          <IconButton id={`${domId}-open`} label="Open" onClick={openDownloaded}>
-            <SquareArrowOutUpRight id={`${domId}-open-icon`} aria-hidden />
-          </IconButton>
-        ) : null}
-        {!running && !compact ? (
           <IconButton
-            id={`${domId}-remove`}
-            label="Remove from list"
-            className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-            onClick={() => void removeDownload(item.id)}
+            id={`${domId}-folder`}
+            label="Show in folder"
+            disabled={gone}
+            onClick={() => void showDownloadInFolder(item.id)}
           >
-            <Trash2 id={`${domId}-remove-icon`} aria-hidden />
+            <Folder id={`${domId}-folder-icon`} aria-hidden />
+          </IconButton>
+        ) : null}
+        {completed && !editing && PRINTABLE.has(extension(item.fileName)) ? (
+          <IconButton id={`${domId}-print`} label="Print" disabled={gone || printing} onClick={printDownloaded}>
+            <Printer id={`${domId}-print-icon`} aria-hidden />
           </IconButton>
         ) : null}
       </div>

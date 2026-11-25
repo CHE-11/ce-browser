@@ -781,6 +781,8 @@ export type DownloadItem = {
   ranges: { start: number; end: number; received: number }[];
   /** Windows name of the computer that saved this file. Empty when an older list could not tell. */
   computerName: string;
+  /** The finished file is no longer on this computer. */
+  missing: boolean;
 };
 
 export type LocalEntry = {

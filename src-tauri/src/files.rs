@@ -60,6 +60,32 @@ pub fn open_with_default(path: &Path) -> Result<(), String> {
     Err(format!("Could not open {} (error {code}).", path.display()))
 }
 
+/// Asks the app registered for this file to print it.
+pub fn print_document(path: &Path) -> Result<(), String> {
+    if !path.is_file() {
+        return Err(format!("File does not exist: {}", path.display()));
+    }
+    let file = wide(path.as_os_str());
+    let operation = wide(OsStr::new("print"));
+    let code = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
+    };
+    if code > 32 {
+        return Ok(());
+    }
+    if code == 31 || code == 27 {
+        return Err("Windows has no app that can print this file.".into());
+    }
+    Err(format!("Couldn't print {} (error {code}).", path.display()))
+}
+
 /// Returns `dir/name`, or `dir/name (n).ext` when that file already exists.
 pub fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let name = sanitize_file_name(name);

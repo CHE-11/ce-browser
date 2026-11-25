@@ -59,6 +59,9 @@ pub struct DownloadItem {
     /// Windows name of the computer that saved this file.
     #[serde(default)]
     pub computer_name: String,
+    /// The finished file is gone from this computer. Filled in when the list is sent.
+    #[serde(default)]
+    pub missing: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -180,10 +183,10 @@ pub fn reload(app: &AppHandle) {
     let items = read_items(app);
     let next_id = items.iter().map(|item| item.id).max().unwrap_or(0) + 1;
     with_state(app, |state| {
-        state.items = items.clone();
+        state.items = items;
         state.next_id = next_id;
     });
-    let _ = app.emit("downloads-changed", &items);
+    let _ = app.emit("downloads-changed", &list(app));
     crate::host_extensions::note_downloads(app);
 }
 
@@ -255,7 +258,22 @@ fn with_state<T>(app: &AppHandle, change: impl FnOnce(&mut DownloadsState) -> T)
 }
 
 pub fn list(app: &AppHandle) -> Vec<DownloadItem> {
-    with_state(app, |state| state.items.clone())
+    with_state(app, |state| {
+        state
+            .items
+            .iter()
+            .cloned()
+            .map(|mut item| {
+                item.missing = file_is_missing(&item);
+                item
+            })
+            .collect()
+    })
+}
+
+/// A finished download saved on this computer whose file has been deleted.
+fn file_is_missing(item: &DownloadItem) -> bool {
+    item.state == COMPLETED && on_this_computer(item) && !Path::new(&item.path).is_file()
 }
 
 /// A file this browser wrote itself, such as a saved PDF. It joins the profile's download list.
@@ -286,6 +304,7 @@ pub fn record_completed(app: &AppHandle, url: &str, path: &Path, mime_type: &str
                 accelerated: false,
                 ranges: Vec::new(),
                 computer_name: computer_name(),
+                missing: false,
             },
         );
     });
@@ -542,6 +561,7 @@ fn track(
                     accelerated: false,
                     ranges: Vec::new(),
                     computer_name: computer_name(),
+                    missing: false,
                 },
             );
             id
@@ -768,11 +788,27 @@ pub fn open(app: &AppHandle, id: u32, window: &str) -> Result<(), String> {
     if item.state != COMPLETED {
         return Err("The download has not finished.".into());
     }
+    if !Path::new(&item.path).is_file() {
+        return Err("That file is no longer on disk.".into());
+    }
     let owner = popup::owner_of(window);
     if system::has_handler(app, &item.path) {
         return system::open_file_in_window(app, &item.path, &owner);
     }
     files::open_with_default(Path::new(&item.path))
+}
+
+/// Path of a finished download that was saved on this computer and is still on disk.
+pub fn completed_path(app: &AppHandle, id: u32) -> Result<PathBuf, String> {
+    let item = require_here(app, id)?;
+    if item.state != COMPLETED {
+        return Err("The download has not finished.".into());
+    }
+    let path = PathBuf::from(&item.path);
+    if !path.is_file() {
+        return Err("That file is no longer on disk.".into());
+    }
+    Ok(path)
 }
 
 pub fn show_in_folder(app: &AppHandle, id: u32) -> Result<(), String> {
@@ -1159,6 +1195,7 @@ fn start_accelerated(
                 accelerated: true,
                 ranges,
                 computer_name: computer_name(),
+                missing: false,
             },
         );
         id
@@ -1450,6 +1487,32 @@ mod tests {
         assert!(!adopt_local(std::slice::from_mut(&mut missing)));
         assert!(missing.computer_name.is_empty());
         assert!(!on_this_computer(&missing));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_finished_download_is_missing_only_when_its_file_is_gone() {
+        let dir = std::env::temp_dir().join(format!("ce-browser-missing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("notes.txt");
+        std::fs::write(&path, b"hi").expect("file");
+        let present = DownloadItem {
+            state: super::COMPLETED.into(),
+            computer_name: computer_name(),
+            path: path.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        assert!(!super::file_is_missing(&present));
+        let _ = std::fs::remove_file(&path);
+        assert!(super::file_is_missing(&present));
+        let elsewhere = DownloadItem {
+            state: super::COMPLETED.into(),
+            computer_name: format!("{}-other", computer_name()),
+            path: path.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        assert!(!super::file_is_missing(&elsewhere));
         let _ = std::fs::remove_dir_all(dir);
     }
 

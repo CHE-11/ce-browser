@@ -1,6 +1,6 @@
 import { IconButton } from "@/components/IconButton";
 import { PopupFrame } from "@/components/PopupFrame";
-import { createTab, closePopup } from "@/lib/browser-client";
+import { closePopup, createTab } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { focusRow } from "@/lib/focus-ring";
 import { CHROME, metric } from "@/lib/chrome-metrics";
@@ -19,9 +19,12 @@ export function DownloadsPopover() {
   return (
     <PopupFrame id="downloads-panel" width={metric(settings?.downloadsPanelWidth, CHROME.downloadsPanelWidth)} maxHeight={520} ready={loaded}>
       <div id="downloads-panel-header" className="flex items-center justify-between gap-2 py-1 pr-1 pl-4">
-        <h2 id="downloads-panel-title" className="text-sm font-medium">
-          Recent download history
-        </h2>
+        <div id="downloads-panel-actions" className="flex justify-start items-center gap-2">
+          <h2 id="downloads-panel-title" className="text-sm font-medium">
+            Recent download history
+          </h2>
+        </div>
+
         <IconButton id="downloads-panel-close" label="Close" onClick={() => void closePopup()}>
           <X id="downloads-panel-close-icon" aria-hidden />
         </IconButton>

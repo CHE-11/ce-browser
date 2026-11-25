@@ -1717,6 +1717,11 @@ export function openDownload(id: number) {
   return invoke<void>("open_download", { id });
 }
 
+/** Opens the print dialog for a finished download, or asks Windows to print it. */
+export function printDownload(id: number) {
+  return invoke<void>("print_download", { id });
+}
+
 export function showDownloadInFolder(id: number) {
   return invoke<void>("show_download_in_folder", { id });
 }
@@ -1737,6 +1742,11 @@ export function removeDownload(id: number) {
 
 export function clearDownloads() {
   return invoke<void>("clear_downloads");
+}
+
+/** Opens the configured download folder in Explorer, creating it if missing. */
+export function openDownloadsFolder() {
+  return invoke<void>("open_downloads_folder");
 }
 
 export function browseLocal(path?: string) {

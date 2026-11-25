@@ -17,8 +17,9 @@ const READ_FAILURE: &str = "Couldn't read this page.";
 const PRINT_FAILURE: &str = "Couldn't save the PDF.";
 
 static NEXT_HOST: AtomicU32 = AtomicU32::new(1);
-/// The webview behind an open print dialog. Closed when the next print starts.
-static DIALOG_HOST: Mutex<Option<(String, PathBuf)>> = Mutex::new(None);
+/// The webview behind an open print dialog, and the temp file to delete with it.
+/// A saved download is not deleted. Closed when the next print starts.
+static DIALOG_HOST: Mutex<Option<(String, Option<PathBuf>)>> = Mutex::new(None);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
@@ -643,9 +644,75 @@ pub fn print_html_dialog(app: &AppHandle, html: &str, tab_id: Option<u32>) -> Re
     let html = crate::print_images::embed(app, html, "", tab_id);
     let (webview, file) = open_host(app, &html)?;
     if let Ok(mut host) = DIALOG_HOST.lock() {
-        *host = Some((webview.label().to_string(), file));
+        *host = Some((webview.label().to_string(), Some(file)));
     }
     webview2::show_print_dialog(&webview)
+}
+
+const DIALOG_FAILURE: &str = "Couldn't open the print dialog.";
+
+/// Opens the Windows print dialog for a file this browser can show.
+/// Other documents go to the app Windows has registered to print them.
+pub fn print_saved_file(app: &AppHandle, path: &Path) -> Result<(), String> {
+    if !path.is_file() {
+        return Err("That file is no longer on disk.".into());
+    }
+    if renders_for_print(path) {
+        print_file_dialog(app, path)
+    } else {
+        files::print_document(path)
+    }
+}
+
+fn print_file_dialog(app: &AppHandle, path: &Path) -> Result<(), String> {
+    close_dialog_host(app);
+    let url = Url::from_file_path(path)
+        .map_err(|_| format!("{DIALOG_FAILURE} That file path can't be opened."))?;
+    let webview = spawn_host(app, url, DIALOG_FAILURE)?;
+    if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+    {
+        std::thread::sleep(Duration::from_millis(400));
+    }
+    if let Ok(mut host) = DIALOG_HOST.lock() {
+        *host = Some((webview.label().to_string(), None));
+    }
+    let shown = webview2::show_print_dialog(&webview);
+    if shown.is_err() {
+        close_dialog_host(app);
+    }
+    shown
+}
+
+fn renders_for_print(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .as_deref(),
+        Some(
+            "pdf"
+                | "html"
+                | "htm"
+                | "xhtml"
+                | "svg"
+                | "xml"
+                | "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "webp"
+                | "bmp"
+                | "txt"
+                | "md"
+                | "markdown"
+                | "log"
+                | "csv"
+                | "json"
+        )
+    )
 }
 
 pub fn open_file(path: &str) -> Result<(), String> {
@@ -672,7 +739,9 @@ fn close_dialog_host(app: &AppHandle) {
         if let Some(webview) = app.get_webview(&label) {
             let _ = webview.close();
         }
-        let _ = std::fs::remove_file(file);
+        if let Some(file) = file {
+            let _ = std::fs::remove_file(file);
+        }
     }
 }
 
@@ -688,11 +757,22 @@ fn open_host(app: &AppHandle, html: &str) -> Result<(Webview, PathBuf), String> 
     let file = folder.join(format!("print-{}-{number}.html", std::process::id()));
     std::fs::write(&file, html).map_err(|error| format!("{PRINT_FAILURE} {error}"))?;
     let url = Url::from_file_path(&file).map_err(|_| format!("{PRINT_FAILURE} Bad temp path."))?;
+    match spawn_host(app, url, PRINT_FAILURE) {
+        Ok(webview) => Ok((webview, file)),
+        Err(error) => {
+            let _ = std::fs::remove_file(&file);
+            Err(error)
+        }
+    }
+}
 
+/// Loads `url` in a webview parked off the window and waits until it has finished loading.
+fn spawn_host(app: &AppHandle, url: Url, failure: &str) -> Result<Webview, String> {
     let window = app
         .get_window(&tabs::focused_window(app))
         .or_else(|| app.get_window(tabs::WINDOW))
         .ok_or("The browser window is missing.")?;
+    let number = NEXT_HOST.fetch_add(1, Ordering::Relaxed);
     let label = format!("print-host-{number}");
     let (tx, rx) = mpsc::channel::<()>();
     let loaded = Mutex::new(Some(tx));
@@ -711,27 +791,20 @@ fn open_host(app: &AppHandle, html: &str) -> Result<(Webview, PathBuf), String> 
             LogicalPosition::new(-20000.0, -20000.0),
             LogicalSize::new(1024.0, 1400.0),
         )
-        .map_err(|error| {
-            let _ = std::fs::remove_file(&file);
-            format!("{PRINT_FAILURE} {error}")
-        })?;
+        .map_err(|error| format!("{failure} {error}"))?;
     if rx.recv_timeout(Duration::from_secs(45)).is_err() {
         let _ = webview.close();
-        let _ = std::fs::remove_file(&file);
-        return Err(format!("{PRINT_FAILURE} The page took too long to load."));
+        return Err(format!("{failure} The page took too long to load."));
     }
-    let _ = webview2::evaluate(
-        &webview,
-        SETTLE_SCRIPT,
-        Duration::from_secs(15),
-        PRINT_FAILURE,
-    );
-    Ok((webview, file))
+    let _ = webview2::evaluate(&webview, SETTLE_SCRIPT, Duration::from_secs(15), failure);
+    Ok(webview)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{facts_from_html, page_number_footer, page_number_header};
+    use std::path::Path;
+
+    use super::{facts_from_html, page_number_footer, page_number_header, renders_for_print};
 
     #[test]
     fn page_numbers_are_current_over_total_at_the_chosen_side() {
@@ -790,6 +863,15 @@ mod tests {
             facts.url,
             "https://www.example.com/science/why-the-sky-is-blue"
         );
+    }
+
+    #[test]
+    fn files_the_browser_can_show_print_in_the_dialog() {
+        assert!(renders_for_print(Path::new("notes.PDF")));
+        assert!(renders_for_print(Path::new(r"C:\Downloads\photo.png")));
+        assert!(renders_for_print(Path::new("page.html")));
+        assert!(!renders_for_print(Path::new("report.docx")));
+        assert!(!renders_for_print(Path::new("archive.zip")));
     }
 
     #[test]
