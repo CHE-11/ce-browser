@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bell, Camera, Link2, MapPin, Mic, Shield, X, type LucideIcon } from "lucide-react";
+import { AppWindow, Bell, Camera, Link2, MapPin, Mic, Shield, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import { PopupFrame } from "@/components/PopupFrame";
@@ -24,6 +24,9 @@ function iconFor(kind: string): LucideIcon {
   }
   if (kind.startsWith("protocol:")) {
     return Link2;
+  }
+  if (kind.startsWith("app:")) {
+    return AppWindow;
   }
   return Shield;
 }

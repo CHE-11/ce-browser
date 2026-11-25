@@ -17,6 +17,7 @@ mod extension_actions;
 mod extension_popouts;
 mod extension_store;
 mod extensions;
+mod external_apps;
 mod favicons;
 mod files;
 mod find;

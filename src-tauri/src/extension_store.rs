@@ -398,7 +398,7 @@ fn registry_version() -> Option<String> {
     None
 }
 
-fn registry_string(
+pub(crate) fn registry_string(
     root: windows::Win32::System::Registry::HKEY,
     subkey: &str,
     value: &str,

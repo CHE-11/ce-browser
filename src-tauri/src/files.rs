@@ -60,6 +60,29 @@ pub fn open_with_default(path: &Path) -> Result<(), String> {
     Err(format!("Could not open {} (error {code}).", path.display()))
 }
 
+/// Hands a link such as `claude://…` to the app Windows has registered for its scheme.
+pub fn open_uri(uri: &str) -> Result<(), String> {
+    let file = wide(OsStr::new(uri));
+    let operation = wide(OsStr::new("open"));
+    let code = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
+    };
+    if code > 32 {
+        return Ok(());
+    }
+    if code == 31 || code == 27 {
+        return Err("Windows has no app that opens this link.".into());
+    }
+    Err(format!("Couldn't open the app for this link (error {code})."))
+}
+
 /// Asks the app registered for this file to print it.
 pub fn print_document(path: &Path) -> Result<(), String> {
     if !path.is_file() {

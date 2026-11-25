@@ -87,9 +87,18 @@ pub fn protocol_kind(scheme: &str) -> Option<String> {
     Some(format!("protocol:{scheme}"))
 }
 
+/// `app:claude` for a link that opens a desktop app. Same scheme rules as `protocol_kind`.
+pub fn app_kind(scheme: &str) -> Option<String> {
+    let kind = protocol_kind(scheme)?;
+    Some(format!("app:{}", &kind["protocol:".len()..]))
+}
+
 /// The sentence under "{site} wants to" on the permission prompt.
 pub fn request_label(kind: &str) -> String {
     let kind = kind.trim().to_ascii_lowercase();
+    if let Some(scheme) = kind.strip_prefix("app:") {
+        return format!("Open the {scheme} app");
+    }
     if let Some(scheme) = kind.strip_prefix("protocol:") {
         return match scheme {
             "mailto" => "Open email links".into(),
@@ -884,6 +893,9 @@ fn kind_key(raw: &str) -> String {
     if KINDS.contains(&raw.as_str()) {
         return raw;
     }
+    if let Some(scheme) = raw.strip_prefix("app:") {
+        return app_kind(scheme).unwrap_or_default();
+    }
     protocol_kind(raw.strip_prefix("protocol:").unwrap_or("")).unwrap_or_default()
 }
 
@@ -1116,6 +1128,8 @@ mod tests {
     #[test]
     fn an_email_handler_asks_to_open_email_links() {
         assert_eq!(request_label("protocol:mailto"), "Open email links");
+        assert_eq!(request_label("app:claude"), "Open the claude app");
+        assert_eq!(kind_key("APP:Claude"), "app:claude");
         assert_eq!(request_label("camera"), "Use your camera");
         assert_eq!(request_label("other"), "Use a feature of this site");
     }

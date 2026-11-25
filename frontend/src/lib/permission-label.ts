@@ -24,10 +24,14 @@ const PROTOCOL_LABEL: Record<string, string> = {
   magnet: "Magnet links",
 };
 
-/** Short name for a stored permission, including `protocol:mailto`. */
+/** Short name for a stored permission, including `protocol:mailto` and `app:claude`. */
 export function permissionLabel(kind: string) {
   if (KIND_LABEL[kind]) {
     return KIND_LABEL[kind];
+  }
+  if (kind.startsWith("app:")) {
+    const scheme = kind.slice("app:".length);
+    return `${scheme.charAt(0).toUpperCase()}${scheme.slice(1)} app`;
   }
   if (kind.startsWith("protocol:")) {
     const scheme = kind.slice("protocol:".length);

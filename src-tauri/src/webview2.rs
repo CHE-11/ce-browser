@@ -3106,6 +3106,11 @@ fn attach_adblock(
             &NavigationStartingEventHandler::create(Box::new(move |sender, args| {
                 if let Some(args) = args {
                     let uri = read_pwstr(|value| args.Uri(value));
+                    // The page stays put while the link goes to an app, and WebView2 ends
+                    // this navigation as aborted. It must not replace the page's own load.
+                    if crate::external_apps::external_scheme(&uri).is_some() {
+                        return Ok(());
+                    }
                     let mut navigation_id = 0u64;
                     let _ = args.NavigationId(&mut navigation_id);
                     crate::page_errors::note_navigation(id, &uri, navigation_id, load_kind(&args));
@@ -3258,6 +3263,23 @@ fn attach_adblock(
             })),
             &mut token,
         )?;
+
+        if let Ok(core18) = core.cast::<ICoreWebView2_18>() {
+            let launch_app = app.clone();
+            core18.add_LaunchingExternalUriScheme(
+                &LaunchingExternalUriSchemeEventHandler::create(Box::new(move |_, args| {
+                    let Some(args) = args else {
+                        return Ok(());
+                    };
+                    let _ = args.SetCancel(true);
+                    let uri = read_pwstr(|value| args.Uri(value));
+                    let initiator = read_pwstr(|value| args.InitiatingOrigin(value));
+                    on_external_app(&launch_app, id, &uri, &initiator);
+                    Ok(())
+                })),
+                &mut token,
+            )?;
+        }
     }
     crate::notify::attach(app, &core, id);
     Ok(())
@@ -3308,6 +3330,8 @@ struct PendingPrompt {
     /// Further identical protocol requests waiting on this same answer.
     extras: u32,
     scheme: Option<String>,
+    /// A link handed to a desktop app. It opens only if the user allows it.
+    launch: Option<String>,
     web: Option<
         MainThread<(
             ICoreWebView2PermissionRequestedEventArgs,
@@ -3383,6 +3407,7 @@ fn on_permission(
         shown: false,
         extras: 0,
         scheme: None,
+        launch: None,
         web: Some(held),
     });
     drop(guard);
@@ -3430,6 +3455,71 @@ fn on_protocol(app: &AppHandle, tab: u32, source: &str, scheme: &str) {
             shown: false,
             extras: 0,
             scheme: Some(scheme.to_string()),
+            launch: None,
+            web: None,
+        });
+    }
+    crate::privacy::note_request(app, &origin, &kind);
+    let later = app.clone();
+    let _ = app.run_on_main_thread(move || present_next(&later));
+}
+
+/// A page sent the tab to a link such as `claude://…`. WebView2's own dialog is replaced by the
+/// permission prompt, and a link with no app registered for it is dropped quietly.
+fn on_external_app(app: &AppHandle, tab: u32, uri: &str, initiator: &str) {
+    let Some(scheme) = crate::external_apps::external_scheme(uri) else {
+        return;
+    };
+    let Some(kind) = crate::privacy::app_kind(&scheme) else {
+        return;
+    };
+    let Some(name) = crate::external_apps::app_name(&scheme) else {
+        eprintln!("external app: nothing is registered for {scheme}:");
+        return;
+    };
+    let origin = origin_of(app, tab, initiator);
+    let launch = |uri: String| {
+        std::thread::spawn(move || {
+            if let Err(error) = crate::files::open_uri(&uri) {
+                eprintln!("external app: {error}");
+            }
+        });
+    };
+    if origin.is_empty() {
+        launch(uri.to_string());
+        return;
+    }
+    match crate::privacy::decision(app, &origin, &kind) {
+        Some(true) => {
+            launch(uri.to_string());
+            return;
+        }
+        Some(false) => return,
+        None => {}
+    }
+    {
+        let mut guard = prompts().lock().expect("permission prompts");
+        if let Some(existing) = guard
+            .pending
+            .iter_mut()
+            .find(|item| item.tab == tab && item.kind == kind)
+        {
+            existing.launch = Some(uri.to_string());
+            return;
+        }
+        let id = guard.next;
+        guard.next += 1;
+        guard.pending.push(PendingPrompt {
+            id,
+            tab,
+            origin: origin.clone(),
+            kind: kind.clone(),
+            host: site_host(&origin),
+            label: format!("Open the {name} app"),
+            shown: false,
+            extras: 0,
+            scheme: None,
+            launch: Some(uri.to_string()),
             web: None,
         });
     }
@@ -3534,6 +3624,13 @@ fn settle(app: &AppHandle, prompt: PendingPrompt, choice: &str) {
             arm_auto(prompt.tab, &prompt.origin);
         }
         finish_protocol(app, prompt.tab, allow, scheme, prompt.extras + 1);
+    }
+    if let Some(uri) = prompt.launch.filter(|_| allow) {
+        std::thread::spawn(move || {
+            if let Err(error) = crate::files::open_uri(&uri) {
+                eprintln!("external app: {error}");
+            }
+        });
     }
 }
 
