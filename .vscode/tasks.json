@@ -149,6 +149,28 @@
       }
     },
     {
+      "label": "Cargo Audit",
+      "type": "shell",
+      "command": "cargo audit --file \"${workspaceFolder}/src-tauri/Cargo.lock\"",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "options": {
+        "cwd": "${workspaceFolder}/src-tauri",
+        "statusbar": {
+          "hide": false,
+          "color": "#ffb22d"
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "close": false
+      }
+    },
+    {
       "label": "Cargo Clean",
       "type": "shell",
       "command": "cargo clean",
@@ -157,7 +179,7 @@
         "isDefault": true
       },
       "options": {
-        "cwd": "${workspaceFolder}",
+        "cwd": "${workspaceFolder}/src-tauri",
         "statusbar": {
           "hide": false,
           "color": "#ff0202"
