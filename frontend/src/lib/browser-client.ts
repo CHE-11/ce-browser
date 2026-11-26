@@ -123,6 +123,8 @@ import type {
   Container,
   NetworkEntry,
   NetworkSpeed,
+  SpeedTestProgress,
+  SpeedTestResult,
   OmniboxSuggestion,
   PeekInfo,
   PermissionGrant,
@@ -491,6 +493,22 @@ export function readingStats(id: number) {
 
 export function networkSpeed() {
   return invoke<NetworkSpeed>("network_speed");
+}
+
+export function runSpeedTest() {
+  return invoke<SpeedTestResult>("run_speed_test");
+}
+
+export function cancelSpeedTest() {
+  return invoke<void>("cancel_speed_test");
+}
+
+export function lastSpeedTest() {
+  return invoke<SpeedTestResult | null>("last_speed_test");
+}
+
+export function onSpeedTestProgress(handler: (progress: SpeedTestProgress) => void): Promise<UnlistenFn> {
+  return listen<SpeedTestProgress>("speed-test-progress", (event) => handler(event.payload));
 }
 
 // Boards

@@ -98,7 +98,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   },
   {
     id: "wayback",
-    name: "Wayback Machine",
+    name: "Wayback",
     description: "Open the current page in the Internet Archive.",
     icon: Landmark,
   },
@@ -129,7 +129,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     id: "network-speed",
     name: "Network speed",
-    description: "Live download, upload, latency, and connection strength.",
+    description: "Live connection stats, plus a speed test of download and upload capacity.",
     icon: Gauge,
     anywhere: true,
   },

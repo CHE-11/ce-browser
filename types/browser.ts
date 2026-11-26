@@ -236,6 +236,24 @@ export type NetworkSpeed = {
   externalIp: string | null;
 };
 
+export type SpeedTestPhase = "latency" | "download" | "upload";
+
+export type SpeedTestProgress = {
+  phase: SpeedTestPhase;
+  bytes: number;
+  /** Bytes per second for the phase in progress. */
+  bps: number;
+};
+
+/** Finished capacity test. Rates are bytes per second. */
+export type SpeedTestResult = {
+  downBps: number;
+  upBps: number;
+  latencyMs: number | null;
+  /** Unix milliseconds when the test finished. */
+  at: number;
+};
+
 export type AiProviderId = "openai" | "claude" | "custom" | "local";
 
 export type AiProviderSlot = {

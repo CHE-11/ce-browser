@@ -32,6 +32,7 @@ mod microphone;
 mod model_prices;
 #[path = "network_speed.rs"]
 mod net_speed;
+mod speed_test;
 mod notify;
 mod ocr;
 mod page_console;
@@ -1819,6 +1820,21 @@ async fn reading_stats(app: AppHandle, id: u32) -> Result<tools::ReadingStats, S
 #[tauri::command]
 async fn network_speed() -> Result<net_speed::NetworkSpeed, String> {
     blocking(|| Ok(net_speed::snapshot())).await
+}
+
+#[tauri::command]
+async fn run_speed_test(app: AppHandle) -> Result<speed_test::SpeedTestResult, String> {
+    blocking(move || speed_test::run(&app)).await
+}
+
+#[tauri::command]
+async fn cancel_speed_test() {
+    speed_test::cancel();
+}
+
+#[tauri::command]
+fn last_speed_test() -> Option<speed_test::SpeedTestResult> {
+    speed_test::last()
 }
 
 #[tauri::command]
@@ -3625,6 +3641,9 @@ pub fn run() {
             show_notice,
             reading_stats,
             network_speed,
+            run_speed_test,
+            cancel_speed_test,
+            last_speed_test,
             list_prices,
             track_price,
             check_prices,

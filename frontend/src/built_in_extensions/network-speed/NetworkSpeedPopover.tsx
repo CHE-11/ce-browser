@@ -20,6 +20,7 @@ import {
   throughputHint,
   type StrengthTone,
 } from "./format";
+import { SpeedTest } from "./SpeedTest";
 import { useNetworkSpeed } from "./use-network-speed";
 
 const TONE_TEXT: Record<StrengthTone, string> = {
@@ -82,7 +83,7 @@ export function NetworkSpeedPopover() {
   const external = speed.externalIp;
 
   return (
-    <PopupFrame id="network-speed-popover" width={300} maxHeight={360}>
+    <PopupFrame id="network-speed-popover" width={300} maxHeight={520}>
       <PopoverHeader
         id="network-speed-header"
         icon={<Gauge id="network-speed-header-icon" aria-hidden />}
@@ -158,7 +159,7 @@ export function NetworkSpeedPopover() {
           hint={externalIpHint(external)}
           onActivate={external ? () => copyIpAddress(external) : undefined}
         />
-
+        <SpeedTest online={speed.online} />
       </div>
     </PopupFrame>
   );
