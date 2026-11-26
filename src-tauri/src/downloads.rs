@@ -623,17 +623,33 @@ fn progress(app: &AppHandle, id: u32, received: i64, total: i64) {
     }
 }
 
-fn state_changed(app: &AppHandle, id: u32, operation: &ICoreWebView2DownloadOperation) {
-    let (state, reason, can_resume, received, path) = unsafe {
+/// `None` when the operation's WebView2 object no longer answers. A failed read must not be
+/// treated as in progress: that enum's default value is in progress.
+fn snapshot(
+    operation: &ICoreWebView2DownloadOperation,
+) -> Option<(
+    COREWEBVIEW2_DOWNLOAD_STATE,
+    COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON,
+    bool,
+    i64,
+    String,
+)> {
+    unsafe {
         let mut state = COREWEBVIEW2_DOWNLOAD_STATE::default();
-        let _ = operation.State(&mut state);
+        operation.State(&mut state).ok()?;
         let mut reason = COREWEBVIEW2_DOWNLOAD_INTERRUPT_REASON::default();
         let _ = operation.InterruptReason(&mut reason);
         let can_resume = read_bool(|value| operation.CanResume(value));
         let mut received = 0i64;
         let _ = operation.BytesReceived(&mut received);
         let path = read_pwstr(|value| operation.ResultFilePath(value));
-        (state, reason, can_resume, received, path)
+        Some((state, reason, can_resume, received, path))
+    }
+}
+
+fn state_changed(app: &AppHandle, id: u32, operation: &ICoreWebView2DownloadOperation) {
+    let Some((state, reason, can_resume, received, path)) = snapshot(operation) else {
+        return;
     };
     let next = if state == COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED {
         COMPLETED
@@ -704,6 +720,82 @@ fn run_operation(
         .map_err(|_| "WebView2 did not answer.".to_string())?
 }
 
+/// WebView2 returns this when the download operation can no longer be paused or cancelled.
+const INVALID_STATE: i32 = 0x8007_139Fu32 as i32;
+
+fn invalid_state(error: &windows::core::Error) -> bool {
+    error.code().0 == INVALID_STATE
+}
+
+enum ControlResult {
+    /// Pause or cancel was accepted. The state event follows.
+    Done,
+    /// WebView2 had already left in-progress, and the row now matches that.
+    Settled,
+    /// The operation no longer accepts pause or cancel.
+    Dead,
+    /// This download has no WebView2 operation.
+    Missing,
+    Failed(String),
+}
+
+/// Pause (`pause`) or cancel the WebView2 download. Runs on the UI thread, which owns the operation.
+fn control_download(app: &AppHandle, id: u32, pause: bool) -> Result<ControlResult, String> {
+    let (tx, rx) = mpsc::channel();
+    let app_on_ui = app.clone();
+    app.run_on_main_thread(move || {
+        let operation = OPERATIONS.with(|operations| operations.borrow().get(&id).cloned());
+        let Some(operation) = operation else {
+            let _ = tx.send(ControlResult::Missing);
+            return;
+        };
+        let Some((state, _, _, _, _)) = snapshot(&operation) else {
+            OPERATIONS.with(|operations| operations.borrow_mut().remove(&id));
+            let _ = tx.send(ControlResult::Dead);
+            return;
+        };
+        if state != COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS {
+            state_changed(&app_on_ui, id, &operation);
+            let _ = tx.send(ControlResult::Settled);
+            return;
+        }
+        let result = unsafe {
+            if pause {
+                operation.Pause()
+            } else {
+                operation.Cancel()
+            }
+        };
+        match result {
+            Ok(()) => {
+                let _ = tx.send(ControlResult::Done);
+            }
+            Err(error) => {
+                if invalid_state(&error) {
+                    OPERATIONS.with(|operations| operations.borrow_mut().remove(&id));
+                    let _ = tx.send(ControlResult::Dead);
+                    return;
+                }
+                if snapshot(&operation).is_some_and(|(state, _, _, _, _)| {
+                    state != COREWEBVIEW2_DOWNLOAD_STATE_IN_PROGRESS
+                }) {
+                    state_changed(&app_on_ui, id, &operation);
+                    let _ = tx.send(ControlResult::Settled);
+                    return;
+                }
+                let _ = tx.send(ControlResult::Failed(error.message()));
+            }
+        }
+    })
+    .map_err(|error| error.to_string())?;
+    rx.recv_timeout(Duration::from_secs(5))
+        .map_err(|_| "WebView2 did not answer.".to_string())
+}
+
+fn still_running(app: &AppHandle, id: u32) -> bool {
+    item(app, id).is_ok_and(|item| item.state == IN_PROGRESS || item.state == PAUSED)
+}
+
 fn set_state(app: &AppHandle, id: u32, next: &str) {
     with_state(app, |state| {
         if let Some(item) = state.items.iter_mut().find(|item| item.id == id) {
@@ -722,9 +814,22 @@ pub fn pause(app: &AppHandle, id: u32) -> Result<(), String> {
         set_state(app, id, PAUSED);
         return Ok(());
     }
-    run_operation(app, id, |operation| unsafe { operation.Pause() })?;
-    set_state(app, id, PAUSED);
-    Ok(())
+    match control_download(app, id, true)? {
+        ControlResult::Done => {
+            if still_running(app, id) {
+                set_state(app, id, PAUSED);
+            }
+            Ok(())
+        }
+        ControlResult::Settled => Ok(()),
+        ControlResult::Dead | ControlResult::Missing => {
+            if still_running(app, id) {
+                mark_interrupted(app, id, false);
+            }
+            Ok(())
+        }
+        ControlResult::Failed(message) => Err(message),
+    }
 }
 
 pub fn resume(app: &AppHandle, id: u32) -> Result<(), String> {
@@ -773,7 +878,16 @@ pub fn cancel(app: &AppHandle, id: u32) -> Result<(), String> {
         }
         return Ok(());
     }
-    run_operation(app, id, |operation| unsafe { operation.Cancel() })
+    match control_download(app, id, false)? {
+        ControlResult::Done | ControlResult::Settled => Ok(()),
+        ControlResult::Dead | ControlResult::Missing => {
+            if still_running(app, id) {
+                mark_cancelled(app, id);
+            }
+            Ok(())
+        }
+        ControlResult::Failed(message) => Err(message),
+    }
 }
 
 fn item(app: &AppHandle, id: u32) -> Result<DownloadItem, String> {
@@ -1386,11 +1500,7 @@ fn mark_interrupted(app: &AppHandle, id: u32, can_resume: bool) {
     changed(app, true);
 }
 
-fn finish_cancel(app: &AppHandle, id: u32) {
-    let path = item(app, id).ok().map(|item| item.path);
-    if let Some(path) = path {
-        let _ = fs::remove_file(path);
-    }
+fn mark_cancelled(app: &AppHandle, id: u32) {
     with_state(app, |state| {
         if let Some(item) = state.items.iter_mut().find(|item| item.id == id) {
             item.state = CANCELLED.into();
@@ -1399,8 +1509,16 @@ fn finish_cancel(app: &AppHandle, id: u32) {
         }
         state.last_emit.remove(&id);
     });
-    jobs().remove(&id);
     changed(app, true);
+}
+
+fn finish_cancel(app: &AppHandle, id: u32) {
+    let path = item(app, id).ok().map(|item| item.path);
+    if let Some(path) = path {
+        let _ = fs::remove_file(path);
+    }
+    jobs().remove(&id);
+    mark_cancelled(app, id);
 }
 
 fn refresh_session(app: &AppHandle, url: &str) -> (String, String) {

@@ -1305,15 +1305,14 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         id="address-downloads"
         ref={downloadsRef}
         label="Downloads (Ctrl+J)"
-        className={cn("relative", downloadFlash && "animate-pulse bg-sky-500/25 text-sky-300")}
+        className={cn(downloadFlash && "animate-pulse bg-sky-500/25 text-sky-300")}
         onClick={(event) =>
           void openPopup("downloads", event.currentTarget)
         }
       >
-        <Download id="address-downloads-icon" aria-hidden />
         {activeDownloads.length > 0 ? (
-          <svg id="address-downloads-ring" className="pointer-events-none absolute inset-0.5 -rotate-90" viewBox="0 0 36 36">
-            <circle id="address-downloads-ring-track" cx="18" cy="18" r="16" fill="none" stroke="rgb(63 63 70)" strokeWidth="2.5" />
+          <svg id="address-downloads-ring" className="origin-center animate-spin" viewBox="0 0 36 36" aria-hidden>
+            <circle id="address-downloads-ring-track" cx="18" cy="18" r="16" fill="none" stroke="rgb(63 63 70)" strokeWidth="3" />
             <circle
               id="address-downloads-ring-value"
               cx="18"
@@ -1321,14 +1320,16 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
               r="16"
               fill="none"
               stroke="rgb(56 189 248)"
-              strokeWidth="2.5"
+              strokeWidth="3"
               strokeLinecap="round"
               strokeDasharray={`${(progress ?? 0.25) * 100.5} 100.5`}
-              className={progress === null ? "origin-center animate-spin" : undefined}
             />
           </svg>
-        ) : null}
+        ) : (
+          <Download id="address-downloads-icon" aria-hidden />
+        )}
       </IconButton>
+      
       <IconButton
         id="address-history"
         ref={historyRef}

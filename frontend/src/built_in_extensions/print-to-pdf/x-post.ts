@@ -38,7 +38,23 @@ a.ce-x-card, a.ce-x-card:visited, a.ce-x-card * { color: #1a1a1a !important; tex
 .ce-x-replies > h2 { margin: 0 0 0.2em; color: #666; font-size: 0.78em; letter-spacing: 0.06em; text-transform: uppercase; }
 .ce-x-reply { padding: 0.85em 0; border-top: 1px solid #e4e4e4; }
 .ce-x-reply .ce-x-body p { margin-bottom: 0.3em; }
+.ce-x-title { margin: 0.2em 0 0.3em; font-size: 1.9em; }
+.ce-x-article { margin: 0.9em 0 0; }
+.ce-x-article p { margin: 0 0 0.9em; }
+.ce-x-article figure { margin: 1.1em 0; break-inside: avoid; }
+.ce-x-article img { display: block; width: auto !important; max-width: 100% !important; height: auto !important; max-height: 720px; margin: 0 auto; border-radius: 8px; }
 `;
+
+/** X Articles: long-form posts with a cover, a title and a rich-text body. */
+export type XLongform = {
+  /** The `data-article-part="body"` wrapper. */
+  part: HTMLElement;
+  body: HTMLElement;
+  title: string;
+  /** Reading time, such as "11 min read". */
+  meta: string;
+  cover: HTMLImageElement | null;
+};
 
 export type XPost = {
   article: HTMLElement;
@@ -46,6 +62,7 @@ export type XPost = {
   handle: string;
   avatar: HTMLImageElement | null;
   body: HTMLElement | null;
+  longform: XLongform | null;
   time: string;
   permalink: string;
   views: string;
@@ -93,6 +110,14 @@ export function readXPage(doc: Document, pageUrl: string): XPage | null {
 /** Header fields for a rebuilt X page. The byline meta is a profile URL, which reads as a second link. */
 export function xHeaderPage(page: ExtractedPage, x: XPage): ExtractedPage {
   const focal = x.focalIndex >= 0 ? x.posts[x.focalIndex] : undefined;
+  if (focal?.longform?.title) {
+    return {
+      ...page,
+      siteName: "X",
+      title: focal.longform.title,
+      byline: [authorHeading(focal), focal.longform.meta].filter(Boolean).join(" · "),
+    };
+  }
   const title = focal ? authorHeading(focal) : cleanTitle(page.title);
   return {
     ...page,
@@ -172,6 +197,9 @@ function renderPost(
   if (showAuthor && (post.name || post.handle || post.avatar)) {
     section.append(renderByline(doc, post, tag));
   }
+  if (post.longform) {
+    section.append(...renderLongform(doc, post.longform, options, tag, showAuthor));
+  }
   if (post.body) {
     section.append(flowBody(doc, post.body, tag));
   }
@@ -233,7 +261,7 @@ function blocksOf(post: XPost): Block[] {
   const seen = new Set<Element>();
   const nodes = post.article.querySelectorAll("video, img, article");
   nodes.forEach((node) => {
-    if (seen.has(node) || post.body?.contains(node)) {
+    if (seen.has(node) || post.body?.contains(node) || inLongform(post, node)) {
       return;
     }
     if (node.tagName === "ARTICLE") {
@@ -342,6 +370,105 @@ function renderCard(doc: Document, article: HTMLElement, options: RenderOptions,
   }
   link.append(body);
   return link;
+}
+
+function renderLongform(
+  doc: Document,
+  longform: XLongform,
+  options: RenderOptions,
+  tag: (el: Element) => Element,
+  showTitle: boolean,
+) {
+  const nodes: Element[] = [];
+  if (longform.cover && !options.removeMedia) {
+    const figure = doc.createElement("figure");
+    figure.className = "ce-x-media";
+    tag(figure);
+    figure.append(adoptImage(doc, longform.cover, tag));
+    nodes.push(figure);
+  }
+  if (showTitle && longform.title) {
+    const title = doc.createElement("h1");
+    title.className = "ce-x-title";
+    title.textContent = longform.title;
+    tag(title);
+    nodes.push(title);
+    if (longform.meta) {
+      nodes.push(line(doc, "p", "ce-x-meta", longform.meta, tag));
+    }
+  }
+  const body = doc.createElement("div");
+  body.className = "ce-x-article";
+  tag(body);
+  body.append(...Array.from(longform.body.childNodes).flatMap((node) => richCopy(doc, node, options, tag)));
+  nodes.push(body);
+  return nodes;
+}
+
+const RICH_BLOCKS = new Set([
+  "P", "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "LI", "BLOCKQUOTE", "PRE", "FIGURE", "FIGCAPTION",
+  "TABLE", "THEAD", "TBODY", "TR", "TH", "TD",
+]);
+const RICH_INLINE = new Set(["B", "STRONG", "I", "EM", "U", "S", "DEL", "CODE", "SUB", "SUP", "MARK"]);
+const RICH_SKIP = new Set(["BUTTON", "SVG", "STYLE", "SCRIPT", "TEMPLATE", "INPUT", "TEXTAREA", "SELECT"]);
+
+/**
+ * Copies an X Article body without X's classes. Wrapper divs and spans are unwrapped, and
+ * the text keeps its blocks, emphasis and links. `whitespace-pre-wrap` is gone, so line breaks become `<br>`.
+ */
+function richCopy(doc: Document, node: Node, options: RenderOptions, tag: (el: Element) => Element): Node[] {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const parts = (node.textContent ?? "").split("\n");
+    return parts.flatMap((part, index) => {
+      const out: Node[] = index > 0 ? [tag(doc.createElement("br"))] : [];
+      if (part) {
+        out.push(doc.createTextNode(part));
+      }
+      return out;
+    });
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return [];
+  }
+  const element = node as HTMLElement;
+  const name = element.tagName.toUpperCase();
+  if (RICH_SKIP.has(name)) {
+    return [];
+  }
+  if (name === "BR" || name === "HR") {
+    return [tag(doc.createElement(name.toLowerCase()))];
+  }
+  if (name === "IMG") {
+    return options.removeMedia ? [] : [adoptImage(doc, element as HTMLImageElement, tag)];
+  }
+  if (name === "VIDEO") {
+    const poster = options.removeMedia ? null : posterImage(doc, element.getAttribute("poster") ?? "", tag);
+    return poster ? [poster] : [];
+  }
+  const children = Array.from(element.childNodes).flatMap((child) => richCopy(doc, child, options, tag));
+  if (name === "A") {
+    if (!clean(element.textContent)) {
+      return children;
+    }
+    const link = doc.createElement("a");
+    const href = element.getAttribute("href");
+    if (href) {
+      link.setAttribute("href", absoluteHref(href, options.pageUrl));
+    }
+    tag(link);
+    link.append(...children);
+    return [link];
+  }
+  if (!RICH_BLOCKS.has(name) && !RICH_INLINE.has(name)) {
+    return children;
+  }
+  const copy = doc.createElement(name.toLowerCase());
+  tag(copy);
+  copy.append(...children);
+  if (RICH_BLOCKS.has(name) && name !== "TD" && name !== "TH" && !hasContent(copy)) {
+    return [];
+  }
+  return [copy];
 }
 
 function renderQuote(doc: Document, article: HTMLElement, tag: (el: Element) => Element) {
@@ -463,11 +590,14 @@ function flowBody(doc: Document, source: HTMLElement, tag: (el: Element) => Elem
 }
 
 function describe(article: Element): XPost | null {
-  const body = ownBody(article);
-  const { name, handle } = names(article, body);
-  const stamp = stampOf(article, body);
-  const avatar = avatarOf(article, body);
-  if (!body && !stamp.text && !avatar && !article.querySelector("video, img")) {
+  const longform = longformOf(article);
+  // An X Article's only pre-wrap div is the author's bio in the card under it.
+  const body = longform ? null : ownBody(article);
+  const scope = longform?.part ?? body;
+  const { name, handle } = names(article, scope);
+  const stamp = stampOf(article, scope);
+  const avatar = avatarOf(article, scope);
+  if (!scope && !stamp.text && !avatar && !article.querySelector("video, img")) {
     return null;
   }
   return {
@@ -476,12 +606,33 @@ function describe(article: Element): XPost | null {
     handle,
     avatar,
     body,
+    longform,
     time: stamp.text,
     permalink: stamp.href,
     views: viewsOf(article),
     engagement: engagementOf(article),
-    ad: promoted(article, body),
+    ad: promoted(article, scope),
   };
+}
+
+function longformOf(article: Element): XLongform | null {
+  const own = (selector: string) =>
+    Array.from(article.querySelectorAll<HTMLElement>(selector)).find((element) => element.closest("article") === article) ?? null;
+  const part = own("[data-article-part='body']");
+  if (!part) {
+    return null;
+  }
+  return {
+    part,
+    body: part.querySelector<HTMLElement>("[data-article-body-html]") ?? part,
+    title: clean(own("[data-article-part='title']")?.textContent),
+    meta: clean(own("[data-article-part='byline']")?.textContent),
+    cover: own("[data-article-part='cover']")?.querySelector("img") ?? null,
+  };
+}
+
+function inLongform(post: XPost, node: Element) {
+  return post.longform !== null && node.closest("[data-article-part]")?.closest("article") === post.article;
 }
 
 function ownBody(article: Element) {
@@ -586,6 +737,10 @@ function cardHref(article: Element, pageUrl: string) {
     ?? card?.closest("a")?.getAttribute("href")
     ?? article.querySelector("a[href*='/status/']")?.getAttribute("href")
     ?? "";
+  return absoluteHref(raw, pageUrl);
+}
+
+function absoluteHref(raw: string, pageUrl: string) {
   try {
     return new URL(raw, pageUrl).href;
   } catch {
@@ -681,11 +836,14 @@ function statusId(url: string) {
 }
 
 function bodyLength(post: XPost) {
-  return post.body?.textContent?.length ?? 0;
+  return (post.longform?.body ?? post.body)?.textContent?.length ?? 0;
 }
 
 function mediaCount(post: XPost) {
-  return blocksOf(post).filter((block) => block.kind === "video" || block.kind === "photo").length;
+  const longform = post.longform
+    ? post.longform.body.querySelectorAll("img, video").length + (post.longform.cover ? 1 : 0)
+    : 0;
+  return longform + blocksOf(post).filter((block) => block.kind === "video" || block.kind === "photo").length;
 }
 
 function hasContent(element: HTMLElement) {

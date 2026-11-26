@@ -181,6 +181,7 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
   const [renameError, setRenameError] = useState<string | null>(null);
   const [printing, setPrinting] = useState(false);
   const [printError, setPrintError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const dragging = useRef(false);
   const suppressClickUntil = useRef(0);
   const editingRef = useRef(false);
@@ -244,6 +245,11 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
   function submitRename(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void commitRename();
+  }
+
+  function runDownloadAction(work: Promise<void>, fallback: string) {
+    setActionError(null);
+    void work.catch((reason: unknown) => setActionError(failure(reason, fallback)));
   }
 
   function printDownloaded() {
@@ -404,6 +410,11 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
             {printError}
           </p>
         ) : null}
+        {actionError ? (
+          <p id={`${domId}-action-error`} title={actionError} className="truncate text-xs text-red-300">
+            {actionError}
+          </p>
+        ) : null}
         {running ? (
           <div id={`${domId}-progress`} className="mt-1 h-1 overflow-hidden rounded-full bg-zinc-800">
             <div
@@ -420,17 +431,29 @@ export function DownloadRow({ item, compact, renamable }: DownloadRowProps) {
       </div>
       <div id={`${domId}-actions`} className="flex shrink-0 cursor-default items-center gap-0.5">
         {here && item.state === "inProgress" ? (
-          <IconButton id={`${domId}-pause`} label="Pause" onClick={() => void pauseDownload(item.id)}>
+          <IconButton
+            id={`${domId}-pause`}
+            label="Pause"
+            onClick={() => runDownloadAction(pauseDownload(item.id), "Could not pause this download.")}
+          >
             <Pause id={`${domId}-pause-icon`} aria-hidden />
           </IconButton>
         ) : null}
         {here && (item.state === "paused" || (item.state === "interrupted" && item.canResume)) ? (
-          <IconButton id={`${domId}-resume`} label="Resume" onClick={() => void resumeDownload(item.id)}>
+          <IconButton
+            id={`${domId}-resume`}
+            label="Resume"
+            onClick={() => runDownloadAction(resumeDownload(item.id), "Could not resume this download.")}
+          >
             <Play id={`${domId}-resume-icon`} aria-hidden />
           </IconButton>
         ) : null}
         {running ? (
-          <IconButton id={`${domId}-cancel`} label="Cancel" onClick={() => void cancelDownload(item.id)}>
+          <IconButton
+            id={`${domId}-cancel`}
+            label="Cancel"
+            onClick={() => runDownloadAction(cancelDownload(item.id), "Could not stop this download.")}
+          >
             <X id={`${domId}-cancel-icon`} aria-hidden />
           </IconButton>
         ) : null}
