@@ -15,6 +15,8 @@ import { AgentComposer } from "./AgentComposer";
 import { AgentError } from "./AgentError";
 import { AgentGoalCard } from "./AgentGoalCard";
 import { AgentHeader, type AgentPanelView } from "./AgentHeader";
+import { AgentLimitsMenu } from "./AgentLimitsMenu";
+import { AgentModelPicker } from "./AgentModelPicker";
 import { AgentLiveView } from "./AgentLiveView";
 import { AgentPageStatus } from "./AgentPageStatus";
 import { AgentMemoryView } from "./AgentMemoryView";
@@ -105,9 +107,10 @@ export function AgentPanelPage() {
   const mode: ComposerMode = !run ? "start" : active ? "reply" : run.source === "agent" ? "followup" : "start";
   const showRunAutonomy = !!run && active && run.source === "agent";
   const autonomy: AgentAutonomy = showRunAutonomy ? run.autonomy : agent.draft.autonomy;
-  const providerModel = settings?.aiProviders[settings.aiProvider]?.model ?? "";
+  const provider = settings?.aiProvider ?? "openai";
+  const providerModel = settings?.aiProviders[provider]?.model ?? "";
   const savedModel = settings?.automation.agentModel ?? "";
-  const modelName = savedModel || providerModel;
+  const thinking = settings?.aiProviders[provider]?.thinking ?? "";
   const inputTokens = settings?.aiMaxInputTokens ?? AI_INPUT_TOKENS.fallback;
   const outputTokens = settings?.aiMaxOutputTokens ?? AI_OUTPUT_TOKENS.fallback;
   const saveChatSettings = (patch: Partial<BrowserSettings>) => {
@@ -182,25 +185,6 @@ export function AgentPanelPage() {
         autonomy={autonomy}
         autonomyFor={showRunAutonomy ? "run" : "next"}
         onAutonomy={(level) => (showRunAutonomy ? agent.setAutonomy(run.id, level) : agent.setDraft({ autonomy: level }))}
-        model={modelName}
-        modelFallback={providerModel}
-        onModel={(model) => {
-          const current = settingsRef.current;
-          if (!current) {
-            return;
-          }
-          const provider = current.aiProvider;
-          const slot = current.aiProviders[provider];
-          saveChatSettings({
-            automation: { ...current.automation, agentModel: model },
-            aiProviders: model ? { ...current.aiProviders, [provider]: { ...slot, model } } : current.aiProviders,
-          });
-          agent.setDraft({ model: "" });
-        }}
-        inputTokens={inputTokens}
-        outputTokens={outputTokens}
-        onInputTokens={(aiMaxInputTokens) => saveChatSettings({ aiMaxInputTokens })}
-        onOutputTokens={(aiMaxOutputTokens) => saveChatSettings({ aiMaxOutputTokens })}
         access={access}
         onAccess={(next) => (showRunAutonomy ? agent.setAccess(run.id, next) : agent.setDraft({ access: next }))}
         currentSite={currentSite}
@@ -316,19 +300,52 @@ export function AgentPanelPage() {
             onSubmit={submit}
           />
         )}
-        <div id="agent-panel-chat-meta" className="flex flex-row items-center justify-between gap-1">
-          <p id="agent-panel-chat-meta-limits" className="text-[10px] text-zinc-500">
-            {`${inputTokens.toLocaleString()} in · ${outputTokens.toLocaleString()} out`}
-          </p>
-          <p id="agent-panel-chat-meta-model" className="truncate text-[10px] text-zinc-500">
-            {modelName || "No model"}
-          </p>
+        <div id="agent-panel-chat-meta" className="relative flex flex-row items-center justify-between gap-1">
+          <AgentLimitsMenu
+            id="agent-panel-chat-meta-limits"
+            inputTokens={inputTokens}
+            outputTokens={outputTokens}
+            onInputTokens={(aiMaxInputTokens) => saveChatSettings({ aiMaxInputTokens })}
+            onOutputTokens={(aiMaxOutputTokens) => saveChatSettings({ aiMaxOutputTokens })}
+          />
+          <AgentModelPicker
+            id="agent-panel-chat-meta-model"
+            className="min-w-0 flex-1 text-center"
+            value={savedModel}
+            fallback={providerModel}
+            provider={provider}
+            thinking={thinking}
+            onChange={(model) => {
+              const current = settingsRef.current;
+              if (!current) {
+                return;
+              }
+              const provider = current.aiProvider;
+              const slot = current.aiProviders[provider];
+              saveChatSettings({
+                automation: { ...current.automation, agentModel: model },
+                aiProviders: model ? { ...current.aiProviders, [provider]: { ...slot, model } } : current.aiProviders,
+              });
+              agent.setDraft({ model: "" });
+            }}
+            onThinking={(thinking) => {
+              const current = settingsRef.current;
+              if (!current) {
+                return;
+              }
+              const provider = current.aiProvider;
+              const slot = current.aiProviders[provider];
+              saveChatSettings({
+                aiProviders: { ...current.aiProviders, [provider]: { ...slot, thinking } },
+              });
+            }}
+          />
           {run && run.tokensIn + run.tokensOut > 0 ? (
-            <p id="agent-panel-chat-meta-used" className="text-[10px] text-zinc-500">
+            <p id="agent-panel-chat-meta-used" className="shrink-0 text-[10px] text-zinc-500">
               Used {formatTokens(run?.tokensIn ?? 0)} in / {formatTokens(run?.tokensOut ?? 0)} out
             </p>
           ) : (
-            <p id="agent-panel-chat-meta-used" className="text-[10px] text-zinc-500">
+            <p id="agent-panel-chat-meta-used" className="shrink-0 text-[10px] text-zinc-500">
               Used...
             </p>
           )}

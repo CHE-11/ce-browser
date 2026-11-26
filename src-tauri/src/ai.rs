@@ -369,7 +369,7 @@ fn recent_text_models(entries: &[(String, i64)]) -> Vec<String> {
         .collect()
 }
 
-/// Text chat models, without specialty variants such as cyber or image models.
+/// Text chat models, without specialty variants such as cyber, healthcare, or image models.
 fn general_text_model(id: &str) -> bool {
     let id = id.trim();
     if id.is_empty() {
@@ -379,7 +379,7 @@ fn general_text_model(id: &str) -> bool {
     if !text_chat_model("openai", &lower) && !text_chat_model("claude", &lower) {
         return false;
     }
-    const SKIP: &[&str] = &["cyber", "rosalind", "legal", "search"];
+    const SKIP: &[&str] = &["cyber", "rosalind", "legal", "search", "healthcare"];
     !SKIP.iter().any(|marker| lower.contains(marker))
 }
 
@@ -1636,7 +1636,7 @@ pub fn list_models(app: &AppHandle) -> Result<Vec<String>, String> {
     let mut ids: Vec<String> = entries
         .into_iter()
         .map(|(id, _)| id)
-        .filter(|id| text_chat_model(provider, id))
+        .filter(|id| text_chat_model(provider, id) && !id.to_ascii_lowercase().contains("healthcare"))
         .collect();
     ids.sort();
     Ok(ids)
@@ -1799,7 +1799,7 @@ mod tests {
         ChatMessage, ChatPart, ToolCall, ToolSpec, Usage, anthropic_body, anthropic_text,
         anthropic_tool_reply, anthropic_tools_body, apply_output_limit, attach_thinking,
         attach_tool_thinking, chat_tokens, chat_tools_require_reasoning_none, chat_url,
-        claude_models_url, fit_messages, fit_prompt, http_error, messages_url,
+        claude_models_url, fit_messages, fit_prompt, general_text_model, http_error, messages_url,
         model_accepts_thinking, model_ids, model_page, models_url, openai_body, openai_text,
         openai_tool_reply, openai_tools_body, read_anthropic_stream, read_openai_stream,
         recent_text_models, text_chat_model, text_tokens, transport_error,
@@ -2077,12 +2077,15 @@ mod tests {
             ("gpt-5.6-sol-20260901".into(), 8),
             ("gpt-5.6-sol".into(), 8),
             ("gpt-5.6-cyber".into(), 9),
+            ("gpt-healthcare".into(), 14),
             ("text-embedding-3-small".into(), 10),
             ("ft:gpt-5:org:name:abc".into(), 11),
             ("claude-haiku-3-5".into(), 1),
             ("claude-sonnet-5-5-20260928".into(), 12),
         ];
         let ids = recent_text_models(&entries);
+        assert!(!general_text_model("gpt-healthcare"));
+        assert!(general_text_model("gpt-5.6-sol"));
         assert_eq!(
             ids,
             vec![

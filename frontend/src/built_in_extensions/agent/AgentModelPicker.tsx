@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState, type KeyboardEvent } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Check } from "lucide-react";
+import { modelAcceptsThinking } from "@/lib/ai/model-label";
 import { cn } from "@/lib/cn";
 import { useDismiss } from "@/lib/use-dismiss";
 import { formatPrice, useModelCatalog, useModelPrice } from "@/lib/use-model-prices";
@@ -9,136 +10,137 @@ type Props = {
   value: string;
   /** Model used when `value` is blank. */
   fallback: string;
+  provider: string;
+  /** `low`, `medium`, `high`, or blank for the provider default. */
+  thinking: string;
   onChange: (model: string) => void;
+  onThinking: (thinking: string) => void;
   className?: string;
-  /** `inline` draws the list in the page flow so a parent menu can scroll it. */
-  listPlacement?: "overlay" | "inline";
 };
 
 type Choice = { value: string; label: string; detail: string; price: string };
 
-/** Combo box for the next task's model, with its price per million tokens. Blank uses the agent model from Settings. */
-export function AgentModelPicker({ id, value, fallback, onChange, className, listPlacement = "overlay" }: Props) {
+const THINKING_LEVELS = [
+  { value: "", label: "Default" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+];
+
+function listedModel(model: string) {
+  return !model.toLowerCase().includes("healthcare");
+}
+
+/** Model name in the footer. The list opens above it, with a thinking level when the model accepts one. */
+export function AgentModelPicker({ id, value, fallback, provider, thinking, onChange, onThinking, className }: Props) {
   const root = useRef<HTMLDivElement | null>(null);
   const input = useRef<HTMLInputElement | null>(null);
   const { models, prices, loading } = useModelCatalog();
+  const selected = value || fallback;
   const fallbackPrice = useModelPrice(fallback);
-  const selectedPrice = useModelPrice(value || fallback);
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
   const close = useCallback(() => {
     setOpen(false);
-    setQuery(null);
+    setQuery("");
   }, []);
   useDismiss(root, open, close);
+  useEffect(() => {
+    if (open) {
+      input.current?.focus();
+    }
+  }, [open]);
 
-  const needle = (query ?? "").trim().toLowerCase();
-  const listed = value && !models.includes(value) ? [value, ...models] : models;
+  const needle = query.trim().toLowerCase();
+  const catalog = models.filter(listedModel);
+  const listed = value && listedModel(value) && !catalog.includes(value) ? [value, ...catalog] : catalog;
   const choices: Choice[] = [
-    ...(needle
-      ? []
-      : [{ value: "", label: "Default", detail: fallback || "Model from Settings", price: formatPrice(fallbackPrice) }]),
+    ...(needle ? [] : [{ value: "", label: "Default", detail: fallback || "Model from Settings", price: formatPrice(fallbackPrice) }]),
     ...listed
       .filter((model) => !needle || model.toLowerCase().includes(needle))
       .map((model) => ({ value: model, label: model, detail: "", price: formatPrice(prices[model]) })),
   ];
-  const typed = query?.trim() ?? "";
-  if (typed && !listed.some((model) => model.toLowerCase() === typed.toLowerCase())) {
+  const typed = query.trim();
+  if (typed && listedModel(typed) && !listed.some((model) => model.toLowerCase() === typed.toLowerCase())) {
     choices.push({ value: typed, label: `Use “${typed}”`, detail: "A model id from your provider", price: "" });
   }
   const active = choices.length > 0 ? Math.min(highlight, choices.length - 1) : 0;
+  const acceptsThinking = modelAcceptsThinking(provider, selected);
+  const thinkingValue = THINKING_LEVELS.some((level) => level.value === thinking) ? thinking : "";
 
   const pick = (choice: Choice) => {
     onChange(choice.value);
     close();
-    input.current?.blur();
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      if (!open) {
-        setOpen(true);
-        return;
-      }
       setHighlight((active + (event.key === "ArrowDown" ? 1 : choices.length - 1)) % Math.max(1, choices.length));
     } else if (event.key === "Enter") {
       event.preventDefault();
-      if (open && choices[active]) {
+      if (choices[active]) {
         pick(choices[active]);
       }
-    } else if (event.key === "Escape" && open) {
+    } else if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
       close();
     }
   };
 
-  const shownPrice = formatPrice(selectedPrice);
-
   return (
-    <div id={id} ref={root} className={cn("relative min-w-0", className)}>
-      <div id={`${id}-field`} className="flex h-7 items-center rounded-md border border-zinc-800 bg-zinc-900 focus-within:border-sky-500">
-        <input
-          id={`${id}-input`}
-          ref={input}
-          role="combobox"
-          aria-expanded={open}
-          aria-controls={`${id}-list`}
-          aria-autocomplete="list"
-          aria-label="Model"
-          title="Model for the next task"
-          spellCheck={false}
-          className="h-full min-w-0 flex-1 bg-transparent px-1.5 text-[11px] text-zinc-200 outline-none placeholder:text-zinc-400"
-          placeholder={fallback ? `Default · ${fallback}` : "Default model"}
-          value={query ?? value}
-          onFocus={(event) => {
-            setOpen(true);
-            event.currentTarget.select();
-          }}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setOpen(true);
+    <div id={id} ref={root} className={cn("min-w-0", className)}>
+      <button
+        id={`${id}-button`}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Model for the next task"
+        className="block w-full truncate text-center text-[10px] text-zinc-500 hover:text-zinc-200"
+        onClick={() => {
+          if (open) {
+            close();
+          } else {
+            setQuery("");
             setHighlight(0);
-          }}
-          onKeyDown={onKeyDown}
-        />
-        {shownPrice && query === null ? (
-          <span id={`${id}-price`} className="shrink-0 pr-0.5 text-[10px] tabular-nums text-emerald-400/90" title="US dollars per million tokens, in / out">
-            {shownPrice}
-          </span>
-        ) : null}
-        <button
-          id={`${id}-toggle`}
-          type="button"
-          tabIndex={-1}
-          aria-label="Show models"
-          className="flex h-full w-5 shrink-0 items-center justify-center text-zinc-500 hover:text-zinc-200"
-          onClick={() => {
-            if (open) {
-              close();
-            } else {
-              input.current?.focus();
-            }
-          }}
-        >
-          <ChevronDown id={`${id}-toggle-icon`} className="size-3.5" aria-hidden />
-        </button>
-      </div>
+            setOpen(true);
+          }
+        }}
+      >
+        {selected || "No model"}
+      </button>
       {open ? (
         <div
           id={`${id}-popover`}
+          role="dialog"
+          aria-label="Model"
           data-agent-popover
-          className={cn(
-            "z-40 mt-1 overflow-hidden rounded-lg bg-zinc-900 shadow-2xl ring-1 ring-zinc-700",
-            listPlacement === "inline" ? "relative" : "absolute right-0 top-full w-[min(20rem,calc(100vw-1.5rem))]",
-          )}
+          className="absolute bottom-full left-0 z-40 mb-2 w-[min(20rem,100%)] overflow-hidden rounded-lg bg-zinc-900 shadow-2xl ring-1 ring-zinc-700"
         >
           <div id={`${id}-heading`} className="flex justify-between border-b border-zinc-800 px-2.5 py-1 text-[10px] text-zinc-500">
             <span id={`${id}-heading-model`}>Model</span>
             <span id={`${id}-heading-price`}>$ per 1M tokens · in / out</span>
           </div>
+          <input
+            id={`${id}-input`}
+            ref={input}
+            role="combobox"
+            aria-expanded={open}
+            aria-controls={`${id}-list`}
+            aria-autocomplete="list"
+            aria-label="Search models"
+            spellCheck={false}
+            placeholder="Search models"
+            className="h-7 w-full border-b border-zinc-800 bg-transparent px-2.5 text-xs text-zinc-100 outline-none placeholder:text-zinc-500"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setHighlight(0);
+            }}
+            onKeyDown={onKeyDown}
+          />
           <ul id={`${id}-list`} role="listbox" aria-label="Models" className="max-h-64 overflow-y-auto p-1">
             {choices.map((choice, index) => (
               <li id={`${id}-option-${index}`} key={`${choice.value}-${index}`} role="option" aria-selected={choice.value === value}>
@@ -167,12 +169,45 @@ export function AgentModelPicker({ id, value, fallback, onChange, className, lis
                 </button>
               </li>
             ))}
+            {choices.length === 0 && !loading ? (
+              <li id={`${id}-empty`} className="px-2 py-1.5 text-[11px] text-zinc-500">
+                No models
+              </li>
+            ) : null}
             {loading ? (
               <li id={`${id}-loading`} className="px-2 py-1.5 text-[11px] text-zinc-500">
                 Loading models…
               </li>
             ) : null}
           </ul>
+          {acceptsThinking ? (
+            <div id={`${id}-thinking`} className="border-t border-zinc-800 p-2">
+              <div id={`${id}-thinking-label`} className="px-0.5 pb-1 text-[10px] text-zinc-500" title="How long the model thinks before it answers. Higher costs more.">
+                Thinking
+              </div>
+              <div id={`${id}-thinking-levels`} role="radiogroup" aria-label="Thinking" className="flex rounded-md bg-zinc-950 p-0.5 ring-1 ring-zinc-800">
+                {THINKING_LEVELS.map((level) => {
+                  const selectedLevel = level.value === thinkingValue;
+                  return (
+                    <button
+                      id={`${id}-thinking-${level.value || "default"}`}
+                      key={level.label}
+                      type="button"
+                      role="radio"
+                      aria-checked={selectedLevel}
+                      className={cn(
+                        "h-6 flex-1 rounded px-1 text-[11px] font-medium text-zinc-400 hover:text-zinc-100",
+                        selectedLevel && "bg-sky-700 text-white",
+                      )}
+                      onClick={() => onThinking(level.value)}
+                    >
+                      {level.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

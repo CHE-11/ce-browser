@@ -4,7 +4,7 @@ import { IconButton } from "@/components/IconButton";
 import type { AccessToggle } from "@/lib/agent-access";
 import { activateTab, createTab, navigate } from "@/lib/browser-client";
 import { AgentAutonomyPicker } from "./AgentAutonomyPicker";
-import { AgentChatSettingsMenu } from "./AgentChatSettingsMenu";
+import { AgentPermissionsMenu } from "./AgentPermissionsMenu";
 
 const AI_SETTINGS_URL = "ce://settings?focus=settings-ai";
 
@@ -30,14 +30,6 @@ type Props = {
   /** Says whether the autonomy applies to the run on show or to the next task. */
   autonomyFor: "run" | "next";
   onAutonomy: (autonomy: AgentAutonomy) => void;
-  /** Saved agent model. Blank uses the provider model. */
-  model: string;
-  modelFallback: string;
-  onModel: (model: string) => void;
-  inputTokens: number;
-  outputTokens: number;
-  onInputTokens: (value: number) => void;
-  onOutputTokens: (value: number) => void;
   access: AgentAccess;
   onAccess: (access: AgentAccess) => void;
   currentSite: string;
@@ -54,13 +46,6 @@ export function AgentHeader({
   autonomy,
   autonomyFor,
   onAutonomy,
-  model,
-  modelFallback,
-  onModel,
-  inputTokens,
-  outputTokens,
-  onInputTokens,
-  onOutputTokens,
   access,
   onAccess,
   currentSite,
@@ -95,15 +80,8 @@ export function AgentHeader({
         </IconButton>
       </header>
       <div id="agent-panel-options" className="flex items-center justify-between gap-2 px-3 pb-2">
-        <AgentChatSettingsMenu
+        <AgentPermissionsMenu
           id="agent-panel-chat-settings"
-          model={model}
-          modelFallback={modelFallback}
-          onModel={onModel}
-          inputTokens={inputTokens}
-          outputTokens={outputTokens}
-          onInputTokens={onInputTokens}
-          onOutputTokens={onOutputTokens}
           access={access}
           onAccess={onAccess}
           scope={autonomyFor}
