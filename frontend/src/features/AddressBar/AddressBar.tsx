@@ -1311,7 +1311,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         }
       >
         {activeDownloads.length > 0 ? (
-          <svg id="address-downloads-ring" className="origin-center animate-spin" viewBox="0 0 36 36" aria-hidden>
+          <svg id="address-downloads-ring" className="-rotate-90" viewBox="0 0 36 36" aria-hidden>
             <circle id="address-downloads-ring-track" cx="18" cy="18" r="16" fill="none" stroke="rgb(63 63 70)" strokeWidth="3" />
             <circle
               id="address-downloads-ring-value"
@@ -1322,7 +1322,8 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
               stroke="rgb(56 189 248)"
               strokeWidth="3"
               strokeLinecap="round"
-              strokeDasharray={`${(progress ?? 0.25) * 100.5} 100.5`}
+              style={{ strokeDasharray: `${(progress ?? 0.25) * 100.5} 100.5` }}
+              className={progress === null ? "origin-center animate-spin" : "transition-[stroke-dasharray] duration-300"}
             />
           </svg>
         ) : (
