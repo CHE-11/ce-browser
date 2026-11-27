@@ -82,7 +82,7 @@ export function Toast({ params }: ToastProps) {
       id="toast"
       role="status"
       aria-live="polite"
-      className="flex h-full items-center gap-2 rounded-[10px] bg-zinc-900 pl-4 pr-1.5 text-sm text-zinc-100 ring-1 ring-inset ring-zinc-700 motion-safe:animate-[toast-in_160ms_ease-out]"
+      className="flex h-full items-center gap-2 rounded-[10px] bg-zinc-900 pl-4 pr-1.5 text-sm text-zinc-100 ring-1 ring-inset ring-zinc-700 opacity-0 motion-safe:animate-[toast-in_160ms_ease-out_forwards] motion-reduce:opacity-100"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onContextMenu={(event) => event.preventDefault()}

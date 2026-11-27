@@ -21,7 +21,9 @@ type EditorState =
   | { mode: "add-folder"; parentId: string }
   | { mode: "edit"; node: BookmarkNode };
 
-type MenuState = { node: BookmarkNode; x: number; y: number };
+type MenuState =
+  | { kind: "item"; node: BookmarkNode; x: number; y: number }
+  | { kind: "blank"; parentId: string; x: number; y: number };
 
 type DropState = { id: string; place: BookmarkDropPlace };
 
@@ -89,6 +91,7 @@ function BookmarkSearchList({
   drop,
   axis,
   onPick,
+  onOpen,
   onContextMenu,
   onDragStart,
   onDragEnd,
@@ -103,6 +106,7 @@ function BookmarkSearchList({
   drop: DropState | null;
   axis: "x" | "y";
   onPick: (event: MouseEvent, node: BookmarkNode, index: number, list: BookmarkNode[]) => void;
+  onOpen: (node: BookmarkNode) => void;
   onContextMenu: (event: MouseEvent, node: BookmarkNode) => void;
   onDragStart: (event: DragEvent, node: BookmarkNode) => void;
   onDragEnd: () => void;
@@ -132,6 +136,7 @@ function BookmarkSearchList({
               dropChrome(drop, node.id, axis),
             )}
             onClick={(event) => onPick(event, node, index, nodes)}
+            onDoubleClick={() => onOpen(node)}
             onContextMenu={(event) => onContextMenu(event, node)}
             onDragStart={(event) => onDragStart(event, node)}
             onDragEnd={onDragEnd}
@@ -217,14 +222,40 @@ export function BookmarksPage() {
   const [moving, setMoving] = useState<string[] | null>(null);
   const anchorId = useRef<string | null>(null);
   const dragged = useRef(false);
+  /** Ids being dragged; multi-select drags every selected root. */
+  const draggingIds = useRef<string[]>([]);
+  /** Last known folder path, used when the open folder is deleted. */
+  const folderTrail = useRef<string[]>(["bar"]);
 
-  const selected = findFolder(tree, selectedId) ?? tree?.bar ?? null;
+  const activeFolderId = (() => {
+    if (findFolder(tree, selectedId)) {
+      return selectedId;
+    }
+    for (let index = folderTrail.current.length - 1; index >= 0; index -= 1) {
+      const id = folderTrail.current[index];
+      if (id && findFolder(tree, id)) {
+        return id;
+      }
+    }
+    return "bar";
+  })();
+  const selected = findFolder(tree, activeFolderId) ?? tree?.bar ?? null;
   const path = folderPath(tree, selected?.id ?? "bar");
   const axis: "x" | "y" = view === "cards" ? "x" : "y";
 
   useEffect(() => {
     document.title = "Bookmarks";
   }, []);
+
+  useEffect(() => {
+    if (findFolder(tree, selectedId)) {
+      folderTrail.current = folderPath(tree, selectedId).map((folder) => folder.id);
+      return;
+    }
+    if (activeFolderId !== selectedId) {
+      setSelectedId(activeFolderId);
+    }
+  }, [tree, selectedId, activeFolderId]);
 
   useEffect(() => {
     const unlisten = onBookmarkHealth((progress) => setHealthProgress(progress));
@@ -319,6 +350,7 @@ export function BookmarksPage() {
 
   const endDrag = () => {
     setDrop(null);
+    draggingIds.current = [];
     window.setTimeout(() => {
       dragged.current = false;
     });
@@ -341,19 +373,51 @@ export function BookmarksPage() {
     }
   };
 
-  const moveIds = async (ids: string[], parentId: string) => {
+  const moveIds = async (ids: string[], parentId: string, index?: number) => {
     const targets = bookmarkRootsOf(tree, orderedIds(ids)).filter(
       (id) => id !== parentId && !ROOT_FOLDERS.has(id) && !bookmarkContains(tree, id, parentId),
     );
+    if (targets.length === 0) {
+      return;
+    }
     try {
-      for (const id of targets) {
-        await moveBookmark(id, parentId);
+      if (targets.length === 1) {
+        await moveBookmark(targets[0]!, parentId, index);
+      } else if (index === undefined) {
+        for (const id of targets) {
+          await moveBookmark(id, parentId);
+        }
+      } else {
+        const siblings = findFolder(tree, parentId)?.children ?? [];
+        const moving = new Set(targets);
+        let dest = index;
+        for (let i = 0; i < Math.min(index, siblings.length); i++) {
+          if (moving.has(siblings[i]!.id)) {
+            dest -= 1;
+          }
+        }
+        dest = Math.max(0, dest);
+        // Park at the end first so same-folder reorders keep relative order.
+        for (const id of targets) {
+          await moveBookmark(id, parentId);
+        }
+        for (let i = 0; i < targets.length; i++) {
+          await moveBookmark(targets[i]!, parentId, dest + i);
+        }
       }
       setPicked([]);
+      anchorId.current = null;
       setStatus(null);
     } catch (reason: unknown) {
       setStatus(String(reason));
     }
+  };
+
+  const dragIdsOf = (node: BookmarkNode) => {
+    if (picked.includes(node.id) && picked.length > 1) {
+      return bookmarkRootsOf(tree, orderedIds(picked)).filter((id) => !ROOT_FOLDERS.has(id));
+    }
+    return ROOT_FOLDERS.has(node.id) ? [] : [node.id];
   };
 
   const onDragStart = (event: DragEvent, node: BookmarkNode) => {
@@ -362,6 +426,8 @@ export function BookmarksPage() {
       return;
     }
     dragged.current = true;
+    const ids = dragIdsOf(node);
+    draggingIds.current = ids;
     event.dataTransfer?.setData(BOOKMARK_DRAG_TYPE, node.id);
     if (node.url) {
       event.dataTransfer?.setData("text/uri-list", node.url);
@@ -373,6 +439,10 @@ export function BookmarksPage() {
     if (!event.dataTransfer?.types.includes(BOOKMARK_DRAG_TYPE)) {
       return;
     }
+    if (draggingIds.current.includes(node.id)) {
+      setDrop(null);
+      return;
+    }
     event.preventDefault();
     const place = bookmarkDropPlace(event, node, axis);
     setDrop((current) => (current?.id === node.id && current.place === place ? current : { id: node.id, place }));
@@ -381,35 +451,56 @@ export function BookmarksPage() {
   const commitDrop = (event: DragEvent, node: BookmarkNode) => {
     event.preventDefault();
     event.stopPropagation();
-    const id = event.dataTransfer?.getData(BOOKMARK_DRAG_TYPE);
+    const fallback = event.dataTransfer?.getData(BOOKMARK_DRAG_TYPE);
+    const ids = draggingIds.current.length > 0 ? draggingIds.current : fallback ? [fallback] : [];
     const place = bookmarkDropPlace(event, node, axis);
     setDrop(null);
-    if (!tree || !id || id === node.id || ROOT_FOLDERS.has(id)) {
+    draggingIds.current = [];
+    if (!tree || ids.length === 0 || ids.includes(node.id)) {
       return;
     }
     if (place === "into") {
       if (node.url || node.separator) {
         return;
       }
-      report(moveBookmark(id, node.id));
+      void moveIds(ids, node.id);
       return;
     }
     const parent = findBookmarkParent(tree, node.id);
     if (!parent) {
       return;
     }
-    report(moveBookmark(id, parent.parentId, place === "after" ? parent.index + 1 : parent.index));
+    void moveIds(ids, parent.parentId, place === "after" ? parent.index + 1 : parent.index);
   };
 
   const dropIntoFolder = (event: DragEvent, folderId: string) => {
     event.preventDefault();
-    const id = event.dataTransfer?.getData(BOOKMARK_DRAG_TYPE);
+    const fallback = event.dataTransfer?.getData(BOOKMARK_DRAG_TYPE);
+    const ids = draggingIds.current.length > 0 ? draggingIds.current : fallback ? [fallback] : [];
     setDrop(null);
-    if (!id || id === folderId || ROOT_FOLDERS.has(id)) {
+    draggingIds.current = [];
+    if (ids.length === 0 || ids.includes(folderId)) {
       return;
     }
-    report(moveBookmark(id, folderId));
+    void moveIds(ids, folderId);
   };
+
+  const clearPick = useCallback(() => {
+    setPicked([]);
+    anchorId.current = null;
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || picked.length === 0 || menu || editor || renaming || moving) {
+        return;
+      }
+      event.preventDefault();
+      clearPick();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [picked.length, menu, editor, renaming, moving, clearPick]);
 
   const pickRow = (event: MouseEvent, node: BookmarkNode, index: number, list: BookmarkNode[] = rows) => {
     if (dragged.current) {
@@ -428,17 +519,18 @@ export function BookmarksPage() {
       anchorId.current = node.id;
       return;
     }
-    if (node.url) {
-      if (view === "columns") {
-        setPicked([node.id]);
-        anchorId.current = node.id;
-      }
-      void createTab(node.url);
+    if (node.url || node.separator) {
+      setPicked([node.id]);
+      anchorId.current = node.id;
       return;
     }
-    if (!node.separator) {
-      setSelectedId(node.id);
-      setQuery("");
+    setSelectedId(node.id);
+    setQuery("");
+  };
+
+  const openRow = (node: BookmarkNode) => {
+    if (node.url) {
+      void createTab(node.url);
     }
   };
 
@@ -456,10 +548,21 @@ export function BookmarksPage() {
       setPicked([node.id]);
       anchorId.current = node.id;
     }
-    setMenu({ node, x: event.clientX, y: event.clientY });
+    setMenu({ kind: "item", node, x: event.clientX, y: event.clientY });
   };
 
-  const menuTargets = menu && picked.includes(menu.node.id) && picked.length > 1 ? picked : menu ? [menu.node.id] : [];
+  const openBlankMenu = (event: MouseEvent, parentId: string) => {
+    event.preventDefault();
+    clearPick();
+    setMenu({ kind: "blank", parentId, x: event.clientX, y: event.clientY });
+  };
+
+  const menuTargets =
+    menu?.kind === "item" && picked.includes(menu.node.id) && picked.length > 1
+      ? picked
+      : menu?.kind === "item"
+        ? [menu.node.id]
+        : [];
   const bulkMenu = menuTargets.length > 1;
 
   return (
@@ -602,7 +705,7 @@ export function BookmarksPage() {
         className={cn("min-h-0 flex-1", view === "columns" && !hits ? "overflow-hidden" : "overflow-y-auto p-3")}
         onClick={(event) => {
           if (event.target === event.currentTarget) {
-            setPicked([]);
+            clearPick();
           }
         }}
         onDragOver={(event) => {
@@ -614,13 +717,15 @@ export function BookmarksPage() {
           if (!selected || hits || view === "columns") {
             return;
           }
-          const id = event.dataTransfer.getData(BOOKMARK_DRAG_TYPE);
-          if (!id) {
+          const fallback = event.dataTransfer.getData(BOOKMARK_DRAG_TYPE);
+          const ids = draggingIds.current.length > 0 ? draggingIds.current : fallback ? [fallback] : [];
+          if (ids.length === 0) {
             return;
           }
           event.preventDefault();
           setDrop(null);
-          report(moveBookmark(id, selected.id));
+          draggingIds.current = [];
+          void moveIds(ids, selected.id);
         }}
       >
         {view === "columns" && !hits && tree ? (
@@ -630,13 +735,15 @@ export function BookmarksPage() {
             picked={picked}
             drop={drop}
             onPick={pickRow}
+            onOpen={openRow}
             onContextMenu={openRowMenu}
+            onBlankContextMenu={openBlankMenu}
             onDragStart={onDragStart}
             onDragEnd={endDrag}
             onDragOver={allowDrop}
             onDrop={commitDrop}
             onDropInto={dropIntoFolder}
-            onClearPick={() => setPicked([])}
+            onClearPick={clearPick}
           />
         ) : hits ? (
           <div id="bookmarks-page-results-wrap" className="mx-auto flex w-full max-w-[900px] flex-col">
@@ -652,6 +759,7 @@ export function BookmarksPage() {
                 drop={drop}
                 axis={axis}
                 onPick={pickRow}
+                onOpen={openRow}
                 onContextMenu={openRowMenu}
                 onDragStart={onDragStart}
                 onDragEnd={endDrag}
@@ -675,11 +783,12 @@ export function BookmarksPage() {
         ) : (
           <BookmarkGrid
             rows={rows}
-                view={view === "columns" ? "list" : view}
+            view={view === "columns" ? "list" : view}
             axis={axis}
             picked={picked}
             drop={drop}
             onPick={pickRow}
+            onOpen={openRow}
             onContextMenu={openRowMenu}
             onDragStart={onDragStart}
             onDragEnd={endDrag}
@@ -691,7 +800,40 @@ export function BookmarksPage() {
         )}
       </div>
 
-      {menu ? (
+      {menu?.kind === "blank" ? (
+        <ContextMenu id="bookmarks-blank-menu" label="Folder" x={menu.x} y={menu.y} onClose={closeMenu}>
+          <ContextMenuItem
+            id="bookmarks-blank-menu-add-link"
+            icon={<Plus />}
+            label="Add bookmark"
+            onClick={() => {
+              setEditor({ mode: "add-link", parentId: menu.parentId });
+              closeMenu();
+            }}
+          />
+          <ContextMenuItem
+            id="bookmarks-blank-menu-add-folder"
+            icon={<FolderPlus />}
+            label="Add folder"
+            onClick={() => {
+              setEditor({ mode: "add-folder", parentId: menu.parentId });
+              closeMenu();
+            }}
+          />
+          <ContextMenuSeparator id="bookmarks-blank-menu-separator" />
+          <ContextMenuItem
+            id="bookmarks-blank-menu-add-divider"
+            icon={<SeparatorHorizontal />}
+            label="Add divider"
+            onClick={() => {
+              addDivider(menu.parentId);
+              closeMenu();
+            }}
+          />
+        </ContextMenu>
+      ) : null}
+
+      {menu?.kind === "item" ? (
         <ContextMenu id="bookmarks-menu" label="Bookmark" x={menu.x} y={menu.y} onClose={closeMenu}>
           {bulkMenu || menu.node.separator ? null : menu.node.url ? (
             <>
@@ -881,7 +1023,9 @@ type BookmarkColumnsProps = {
   picked: string[];
   drop: DropState | null;
   onPick: (event: MouseEvent, node: BookmarkNode, index: number, list: BookmarkNode[]) => void;
+  onOpen: (node: BookmarkNode) => void;
   onContextMenu: (event: MouseEvent, node: BookmarkNode) => void;
+  onBlankContextMenu: (event: MouseEvent, parentId: string) => void;
   onDragStart: (event: DragEvent, node: BookmarkNode) => void;
   onDragEnd: () => void;
   onDragOver: (event: DragEvent, node: BookmarkNode) => void;
@@ -896,7 +1040,9 @@ function BookmarkColumns({
   picked,
   drop,
   onPick,
+  onOpen,
   onContextMenu,
+  onBlankContextMenu,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -973,6 +1119,16 @@ function BookmarkColumns({
                   onClearPick();
                 }
               }}
+              onContextMenu={(event) => {
+                if (!column.parentId) {
+                  return;
+                }
+                const target = event.target;
+                if (target instanceof Element && target.closest("[id^='bookmarks-item-']")) {
+                  return;
+                }
+                onBlankContextMenu(event, column.parentId);
+              }}
             >
               {column.nodes.length === 0 ? (
                 <p id={`bookmarks-column-${column.key}-empty`} className="px-3 py-6 text-center text-xs text-zinc-500">
@@ -988,6 +1144,7 @@ function BookmarkColumns({
                     dropClass={dropChrome(drop, node.id, "y")}
                     icon={cachedIcon(icons, node.url)}
                     onClick={(event) => onPick(event, node, index, column.nodes)}
+                    onDoubleClick={() => onOpen(node)}
                     onContextMenu={(event) => onContextMenu(event, node)}
                     onDragStart={(event) => onDragStart(event, node)}
                     onDragEnd={onDragEnd}
@@ -1011,6 +1168,7 @@ type BookmarkColumnRowProps = {
   dropClass: string;
   icon: string;
   onClick: (event: MouseEvent) => void;
+  onDoubleClick: () => void;
   onContextMenu: (event: MouseEvent) => void;
   onDragStart: (event: DragEvent) => void;
   onDragEnd: () => void;
@@ -1025,6 +1183,7 @@ function BookmarkColumnRow({
   dropClass,
   icon,
   onClick,
+  onDoubleClick,
   onContextMenu,
   onDragStart,
   onDragEnd,
@@ -1048,6 +1207,7 @@ function BookmarkColumnRow({
         dropClass,
       )}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -1080,6 +1240,7 @@ type BookmarkGridProps = {
   picked: string[];
   drop: DropState | null;
   onPick: (event: MouseEvent, node: BookmarkNode, index: number) => void;
+  onOpen: (node: BookmarkNode) => void;
   onContextMenu: (event: MouseEvent, node: BookmarkNode) => void;
   onDragStart: (event: DragEvent, node: BookmarkNode) => void;
   onDragEnd: () => void;
@@ -1096,6 +1257,7 @@ function BookmarkGrid({
   picked,
   drop,
   onPick,
+  onOpen,
   onContextMenu,
   onDragStart,
   onDragEnd,
@@ -1123,6 +1285,7 @@ function BookmarkGrid({
           dropClass={dropChrome(drop, node.id, axis)}
           icon={cachedIcon(icons, node.url)}
           onClick={(event) => onPick(event, node, index)}
+          onDoubleClick={() => onOpen(node)}
           onContextMenu={(event) => onContextMenu(event, node)}
           onDragStart={(event) => onDragStart(event, node)}
           onDragEnd={onDragEnd}
@@ -1143,6 +1306,7 @@ type BookmarkItemProps = {
   dropClass: string;
   icon: string;
   onClick: (event: MouseEvent) => void;
+  onDoubleClick: () => void;
   onContextMenu: (event: MouseEvent) => void;
   onDragStart: (event: DragEvent) => void;
   onDragEnd: () => void;
@@ -1159,6 +1323,7 @@ function BookmarkItem({
   dropClass,
   icon,
   onClick,
+  onDoubleClick,
   onContextMenu,
   onDragStart,
   onDragEnd,
@@ -1187,6 +1352,7 @@ function BookmarkItem({
         dropClass,
       )}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}

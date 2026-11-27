@@ -8779,6 +8779,8 @@ pub(crate) fn popup_surface_color(app: &AppHandle) -> Color {
 }
 
 /// Paints the document the same color as the webview before React mounts.
+/// Toast webviews stay transparent so the empty surface does not flash before the
+/// toast pill animates in with its text.
 pub(crate) fn popup_paint_script(color: Color) -> String {
     format!(
         r##"(function () {{
@@ -8786,9 +8788,11 @@ pub(crate) fn popup_paint_script(color: Color) -> String {
   var color = "#{r:02x}{g:02x}{b:02x}";
   var root = document.documentElement;
   root.dataset.popup = "true";
-  if (location.hash.indexOf("#/popup/toast") === 0) {{
+  var toast = location.hash.indexOf("#/popup/toast") === 0;
+  if (toast) {{
     root.dataset.toast = "true";
     root.style.overflow = "hidden";
+    color = "transparent";
   }}
   var paint = function () {{
     root.style.backgroundColor = color;
@@ -8871,7 +8875,8 @@ pub fn show_toast(app: &AppHandle, window_label: &str, params: &str) -> Result<(
     })
     .ok_or("The browser window is missing.")?;
     let url = paths::internal_url(app, &format!("popup/toast?{params}"));
-    let surface = popup_surface_color(app);
+    // Transparent so the webview does not show an empty zinc bar before React paints the toast.
+    let surface = Color(0, 0, 0, 0);
     let (position, size) = toast_rect(app, window_label);
     let builder = base_builder(app, &label, WebviewUrl::External(url))
         .disable_drag_drop_handler()

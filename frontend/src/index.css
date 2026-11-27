@@ -425,11 +425,14 @@ html[data-popup="true"] body {
   background: var(--app-zinc-900);
 }
 
-/* The entrance slide paints past the window. Without this, that overflow becomes a scrollbar for the first frames and the text jumps. */
+/* Toast webviews are transparent; the pill itself carries the surface. Keep overflow clipped
+ * so the entrance translate cannot create a scrollbar that jumps the text. Override the popup
+ * zinc fill or an empty bar flashes before the animated toast appears. */
 html[data-toast="true"],
 html[data-toast="true"] body,
 html[data-toast="true"] #root {
   overflow: hidden;
+  background: transparent !important;
 }
 
 #root {
@@ -482,11 +485,11 @@ html[data-toast="true"] #root {
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translate3d(0, 6px, 0);
   }
   to {
     opacity: 1;
-    transform: none;
+    transform: translate3d(0, 0, 0);
   }
 }
 
