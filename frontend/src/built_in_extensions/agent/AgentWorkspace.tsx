@@ -588,6 +588,7 @@ export function AgentWorkspace({ layout = "panel", params }: Props) {
             onView={setView}
             hideHistory
             hideOpenPage
+            page
             onNewTask={() => {
               setView("run");
               agent.newTask();

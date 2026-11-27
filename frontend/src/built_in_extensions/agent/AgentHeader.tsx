@@ -3,6 +3,7 @@ import type { AgentAccess, AgentAutonomy, TabInfo } from "@type/browser";
 import { IconButton } from "@/components/IconButton";
 import type { AccessToggle } from "@/lib/agent-access";
 import { activateTab, createTab, navigate } from "@/lib/browser-client";
+import { cn } from "@/lib/cn";
 import { AgentAutonomyPicker } from "./AgentAutonomyPicker";
 import { AgentPermissionsMenu } from "./AgentPermissionsMenu";
 
@@ -50,6 +51,8 @@ type Props = {
   hideHistory?: boolean;
   /** Hide the open-page button when already on `ce://agent`. */
   hideOpenPage?: boolean;
+  /** Full `ce://agent` page; adds top padding. The side panel keeps padding at 0. */
+  page?: boolean;
   /** Opens `ce://agent` on this chat. Null opens a blank composer. */
   runId?: number | null;
 };
@@ -70,10 +73,11 @@ export function AgentHeader({
   accessBlocked,
   hideHistory = false,
   hideOpenPage = false,
+  page = false,
   runId = null,
 }: Props) {
   return (
-    <div id="agent-header" className="shrink-0 border-b border-zinc-800 pt-5">
+    <div id="agent-header" className={cn("shrink-0 border-b border-zinc-800", page ? "pt-5" : "pt-0")}>
       <div id="agent-panel-options" className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-3 py-2">
         <div id="agent-panel-options-left" className="min-w-0 justify-self-start">
           <AgentPermissionsMenu
