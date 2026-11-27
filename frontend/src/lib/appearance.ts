@@ -408,12 +408,26 @@ export const FONTS = [
 
 export type FontId = (typeof FONTS)[number]["id"];
 
+/** Default typeface for the agent panel and ce://agent. */
+export const DEFAULT_AGENT_FONT: FontId = "atkinson";
+
 let savedFont: FontId = DEFAULT_FONT;
 /** Painted over `savedFont` while the font list is hovering. Null means show the saved font. */
 let fontPreview: FontId | null = null;
 
 export function normalizeFont(value: string | null | undefined): FontId {
   return FONTS.find((font) => font.id === value)?.id ?? DEFAULT_FONT;
+}
+
+/** Agent font id; blank or unknown values use Atkinson Hyperlegible. */
+export function normalizeAgentFont(value: string | null | undefined): FontId {
+  return FONTS.find((font) => font.id === value)?.id ?? DEFAULT_AGENT_FONT;
+}
+
+/** CSS `font-family` stack for a UI font id. */
+export function fontStack(id: string | null | undefined): string {
+  const font = FONTS.find((item) => item.id === id) ?? FONTS.find((item) => item.id === DEFAULT_FONT)!;
+  return font.stack;
 }
 
 export function readFont(): FontId {

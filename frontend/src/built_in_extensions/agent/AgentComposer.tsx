@@ -1,9 +1,10 @@
-import { useRef, useState, type KeyboardEvent } from "react";
-import { AtSign, ChevronRight, SendHorizontal, Slash } from "lucide-react";
-import type { TabInfo } from "@type/browser";
+import { useRef, useState, type DragEvent, type KeyboardEvent, type ClipboardEvent } from "react";
+import { AtSign, FileText, Paperclip, SendHorizontal, Slash, X } from "lucide-react";
+import type { AgentAttachment, TabInfo } from "@type/browser";
 import { FavIcon } from "@/components/FavIcon";
 import { IconButton } from "@/components/IconButton";
 import { commandMatches, type AgentCommand, type ComposerMode } from "@/lib/agent-commands";
+import { pickAgentFiles } from "@/lib/browser-client";
 import { cn } from "@/lib/cn";
 import { inputClassName } from "./agent-styles";
 
@@ -16,16 +17,21 @@ const PLACEHOLDERS: Record<ComposerMode, string> = {
   followup: "Ask a follow-up…",
 };
 
+const MAX_ATTACHMENTS = 6;
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif)$/i;
+const TEXT_EXT = /\.(txt|md|json|csv|log|html?|css|jsx?|tsx?)$/i;
+
 type Props = {
   mode: ComposerMode;
   draftKey: string;
   disabled?: boolean;
-  suggestions?: string[];
+  /** When false, image paste/attach is blocked (text files still ok). */
+  allowImages?: boolean;
   /** Tabs that `@` can point the agent at. */
   tabs?: TabInfo[];
   /** Earlier tasks, newest first, for the up arrow. */
   history?: string[];
-  onSubmit: (text: string, contextTabs: number[]) => void;
+  onSubmit: (text: string, contextTabs: number[], attachments: AgentAttachment[]) => void;
 };
 
 type Mention = { id: number; token: string };
@@ -61,18 +67,78 @@ function findMenu(text: string, caret: number, mode: ComposerMode, tabs: TabInfo
   return items.length > 0 ? { kind: "mention", items, at, caret } : null;
 }
 
-export function AgentComposer({ mode, draftKey, disabled, suggestions = [], tabs = [], history = [], onSubmit }: Props) {
+function stamp() {
+  return `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function stripDataUrl(dataUrl: string) {
+  const comma = dataUrl.indexOf(",");
+  return comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+}
+
+function isImageFile(file: File) {
+  return file.type.startsWith("image/") || IMAGE_EXT.test(file.name);
+}
+
+function isTextFile(file: File) {
+  return file.type.startsWith("text/") || file.type === "application/json" || TEXT_EXT.test(file.name);
+}
+
+async function fileToAttachment(file: File): Promise<AgentAttachment | null> {
+  if (isImageFile(file)) {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(new Error("Could not read that image."));
+      reader.readAsDataURL(file);
+    });
+    return {
+      id: stamp(),
+      kind: "image",
+      name: file.name || "image.png",
+      mediaType: file.type || "image/png",
+      data: stripDataUrl(dataUrl),
+    };
+  }
+  if (isTextFile(file)) {
+    const text = await file.text();
+    return {
+      id: stamp(),
+      kind: "text",
+      name: file.name || "file.txt",
+      mediaType: file.type || "text/plain",
+      data: text,
+    };
+  }
+  return null;
+}
+
+function previewSrc(attachment: AgentAttachment) {
+  if (attachment.kind !== "image") {
+    return null;
+  }
+  if (attachment.data.startsWith("data:")) {
+    return attachment.data;
+  }
+  return `data:${attachment.mediaType || "image/png"};base64,${attachment.data}`;
+}
+
+export function AgentComposer({ mode, draftKey, disabled, allowImages = true, tabs = [], history = [], onSubmit }: Props) {
   const input = useRef<HTMLTextAreaElement | null>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
   const [text, setTextState] = useState(() => drafts.get(draftKey) ?? "");
+  const [attachments, setAttachments] = useState<AgentAttachment[]>([]);
+  const [attachNote, setAttachNote] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [caret, setCaret] = useState(0);
   const [mentions, setMentions] = useState<Mention[]>([]);
   const [highlight, setHighlight] = useState(0);
   const [menuClosed, setMenuClosed] = useState(false);
   const [recall, setRecall] = useState(-1);
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const menu = menuClosed || disabled ? null : findMenu(text, caret, mode, tabs);
   const menuSize = menu?.items.length ?? 0;
   const active = menuSize > 0 ? Math.min(highlight, menuSize - 1) : 0;
+  const hasImages = attachments.some((item) => item.kind === "image");
 
   const setText = (value: string) => {
     setTextState(value);
@@ -87,14 +153,78 @@ export function AgentComposer({ mode, draftKey, disabled, suggestions = [], tabs
     });
   };
 
+  const addAttachments = async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) {
+      return;
+    }
+    setAttachNote(null);
+    const next = [...attachments];
+    for (const file of list) {
+      if (next.length >= MAX_ATTACHMENTS) {
+        setAttachNote(`Attach at most ${MAX_ATTACHMENTS} files.`);
+        break;
+      }
+      if (isImageFile(file) && !allowImages) {
+        setAttachNote("This model may not accept images. Pick a vision model, or attach a text file.");
+        continue;
+      }
+      try {
+        const item = await fileToAttachment(file);
+        if (!item) {
+          setAttachNote(`Unsupported file: ${file.name || "attachment"}`);
+          continue;
+        }
+        next.push(item);
+      } catch (reason: unknown) {
+        setAttachNote(String(reason));
+      }
+    }
+    setAttachments(next);
+  };
+
+  const pickFiles = async () => {
+    if (disabled) {
+      return;
+    }
+    setAttachNote(null);
+    try {
+      const picked = await pickAgentFiles();
+      if (picked.length === 0) {
+        return;
+      }
+      const next = [...attachments];
+      for (const item of picked) {
+        if (next.length >= MAX_ATTACHMENTS) {
+          setAttachNote(`Attach at most ${MAX_ATTACHMENTS} files.`);
+          break;
+        }
+        if (item.kind === "image" && !allowImages) {
+          setAttachNote("This model may not accept images. Pick a vision model, or attach a text file.");
+          continue;
+        }
+        next.push(item);
+      }
+      setAttachments(next);
+    } catch (reason: unknown) {
+      setAttachNote(String(reason));
+    }
+  };
+
   const send = () => {
     const value = text.trim();
-    if (!value || disabled) {
+    if ((!value && attachments.length === 0) || disabled) {
+      return;
+    }
+    if (hasImages && !allowImages) {
+      setAttachNote("Remove images or pick a vision model before sending.");
       return;
     }
     const contextTabs = mentions.filter((mention) => value.includes(mention.token)).map((mention) => mention.id);
-    onSubmit(value, [...new Set(contextTabs)]);
+    onSubmit(value, [...new Set(contextTabs)], attachments);
     setText("");
+    setAttachments([]);
+    setAttachNote(null);
     setMentions([]);
     setRecall(-1);
   };
@@ -150,40 +280,99 @@ export function AgentComposer({ mode, draftKey, disabled, suggestions = [], tabs
     }
   };
 
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = event.clipboardData?.files;
+    const items = event.clipboardData?.items;
+    const imageFiles: File[] = [];
+    if (files && files.length > 0) {
+      for (const file of Array.from(files)) {
+        if (isImageFile(file) || isTextFile(file)) {
+          imageFiles.push(file);
+        }
+      }
+    } else if (items) {
+      for (const item of Array.from(items)) {
+        if (item.kind === "file") {
+          const file = item.getAsFile();
+          if (file && (isImageFile(file) || isTextFile(file))) {
+            imageFiles.push(file);
+          }
+        }
+      }
+    }
+    if (imageFiles.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    void addAttachments(imageFiles);
+  };
+
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragging(false);
+    if (disabled) {
+      return;
+    }
+    void addAttachments(event.dataTransfer.files);
+  };
+
   return (
     <div id="agent-composer" className="flex flex-col gap-2">
-      {mode === "start" && !text && suggestions.length > 0 ? (
-        <div id="agent-composer-examples">
-          <button
-            id="agent-composer-examples-toggle"
-            type="button"
-            className="flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-zinc-400 hover:text-zinc-100"
-            aria-expanded={suggestionsOpen}
-            aria-controls="agent-composer-examples-list"
-            onClick={() => setSuggestionsOpen((open) => !open)}
-          >
-            <ChevronRight id="agent-composer-examples-toggle-icon" className={cn("size-3.5 transition-transform", suggestionsOpen && "rotate-90")} aria-hidden />
-            Suggestions
-          </button>
-          {suggestionsOpen ? (
-            <ul id="agent-composer-examples-list" className="mt-1 flex flex-col gap-1">
-              {suggestions.map((example, index) => (
-                <li id={`agent-composer-example-${index}`} key={example}>
-                  <button
-                    id={`agent-composer-example-${index}-button`}
-                    type="button"
-                    className="w-full rounded-md px-2 py-1 text-left text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-                    onClick={() => setText(example)}
-                  >
-                    {example}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+      {attachments.length > 0 ? (
+        <div id="agent-composer-chips" className="flex flex-wrap gap-1.5">
+          {attachments.map((item) => {
+            const src = previewSrc(item);
+            return (
+              <div
+                id={`agent-composer-chip-${item.id}`}
+                key={item.id}
+                className="flex max-w-full items-center gap-1.5 rounded-md bg-zinc-900 px-1.5 py-1 ring-1 ring-zinc-700"
+              >
+                {src ? (
+                  <img id={`agent-composer-chip-${item.id}-thumb`} src={src} alt="" className="size-8 rounded object-cover" />
+                ) : (
+                  <FileText id={`agent-composer-chip-${item.id}-icon`} className="size-3.5 shrink-0 text-zinc-400" aria-hidden />
+                )}
+                <span id={`agent-composer-chip-${item.id}-name`} className="max-w-36 truncate text-[11px] text-zinc-300">
+                  {item.name}
+                </span>
+                <button
+                  id={`agent-composer-chip-${item.id}-remove`}
+                  type="button"
+                  className="flex size-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                  aria-label={`Remove ${item.name}`}
+                  onClick={() => setAttachments((previous) => previous.filter((entry) => entry.id !== item.id))}
+                >
+                  <X id={`agent-composer-chip-${item.id}-remove-icon`} className="size-3" aria-hidden />
+                </button>
+              </div>
+            );
+          })}
         </div>
       ) : null}
-      <div id="agent-composer-box" className="relative">
+      {hasImages && !allowImages ? (
+        <p id="agent-composer-vision-block" role="status" className="rounded-md bg-amber-950/40 px-2 py-1.5 text-[11px] text-amber-200 ring-1 ring-amber-900/60">
+          Attached images need a vision model. Remove them or change the model.
+        </p>
+      ) : null}
+      {attachNote ? (
+        <p id="agent-composer-attach-note" role="status" className="text-[11px] text-amber-200">
+          {attachNote}
+        </p>
+      ) : null}
+      <div
+        id="agent-composer-box"
+        className={cn("relative", dragging && "rounded-md ring-1 ring-sky-600")}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          if (!disabled) {
+            setDragging(true);
+          }
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+      >
         {menu && menuSize > 0 ? (
           <ul
             id="agent-composer-menu"
@@ -236,7 +425,7 @@ export function AgentComposer({ mode, draftKey, disabled, suggestions = [], tabs
         <textarea
           id="agent-composer-input"
           ref={input}
-          className={cn(inputClassName, "min-h-16 resize-none pr-10")}
+          className={cn(inputClassName, "min-h-16 resize-none pr-16")}
           rows={3}
           value={text}
           disabled={disabled}
@@ -249,12 +438,36 @@ export function AgentComposer({ mode, draftKey, disabled, suggestions = [], tabs
           }}
           onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
         />
+        <input
+          id="agent-composer-file-input"
+          ref={fileInput}
+          type="file"
+          className="hidden"
+          multiple
+          accept="image/png,image/jpeg,image/webp,image/gif,.txt,.md,.json,.csv,.log,.html,.htm,.css,.js,.ts,.tsx,.jsx"
+          onChange={(event) => {
+            if (event.target.files) {
+              void addAttachments(event.target.files);
+            }
+            event.target.value = "";
+          }}
+        />
+        <IconButton
+          id="agent-composer-attach"
+          label="Attach files"
+          className="absolute bottom-1.5 right-9 size-7"
+          disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
+          onClick={() => void pickFiles()}
+        >
+          <Paperclip id="agent-composer-attach-icon" aria-hidden />
+        </IconButton>
         <IconButton
           id="agent-composer-send"
           label={mode === "start" ? "Start (Enter)" : "Send (Enter)"}
           className="absolute bottom-1.5 right-1.5 size-7"
-          disabled={disabled || !text.trim()}
+          disabled={disabled || (!text.trim() && attachments.length === 0) || (hasImages && !allowImages)}
           onClick={send}
         >
           <SendHorizontal id="agent-composer-send-icon" aria-hidden />

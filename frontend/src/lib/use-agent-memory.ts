@@ -27,10 +27,42 @@ export function useAgentMemory() {
     items,
     loaded,
     error,
-    add: (text: string, site: string, pinned: boolean) =>
-      guard(agentMemorySave({ id: "", text, site, pinned, created: 0, used: 0 })),
-    update: (item: AgentMemoryItem) => guard(agentMemorySave(item)),
-    togglePin: (item: AgentMemoryItem) => guard(agentMemorySave({ ...item, pinned: !item.pinned })),
+    add: (text: string, site: string, pinned: boolean, category: AgentMemoryItem["category"] = "") =>
+      guard(
+        agentMemorySave({
+          id: "",
+          text,
+          site,
+          pinned,
+          created: 0,
+          used: 0,
+          category,
+          sourceUrl: "",
+          sourceRun: 0,
+          expires: 0,
+        }),
+      ),
+    update: (item: AgentMemoryItem) =>
+      guard(
+        agentMemorySave({
+          ...item,
+          category: item.category ?? "",
+          sourceUrl: item.sourceUrl ?? "",
+          sourceRun: item.sourceRun ?? 0,
+          expires: item.expires ?? 0,
+        }),
+      ),
+    togglePin: (item: AgentMemoryItem) =>
+      guard(
+        agentMemorySave({
+          ...item,
+          category: item.category ?? "",
+          sourceUrl: item.sourceUrl ?? "",
+          sourceRun: item.sourceRun ?? 0,
+          expires: item.expires ?? 0,
+          pinned: !item.pinned,
+        }),
+      ),
     remove: (id: string) => guard(agentMemoryDelete(id)),
   };
 }

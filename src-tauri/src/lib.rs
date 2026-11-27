@@ -2689,8 +2689,15 @@ fn agent_continue(
     run_id: u32,
     text: String,
     tab_id: Option<u32>,
+    attachments: Option<Vec<automation::agent::AgentAttachment>>,
 ) -> Result<(), String> {
-    automation::agent::continue_run(&app, run_id, &text, tab_id)
+    automation::agent::continue_run(
+        &app,
+        run_id,
+        &text,
+        tab_id,
+        attachments.as_deref().unwrap_or(&[]),
+    )
 }
 
 #[tauri::command]
@@ -2705,6 +2712,25 @@ fn agent_set_access(
     access: automation::agent::AgentAccess,
 ) -> Result<(), String> {
     automation::agent::set_access(&app, run_id, access)
+}
+
+#[tauri::command]
+fn agent_update_plan(
+    app: AppHandle,
+    run_id: u32,
+    plan: Vec<automation::agent::PlanItem>,
+) -> Result<(), String> {
+    automation::agent::update_plan(&app, run_id, plan)
+}
+
+#[tauri::command]
+fn agent_allow_risk(app: AppHandle, run_id: u32, risk: String) -> Result<(), String> {
+    automation::agent::allow_risk(&app, run_id, &risk)
+}
+
+#[tauri::command]
+fn agent_cockpit(app: AppHandle, run_id: u32, action: String) -> Result<(), String> {
+    automation::agent::cockpit(&app, run_id, &action)
 }
 
 #[tauri::command]
@@ -2764,8 +2790,18 @@ fn agent_answer_dialog(
 }
 
 #[tauri::command]
-fn agent_reply(app: AppHandle, run_id: u32, text: String) -> Result<(), String> {
-    automation::agent::reply(&app, run_id, &text)
+fn agent_reply(
+    app: AppHandle,
+    run_id: u32,
+    text: String,
+    attachments: Option<Vec<automation::agent::AgentAttachment>>,
+) -> Result<(), String> {
+    automation::agent::reply(&app, run_id, &text, attachments.as_deref().unwrap_or(&[]))
+}
+
+#[tauri::command]
+fn read_attachment_file(path: String) -> Result<automation::agent::AgentAttachment, String> {
+    automation::agent::read_attachment_file(&path)
 }
 
 #[tauri::command]
@@ -3760,8 +3796,12 @@ pub fn run() {
             unpin_profile_taskbar,
             agent_start,
             agent_continue,
+            read_attachment_file,
             agent_set_autonomy,
             agent_set_access,
+            agent_update_plan,
+            agent_allow_risk,
+            agent_cockpit,
             agent_delete_run,
             agent_run,
             agent_save_flow,

@@ -1333,6 +1333,7 @@ fn ensure_child(app: &AppHandle, window: &str, label: &str, url: Url) -> Result<
         )
         .map_err(|error| error.to_string())?;
     attach_webview(app, &view);
+    webview2::attach_inspect_hooks(app, &view);
     let _ = view.set_zoom(settings::get(app).ui_zoom_factor());
     if label.starts_with("cext-panel-") {
         watch_panel_navigation(app, &view, label);

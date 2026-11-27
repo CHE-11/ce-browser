@@ -22,7 +22,93 @@ pub struct Observation {
     pub url: String,
 }
 
-pub fn observe(app: &AppHandle, tab: u32, window: &str, screenshots: bool) -> Observation {
+/// Whether the user's ask is likely to need a page screenshot (layout, images, unlabeled UI).
+/// Text-only tasks (summarize, extract, search) get the DOM/text page state only.
+pub fn task_wants_screenshot(goal: &str, instructions: &str, follow_up: Option<&str>) -> bool {
+    let mut text = String::new();
+    text.push_str(goal);
+    text.push('\n');
+    text.push_str(instructions);
+    if let Some(follow_up) = follow_up {
+        text.push('\n');
+        text.push_str(follow_up);
+    }
+    let text = text.to_lowercase();
+    if text.trim().is_empty() {
+        return false;
+    }
+    // Strong "use your eyes" asks.
+    const VISUAL: &[&str] = &[
+        "screenshot",
+        "screen shot",
+        "look like",
+        "looks like",
+        "what do you see",
+        "what you see",
+        "visually",
+        "visual",
+        "on screen",
+        "on the screen",
+        "image",
+        "picture",
+        "photo",
+        "icon",
+        "logo",
+        "banner",
+        "color",
+        "colour",
+        "layout",
+        "design",
+        "appearance",
+        "chart",
+        "graph",
+        "map",
+        "canvas",
+        "thumbnail",
+        "where is the",
+        "find the button",
+        "red button",
+        "blue button",
+        "green button",
+        "click the image",
+        "click on the image",
+        "unlabeled",
+        "without a label",
+        "pixel",
+    ];
+    if VISUAL.iter().any(|needle| text.contains(needle)) {
+        return true;
+    }
+    // Text / data tasks that the DOM state already covers.
+    const TEXT_ONLY: &[&str] = &[
+        "summarize",
+        "summary",
+        "extract",
+        "read this",
+        "read the",
+        "what does",
+        "what is this page",
+        "explain",
+        "translate",
+        "list the",
+        "find in the text",
+        "search for",
+        "how many",
+        "price of",
+        "bookmark",
+        "history",
+        "remember",
+        "markdown",
+        "copy the",
+        "save as",
+    ];
+    if TEXT_ONLY.iter().any(|needle| text.contains(needle)) {
+        return false;
+    }
+    false
+}
+
+pub fn observe(app: &AppHandle, tab: u32, window: &str, with_shot: bool) -> Observation {
     let url = tabs::tab_info(app, tab)
         .map(|info| info.url)
         .unwrap_or_default();
@@ -93,6 +179,18 @@ pub fn observe(app: &AppHandle, tab: u32, window: &str, screenshots: bool) -> Ob
             clip(&pending.message, 300)
         ));
     }
+    if !with_shot {
+        text.push_str(
+            "\n\nNo screenshot attached. Use the element list and page text. Call look only if you need to see layout, images, colors, or something without a ref.\n",
+        );
+        return Observation {
+            text,
+            image: None,
+            thumb: None,
+            scale: 1.0,
+            url,
+        };
+    }
     let mut observation = Observation {
         text,
         image: None,
@@ -100,22 +198,14 @@ pub fn observe(app: &AppHandle, tab: u32, window: &str, screenshots: bool) -> Ob
         scale: 1.0,
         url,
     };
-    let shot = driver::screenshot(
-        app,
-        tab,
-        screenshots,
-        if screenshots { SHOT_WIDTH } else { 320 },
-    );
-    if let Ok(shot) = shot {
+    if let Ok(shot) = driver::screenshot(app, tab, true, SHOT_WIDTH) {
         if css_width > 0.0 && shot.width > 0 {
             observation.scale = css_width / shot.width as f64;
         }
         observation.thumb = driver::shrink_jpeg(&shot.bytes, 480, 60)
             .ok()
             .map(|thumb| jpeg_data_url(&thumb.bytes));
-        if screenshots {
-            observation.image = Some(base64::engine::general_purpose::STANDARD.encode(&shot.bytes));
-        }
+        observation.image = Some(base64::engine::general_purpose::STANDARD.encode(&shot.bytes));
     }
     observation
 }
@@ -156,6 +246,45 @@ pub fn context_tabs(app: &AppHandle, ids: &[u32]) -> String {
         ));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::task_wants_screenshot;
+
+    #[test]
+    fn text_tasks_skip_screenshots() {
+        assert!(!task_wants_screenshot(
+            "Summarize this page and list the key facts",
+            "",
+            None
+        ));
+        assert!(!task_wants_screenshot(
+            "Extract the prices from the table",
+            "",
+            None
+        ));
+        assert!(!task_wants_screenshot("What does this article say?", "", None));
+    }
+
+    #[test]
+    fn visual_tasks_request_screenshots() {
+        assert!(task_wants_screenshot(
+            "What color is the primary button?",
+            "",
+            None
+        ));
+        assert!(task_wants_screenshot(
+            "Describe the layout of this page",
+            "",
+            None
+        ));
+        assert!(task_wants_screenshot(
+            "Book a flight",
+            "",
+            Some("Look at the seat map image")
+        ));
+    }
 }
 
 /// Drops screenshots and page states from all but the newest turn so the request stays small.

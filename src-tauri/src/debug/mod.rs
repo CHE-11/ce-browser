@@ -401,10 +401,22 @@ fn held_popups() -> MutexGuard<'static, Vec<String>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Focus moving to the HUD or to a WebView2 DevTools window does not dismiss a popup, so
-/// the popup can be inspected. Only while the Debug HUD extension is on.
+/// Focus moving to a DevTools window does not dismiss a popup, so the popup can be inspected.
+/// The HUD holds popups too while the Debug HUD extension is on.
 pub fn keeps_popups_open(app: &AppHandle, hwnd: isize) -> bool {
-    hud_enabled() && (hud::is_hud_hwnd(app, hwnd) || is_webview_devtools(hwnd))
+    is_devtools_window(app, hwnd) || (hud_enabled() && hud::is_hud_hwnd(app, hwnd))
+}
+
+/// A WebView2 DevTools window, or an `inspect-<label>` window this app built for one.
+fn is_devtools_window(app: &AppHandle, hwnd: isize) -> bool {
+    if hwnd == 0 {
+        return false;
+    }
+    is_webview_devtools(hwnd)
+        || app.windows().iter().any(|(label, window)| {
+            label.starts_with("inspect-")
+                && window.hwnd().is_ok_and(|own| own.0 as isize == hwnd)
+        })
 }
 
 pub fn hold_popups(window: &str) {
@@ -420,7 +432,7 @@ pub fn release_held_popups(app: &AppHandle, x: i32, y: i32) -> Vec<String> {
     if held_popups().is_empty() {
         return Vec::new();
     }
-    if hud::contains_point(app, x, y) || is_webview_devtools(root_at(x, y)) {
+    if hud::contains_point(app, x, y) || is_devtools_window(app, root_at(x, y)) {
         return Vec::new();
     }
     std::mem::take(&mut *held_popups())
@@ -602,7 +614,9 @@ pub async fn debug_clear_outline(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn open_devtools(app: &AppHandle, label: &str) -> Result<(), String> {
+/// DevTools for webview `label`: the docked inspector for a tab, a DevTools window otherwise.
+/// Not gated on the HUD, so F12 in a panel or popup can use it.
+pub fn open_devtools_for(app: &AppHandle, label: &str) -> Result<(), String> {
     if let Some(id) = webviews::tab_id(label) {
         tabs::open_devtools(app, id);
         return Ok(());
@@ -706,7 +720,7 @@ fn reload_webview(app: &AppHandle, label: &str) -> Result<(), String> {
 #[tauri::command]
 pub async fn debug_open_devtools(app: AppHandle, label: String) -> Result<(), String> {
     require()?;
-    open_devtools(&app, &label)
+    open_devtools_for(&app, &label)
 }
 
 #[tauri::command]

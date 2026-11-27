@@ -8,9 +8,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 type BookmarkAddProps = {
   mode: "link" | "folder";
   parentId: string;
+  /** Insert at this index in `parentId`. Ignored if the user picks another folder. */
+  index?: number | null;
 };
 
-export function BookmarkAdd({ mode, parentId }: BookmarkAddProps) {
+export function BookmarkAdd({ mode, parentId, index = null }: BookmarkAddProps) {
   const { tree, loaded: treeLoaded } = useBookmarksState();
   const snapshot = useTabs();
   const folders = useMemo(() => listFolders(tree), [tree]);
@@ -53,7 +55,8 @@ export function BookmarkAdd({ mode, parentId }: BookmarkAddProps) {
       return;
     }
     try {
-      await addBookmark(folderId, name.trim(), isLink ? url.trim() : null);
+      const at = folderId === parentId && index != null ? index : undefined;
+      await addBookmark(folderId, name.trim(), isLink ? url.trim() : null, at);
       await closePopup();
     } catch (reason) {
       setError(String(reason));

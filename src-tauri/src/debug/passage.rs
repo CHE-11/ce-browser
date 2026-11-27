@@ -531,7 +531,7 @@ fn run(app: &AppHandle, name: &str, args: &Value) -> Result<Output, String> {
             Ok(Output::json(json!("Reloading.")))
         }
         "devtools" => {
-            super::open_devtools(app, &arg_label(args))?;
+            super::open_devtools_for(app, &arg_label(args))?;
             Ok(Output::json(json!("DevTools opened.")))
         }
         "wait" => wait(app, args).map(Output::json),

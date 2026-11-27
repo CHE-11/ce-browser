@@ -14,7 +14,7 @@ pub const FILE: &str = "agent-memory.json";
 const MAX_ITEMS: usize = 500;
 const MAX_TEXT: usize = 1000;
 /// Characters of memory added to the agent's instructions each turn.
-const PROMPT_BUDGET: usize = 1500;
+const PROMPT_BUDGET: usize = 4000;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default, rename_all = "camelCase")]
@@ -28,6 +28,14 @@ pub struct MemoryItem {
     pub created: u64,
     /// Last time the agent read it.
     pub used: u64,
+    /// `preference`, `procedure`, `fact`, or blank for uncategorized older notes.
+    pub category: String,
+    /// Page URL the note came from, when known.
+    pub source_url: String,
+    /// Run id that created the note. Zero when the user added it.
+    pub source_run: u32,
+    /// Milliseconds since 1970 when the note should be reviewed or dropped. Zero never expires.
+    pub expires: u64,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -106,6 +114,13 @@ pub fn save(app: &AppHandle, item: MemoryItem) -> Result<MemoryItem, String> {
     }
     let site = clean_site(&item.site);
     Ok(change(app, |items| {
+        let category = match item.category.trim() {
+            "preference" | "procedure" | "fact" => item.category.trim().to_string(),
+            _ => String::new(),
+        };
+        let source_url = clip(item.source_url.trim(), 500);
+        let source_run = item.source_run;
+        let expires = item.expires;
         if let Some(existing) = items
             .iter_mut()
             .find(|existing| !item.id.is_empty() && existing.id == item.id)
@@ -113,6 +128,10 @@ pub fn save(app: &AppHandle, item: MemoryItem) -> Result<MemoryItem, String> {
             existing.text = text;
             existing.site = site;
             existing.pinned = item.pinned;
+            existing.category = category;
+            existing.source_url = source_url;
+            existing.source_run = source_run;
+            existing.expires = expires;
             return existing.clone();
         }
         if let Some(same) = items
@@ -120,6 +139,18 @@ pub fn save(app: &AppHandle, item: MemoryItem) -> Result<MemoryItem, String> {
             .find(|existing| existing.text == text && existing.site == site)
         {
             same.pinned |= item.pinned;
+            if same.category.is_empty() {
+                same.category = category;
+            }
+            if same.source_url.is_empty() {
+                same.source_url = source_url;
+            }
+            if same.source_run == 0 {
+                same.source_run = source_run;
+            }
+            if same.expires == 0 {
+                same.expires = expires;
+            }
             return same.clone();
         }
         let saved = MemoryItem {
@@ -129,6 +160,10 @@ pub fn save(app: &AppHandle, item: MemoryItem) -> Result<MemoryItem, String> {
             pinned: item.pinned,
             created: now_ms(),
             used: 0,
+            category,
+            source_url,
+            source_run,
+            expires,
         };
         items.push(saved.clone());
         while items.len() > MAX_ITEMS {
@@ -206,17 +241,23 @@ fn touch(app: &AppHandle, items: &[MemoryItem]) {
 /// Pinned notes and notes for the page's site, for the agent's instructions.
 pub fn for_prompt(app: &AppHandle, url: &str) -> String {
     let site = sleep_site_key(url);
+    let now = now_ms();
     let mut items: Vec<MemoryItem> = list(app)
         .into_iter()
+        .filter(|item| item.expires == 0 || item.expires > now)
         .filter(|item| item.pinned || (!site.is_empty() && item.site == site))
         .collect();
     items.sort_by_key(|item| std::cmp::Reverse((item.pinned, item.created)));
     let mut out = String::new();
     for item in items {
+        let mut prefix = String::new();
+        if !item.category.is_empty() {
+            prefix.push_str(&format!("[{}] ", item.category));
+        }
         let line = if item.site.is_empty() {
-            format!("- {}\n", item.text)
+            format!("- {prefix}{}\n", item.text)
         } else {
-            format!("- ({}) {}\n", item.site, item.text)
+            format!("- {prefix}({}) {}\n", item.site, item.text)
         };
         if out.len() + line.len() > PROMPT_BUDGET {
             break;
@@ -228,11 +269,20 @@ pub fn for_prompt(app: &AppHandle, url: &str) -> String {
 
 pub fn describe(item: &MemoryItem) -> String {
     let mut out = format!("[{}] {}", item.id, item.text);
+    if !item.category.is_empty() {
+        out.push_str(&format!(" ({})", item.category));
+    }
     if !item.site.is_empty() {
         out.push_str(&format!(" (site: {})", item.site));
     }
+    if !item.source_url.is_empty() {
+        out.push_str(&format!(" (from: {})", item.source_url));
+    }
     if item.pinned {
         out.push_str(" (pinned)");
+    }
+    if item.expires > 0 {
+        out.push_str(&format!(" (expires: {})", item.expires));
     }
     out
 }

@@ -72,6 +72,7 @@ pub fn tools(auto: &AutomationSettings, helper: bool) -> Vec<Tool> {
                 json!({
                     "text": { "type": "string" },
                     "site": { "type": "string", "description": "Host the note is about, such as `github.com`, or `this site` for the current page. Blank for a general note." },
+                    "category": { "type": "string", "enum": ["preference", "procedure", "fact"], "description": "What kind of note this is." },
                     "pinned": { "type": "boolean", "description": "Show it in every run." }
                 }),
                 &["text"],
@@ -200,9 +201,14 @@ fn page_url(ctx: &Ctx) -> String {
 
 fn remember(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     let text = arg_str(args, "text");
+    let url = page_url(ctx);
     let site = match arg_str(args, "site").trim() {
-        "this site" | "current" | "here" => sleep_site_key(&page_url(ctx)),
+        "this site" | "current" | "here" => sleep_site_key(&url),
         other => other.to_string(),
+    };
+    let category = match arg_str(args, "category").trim() {
+        "preference" | "procedure" | "fact" => arg_str(args, "category").trim().to_string(),
+        _ => "fact".into(),
     };
     let saved = memory::save(
         ctx.app,
@@ -210,6 +216,9 @@ fn remember(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
             text,
             site,
             pinned: arg_bool(args, "pinned", false),
+            category,
+            source_url: url,
+            source_run: ctx.id,
             ..MemoryItem::default()
         },
     )?;

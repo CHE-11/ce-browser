@@ -6,9 +6,11 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AdblockStats,
   AgentAccess,
+  AgentAttachment,
   AgentAutonomy,
   AgentDelta,
   AgentMemoryItem,
+  AgentPlanItem,
   AgentRun,
   AgentStartOptions,
   DebugConsoleEntry,
@@ -2302,8 +2304,41 @@ export function agentStart(tabId: number, goal: string, options?: AgentStartOpti
 }
 
 /** Sends a follow-up. A finished run continues with its history, in `tabId` when its own tab closed. */
-export function agentContinue(runId: number, text: string, tabId?: number) {
-  return invoke<void>("agent_continue", { runId, text, tabId: tabId ?? null });
+export function agentContinue(runId: number, text: string, tabId?: number, attachments?: AgentAttachment[]) {
+  return invoke<void>("agent_continue", {
+    runId,
+    text,
+    tabId: tabId ?? null,
+    attachments: attachments?.length ? attachments : null,
+  });
+}
+
+/** Reads a local image or text file into an agent attachment. */
+export function readAttachmentFile(path: string) {
+  return invoke<AgentAttachment>("read_attachment_file", { path });
+}
+
+/** Opens a file picker for agent attachments (images and text-like files). */
+export async function pickAgentFiles(): Promise<AgentAttachment[]> {
+  const picked = await open({
+    multiple: true,
+    title: "Attach files",
+    filters: [
+      {
+        name: "Images and text",
+        extensions: ["png", "jpg", "jpeg", "webp", "gif", "txt", "md", "json", "csv", "log", "html", "htm", "css", "js", "ts", "tsx", "jsx"],
+      },
+    ],
+  });
+  const paths = pickedPaths(picked);
+  if (!paths) {
+    return [];
+  }
+  const out: AgentAttachment[] = [];
+  for (const path of paths) {
+    out.push(await readAttachmentFile(path));
+  }
+  return out;
 }
 
 export function agentSetAutonomy(runId: number, autonomy: AgentAutonomy) {
@@ -2312,6 +2347,20 @@ export function agentSetAutonomy(runId: number, autonomy: AgentAutonomy) {
 
 export function agentSetAccess(runId: number, access: AgentAccess) {
   return invoke<void>("agent_set_access", { runId, access });
+}
+
+export function agentUpdatePlan(runId: number, plan: AgentPlanItem[]) {
+  return invoke<void>("agent_update_plan", { runId, plan });
+}
+
+/** Allows this risk kind for the rest of the run (not payment/upload/budget). */
+export function agentAllowRisk(runId: number, risk: string) {
+  return invoke<void>("agent_allow_risk", { runId, risk });
+}
+
+/** Steers a run from the cockpit: `retry`, `skip`, `replan`, or `verify`. */
+export function agentCockpit(runId: number, action: "retry" | "skip" | "replan" | "verify") {
+  return invoke<void>("agent_cockpit", { runId, action });
 }
 
 export function agentDeleteRun(runId: number) {
@@ -2361,8 +2410,12 @@ export function agentAnswerDialog(runId: number, accept: boolean, text = "") {
   return invoke<void>("agent_answer_dialog", { runId, accept, text });
 }
 
-export function agentReply(runId: number, text: string) {
-  return invoke<void>("agent_reply", { runId, text });
+export function agentReply(runId: number, text: string, attachments?: AgentAttachment[]) {
+  return invoke<void>("agent_reply", {
+    runId,
+    text,
+    attachments: attachments?.length ? attachments : null,
+  });
 }
 
 export function agentTakeOver(runId: number) {

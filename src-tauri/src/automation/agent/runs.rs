@@ -7,13 +7,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{AppHandle, Emitter};
 
-use crate::ai::{self, ChatMessage};
+use crate::ai::{self, ChatMessage, ChatPart};
 use crate::automation::flows::FlowStep;
 use crate::automation::policy::{self, Risk, Verdict};
 use crate::automation::{audit, clip, now_ms};
 use crate::settings::sleep_site_key;
 use crate::{settings, system, tabs};
 
+use super::attach::{self, AgentAttachment};
 use super::{run_loop, store};
 
 pub const MAX_RUNS: usize = 100;
@@ -188,6 +189,10 @@ pub struct AgentRun {
     pub opened_tab: Option<AgentNotice>,
     /// Latest desktop screenshot, as a small JPEG data URL.
     pub screen: Option<String>,
+    /// Risk kinds the user already allowed for the rest of this run (for example `send`).
+    pub allowed_risks: Vec<String>,
+    /// Sources the run cited while researching (URLs).
+    pub sources: Vec<String>,
 }
 
 impl AgentRun {
@@ -210,6 +215,8 @@ pub struct StartOptions {
     pub instructions: String,
     /// Blank uses the default access.
     pub access: Option<AgentAccess>,
+    /// Images and text files included with the opening message.
+    pub attachments: Vec<AgentAttachment>,
     #[serde(skip)]
     pub parent: Option<u32>,
 }
@@ -229,6 +236,10 @@ pub(super) struct RunState {
     pub answer: Option<(u32, Answer)>,
     pub pending_risk: Option<Risk>,
     pub notes: Vec<String>,
+    /// Attachments waiting to go out with the next user note (images/text files).
+    pub pending_user_parts: Vec<ChatPart>,
+    /// Attachments for the opening task message.
+    pub opening_parts: Vec<ChatPart>,
     /// Last activity, for ending idle MCP sessions.
     pub touched: u64,
     /// The model conversation, kept so a finished run can take a follow-up.
@@ -258,6 +269,8 @@ impl RunState {
             answer: None,
             pending_risk: None,
             notes: Vec::new(),
+            pending_user_parts: Vec::new(),
+            opening_parts: Vec::new(),
             touched: now_ms(),
             transcript: Vec::new(),
             flow_steps: Vec::new(),
@@ -412,10 +425,16 @@ pub fn start_with(
     goal: &str,
     options: StartOptions,
 ) -> Result<u32, String> {
+    let prepared = attach::prepare(&options.attachments)?;
     let goal = goal.trim();
-    if goal.is_empty() {
+    if goal.is_empty() && prepared.parts.is_empty() {
         return Err("Describe what the agent should do.".into());
     }
+    let goal = if goal.is_empty() {
+        "Look at the attached files."
+    } else {
+        goal
+    };
     let current = settings::get(app);
     check_ready(app, &current)?;
     let info = tabs::tab_info(app, tab).ok_or("That tab is closed.")?;
@@ -478,12 +497,32 @@ pub fn start_with(
             parent: options.parent,
             background: options.background,
             start_url: info.url.clone(),
+            sources: if info.url.starts_with("http://") || info.url.starts_with("https://") {
+                vec![clip(&info.url, 500)]
+            } else {
+                Vec::new()
+            },
             access,
             ..AgentRun::default()
         });
         state.context_tabs = context_tabs;
         state.instructions = clip(options.instructions.trim(), input_chars(&current));
+        state.opening_parts = prepared.parts.clone();
         state.working = true;
+        let goal_text = state.run.goal.clone();
+        let suffix = attach::step_suffix(&prepared);
+        let mut user = step_within(
+            "user",
+            &if suffix.is_empty() {
+                goal_text
+            } else {
+                format!("{goal_text} {suffix}")
+            },
+            &prepared.detail,
+            input_chars(&current),
+        );
+        user.thumb = prepared.thumb;
+        add_step(&mut state.run, user);
         agents.runs.push(state);
         trim_runs(&mut agents);
         id
@@ -496,11 +535,23 @@ pub fn start_with(
 
 /// Sends a follow-up to a run. A finished run picks up where it stopped, with its history.
 /// `tab` is where to continue when the run's own tab has closed.
-pub fn continue_run(app: &AppHandle, id: u32, text: &str, tab: Option<u32>) -> Result<(), String> {
+pub fn continue_run(
+    app: &AppHandle,
+    id: u32,
+    text: &str,
+    tab: Option<u32>,
+    attachments: &[AgentAttachment],
+) -> Result<(), String> {
+    let prepared = attach::prepare(attachments)?;
     let text = text.trim();
-    if text.is_empty() {
+    if text.is_empty() && prepared.parts.is_empty() {
         return Ok(());
     }
+    let text = if text.is_empty() {
+        "Look at the attached files."
+    } else {
+        text
+    };
     let (active, source, own_tab, working) = with_run(id, |state| {
         (
             state.run.active(),
@@ -511,7 +562,7 @@ pub fn continue_run(app: &AppHandle, id: u32, text: &str, tab: Option<u32>) -> R
     })
     .ok_or("That run was removed.")?;
     if active {
-        return reply(app, id, text);
+        return reply(app, id, text, attachments);
     }
     if working {
         return Err("The agent is still stopping. Try again in a moment.".into());
@@ -533,6 +584,7 @@ pub fn continue_run(app: &AppHandle, id: u32, text: &str, tab: Option<u32>) -> R
     if tabs::tab_info(app, tab).is_some_and(|info| current.ai_blocked(&info.url)) {
         return Err(settings::AI_SITE_BLOCKED.into());
     }
+    let suffix = attach::step_suffix(&prepared);
     let restarted = with_run(id, |state| {
         if state.run.active() || state.working {
             return false;
@@ -548,6 +600,7 @@ pub fn continue_run(app: &AppHandle, id: u32, text: &str, tab: Option<u32>) -> R
         } else {
             text.to_string()
         });
+        state.opening_parts = prepared.parts.clone();
         state.run.status = "running".into();
         state.run.finished = 0;
         state.run.approval = None;
@@ -565,15 +618,23 @@ pub fn continue_run(app: &AppHandle, id: u32, text: &str, tab: Option<u32>) -> R
             previous_status == "failed",
             output_chars(&current),
         );
-        add_step(
-            &mut state.run,
-            step_within("user", text, "", input_chars(&current)),
+        let mut user = step_within(
+            "user",
+            &if suffix.is_empty() {
+                text.to_string()
+            } else {
+                format!("{text} {suffix}")
+            },
+            &prepared.detail,
+            input_chars(&current),
         );
+        user.thumb = prepared.thumb.clone();
+        add_step(&mut state.run, user);
         true
     })
     .unwrap_or(false);
     if !restarted {
-        return reply(app, id, text);
+        return reply(app, id, text, attachments);
     }
     tabs::set_automated(app, tab, true);
     emit(app);
@@ -785,17 +846,29 @@ pub fn answer(app: &AppHandle, id: u32, approval: u32, allow: bool) {
 }
 
 /// Answers the agent's question, or adds an instruction to a running agent.
-pub fn reply(app: &AppHandle, id: u32, text: &str) -> Result<(), String> {
+pub fn reply(
+    app: &AppHandle,
+    id: u32,
+    text: &str,
+    attachments: &[AgentAttachment],
+) -> Result<(), String> {
+    let prepared = attach::prepare(attachments)?;
     let text = text.trim();
-    if text.is_empty() {
+    if text.is_empty() && prepared.parts.is_empty() {
         return Ok(());
     }
+    let text = if text.is_empty() {
+        "Look at the attached files."
+    } else {
+        text
+    };
     let tab = with_run(id, |state| state.run.tab_id).ok_or("That run has finished.")?;
     let current = settings::get(app);
     if tabs::tab_info(app, tab).is_some_and(|info| current.ai_blocked(&info.url)) {
         return Err(settings::AI_SITE_BLOCKED.into());
     }
     let message_limit = input_chars(&current);
+    let suffix = attach::step_suffix(&prepared);
     with_run(id, |state| {
         if !state.run.active() {
             return Err("That run has finished.".to_string());
@@ -803,10 +876,25 @@ pub fn reply(app: &AppHandle, id: u32, text: &str) -> Result<(), String> {
         match &state.run.approval {
             Some(approval) if approval.kind == "question" => {
                 state.answer = Some((approval.id, Answer::Reply(text.to_string())));
+                state.pending_user_parts.extend(prepared.parts.clone());
             }
-            _ => state.notes.push(format!("Message from the user: {text}")),
+            _ => {
+                state.notes.push(format!("Message from the user: {text}"));
+                state.pending_user_parts.extend(prepared.parts.clone());
+            }
         }
-        add_step(&mut state.run, step_within("user", text, "", message_limit));
+        let mut user = step_within(
+            "user",
+            &if suffix.is_empty() {
+                text.to_string()
+            } else {
+                format!("{text} {suffix}")
+            },
+            &prepared.detail,
+            message_limit,
+        );
+        user.thumb = prepared.thumb.clone();
+        add_step(&mut state.run, user);
         Ok(())
     })
     .ok_or("That run has finished.")??;
@@ -857,6 +945,118 @@ pub fn set_access(app: &AppHandle, id: u32, access: AgentAccess) -> Result<(), S
     .ok_or("That run was removed.")??;
     emit(app);
     Ok(())
+}
+
+/// Replaces the run's plan checklist. Used by the panel when the user edits it.
+pub fn update_plan(app: &AppHandle, id: u32, plan: Vec<PlanItem>) -> Result<(), String> {
+    let plan: Vec<PlanItem> = plan
+        .into_iter()
+        .filter_map(|item| {
+            let text = clip(item.text.trim(), 200);
+            if text.is_empty() {
+                return None;
+            }
+            let status = match item.status.as_str() {
+                "active" | "done" | "skipped" => item.status,
+                _ => "pending".into(),
+            };
+            Some(PlanItem { text, status })
+        })
+        .take(25)
+        .collect();
+    with_run(id, |state| {
+        if !state.run.active() && state.run.finished != 0 {
+            return Err("That run has finished.".to_string());
+        }
+        state.run.plan = plan;
+        Ok(())
+    })
+    .ok_or("That run was removed.")??;
+    emit(app);
+    Ok(())
+}
+
+/// Allows this risk kind for the rest of the run, and approves the waiting prompt when it matches.
+pub fn allow_risk(app: &AppHandle, id: u32, risk: &str) -> Result<(), String> {
+    let risk = risk.trim().to_ascii_lowercase();
+    if risk.is_empty() || risk == "budget" || risk == "payment" || risk == "upload" {
+        return Err("That action still needs a one-off yes.".into());
+    }
+    with_run(id, |state| {
+        if state.run.source != "agent" {
+            return Err("MCP sessions always ask.".to_string());
+        }
+        if !state
+            .run
+            .allowed_risks
+            .iter()
+            .any(|item| item.eq_ignore_ascii_case(&risk))
+        {
+            state.run.allowed_risks.push(risk.clone());
+        }
+        if let Some(approval) = &state.run.approval
+            && approval.kind == "confirm"
+            && approval.risk.eq_ignore_ascii_case(&risk)
+        {
+            state.answer = Some((approval.id, Answer::Allow(true)));
+        }
+        Ok(())
+    })
+    .ok_or("That run was removed.")??;
+    wake();
+    emit(app);
+    Ok(())
+}
+
+/// Steers a run from the execution cockpit: retry, skip, replan, or verify.
+pub fn cockpit(app: &AppHandle, id: u32, action: &str) -> Result<(), String> {
+    let note = match action.trim() {
+        "retry" => {
+            "User cockpit: retry the last failed or blocked action. Use a different approach if the same one failed."
+        }
+        "skip" => "User cockpit: skip the current plan step or last failing action and continue with the rest.",
+        "replan" => {
+            "User cockpit: stop and rewrite the plan from the current page state, then continue carefully."
+        }
+        "verify" => {
+            "User cockpit: verify the last consequential action succeeded (page state, confirmation, or result), then continue or report what is wrong."
+        }
+        _ => return Err("Unknown cockpit action.".into()),
+    };
+    let active = with_run(id, |state| state.run.active()).ok_or("That run was removed.")?;
+    if active {
+        reply(app, id, note, &[])
+    } else {
+        continue_run(app, id, note, None, &[])
+    }
+}
+
+/// Records a page URL on the run (start page, navigations, and research reads).
+pub(super) fn note_source(app: &AppHandle, id: u32, url: &str) {
+    let url = url.trim();
+    if url.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
+        return;
+    }
+    let clipped = clip(url, 500);
+    let changed = with_run(id, |state| {
+        if state
+            .run
+            .sources
+            .iter()
+            .any(|item| item.eq_ignore_ascii_case(&clipped))
+        {
+            return false;
+        }
+        if state.run.sources.len() >= 40 {
+            state.run.sources.remove(0);
+        }
+        state.run.sources.push(clipped);
+        true
+    })
+    .unwrap_or(false);
+    if changed {
+        emit(app);
+    }
 }
 
 /// What the run may reach now.
@@ -1302,18 +1502,34 @@ pub(super) fn gate(app: &AppHandle, id: u32, verdict: Verdict) -> Result<(), Str
         Verdict::Allow => Ok(()),
         Verdict::Block(reason) => Err(reason),
         Verdict::Ask { prompt, risk } => {
-            let level = with_run(id, |state| state.run.autonomy.clone()).unwrap_or_default();
-            if policy::autonomy_allows(&level, risk) {
+            let (level, allowed) = with_run(id, |state| {
+                (
+                    state.run.autonomy.clone(),
+                    state.run.allowed_risks.clone(),
+                )
+            })
+            .unwrap_or_default();
+            let risk_label = risk_name(risk);
+            if policy::autonomy_allows(&level, risk)
+                || allowed
+                    .iter()
+                    .any(|item| item.eq_ignore_ascii_case(risk_label))
+            {
+                let how = if policy::autonomy_allows(&level, risk) {
+                    format!("{level} autonomy")
+                } else {
+                    format!("allowed {risk_label} for this run")
+                };
                 push_step(
                     app,
                     id,
                     "approved",
                     &prompt,
-                    &format!("Went ahead without asking ({level} autonomy)."),
+                    &format!("Went ahead without asking ({how})."),
                 );
                 return Ok(());
             }
-            match ask(app, id, "confirm", &prompt, Some(risk), risk_name(risk)) {
+            match ask(app, id, "confirm", &prompt, Some(risk), risk_label) {
                 Some(Answer::Allow(true)) => Ok(()),
                 Some(_) => Err(
                     "The user declined this action. Don't try it again. Find another way or finish."

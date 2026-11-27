@@ -136,6 +136,8 @@ fn drive(
     } else {
         setup.model.clone()
     };
+    let opening_attachments =
+        with_run(id, |state| std::mem::take(&mut state.opening_parts)).unwrap_or_default();
     let mut opening = Some(match &setup.follow_up {
         Some(text) if !messages.is_empty() => format!("Follow-up from the user: {text}"),
         Some(text) => format!("Task: {}\n\nFollow-up from the user: {text}", setup.goal),
@@ -148,6 +150,7 @@ fn drive(
             text
         }
     });
+    let mut opening_attachments = Some(opening_attachments);
     let mut limit = auto.max_steps.max(1);
     let mut turns = 0u32;
     let mut budget = setup.budget;
@@ -201,7 +204,17 @@ fn drive(
         if settings::get(app).ai_blocked(&page_url) {
             return Ok(("failed", settings::AI_SITE_BLOCKED.into()));
         }
-        let observation = observe::observe(app, tab, &setup.window, auto.screenshots_to_model);
+        runs::note_source(app, id, &page_url);
+        // Screenshots are expensive. Only take one when Settings allow it and the
+        // opening ask needs vision; later turns rely on the `look` tool.
+        let with_shot = auto.screenshots_to_model
+            && opening.is_some()
+            && observe::task_wants_screenshot(
+                &setup.goal,
+                &setup.instructions,
+                setup.follow_up.as_deref(),
+            );
+        let observation = observe::observe(app, tab, &setup.window, with_shot);
         if checkpoint(id).is_err() {
             return stopped();
         }
@@ -213,6 +226,9 @@ fn drive(
         if let Some(text) = opening.take() {
             parts.push(ChatPart::Text(text));
         }
+        if let Some(extra) = opening_attachments.take() {
+            parts.extend(extra);
+        }
         parts.push(ChatPart::Text(observation.text.clone()));
         if let Some(image) = observation.image.clone() {
             parts.push(ChatPart::Image {
@@ -221,9 +237,17 @@ fn drive(
             });
         }
         flush(messages, pending, parts);
-        let notes = with_run(id, |state| std::mem::take(&mut state.notes)).unwrap_or_default();
-        for note in notes {
-            messages.push(ChatMessage::User(vec![ChatPart::Text(note)]));
+        let (notes, pending_parts) = with_run(id, |state| {
+            (
+                std::mem::take(&mut state.notes),
+                std::mem::take(&mut state.pending_user_parts),
+            )
+        })
+        .unwrap_or_default();
+        if !notes.is_empty() || !pending_parts.is_empty() {
+            let mut content: Vec<ChatPart> = notes.into_iter().map(ChatPart::Text).collect();
+            content.extend(pending_parts);
+            messages.push(ChatMessage::User(content));
         }
         summarize(app, id, &current, &model, &setup.goal, messages);
         observe::prune(messages);

@@ -26,10 +26,11 @@ export function AgentLimitsMenu({ id, inputTokens, outputTokens, onInputTokens, 
         aria-haspopup="dialog"
         aria-expanded={open}
         title="Token limits"
-        className="text-left text-[10px] text-zinc-500 hover:text-zinc-200"
+        className="flex flex-col items-start gap-0 text-left text-[10px] leading-tight text-zinc-500 hover:text-zinc-200"
         onClick={() => setOpen((value) => !value)}
       >
-        Limits: {`${inputTokens.toLocaleString()} in · ${outputTokens.toLocaleString()} out`}
+        <span id={`${id}-button-in`}>{`${inputTokens.toLocaleString()} in`}</span>
+        <span id={`${id}-button-out`}>{`${outputTokens.toLocaleString()} out`}</span>
       </button>
       {open ? (
         <div

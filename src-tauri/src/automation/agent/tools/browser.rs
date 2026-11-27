@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use base64::Engine;
 use serde_json::{Value, json};
 
 use crate::automation::driver;
@@ -190,7 +191,7 @@ pub fn tools(auto: &AutomationSettings) -> Vec<Tool> {
         ),
         tool(
             "look",
-            "Take a fresh screenshot of the current tab with element labels, to check what the page looks like.",
+            "Take a labelled screenshot of the current tab. Use only when you need to see layout, images, colors, or something without a ref. Skip it for ordinary reading or clicking by ref.",
             object(json!({}), &[]),
             Kind::Read,
             false,
@@ -587,6 +588,7 @@ fn navigate(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
     gate(ctx, policy::open(ctx.auto, url.as_str()))?;
     halt(ctx)?;
     driver::navigate(ctx.app, ctx.tab, url.as_str())?;
+    runs::note_source(ctx.app, ctx.id, url.as_str());
     record(
         ctx,
         FlowStep {
@@ -658,6 +660,9 @@ fn wait(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
 }
 
 fn read_text(ctx: &mut Ctx, _args: &Value) -> Result<Done, String> {
+    if let Some(info) = tabs::tab_info(ctx.app, ctx.tab) {
+        runs::note_source(ctx.app, ctx.id, &info.url);
+    }
     let text = driver::text(ctx.app, ctx.tab, 12_000, true)?;
     step(
         "Read the page text",
@@ -670,6 +675,9 @@ fn read_text(ctx: &mut Ctx, _args: &Value) -> Result<Done, String> {
 }
 
 fn read_markdown(ctx: &mut Ctx, _args: &Value) -> Result<Done, String> {
+    if let Some(info) = tabs::tab_info(ctx.app, ctx.tab) {
+        runs::note_source(ctx.app, ctx.id, &info.url);
+    }
     let page = print::extract_page(ctx.app, ctx.tab)?;
     let markdown = media::html_to_markdown(&page.title, &page.html);
     step(
@@ -695,7 +703,13 @@ fn ocr(ctx: &mut Ctx, _args: &Value) -> Result<Done, String> {
 }
 
 fn look(ctx: &mut Ctx, _args: &Value) -> Result<Done, String> {
-    ctx.image = Some(observe::look(ctx.app, ctx.tab)?);
+    let image = observe::look(ctx.app, ctx.tab)?;
+    if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&image)
+        && let Ok(thumb) = driver::shrink_jpeg(&bytes, 480, 60)
+    {
+        runs::set_last_thumb(ctx.id, crate::automation::jpeg_data_url(&thumb.bytes));
+    }
+    ctx.image = Some(image);
     step("Look at the page", "Screenshot attached.")
 }
 

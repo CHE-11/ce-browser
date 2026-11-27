@@ -87,6 +87,27 @@ export function modelAcceptsThinking(provider: string, id: string) {
   return false;
 }
 
+/**
+ * Whether the model is likely to accept image inputs (screenshots).
+ * Unknown models return true so we do not block screenshots without evidence.
+ */
+export function modelLikelyAcceptsVision(provider: string, id: string) {
+  const name = modelFamily(id);
+  if (!name) {
+    return true;
+  }
+  if (/(tts|whisper|embed|transcribe|moderation|realtime|audio)/.test(name)) {
+    return false;
+  }
+  if (provider === "openai" && /gpt-3|text-davinci|babbage|ada/.test(name)) {
+    return false;
+  }
+  if (provider === "claude" && name.includes("instant")) {
+    return false;
+  }
+  return true;
+}
+
 function modelFamily(id: string) {
   const name = id.trim().toLowerCase();
   return name.replace(/-\d{8}$/, "").replace(/-\d{4}-\d{2}-\d{2}$/, "");

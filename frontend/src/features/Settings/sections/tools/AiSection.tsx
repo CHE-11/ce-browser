@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { RotateCcw, X } from "lucide-react";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
+import { DEFAULT_AGENT_FONT, FONTS, normalizeAgentFont } from "@/lib/appearance";
 import { aiKeyStatus, clearAiKey, listAiModels, setAiKey, testAiConnection } from "@/lib/browser-client";
 import type { AiKeyStatus, AiProviderId, AiProviderSlot, BrowserSettings } from "@type/browser";
 import { cn } from "@/lib/cn";
@@ -43,6 +44,8 @@ const OUTPUT_TOKENS_LABEL = "Max output tokens";
 const OUTPUT_TOKENS_HINT = "How long a reply may be. On Claude, thinking raises a number under 8192. Higher costs more.";
 const SUGGESTIONS_LABEL = "Agent suggestions";
 const SUGGESTIONS_HINT = "Shown in the agent panel. Click one to fill in the task.";
+const AGENT_FONT_LABEL = "Agent font";
+const AGENT_FONT_HINT = "Typeface for the agent panel and ce://agent. Separate from the rest of the browser. Defaults to Atkinson Hyperlegible.";
 const BLOCKED_LABEL = "Blocked sites";
 const BLOCKED_HINT = "The agent says it isn't allowed and won't take questions or screenshots. These sites are blocked for automation too.";
 const SUGGESTION_LIMIT = 12;
@@ -96,6 +99,11 @@ export function AiSection({ settings, query, onUpdate, onError, onMatch }: Setti
     OUTPUT_TOKENS_HINT,
     SUGGESTIONS_LABEL,
     SUGGESTIONS_HINT,
+    AGENT_FONT_LABEL,
+    AGENT_FONT_HINT,
+    ...FONTS.map((font) => font.label),
+    "hyperlegible",
+    "atkinson",
     BLOCKED_LABEL,
     BLOCKED_HINT,
     ...blockedSites,
@@ -285,6 +293,7 @@ export function AiSection({ settings, query, onUpdate, onError, onMatch }: Setti
         max={OUTPUT_TOKENS_MAX}
         onChange={(aiMaxOutputTokens) => onUpdate({ aiMaxOutputTokens })}
       />
+      <AgentFontPicker settings={settings} onUpdate={onUpdate} />
       <AgentSuggestions settings={settings} onUpdate={onUpdate} />
       <SiteList
         id="settings-ai-blocked"
@@ -392,6 +401,73 @@ function TokenLimit({
         }}
       />
     </Row>
+  );
+}
+
+function AgentFontPicker({ settings, onUpdate }: { settings: SettingsSectionProps["settings"]; onUpdate: SettingsSectionProps["onUpdate"] }) {
+  const labels = FONTS.map((font) => font.label);
+  const visible = useSettingVisible(AGENT_FONT_LABEL, AGENT_FONT_HINT, ...labels, "agent", "hyperlegible", "atkinson");
+  const { changed, reset } = useSettingChanged(["agentFont"]);
+  if (!visible) {
+    return null;
+  }
+  const selected = normalizeAgentFont(settings.agentFont);
+  return (
+    <div id="settings-agent-font" className="px-5 py-3">
+      <div id="settings-agent-font-heading" className="mb-1 flex items-center gap-2">
+        <div id="settings-agent-font-label" className="text-sm text-zinc-100">
+          {AGENT_FONT_LABEL}
+        </div>
+        {changed ? (
+          <span
+            id="settings-agent-font-changed"
+            role="img"
+            aria-label="Changed from default"
+            title="Changed from default"
+            className="size-1.5 shrink-0 rounded-full bg-sky-400"
+          />
+        ) : null}
+        {changed && reset ? (
+          <IconButton
+            id="settings-agent-font-reset"
+            label={`Reset ${AGENT_FONT_LABEL} to default`}
+            className="size-7 opacity-60 hover:opacity-100 focus-visible:opacity-100"
+            onClick={reset}
+          >
+            <RotateCcw id="settings-agent-font-reset-icon" aria-hidden />
+          </IconButton>
+        ) : null}
+      </div>
+      <p id="settings-agent-font-hint" className="mb-3 text-xs text-zinc-500">
+        {AGENT_FONT_HINT}
+      </p>
+      <div id="settings-agent-font-options" className="flex flex-wrap gap-2">
+        {FONTS.map((font) => {
+          const active = selected === font.id;
+          return (
+            <button
+              key={font.id}
+              id={`settings-agent-font-${font.id}`}
+              type="button"
+              aria-pressed={active}
+              className={cn(
+                "h-8 rounded-md border px-3 text-sm",
+                active ? "border-sky-500 text-zinc-100" : "border-zinc-700 text-zinc-300 hover:border-zinc-500",
+              )}
+              style={{ fontFamily: font.stack }}
+              onClick={() => onUpdate({ agentFont: font.id })}
+            >
+              {font.label}
+              {font.id === DEFAULT_AGENT_FONT ? (
+                <span id={`settings-agent-font-${font.id}-default`} className="ml-1 text-[10px] text-zinc-500">
+                  default
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 

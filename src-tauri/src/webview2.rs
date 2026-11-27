@@ -602,7 +602,7 @@ pub fn attach_ui_hooks(app: &AppHandle, webview: &Webview, window: &str) {
     let window = window.to_string();
     let _ = webview.with_webview(move |platform| {
         attach_zoom_wheel(&platform, app.clone(), ZoomKind::Ui(window));
-        if let Err(error) = attach_accelerators(&app, &platform.controller(), Target::Ui) {
+        if let Err(error) = attach_accelerators(&app, &platform.controller(), Target::Ui, None) {
             eprintln!("WebView2 shortcuts for the browser UI: {error}");
         }
         if let Ok(core) = core(&platform) {
@@ -1777,9 +1777,12 @@ fn clip_round(hwnd: HWND, radius: i32, width: i32, height: i32) {
 /// The docked agent panel takes the browser's shortcuts the way the browser UI does.
 pub fn attach_panel_hooks(app: &AppHandle, webview: &Webview) {
     let app = app.clone();
+    let label = webview.label().to_string();
     let _ = webview.with_webview(move |platform| {
-        if let Err(error) = attach_accelerators(&app, &platform.controller(), Target::Ui) {
-            eprintln!("WebView2 shortcuts for the agent panel: {error}");
+        let controller = platform.controller();
+        if let Err(error) = attach_accelerators(&app, &controller, Target::Ui, Some(label.clone()))
+        {
+            eprintln!("WebView2 shortcuts for {label}: {error}");
         }
     });
 }
@@ -1789,7 +1792,9 @@ pub fn attach_popup_hooks(app: &AppHandle, webview: &Webview, label: &str) {
     let label = label.to_string();
     let _ = webview.with_webview(move |platform| {
         let controller = platform.controller();
-        if let Err(error) = attach_accelerators(&app, &controller, Target::Popup) {
+        if let Err(error) =
+            attach_accelerators(&app, &controller, Target::Popup, Some(label.clone()))
+        {
             eprintln!("WebView2 shortcuts for {label}: {error}");
         }
         if let Ok(core) = core(&platform) {
@@ -2069,7 +2074,7 @@ fn page_hooks(app: &AppHandle, platform: &PlatformWebview, id: u32) -> windows::
     let controller = platform.controller();
     let core = core(platform)?;
     pin_profile_scheme(&core);
-    attach_accelerators(app, &controller, Target::Page)?;
+    attach_accelerators(app, &controller, Target::Page, None)?;
     let mut token = 0i64;
     let zoom_app = app.clone();
     unsafe {
@@ -4545,10 +4550,13 @@ fn add_link_items(
     }
 }
 
+/// `own` is the label of a panel or popup webview. Its DevTools and Inspect shortcuts open the
+/// tools for that webview instead of the active tab.
 fn attach_accelerators(
     app: &AppHandle,
     controller: &ICoreWebView2Controller,
     target: Target,
+    own: Option<String>,
 ) -> windows::core::Result<()> {
     let app = app.clone();
     let mut token = 0i64;
@@ -4612,7 +4620,77 @@ fn attach_accelerators(
                 );
                 if let Some(action) = action {
                     args.SetHandled(true)?;
-                    shortcuts::dispatch(&app, action);
+                    match &own {
+                        Some(label) if is_devtools_action(action) => open_own_devtools(&app, label),
+                        _ => shortcuts::dispatch(&app, action),
+                    }
+                }
+                Ok(())
+            })),
+            &mut token,
+        )
+    }
+}
+
+fn is_devtools_action(action: shortcuts::Action) -> bool {
+    matches!(action, shortcuts::Action::DevTools | shortcuts::Action::Inspect)
+}
+
+/// The extension inspector window refuses the main thread, where WebView2 raises keys.
+fn open_own_devtools(app: &AppHandle, label: &str) {
+    let app = app.clone();
+    let label = label.to_string();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = crate::debug::open_devtools_for(&app, &label) {
+            eprintln!("devtools for {label}: {error}");
+        }
+    });
+}
+
+/// Extension side panels and bars keep their keys except DevTools and Inspect, which open the
+/// tools for that webview.
+pub fn attach_inspect_hooks(app: &AppHandle, webview: &Webview) {
+    let app = app.clone();
+    let label = webview.label().to_string();
+    let _ = webview.with_webview(move |platform| {
+        if let Err(error) = inspect_hooks(&app, &platform.controller(), label.clone()) {
+            eprintln!("WebView2 DevTools shortcut for {label}: {error}");
+        }
+    });
+}
+
+fn inspect_hooks(
+    app: &AppHandle,
+    controller: &ICoreWebView2Controller,
+    label: String,
+) -> windows::core::Result<()> {
+    let app = app.clone();
+    let mut token = 0i64;
+    unsafe {
+        controller.add_AcceleratorKeyPressed(
+            &AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else {
+                    return Ok(());
+                };
+                let mut kind = COREWEBVIEW2_KEY_EVENT_KIND::default();
+                args.KeyEventKind(&mut kind)?;
+                if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+                    && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+                {
+                    return Ok(());
+                }
+                let mut key = 0u32;
+                args.VirtualKey(&mut key)?;
+                let action = shortcuts::action_for(
+                    key,
+                    key_down(VK_CONTROL),
+                    key_down(VK_SHIFT),
+                    key_down(VK_MENU),
+                    Target::Page,
+                );
+                if action.is_some_and(is_devtools_action) {
+                    args.SetHandled(true)?;
+                    open_own_devtools(&app, &label);
                 }
                 Ok(())
             })),
@@ -4776,7 +4854,8 @@ pub fn attach_peek_hooks(app: &AppHandle, webview: &Webview, window: &str, page:
     let app = app.clone();
     let window = window.to_string();
     let _ = webview.with_webview(move |platform| {
-        if let Err(error) = attach_accelerators(&app, &platform.controller(), Target::Peek) {
+        if let Err(error) = attach_accelerators(&app, &platform.controller(), Target::Peek, None)
+        {
             eprintln!("WebView2 shortcuts for the peek: {error}");
         }
         if !page {

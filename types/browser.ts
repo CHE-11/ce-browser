@@ -1111,6 +1111,8 @@ export type BrowserSettings = {
   colorMode: "dark" | "light" | "system";
   /** Browser UI font. `system` keeps Segoe UI. */
   uiFont: string;
+  /** Font for the agent panel and ce://agent. Defaults to Atkinson Hyperlegible. */
+  agentFont: string;
   uiZoom: number;
   /** Default website zoom, as a percent. */
   pageZoom: number;
@@ -2458,6 +2460,10 @@ export type AgentRun = {
   openedTab: AgentNotice | null;
   /** Latest desktop screenshot, as a small JPEG data URL. */
   screen: string | null;
+  /** Risk kinds already allowed for the rest of this run. */
+  allowedRisks: string[];
+  /** Research source URLs collected during the run. */
+  sources: string[];
 };
 
 /** What a run may reach. Tools outside it are not offered to the model. */
@@ -2490,6 +2496,16 @@ export type ModelPrice = {
   local: boolean;
 };
 
+/** A file or image the user attaches to an agent message. */
+export type AgentAttachment = {
+  id: string;
+  kind: "image" | "text";
+  name: string;
+  mediaType: string;
+  /** Image: base64 without a `data:` prefix. Text: UTF-8 body. */
+  data: string;
+};
+
 export type AgentStartOptions = {
   autonomy?: AgentAutonomy;
   model?: string;
@@ -2500,6 +2516,8 @@ export type AgentStartOptions = {
   /** Guidance for the model, such as from a slash command. Not shown as part of the goal. */
   instructions?: string;
   access?: AgentAccess;
+  /** Images and text files included with the opening message. */
+  attachments?: AgentAttachment[];
 };
 
 /** The model's reply as it is written. Empty text clears it. */
@@ -2508,6 +2526,9 @@ export type AgentDelta = {
   text: string;
   thinking: string;
 };
+
+/** How a memory note is classified. Blank is uncategorized. */
+export type AgentMemoryCategory = "" | "preference" | "procedure" | "fact";
 
 /** A note the agent keeps across runs. */
 export type AgentMemoryItem = {
@@ -2519,6 +2540,14 @@ export type AgentMemoryItem = {
   pinned: boolean;
   created: number;
   used: number;
+  /** Preference, site procedure, or fact. Blank for older notes. */
+  category: AgentMemoryCategory;
+  /** Page the note came from, when known. */
+  sourceUrl: string;
+  /** Run that created the note. Zero when the user added it. */
+  sourceRun: number;
+  /** When to review or drop the note. Zero never expires. */
+  expires: number;
 };
 
 export type McpStatus = {

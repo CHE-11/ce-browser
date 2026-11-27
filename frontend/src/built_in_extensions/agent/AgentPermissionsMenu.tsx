@@ -22,7 +22,7 @@ export function AgentPermissionsMenu({ id, access, onAccess, scope, currentSite,
   useDismiss(root, open, close);
 
   return (
-    <div id={id} ref={root} className="relative min-w-[150px]">
+    <div id={id} ref={root} className="relative w-[110px]">
       <button
         id={`${id}-button`}
         type="button"

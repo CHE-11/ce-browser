@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Brain, Pin, Plus, X } from "lucide-react";
+import type { AgentMemoryCategory } from "@type/browser";
 import { Button } from "@/components/Button";
 import { EmptyState } from "@/components/EmptyState";
 import { IconButton } from "@/components/IconButton";
@@ -16,18 +17,22 @@ export function AgentMemoryView({ enabled, onClose }: { enabled: boolean; onClos
   const [text, setText] = useState("");
   const [site, setSite] = useState("");
   const [pinned, setPinned] = useState(false);
+  const [category, setCategory] = useState<AgentMemoryCategory>("");
   const needle = query.trim().toLowerCase();
-  const items = memory.items.filter((item) => !needle || item.text.toLowerCase().includes(needle) || item.site.includes(needle));
+  const items = memory.items.filter(
+    (item) => !needle || item.text.toLowerCase().includes(needle) || item.site.includes(needle) || (item.category ?? "").includes(needle),
+  );
 
   const add = () => {
     if (!text.trim()) {
       return;
     }
-    void memory.add(text.trim(), site.trim(), pinned).then((saved) => {
+    void memory.add(text.trim(), site.trim(), pinned, category).then((saved) => {
       if (saved) {
         setText("");
         setSite("");
         setPinned(false);
+        setCategory("");
       }
     });
   };
@@ -66,8 +71,27 @@ export function AgentMemoryView({ enabled, onClose }: { enabled: boolean; onClos
             }
           }}
         />
-        <div id="agent-memory-add-row" className="flex items-center gap-1.5">
-          <input id="agent-memory-add-site" className={cn(inputClassName, "h-7 py-1 text-xs")} placeholder="Site (optional)" value={site} onChange={(event) => setSite(event.target.value)} />
+        <div id="agent-memory-add-row" className="flex flex-wrap items-center gap-1.5">
+          <input id="agent-memory-add-site" className={cn(inputClassName, "h-7 min-w-[7rem] flex-1 py-1 text-xs")} placeholder="Site (optional)" value={site} onChange={(event) => setSite(event.target.value)} />
+          <select
+            id="agent-memory-add-category"
+            className={cn(inputClassName, "h-7 w-28 py-1 text-xs")}
+            value={category}
+            onChange={(event) => setCategory(event.target.value as AgentMemoryCategory)}
+          >
+            <option id="agent-memory-add-category-general" value="">
+              General
+            </option>
+            <option id="agent-memory-add-category-preference" value="preference">
+              Preference
+            </option>
+            <option id="agent-memory-add-category-procedure" value="procedure">
+              Procedure
+            </option>
+            <option id="agent-memory-add-category-fact" value="fact">
+              Fact
+            </option>
+          </select>
           <IconButton id="agent-memory-add-pin" label={pinned ? "Pinned: shown in every run" : "Pin: show in every run"} className="size-7" active={pinned} onClick={() => setPinned((value) => !value)}>
             <Pin id="agent-memory-add-pin-icon" aria-hidden />
           </IconButton>

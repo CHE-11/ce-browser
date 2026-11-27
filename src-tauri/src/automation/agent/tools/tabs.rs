@@ -167,6 +167,7 @@ fn read_tab(ctx: &mut Ctx, args: &Value) -> Result<Done, String> {
         return Err(reason);
     }
     driver::wait_load(ctx.app, target, Duration::from_secs(10));
+    runs::note_source(ctx.app, ctx.id, &info.url);
     let text = driver::text(ctx.app, target, 12_000, true)?;
     step(
         format!("Read \"{}\"", clip(&info.title, 60)),

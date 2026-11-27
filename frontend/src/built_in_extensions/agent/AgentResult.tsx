@@ -1,83 +1,42 @@
-import { useState } from "react";
-import { Check, Copy, Download, Pin, Workflow } from "lucide-react";
 import type { AgentRun } from "@type/browser";
-import { Button } from "@/components/Button";
-import { Markdown } from "@/components/Markdown";
-import { chooseSavePath, copyText, pinPage, writeTextFile } from "@/lib/browser-client";
-import { cn } from "@/lib/cn";
 import { AgentError } from "./AgentError";
 
 type Props = {
   run: AgentRun;
-  onSaveFlow: () => void;
-  onError: (text: string) => void;
 };
 
-function errorOf(reason: unknown) {
-  return typeof reason === "string" ? reason : reason instanceof Error ? reason.message : "Something went wrong.";
+/** Whether the transcript already shows this result as a chat message. */
+function resultInChat(run: AgentRun) {
+  const result = run.result.trim();
+  if (!result || result === "Stopped." || result === "Finished.") {
+    return true;
+  }
+  return run.steps.some((step) => {
+    if (step.kind !== "think" && step.kind !== "answer" && step.kind !== "error") {
+      return false;
+    }
+    const text = step.text.trim();
+    return text === result || (text.length >= 80 && result.startsWith(text));
+  });
 }
 
-function fileName(goal: string) {
-  const base = goal
-    .split("\n")[0]
-    .replace(/[^\p{L}\p{N} _-]+/gu, "")
-    .trim()
-    .slice(0, 60);
-  return `${base || "agent result"}.md`;
-}
-
-/** What the run found, in Markdown, with ways to keep it. */
-export function AgentResult({ run, onSaveFlow, onError }: Props) {
-  const [done, setDone] = useState("");
+/** Fallback when a finished result is not already in the transcript. */
+export function AgentResult({ run }: Props) {
   if (!run.result) {
     return null;
   }
   if (run.status === "failed") {
-    return <AgentError id="agent-panel-result" text={run.result} />;
+    return resultInChat(run) ? null : <AgentError id="agent-panel-result" text={run.result} />;
+  }
+  if (run.result === "Stopped." || run.result === "Finished." || resultInChat(run)) {
+    return null;
   }
 
-  const flash = (what: string) => {
-    setDone(what);
-    window.setTimeout(() => setDone(""), 1500);
-  };
-  const act = (what: string, action: () => Promise<unknown>) => {
-    void action()
-      .then((result) => {
-        if (result !== false) {
-          flash(what);
-        }
-      })
-      .catch((reason: unknown) => onError(errorOf(reason)));
-  };
-  const pin = () => pinPage(run.tabId, "", false);
-  const save = async () => {
-    const path = await chooseSavePath(fileName(run.goal), "Markdown", ["md"]);
-    if (!path) {
-      return false;
-    }
-    await writeTextFile(path, `# ${run.goal.split("\n")[0]}\n\n${run.result}\n`);
-    return true;
-  };
-
-  const action = (id: string, label: string, Icon: typeof Copy, onClick: () => void) => (
-    <Button id={`agent-panel-result-${id}`} size="xs" variant="ghost" onClick={onClick}>
-      {done === id ? <Check id={`agent-panel-result-${id}-done`} className="size-3 text-emerald-400" aria-hidden /> : <Icon id={`agent-panel-result-${id}-icon`} className="size-3" aria-hidden />}
-      {done === id ? "Done" : label}
-    </Button>
-  );
-
   return (
-    <section
-      id="agent-panel-result"
-      className={cn("rounded-lg p-3 ring-1", run.status === "done" ? "bg-emerald-950/30 ring-emerald-800/60" : "bg-zinc-900 ring-zinc-800")}
-    >
-      <Markdown id="agent-panel-result-text" text={run.result} className="text-zinc-100" />
-      <div id="agent-panel-result-actions" className="-mb-1 mt-2 flex flex-wrap gap-1 border-t border-zinc-800/80 pt-2">
-        {action("copy", "Copy", Copy, () => act("copy", () => copyText(run.result)))}
-        {action("save", "Save", Download, () => act("save", save))}
-        {run.source === "agent" ? action("pin", "Pin page", Pin, () => act("pin", pin)) : null}
-        {run.flowSteps > 0 ? action("flow", `Save as flow (${run.flowSteps})`, Workflow, onSaveFlow) : null}
-      </div>
-    </section>
+    <div id="agent-panel-result" className="rounded-lg rounded-bl-sm bg-zinc-900/80 px-2.5 py-1.5 text-xs text-zinc-200 ring-1 ring-zinc-800">
+      <p id="agent-panel-result-text" className="whitespace-pre-wrap break-words">
+        {run.result}
+      </p>
+    </div>
   );
 }

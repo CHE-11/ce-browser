@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Search, Trash2, X } from "lucide-react";
-import type { AgentRun } from "@type/browser";
+import { Eye, Search, Trash2, X } from "lucide-react";
+import type { AgentRun, TabInfo } from "@type/browser";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import { cn } from "@/lib/cn";
@@ -9,11 +9,13 @@ import { inputClassName, STATUS_TEXT, STATUS_TONE } from "./agent-styles";
 
 type Props = {
   runs: AgentRun[];
+  tabs: TabInfo[];
   selectedId: number | null;
   onSelect: (id: number) => void;
   onDelete: (id: number) => void;
   onClear: () => void;
   onClose: () => void;
+  onShowTab: (tabId: number) => void;
 };
 
 function startOfToday() {
@@ -29,10 +31,21 @@ function when(at: number, today: number) {
 }
 
 /** Every task in this window, searchable, with helpers under the task that started them. */
-export function AgentRunList({ runs, selectedId, onSelect, onDelete, onClear, onClose }: Props) {
+export function AgentRunList({ runs, tabs, selectedId, onSelect, onDelete, onClear, onClose, onShowTab }: Props) {
   const [query, setQuery] = useState("");
   const needle = query.trim().toLowerCase();
-  const matches = (run: AgentRun) => !needle || run.goal.toLowerCase().includes(needle) || run.result.toLowerCase().includes(needle);
+  const tabTitle = (tabId: number) => {
+    const tab = tabs.find((item) => item.id === tabId);
+    if (!tab) {
+      return `Tab ${tabId}`;
+    }
+    return tab.title || tab.url || `Tab ${tabId}`;
+  };
+  const matches = (run: AgentRun) =>
+    !needle ||
+    run.goal.toLowerCase().includes(needle) ||
+    run.result.toLowerCase().includes(needle) ||
+    tabTitle(run.tabId).toLowerCase().includes(needle);
   const ids = new Set(runs.map((run) => run.id));
   const roots = runs.filter((run) => run.parent === null || !ids.has(run.parent));
   const visible = roots.filter((run) => matches(run) || runs.some((child) => child.parent === run.id && matches(child)));
@@ -60,12 +73,27 @@ export function AgentRunList({ runs, selectedId, onSelect, onDelete, onClear, on
             {child ? `Helper · ${run.goal}` : run.goal}
           </span>
           <span id={`agent-runs-item-${run.id}-meta`} className="mt-0.5 block text-[10px] text-zinc-500">
-            {[run.source === "mcp" ? "MCP" : null, STATUS_TEXT[run.status], `${run.actions} actions`, run.background ? "background" : null, when(run.started, today)]
+            {[
+              run.source === "mcp" ? "MCP" : null,
+              STATUS_TEXT[run.status],
+              `${run.actions} actions`,
+              run.background ? "background" : null,
+              `Tab · ${tabTitle(run.tabId)}`,
+              when(run.started, today),
+            ]
               .filter(Boolean)
               .join(" · ")}
           </span>
         </span>
       </button>
+      <IconButton
+        id={`agent-runs-item-${run.id}-tab`}
+        label="Jump to its tab"
+        className="mt-1 size-6 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+        onClick={() => onShowTab(run.tabId)}
+      >
+        <Eye id={`agent-runs-item-${run.id}-tab-icon`} aria-hidden />
+      </IconButton>
       <IconButton
         id={`agent-runs-item-${run.id}-delete`}
         label="Delete this task"

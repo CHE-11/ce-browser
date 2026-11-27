@@ -182,6 +182,7 @@ function PopupContent({ popup, params }: PopupPageProps) {
         <BookmarkAdd
           mode={params.get("mode") === "folder" ? "folder" : "link"}
           parentId={params.get("parent") || "bar"}
+          index={menuIndex(params)}
         />
       );
     case "bookmark-rename":

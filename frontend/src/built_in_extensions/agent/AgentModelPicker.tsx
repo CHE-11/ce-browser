@@ -97,7 +97,7 @@ export function AgentModelPicker({ id, value, fallback, provider, thinking, onCh
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Model for the next task"
+        title={value ? "Model for this task" : "Model for the next task"}
         className="block w-full truncate text-center text-[10px] text-zinc-500 hover:text-zinc-200"
         onClick={() => {
           if (open) {

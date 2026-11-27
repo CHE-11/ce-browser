@@ -588,6 +588,9 @@ pub struct BrowserSettings {
     /// Browser UI font. An older file omits this and keeps Segoe UI.
     #[serde(default = "default_ui_font")]
     pub ui_font: String,
+    /// Font for the agent panel and ce://agent. An older file omits this and uses Atkinson Hyperlegible.
+    #[serde(default = "default_agent_font")]
+    pub agent_font: String,
     pub ui_zoom: u32,
     /// Default zoom for websites, as a percent. `ce://` pages stay on the UI size.
     #[serde(default = "default_page_zoom")]
@@ -1061,6 +1064,10 @@ fn default_backdrop() -> String {
 
 fn default_ui_font() -> String {
     "system".into()
+}
+
+fn default_agent_font() -> String {
+    "atkinson".into()
 }
 
 fn default_true() -> bool {
@@ -1772,6 +1779,7 @@ impl Default for BrowserSettings {
             theme: "zinc".into(),
             color_mode: "dark".into(),
             ui_font: default_ui_font(),
+            agent_font: default_agent_font(),
             ui_zoom: 100,
             page_zoom: default_page_zoom(),
             sync_folder: String::new(),
@@ -1905,6 +1913,9 @@ impl BrowserSettings {
         }
         if !UI_FONTS.contains(&self.ui_font.as_str()) {
             self.ui_font = defaults.ui_font;
+        }
+        if !UI_FONTS.contains(&self.agent_font.as_str()) {
+            self.agent_font = defaults.agent_font;
         }
         if let Some(preset) = self.legacy_bookmark_size.take() {
             let sizes = match preset.as_str() {
@@ -4485,6 +4496,7 @@ mod tests {
         assert_eq!(loaded.search_engine, "bing");
         assert_eq!(loaded.theme, "nord");
         assert_eq!(loaded.ui_font, "system");
+        assert_eq!(loaded.agent_font, "atkinson");
         assert_eq!(loaded.tab_cycle_order, "strip");
         assert!(loaded.tab_switcher);
         assert_eq!(loaded.window_backdrop, "none");
@@ -4512,6 +4524,19 @@ mod tests {
         let coding: super::BrowserSettings =
             serde_json::from_str(r#"{"uiFont":"martian-mono"}"#).expect("settings parse");
         assert_eq!(coding.normalize().ui_font, "martian-mono");
+    }
+
+    #[test]
+    fn a_missing_agent_font_defaults_to_atkinson_and_an_unknown_one_falls_back() {
+        let missing: super::BrowserSettings =
+            serde_json::from_str(r#"{"theme":"nord"}"#).expect("settings parse");
+        assert_eq!(missing.normalize().agent_font, "atkinson");
+        let unknown: super::BrowserSettings =
+            serde_json::from_str(r#"{"agentFont":"comic-sans"}"#).expect("settings parse");
+        assert_eq!(unknown.normalize().agent_font, "atkinson");
+        let saved: super::BrowserSettings =
+            serde_json::from_str(r#"{"agentFont":"inter"}"#).expect("settings parse");
+        assert_eq!(saved.normalize().agent_font, "inter");
     }
 
     #[test]

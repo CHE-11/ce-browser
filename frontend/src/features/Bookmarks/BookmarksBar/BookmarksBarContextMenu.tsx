@@ -137,8 +137,11 @@ export function BookmarksBarContextMenuItems({
     { text: BOOKMARK_SIZE.menuText, padding: BOOKMARK_SIZE.menuPadding },
     { icon: metric(settings?.bookmarksBarMenuIconSize, CHROME.bookmarksBarMenuIconSize) },
   );
-  const openAdd = (mode: "link" | "folder") => {
+  const openAdd = (mode: "link" | "folder", after?: boolean) => {
     const params = new URLSearchParams({ mode, parent: parentId });
+    if (mode === "folder" && after !== undefined) {
+      params.set("index", String(dividerInsertIndex(tree, parentId, anchorId, index, after)));
+    }
     void openPopup("bookmark-add", MENU_CORNER, { params: params.toString() });
   };
 
@@ -148,6 +151,8 @@ export function BookmarksBarContextMenuItems({
   };
 
   const vertical = divider === "vertical";
+  const folderBeforeLabel = vertical ? "Add folder before" : "Add folder above";
+  const folderAfterLabel = vertical ? "Add folder after" : "Add folder below";
   const beforeLabel = vertical ? "Add vertical divider before" : "Add divider above";
   const afterLabel = vertical ? "Add vertical divider after" : "Add divider below";
   const canDelete = !!target && !PROTECTED_FOLDERS.has(target.id);
@@ -220,11 +225,18 @@ export function BookmarksBarContextMenuItems({
       ) : null}
       <PopupMenuItem id={`${idPrefix}-add`} icon={<Plus />} label="Add bookmark" style={itemStyle} onClick={() => openAdd("link")} />
       <PopupMenuItem
-        id={`${idPrefix}-add-folder`}
+        id={`${idPrefix}-add-folder-before`}
         icon={<FolderPlus />}
-        label="Add folder"
+        label={folderBeforeLabel}
         style={itemStyle}
-        onClick={() => openAdd("folder")}
+        onClick={() => openAdd("folder", false)}
+      />
+      <PopupMenuItem
+        id={`${idPrefix}-add-folder-after`}
+        icon={<FolderPlus />}
+        label={folderAfterLabel}
+        style={itemStyle}
+        onClick={() => openAdd("folder", true)}
       />
       <PopupMenuSeparator id={`${idPrefix}-separator`} />
       <PopupMenuItem
