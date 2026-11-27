@@ -321,18 +321,6 @@ export function AgentWorkspace({ layout = "panel", params }: Props) {
     });
   };
 
-  const workHint = (() => {
-    if (activeTab && /^(https?:|file:)/i.test(activeTab.url)) {
-      return activeTab.title || activeTab.url;
-    }
-    const other = tabs.windowTabs
-      .filter((tab) => /^(https?:|file:)/i.test(tab.url) && !tab.automated)
-      .sort((a, b) => b.lastActive - a.lastActive)[0];
-    if (other) {
-      return other.title || other.url;
-    }
-    return "a new tab";
-  })();
 
   const chatBody = run ? (
       <div id={`${rootId}-run`} className={page ? "mx-auto flex w-full max-w-[968px] flex-col gap-3" : "flex flex-col gap-3"}>
@@ -380,7 +368,7 @@ export function AgentWorkspace({ layout = "panel", params }: Props) {
         title={page ? "What should the agent do?" : "Give the agent a task"}
         hint={
           page
-            ? `It will work in ${workHint} with real clicks and typing. It can open tabs, run flows, pull data, remember things, and start helpers. Type / for commands or @ to add a tab.`
+            ? `It can open tabs, run flows, pull data, remember things, and start helpers. Type / for commands or @ to add a tab.`
             : `It works in the selected tab${activeTab ? ` (${activeTab.title || activeTab.url})` : ""} with real clicks and typing. It can open tabs, run your flows, pull data, remember things, and start helpers. Type / for commands or @ to add a tab.`
         }
       />
