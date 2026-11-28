@@ -4633,7 +4633,10 @@ fn attach_accelerators(
 }
 
 fn is_devtools_action(action: shortcuts::Action) -> bool {
-    matches!(action, shortcuts::Action::DevTools | shortcuts::Action::Inspect)
+    matches!(
+        action,
+        shortcuts::Action::DevTools | shortcuts::Action::Inspect
+    )
 }
 
 /// The extension inspector window refuses the main thread, where WebView2 raises keys.
@@ -4854,8 +4857,7 @@ pub fn attach_peek_hooks(app: &AppHandle, webview: &Webview, window: &str, page:
     let app = app.clone();
     let window = window.to_string();
     let _ = webview.with_webview(move |platform| {
-        if let Err(error) = attach_accelerators(&app, &platform.controller(), Target::Peek, None)
-        {
+        if let Err(error) = attach_accelerators(&app, &platform.controller(), Target::Peek, None) {
             eprintln!("WebView2 shortcuts for the peek: {error}");
         }
         if !page {

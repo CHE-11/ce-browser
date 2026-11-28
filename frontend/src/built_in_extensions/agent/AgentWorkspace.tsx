@@ -369,7 +369,7 @@ export function AgentWorkspace({ layout = "panel", params }: Props) {
         hint={
           page
             ? `It can open tabs, run flows, pull data, remember things, and start helpers. Type / for commands or @ to add a tab.`
-            : `It works in the selected tab${activeTab ? ` (${activeTab.title || activeTab.url})` : ""} with real clicks and typing. It can open tabs, run your flows, pull data, remember things, and start helpers. Type / for commands or @ to add a tab.`
+            : `It works in the selected tab with real clicks and typing. It can open tabs, run your flows, pull data, remember things, and start helpers. Type / for commands or @ to add a tab.`
         }
       />
     );

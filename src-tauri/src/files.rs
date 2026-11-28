@@ -80,7 +80,9 @@ pub fn open_uri(uri: &str) -> Result<(), String> {
     if code == 31 || code == 27 {
         return Err("Windows has no app that opens this link.".into());
     }
-    Err(format!("Couldn't open the app for this link (error {code})."))
+    Err(format!(
+        "Couldn't open the app for this link (error {code})."
+    ))
 }
 
 /// Asks the app registered for this file to print it.

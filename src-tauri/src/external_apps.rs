@@ -70,7 +70,14 @@ fn shell_app_name(scheme: &str) -> Option<String> {
     let flags = ASSOCF_IS_PROTOCOL | ASSOCF_NOTRUNCATE;
     let mut size = 0u32;
     let _ = unsafe {
-        AssocQueryStringW(flags, ASSOCSTR_FRIENDLYAPPNAME, &assoc, PCWSTR::null(), None, &mut size)
+        AssocQueryStringW(
+            flags,
+            ASSOCSTR_FRIENDLYAPPNAME,
+            &assoc,
+            PCWSTR::null(),
+            None,
+            &mut size,
+        )
     };
     if size < 2 || size > 1024 {
         return None;
@@ -97,7 +104,10 @@ fn shell_app_name(scheme: &str) -> Option<String> {
 /// `URL:Claude Protocol` reads as `Claude`. A bare `URL:claude` keeps the scheme.
 fn friendly_name(raw: &str) -> String {
     let mut name = raw.trim();
-    if let Some(rest) = name.strip_prefix("URL:").or_else(|| name.strip_prefix("url:")) {
+    if let Some(rest) = name
+        .strip_prefix("URL:")
+        .or_else(|| name.strip_prefix("url:"))
+    {
         name = rest.trim();
     }
     for suffix in [" Protocol", " protocol", " URL", " Url", " Link", " link"] {
@@ -108,7 +118,10 @@ fn friendly_name(raw: &str) -> String {
     if name.is_empty() || name.eq_ignore_ascii_case("url") || name.len() > 60 {
         return String::new();
     }
-    if name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+    if name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
         return capitalized(name);
     }
     name.to_string()
@@ -139,7 +152,10 @@ mod tests {
             external_scheme("claude://artifact/HPtmhTpoSdHmRKNCJEUsoS").as_deref(),
             Some("claude")
         );
-        assert_eq!(external_scheme("ms-teams:l/chat").as_deref(), Some("ms-teams"));
+        assert_eq!(
+            external_scheme("ms-teams:l/chat").as_deref(),
+            Some("ms-teams")
+        );
         assert_eq!(external_scheme("mailto:a@b.c").as_deref(), Some("mailto"));
     }
 

@@ -75,6 +75,7 @@ import { accentTint } from "../../lib/accent";
 import { cn } from "../../lib/cn";
 import { useHostExtensions } from "@/lib/use-browser";
 import { hostToolbarIds, movedToolbarOrder, splitToolbar } from "../../lib/toolbar-pin";
+import { httpNeedsConfirm } from "../../lib/http-confirm";
 import { buildSuggestions, inlineCompletion, looksLikeUrl } from "../../lib/omnibox";
 import { flattenBookmarks, useUpdateStatus, type WindowTabsState } from "../../lib/use-browser";
 import { focusRing } from "../../lib/focus-ring";
@@ -262,6 +263,11 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   const redirectKeys = useRef(false);
   const redirectStamp = useRef(0);
   const pendingNav = useRef<string | null>(null);
+  /** An http address typed into a new tab that is not active yet. Asked once that tab is loaded. */
+  const pendingHttp = useRef<{ url: string; typed: boolean } | null>(null);
+  const [httpPrompt, setHttpPrompt] = useState<{ id: number; url: string; typed: boolean } | null>(null);
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const restoreRef = useRef<{ text: string; editing: boolean } | null>(null);
   const dismissRef = useRef<() => void>(() => {});
   const completionRange = useRef<[number, number] | null>(null);
@@ -462,10 +468,20 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       }
       input?.focus();
       const queued = pendingNav.current;
+      const httpQueued = pendingHttp.current;
       pendingNav.current = null;
+      pendingHttp.current = null;
       armRef.current = false;
       restoreRef.current = null;
-      if (queued) {
+      if (httpQueued) {
+        redirectKeys.current = false;
+        typedRef.current = "";
+        draftsRef.current.delete(arriving.id);
+        setText("");
+        setEditing(false);
+        input?.blur();
+        setHttpPrompt({ id: arriving.id, url: httpQueued.url, typed: httpQueued.typed });
+      } else if (queued) {
         redirectKeys.current = false;
         typedRef.current = "";
         draftsRef.current.delete(arriving.id);
@@ -532,6 +548,8 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     redirectKeys.current = true;
     redirectStamp.current += 1;
     pendingNav.current = null;
+    pendingHttp.current = null;
+    setHttpPrompt(null);
     restoreRef.current = { text: textRef.current, editing: editingStateRef.current };
     typedRef.current = "";
     if (blurTimer.current !== null) {
@@ -549,11 +567,12 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
   };
 
   const cancelNewTab = () => {
-    if (!armRef.current && !redirectKeys.current && pendingNav.current === null) {
+    if (!armRef.current && !redirectKeys.current && pendingNav.current === null && pendingHttp.current === null) {
       return;
     }
     const queued = pendingNav.current;
     pendingNav.current = null;
+    pendingHttp.current = null;
     const restore = restoreRef.current;
     armRef.current = false;
     redirectKeys.current = false;
@@ -641,6 +660,66 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     inputRef.current?.blur();
   }, [dismissSuggestions]);
 
+  const openHttpConfirm = useCallback((url: string, destination: { id: number } | { fresh: true }, typed: boolean) => {
+    if (blurTimer.current !== null) {
+      window.clearTimeout(blurTimer.current);
+      blurTimer.current = null;
+    }
+    typedRef.current = "";
+    clearAddressSelection(inputRef.current);
+    suggestEpoch.current += 1;
+    popupTicket.current += 1;
+    omniboxRef.current = EMPTY_OMNIBOX;
+    setOmnibox(EMPTY_OMNIBOX);
+    popupOpenRef.current = false;
+    setEditing(false);
+    inputRef.current?.blur();
+    const params = new URLSearchParams({ url });
+    if (typed) {
+      params.set("typed", "1");
+    }
+    if ("fresh" in destination) {
+      params.set("new", "1");
+    } else {
+      params.set("id", String(destination.id));
+    }
+    const field = fieldRef.current;
+    if (!field) {
+      return;
+    }
+    void closePopup().finally(() => {
+      void openPopup("http-confirm", field, {
+        placement: "bottom-start",
+        params: params.toString(),
+      });
+    });
+  }, []);
+
+  const httpAsked = useRef<string | null>(null);
+  useEffect(() => {
+    if (!httpPrompt) {
+      httpAsked.current = null;
+      return;
+    }
+    if (httpPrompt.id !== activeId) {
+      httpAsked.current = null;
+      setHttpPrompt(null);
+      return;
+    }
+    const tab = snapshot.tabs.find((item) => item.id === httpPrompt.id);
+    if (!tab?.loaded) {
+      return;
+    }
+    const key = `${httpPrompt.id}:${httpPrompt.url}`;
+    if (httpAsked.current === key) {
+      return;
+    }
+    httpAsked.current = key;
+    const prompt = httpPrompt;
+    setHttpPrompt(null);
+    openHttpConfirm(prompt.url, { id: prompt.id }, prompt.typed);
+  }, [activeId, httpPrompt, openHttpConfirm, snapshot.tabs]);
+
   const pick = useCallback(
     (suggestion: OmniboxSuggestion | null, inNewTab = false) => {
       const target = suggestion ?? { kind: "url" as const, title: text, url: text.trim() };
@@ -664,10 +743,21 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           armRef.current = false;
           redirectKeys.current = false;
           pendingNav.current = null;
+          pendingHttp.current = null;
           finishEditing();
           void activateTab(target.tabId);
           return;
         }
+        if (httpNeedsConfirm(target.url, settingsRef.current)) {
+          pendingNav.current = null;
+          pendingHttp.current = {
+            url: target.url,
+            typed: target.kind === "url" && looksLikeUrl(target.url),
+          };
+          dismissSuggestions();
+          return;
+        }
+        pendingHttp.current = null;
         pendingNav.current = target.url;
         dismissSuggestions();
         return;
@@ -675,7 +765,6 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
       if (activeRef.current) {
         draftsRef.current.delete(activeRef.current.id);
       }
-      finishEditing();
       const refreshId =
         !inNewTab &&
         target.kind !== "tab" &&
@@ -684,9 +773,17 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         sameAddress(activeRef.current.url, target.url)
           ? activeRef.current.id
           : null;
-      if (target.kind === "url" && looksLikeUrl(target.url) && refreshId === null) {
+      const confirming = refreshId === null && target.kind !== "tab" && httpNeedsConfirm(target.url, settingsRef.current);
+      if (target.kind === "url" && looksLikeUrl(target.url) && refreshId === null && !confirming) {
         void noteTyped(target.url);
       }
+      if (confirming) {
+        const typed = target.kind === "url" && looksLikeUrl(target.url);
+        const fresh = inNewTab || activeId === null || (target.kind === "bookmark" && activePinned);
+        openHttpConfirm(target.url, fresh || activeId === null ? { fresh: true } : { id: activeId }, typed);
+        return;
+      }
+      finishEditing();
       if (refreshId !== null) {
         void reload(refreshId);
       } else if (target.kind === "tab" && target.tabId !== undefined) {
@@ -698,7 +795,7 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         void navigate(activeId, target.url);
       }
     },
-    [activeId, activePinned, dismissSuggestions, finishEditing, text],
+    [activeId, activePinned, dismissSuggestions, finishEditing, openHttpConfirm, text],
   );
 
   const pickRef = useRef(pick);
@@ -1072,7 +1169,17 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
         id="address-home"
         label="Home"
         disabled={activeId === null}
-        onClick={() => activeId !== null && void navigate(activeId, settings?.homePage || "ce://bookmarks")}
+        onClick={() => {
+          if (activeId === null) {
+            return;
+          }
+          const url = settings?.homePage || "ce://bookmarks";
+          if (httpNeedsConfirm(url, settings)) {
+            openHttpConfirm(url, { id: activeId }, false);
+            return;
+          }
+          void navigate(activeId, url);
+        }}
       >
         <House id="address-home-icon" aria-hidden />
       </IconButton>

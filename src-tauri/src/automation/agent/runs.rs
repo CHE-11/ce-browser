@@ -1014,7 +1014,9 @@ pub fn cockpit(app: &AppHandle, id: u32, action: &str) -> Result<(), String> {
         "retry" => {
             "User cockpit: retry the last failed or blocked action. Use a different approach if the same one failed."
         }
-        "skip" => "User cockpit: skip the current plan step or last failing action and continue with the rest.",
+        "skip" => {
+            "User cockpit: skip the current plan step or last failing action and continue with the rest."
+        }
         "replan" => {
             "User cockpit: stop and rewrite the plan from the current page state, then continue carefully."
         }
@@ -1503,10 +1505,7 @@ pub(super) fn gate(app: &AppHandle, id: u32, verdict: Verdict) -> Result<(), Str
         Verdict::Block(reason) => Err(reason),
         Verdict::Ask { prompt, risk } => {
             let (level, allowed) = with_run(id, |state| {
-                (
-                    state.run.autonomy.clone(),
-                    state.run.allowed_risks.clone(),
-                )
+                (state.run.autonomy.clone(), state.run.allowed_risks.clone())
             })
             .unwrap_or_default();
             let risk_label = risk_name(risk);

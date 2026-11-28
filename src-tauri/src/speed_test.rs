@@ -219,7 +219,10 @@ fn finish(
     deadline: Instant,
 ) -> Result<f64, String> {
     emit(app, phase, 0, 0.0);
-    while Instant::now() < deadline && !stopped(epoch) && handles.iter().any(|handle| !handle.is_finished()) {
+    while Instant::now() < deadline
+        && !stopped(epoch)
+        && handles.iter().any(|handle| !handle.is_finished())
+    {
         thread::sleep(PROGRESS_EVERY);
         let bytes = counter.load(Ordering::Relaxed);
         emit(app, phase, bytes, rate(bytes, started));
@@ -339,7 +342,9 @@ fn warmup_down(agent: &ureq::Agent, epoch: u64) -> bool {
         return false;
     }
     let agent = agent.clone();
-    bounded(CALL_LIMIT, move || discard_down(&agent, WARMUP_DOWN).is_ok()) == Some(true)
+    bounded(CALL_LIMIT, move || {
+        discard_down(&agent, WARMUP_DOWN).is_ok()
+    }) == Some(true)
 }
 
 fn warmup_up(agent: &ureq::Agent, payload: &Arc<Vec<u8>>, epoch: u64) -> bool {
@@ -377,11 +382,16 @@ fn discard_down(agent: &ureq::Agent, bytes: u64) -> Result<(), ()> {
 
 /// Runs `work` on another thread and gives up when `limit` elapses.
 /// A stuck DNS lookup is left behind instead of holding the test.
-fn bounded<T: Send + 'static>(limit: Duration, work: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+fn bounded<T: Send + 'static>(
+    limit: Duration,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
     let (tx, rx) = mpsc::channel();
-    let spawned = thread::Builder::new().name("speed-test-call".into()).spawn(move || {
-        let _ = tx.send(work());
-    });
+    let spawned = thread::Builder::new()
+        .name("speed-test-call".into())
+        .spawn(move || {
+            let _ = tx.send(work());
+        });
     if spawned.is_err() {
         return None;
     }
@@ -392,7 +402,9 @@ fn payload(len: usize) -> Vec<u8> {
     let mut out = vec![0u8; len];
     let mut state = 0xC0FFEE_u64;
     for byte in &mut out {
-        state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1);
         *byte = (state >> 33) as u8;
     }
     out
@@ -409,7 +421,10 @@ fn http_agent() -> ureq::Agent {
 }
 
 fn emit(app: &AppHandle, phase: SpeedTestPhase, bytes: u64, bps: f64) {
-    let _ = app.emit("speed-test-progress", SpeedTestProgress { phase, bytes, bps });
+    let _ = app.emit(
+        "speed-test-progress",
+        SpeedTestProgress { phase, bytes, bps },
+    );
 }
 
 fn rate(bytes: u64, started: Instant) -> f64 {

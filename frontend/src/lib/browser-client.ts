@@ -157,8 +157,13 @@ export function listTabs() {
   return invoke<TabsSnapshot>("list_tabs");
 }
 
-export function createTab(url?: string, background = false, index?: number) {
-  return invoke<number>("create_tab", { url, background, index });
+export function createTab(url?: string, background = false, index?: number, allowHttp = false) {
+  return invoke<number>("create_tab", {
+    url,
+    background,
+    index,
+    ...(allowHttp ? { allowHttp: true } : {}),
+  });
 }
 
 /** Opens `url` in a new browser window. */
@@ -194,8 +199,8 @@ export function activateTab(id: number) {
   return invoke<void>("activate_tab", { id });
 }
 
-export function navigate(id: number, input: string) {
-  return invoke<void>("navigate", { id, input });
+export function navigate(id: number, input: string, allowHttp = false) {
+  return invoke<void>("navigate", { id, input, ...(allowHttp ? { allowHttp: true } : {}) });
 }
 
 export function goBack(id: number) {

@@ -32,7 +32,6 @@ mod microphone;
 mod model_prices;
 #[path = "network_speed.rs"]
 mod net_speed;
-mod speed_test;
 mod notify;
 mod ocr;
 mod page_console;
@@ -62,6 +61,7 @@ mod settings;
 mod shopping;
 mod shortcuts;
 mod site_info;
+mod speed_test;
 mod status;
 mod storage;
 mod sync;
@@ -122,14 +122,15 @@ async fn create_tab(
     url: Option<String>,
     background: Option<bool>,
     index: Option<usize>,
+    allow_http: Option<bool>,
 ) -> Result<u32, String> {
-    tabs::create_tab_on(
-        &app,
-        &browser_window(&window),
-        url,
-        background.unwrap_or(false),
-        index,
-    )
+    let window = browser_window(&window);
+    let background = background.unwrap_or(false);
+    if allow_http == Some(true) {
+        tabs::create_tab_allowing_http(&app, &window, url, background, index)
+    } else {
+        tabs::create_tab_on(&app, &window, url, background, index)
+    }
 }
 
 #[tauri::command]
@@ -168,8 +169,17 @@ async fn activate_tab(app: AppHandle, id: u32) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn navigate(app: AppHandle, id: u32, input: String) -> Result<(), String> {
-    tabs::navigate(&app, id, &input)
+async fn navigate(
+    app: AppHandle,
+    id: u32,
+    input: String,
+    allow_http: Option<bool>,
+) -> Result<(), String> {
+    if allow_http == Some(true) {
+        tabs::navigate_allowing_http(&app, id, &input)
+    } else {
+        tabs::navigate(&app, id, &input)
+    }
 }
 
 #[tauri::command]
@@ -1312,7 +1322,8 @@ fn clear_downloads(app: AppHandle) {
 async fn open_downloads_folder(app: AppHandle) -> Result<(), String> {
     blocking(move || {
         let dir = settings::get(&app).download_dir(&app);
-        std::fs::create_dir_all(&dir).map_err(|error| format!("Could not create {}: {error}", dir.display()))?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|error| format!("Could not create {}: {error}", dir.display()))?;
         files::reveal_path(&dir)
     })
     .await

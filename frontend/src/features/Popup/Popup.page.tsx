@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PopupShow } from "@type/browser";
 import { AddressBarEllipsisMenu } from "@/features/AddressBar/AddressBarEllipsisMenu";
+import { HttpConfirm } from "@/features/AddressBar/HttpConfirm";
 import { AddressBarExtensionPopover } from "@/features/AddressBar/AddressBarExtensionPopover";
 import { PopupFrame } from "@/components/PopupFrame";
 import { StatusPopover } from "@/components/StatusPopover";
@@ -263,6 +264,8 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <PermissionPrompt params={params} />;
     case "site-info":
       return <SiteInfoPanel tabId={Number(params.get("id"))} initialView={params.get("view") ?? ""} />;
+    case "http-confirm":
+      return <HttpConfirm params={params} />;
     case "selection-translate":
       return <SelectionTranslatePopover params={params} />;
     case "find-all":

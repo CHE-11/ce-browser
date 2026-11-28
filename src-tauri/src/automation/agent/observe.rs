@@ -264,7 +264,11 @@ mod tests {
             "",
             None
         ));
-        assert!(!task_wants_screenshot("What does this article say?", "", None));
+        assert!(!task_wants_screenshot(
+            "What does this article say?",
+            "",
+            None
+        ));
     }
 
     #[test]

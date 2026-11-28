@@ -414,8 +414,7 @@ fn is_devtools_window(app: &AppHandle, hwnd: isize) -> bool {
     }
     is_webview_devtools(hwnd)
         || app.windows().iter().any(|(label, window)| {
-            label.starts_with("inspect-")
-                && window.hwnd().is_ok_and(|own| own.0 as isize == hwnd)
+            label.starts_with("inspect-") && window.hwnd().is_ok_and(|own| own.0 as isize == hwnd)
         })
 }
 

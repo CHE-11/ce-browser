@@ -1344,6 +1344,8 @@ pub struct OpenTab {
     pub keep_bookmarks: bool,
     /// Park the tab off the strip. The resident bookmarks page is created this way.
     pub shelf: bool,
+    /// The address bar confirmed this `http` site. That host stays on `http` for this session.
+    pub allow_http: bool,
 }
 
 impl OpenTab {
@@ -1362,6 +1364,7 @@ impl OpenTab {
             ephemeral: false,
             keep_bookmarks: false,
             shelf: false,
+            allow_http: false,
         }
     }
 }
@@ -1382,6 +1385,28 @@ pub fn create_tab_on(
     background: bool,
     index: Option<usize>,
 ) -> Result<u32, String> {
+    create_tab_opening(app, window, url, background, index, false)
+}
+
+/// Opens `url` in a new tab and leaves an explicit `http` address on `http`.
+pub fn create_tab_allowing_http(
+    app: &AppHandle,
+    window: &str,
+    url: Option<String>,
+    background: bool,
+    index: Option<usize>,
+) -> Result<u32, String> {
+    create_tab_opening(app, window, url, background, index, true)
+}
+
+fn create_tab_opening(
+    app: &AppHandle,
+    window: &str,
+    url: Option<String>,
+    background: bool,
+    index: Option<usize>,
+    allow_http: bool,
+) -> Result<u32, String> {
     let url = match url
         .as_deref()
         .map(str::trim)
@@ -1396,6 +1421,7 @@ pub fn create_tab_on(
             background,
             index,
             window: window.to_string(),
+            allow_http,
             ..OpenTab::new(url)
         },
     )
@@ -1518,6 +1544,9 @@ pub fn open(app: &AppHandle, tab: OpenTab) -> Result<u32, String> {
         }
         id
     });
+    if tab.allow_http && tab.url.scheme() == "http" {
+        crate::privacy::allow_http_navigation(&tab.url);
+    }
     if crate::system::handler_matches(tab.url.as_str(), &crate::settings::get(app).file_handlers) {
         crate::system::claim_file(id);
     }
@@ -6298,7 +6327,19 @@ fn leave_bookmarks(app: &AppHandle, id: u32, url: Url) -> Result<(), String> {
 }
 
 pub fn navigate(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
-    let url = resolve(app, input);
+    navigate_with(app, id, input, false)
+}
+
+/// Loads `input` and leaves this `http` site on `http` for the rest of the session.
+pub fn navigate_allowing_http(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
+    navigate_with(app, id, input, true)
+}
+
+fn navigate_with(app: &AppHandle, id: u32, input: &str, allow_http: bool) -> Result<(), String> {
+    navigate_resolved(app, id, resolve(app, input), allow_http)
+}
+
+fn navigate_resolved(app: &AppHandle, id: u32, url: Url, allow_http: bool) -> Result<(), String> {
     let display = paths::display_url(app, url.as_str());
     if let Some(target) = bookmarks_target(&display) {
         let window =
@@ -6346,6 +6387,9 @@ pub fn navigate(app: &AppHandle, id: u32, input: &str) -> Result<(), String> {
         Some(tab.webview.clone())
     })
     .ok_or("That tab is no longer open.")?;
+    if allow_http && url.scheme() == "http" {
+        crate::privacy::allow_http_navigation(&url);
+    }
     match label.and_then(|label| app.get_webview(&label)) {
         Some(webview) => {
             if let Err(error) = webview.navigate(url) {

@@ -142,7 +142,9 @@ pub fn prepare(attachments: &[AgentAttachment]) -> Result<PreparedAttachments, S
                 continue;
             }
             let clipped = clip(body, MAX_TEXT_CHARS);
-            parts.push(ChatPart::Text(format!("Attached file `{label}`:\n\n{clipped}")));
+            parts.push(ChatPart::Text(format!(
+                "Attached file `{label}`:\n\n{clipped}"
+            )));
             names.push(format!("file:{label}"));
             text_count += 1;
             continue;
@@ -279,7 +281,9 @@ mod tests {
         assert_eq!(prepared.text_count, 1);
         assert_eq!(prepared.image_count, 0);
         assert!(prepared.thumb.is_none());
-        assert!(matches!(&prepared.parts[0], ChatPart::Text(text) if text.contains("notes.md") && text.contains("hello world")));
+        assert!(
+            matches!(&prepared.parts[0], ChatPart::Text(text) if text.contains("notes.md") && text.contains("hello world"))
+        );
         assert!(step_suffix(&prepared).contains("1 file"));
     }
 

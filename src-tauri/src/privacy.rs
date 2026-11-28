@@ -562,19 +562,89 @@ pub fn copy_script() -> String {
         )
 }
 
+/// A site the user agreed to open over `http` for this session. Later pages on that
+/// host stay on `http` too. Nothing here is written to disk.
+struct HttpAllow {
+    host: String,
+    port: u16,
+}
+
+static HTTP_ALLOWS: Mutex<Vec<HttpAllow>> = Mutex::new(Vec::new());
+
+fn http_endpoint(url: &Url) -> Option<(String, u16)> {
+    if url.scheme() != "http" {
+        return None;
+    }
+    let host = url.host_str()?.to_ascii_lowercase();
+    let port = url.port_or_known_default().unwrap_or(80);
+    Some((host, port))
+}
+
+/// Later document loads of this `http` host, in any tab, stay on `http` until the app exits.
+pub fn allow_http_navigation(url: &Url) {
+    let Some((host, port)) = http_endpoint(url) else {
+        return;
+    };
+    let mut allows = HTTP_ALLOWS.lock().expect("http allow");
+    if allows
+        .iter()
+        .any(|item| item.host == host && item.port == port)
+    {
+        return;
+    }
+    if allows.len() >= 64 {
+        allows.remove(0);
+    }
+    allows.push(HttpAllow { host, port });
+}
+
+pub fn http_navigation_allowed(url: &Url) -> bool {
+    let Some((host, port)) = http_endpoint(url) else {
+        return false;
+    };
+    HTTP_ALLOWS
+        .lock()
+        .expect("http allow")
+        .iter()
+        .any(|item| item.host == host && item.port == port)
+}
+
+#[cfg(test)]
+pub fn take_http_navigation(url: &Url) {
+    let Some((host, port)) = http_endpoint(url) else {
+        return;
+    };
+    HTTP_ALLOWS
+        .lock()
+        .expect("http allow")
+        .retain(|item| !(item.host == host && item.port == port));
+}
+
 /// `Some` when the navigation should be cancelled and started again at the returned URL.
 pub fn rewrite_navigation(app: &AppHandle, raw: &str) -> Option<String> {
     let settings = settings::get(app);
-    rewrite(&settings, raw)
+    let allowed = Url::parse(raw)
+        .ok()
+        .is_some_and(|url| http_navigation_allowed(&url));
+    rewrite_inner(&settings, raw, allowed)
 }
 
 pub fn rewrite(settings: &settings::BrowserSettings, raw: &str) -> Option<String> {
+    rewrite_inner(settings, raw, false)
+}
+
+fn rewrite_inner(
+    settings: &settings::BrowserSettings,
+    raw: &str,
+    skip_https: bool,
+) -> Option<String> {
     let mut url = Url::parse(raw).ok()?;
     if url.scheme() != "http" && url.scheme() != "https" {
         return None;
     }
     let mut changed = false;
-    if settings.https_only
+    if !skip_https
+        && settings.https_only
         && url.scheme() == "http"
         && !local_host(&url)
         && !https_exception(settings, &url)
@@ -1058,6 +1128,25 @@ mod tests {
         assert!(rewrite(&settings(), "http://localhost:1420/").is_none());
         assert!(rewrite(&settings(), "http://127.0.0.1/x").is_none());
         assert!(rewrite(&settings(), "http://tauri.localhost/#/newtab").is_none());
+    }
+
+    #[test]
+    fn a_private_address_is_upgraded_until_the_visit_is_confirmed() {
+        let raw = "http://192.168.68.60/";
+        let upgraded = rewrite(&settings(), raw).unwrap();
+        assert!(upgraded.starts_with("https://192.168.68.60"));
+        assert!(rewrite_inner(&settings(), raw, true).is_none());
+        let url = Url::parse(raw).unwrap();
+        allow_http_navigation(&url);
+        assert!(http_navigation_allowed(&url));
+        assert!(http_navigation_allowed(
+            &Url::parse("http://192.168.68.60/code/").unwrap()
+        ));
+        assert!(!http_navigation_allowed(
+            &Url::parse("http://10.0.0.1/").unwrap()
+        ));
+        take_http_navigation(&url);
+        assert!(!http_navigation_allowed(&url));
     }
 
     #[test]

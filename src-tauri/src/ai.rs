@@ -1636,7 +1636,9 @@ pub fn list_models(app: &AppHandle) -> Result<Vec<String>, String> {
     let mut ids: Vec<String> = entries
         .into_iter()
         .map(|(id, _)| id)
-        .filter(|id| text_chat_model(provider, id) && !id.to_ascii_lowercase().contains("healthcare"))
+        .filter(|id| {
+            text_chat_model(provider, id) && !id.to_ascii_lowercase().contains("healthcare")
+        })
         .collect();
     ids.sort();
     Ok(ids)

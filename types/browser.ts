@@ -680,6 +680,7 @@ export type PopupKind =
   | "shortcut-sheet"
   | "unresponsive"
   | "site-info"
+  | "http-confirm"
   | "find-all"
   | "selection-translate"
   | "boards"
