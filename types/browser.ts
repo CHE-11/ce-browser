@@ -166,6 +166,8 @@ export type WindowTabs = {
   scriptingPanel: boolean;
   /** The console panel is in the dock, including while its rail is collapsed. */
   consolePanel: boolean;
+  /** The shopping panel is in the dock, including while its rail is collapsed. */
+  shoppingPanel: boolean;
   /** First extension id in the dock. Empty when no extension panel is open. */
   hostPanel: string;
   /** Sum of the docked columns, in CSS pixels. Zero when the dock is closed. */
@@ -671,7 +673,6 @@ export type PopupKind =
   | "translate"
   | "password"
   | "reading"
-  | "shopping"
   | "toast"
   | "tab-search"
   | "tab-switcher"

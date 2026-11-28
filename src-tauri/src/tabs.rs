@@ -230,6 +230,8 @@ pub struct WindowTabs {
     pub scripting_panel: bool,
     /// The console panel is in the dock, including while its rail is collapsed.
     pub console_panel: bool,
+    /// The shopping panel is in the dock, including while its rail is collapsed.
+    pub shopping_panel: bool,
     /// First extension id in the dock. Empty when no extension panel is open.
     pub host_panel: String,
     /// Sum of the docked columns, in CSS pixels. Zero when the dock is closed.
@@ -458,6 +460,7 @@ pub enum SidePanel {
     Automations,
     Scripting,
     Console,
+    Shopping,
     /// A host or store extension panel.
     #[allow(dead_code)]
     Host,
@@ -467,6 +470,7 @@ pub const AGENT_PANEL_ID: &str = "agent";
 pub const AUTOMATIONS_PANEL_ID: &str = "automations";
 pub const SCRIPTING_PANEL_ID: &str = "scripting";
 pub const CONSOLE_PANEL_ID: &str = "console";
+pub const SHOPPING_PANEL_ID: &str = "shopping";
 /// Collapsed rail, in CSS pixels. The panel chrome uses this same width.
 pub const PANEL_RAIL: f64 = 36.0;
 /// Header above an expanded panel webview, in CSS pixels.
@@ -483,6 +487,7 @@ impl SidePanel {
             Self::Automations => AUTOMATIONS_PANEL_ID,
             Self::Scripting => SCRIPTING_PANEL_ID,
             Self::Console => CONSOLE_PANEL_ID,
+            Self::Shopping => SHOPPING_PANEL_ID,
             Self::Host | Self::None => "",
         }
     }
@@ -493,6 +498,7 @@ impl SidePanel {
             Self::Automations => "Automations",
             Self::Scripting => "Scripting",
             Self::Console => "Console",
+            Self::Shopping => "Shopping",
             Self::Host | Self::None => "",
         }
     }
@@ -958,6 +964,7 @@ impl TabsState {
                         automation_panel: dock_contains_id(&panels, AUTOMATIONS_PANEL_ID),
                         scripting_panel: dock_contains_id(&panels, SCRIPTING_PANEL_ID),
                         console_panel: dock_contains_id(&panels, CONSOLE_PANEL_ID),
+                        shopping_panel: dock_contains_id(&panels, SHOPPING_PANEL_ID),
                         host_panel: panels
                             .iter()
                             .find_map(|entry| extension_id_of(&entry.id).map(str::to_string))
@@ -7909,6 +7916,12 @@ pub fn console_panel_label(window: &str) -> String {
     format!("{CONSOLE_PANEL_PREFIX}{window}")
 }
 
+pub const SHOPPING_PANEL_PREFIX: &str = "shopping-";
+
+pub fn shopping_panel_label(window: &str) -> String {
+    format!("{SHOPPING_PANEL_PREFIX}{window}")
+}
+
 pub fn is_fullscreen(app: &AppHandle, window: &str) -> bool {
     with_state(app, |state| {
         state.chrome(window).is_some_and(|chrome| chrome.fullscreen)
@@ -7956,6 +7969,7 @@ fn fallback_title(id: &str) -> String {
         AUTOMATIONS_PANEL_ID => "Automations".to_string(),
         SCRIPTING_PANEL_ID => "Scripting".to_string(),
         CONSOLE_PANEL_ID => "Console".to_string(),
+        SHOPPING_PANEL_ID => "Shopping".to_string(),
         _ => extension_id_of(id).unwrap_or(id).to_string(),
     }
 }
@@ -8403,6 +8417,7 @@ fn panel_view_label(window: &str, id: &str) -> Option<String> {
         AUTOMATIONS_PANEL_ID => Some(automation_panel_label(window)),
         SCRIPTING_PANEL_ID => Some(scripting_panel_label(window)),
         CONSOLE_PANEL_ID => Some(console_panel_label(window)),
+        SHOPPING_PANEL_ID => Some(shopping_panel_label(window)),
         _ => extension_id_of(id).map(|extension| host_panel_label(window, extension)),
     }
 }
@@ -8519,6 +8534,7 @@ fn park_closed_panels(app: &AppHandle, window: &str, placed: &HashSet<String>) {
         automation_panel_label(window),
         scripting_panel_label(window),
         console_panel_label(window),
+        shopping_panel_label(window),
     ] {
         if !placed.contains(&label)
             && let Some(webview) = app.get_webview(&label)

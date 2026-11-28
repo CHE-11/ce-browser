@@ -2882,6 +2882,15 @@ async fn toggle_console_panel(
 }
 
 #[tauri::command]
+async fn toggle_shopping_panel(
+    app: AppHandle,
+    window: Window,
+    open: Option<bool>,
+) -> Result<bool, String> {
+    automation::panel::toggle_shopping(&app, &browser_window(&window), open)
+}
+
+#[tauri::command]
 async fn open_console_window(app: AppHandle, window: Window) -> Result<(), String> {
     automation::panel::open_console_window(&app, &browser_window(&window))
 }
@@ -3833,6 +3842,7 @@ pub fn run() {
             toggle_scripting_panel,
             open_scripting_window,
             toggle_console_panel,
+            toggle_shopping_panel,
             open_console_window,
             console_arm,
             console_disarm,

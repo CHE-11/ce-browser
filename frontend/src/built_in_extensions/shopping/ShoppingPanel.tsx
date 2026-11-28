@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
-import { Check, Crosshair, ExternalLink, ShoppingCart } from "lucide-react";
+import { Check, Crosshair, ExternalLink } from "lucide-react";
 import { IconButton } from "@/components/IconButton";
-import { PopupFrame } from "@/components/PopupFrame";
 import {
   addPriceUrl,
   checkPrice,
-  closePopup,
   createTab,
   findDeals,
   listPrices,
@@ -14,14 +12,12 @@ import {
   untrackPrice,
 } from "@/lib/browser-client";
 import type { ProductPrice, ShoppingDeals } from "@type/browser";
+import { useTabs } from "@/lib/use-browser";
 import { DealList } from "@/built_in_extensions/shopping/DealList";
 import { checkedLabel, formatPrice, priceChange, siteDomain } from "@/built_in_extensions/shopping/format";
 import { PriceSparkline } from "@/built_in_extensions/shopping/PriceSparkline";
-import { PopoverHeader } from "../PopoverParts";
-import { readPopoverTab } from "../shared";
 import { errorText } from "../use-page-tool";
 import { TrackedSection } from "./TrackedSection";
-
 
 function samePage(item: ProductPrice, url: string) {
   if (!url || !item.url) {
@@ -38,9 +34,12 @@ function samePage(item: ProductPrice, url: string) {
   }
 }
 
-export function ShoppingPopover({ params }: { params: URLSearchParams }) {
-  const tab = readPopoverTab(params);
-  const productPage = /^https?:/i.test(tab.url);
+/** Price tracking and deals for the active tab, drawn in the docked shopping column. */
+export function ShoppingPanel() {
+  const { tabs, activeId } = useTabs();
+  const tab = tabs.find((item) => item.id === activeId);
+  const url = tab?.url ?? "";
+  const productPage = /^https?:/i.test(url);
   const [items, setItems] = useState<ProductPrice[]>([]);
   const [listError, setListError] = useState("");
   const [error, setError] = useState("");
@@ -57,13 +56,21 @@ export function ShoppingPopover({ params }: { params: URLSearchParams }) {
     };
   }, []);
 
-  const current = items.find((item) => samePage(item, tab.url));
-  const domain = siteDomain(tab.url);
+  useEffect(() => {
+    setDeals(null);
+    setError("");
+  }, [url]);
+
+  const current = items.find((item) => samePage(item, url));
+  const domain = siteDomain(url);
   const onSite = domain ? items.filter((item) => siteDomain(item.url) === domain) : [];
   const change = current ? priceChange(current) : null;
 
   const track = () => {
     setError("");
+    if (!tab) {
+      return;
+    }
     if (current) {
       void untrackPrice(current.id)
         .then(setItems)
@@ -76,6 +83,9 @@ export function ShoppingPopover({ params }: { params: URLSearchParams }) {
   };
 
   const search = (force: boolean) => {
+    if (!tab) {
+      return;
+    }
     setBusy(true);
     setError("");
     void findDeals(tab.id, force)
@@ -85,30 +95,22 @@ export function ShoppingPopover({ params }: { params: URLSearchParams }) {
   };
 
   return (
-    <PopupFrame id="shopping-popover" width={480} maxHeight={760} className="min-h-[36rem]">
-      
-      <PopoverHeader
-        id="shopping-header"
-        icon={<ShoppingCart aria-hidden />}
-        title="Shopping"
-        subtitle={tab.title || tab.url}
-        action={
-          <IconButton
-            id="shopping-open-page-icon"
-            label="Open Shopping page"
-            onClick={() => {
-              void createTab("ce://shopping");
-              void closePopup();
-            }}
-          >
-            <ExternalLink id="shopping-open-page-icon-glyph" aria-hidden />
-          </IconButton>
-        }
-      />
-
-      <div id="shopping-body" className="flex flex-col gap-3 px-3 pb-3">
-        {/* Divider between the header and the content */}
-        <div id='divider' className="h-px w-full bg-zinc-800"></div>
+    <main id="shopping-panel" className="flex h-full min-h-0 flex-col bg-zinc-950 text-zinc-100">
+      <header id="shopping-panel-bar" className="flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3 py-2">
+        <p id="shopping-panel-page" className="min-w-0 flex-1 truncate text-xs text-zinc-400">
+          {tab ? tab.title || tab.url : "No tab open"}
+        </p>
+        <IconButton
+          id="shopping-open-page"
+          label="Open Shopping page"
+          onClick={() => {
+            void createTab("ce://shopping");
+          }}
+        >
+          <ExternalLink id="shopping-open-page-icon" aria-hidden />
+        </IconButton>
+      </header>
+      <div id="shopping-body" className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto px-3 py-3">
         {productPage ? (
           <>
             <DealList
@@ -117,13 +119,13 @@ export function ShoppingPopover({ params }: { params: URLSearchParams }) {
               busy={busy}
               onSearch={search}
               onFeedback={setDeals}
-              onTrack={(url) => {
-                void addPriceUrl(url)
+              onTrack={(offerUrl) => {
+                void addPriceUrl(offerUrl)
                   .then(setItems)
                   .catch((reason: unknown) => setError(errorText(reason)));
               }}
             />
-            <div id='divider' className="h-px w-full bg-zinc-800"></div>
+            <div id="shopping-deals-divider" className="h-px w-full bg-zinc-800" />
           </>
         ) : null}
 
@@ -132,7 +134,7 @@ export function ShoppingPopover({ params }: { params: URLSearchParams }) {
             <div id="shopping-product-row" className="flex items-start gap-2">
               <div id="shopping-product-text" className="min-w-0 flex-1">
                 <p id="shopping-product-title" className="truncate text-sm">
-                  {current?.title || tab.title || "This page"}
+                  {current?.title || tab?.title || "This page"}
                 </p>
                 <p id="shopping-product-price" className="text-xs text-zinc-400">
                   {current ? formatPrice(current.price, current.currency) : null}
@@ -181,8 +183,7 @@ export function ShoppingPopover({ params }: { params: URLSearchParams }) {
             {error || listError}
           </p>
         ) : null}
-
       </div>
-    </PopupFrame>
+    </main>
   );
 }

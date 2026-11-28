@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
 import { ShoppingCart } from "lucide-react";
-import { listPrices, onPricesChanged } from "@/lib/browser-client";
+import { IconButton } from "@/components/IconButton";
+import { listPrices, onPricesChanged, toggleShoppingPanel } from "@/lib/browser-client";
 import { siteDomain } from "@/built_in_extensions/shopping/format";
 import type { ProductPrice, TabInfo } from "@type/browser";
-import { ToolButton } from "../ToolButton";
+import { useTabs } from "@/lib/use-browser";
+
+function badgeText(count: number) {
+  return count > 99 ? "99+" : String(count);
+}
 
 export function ShoppingButton({ activeTab }: { activeTab: TabInfo | undefined }) {
+  const { shoppingPanel } = useTabs();
   const [items, setItems] = useState<ProductPrice[]>([]);
   const domain = siteDomain(activeTab?.url ?? "");
   const count = domain ? items.filter((item) => siteDomain(item.url) === domain).length : 0;
@@ -21,14 +27,24 @@ export function ShoppingButton({ activeTab }: { activeTab: TabInfo | undefined }
   const label = count === 0 ? "Shopping" : `Shopping, ${count} tracked on this site`;
 
   return (
-    <ToolButton
-      id="shopping"
+    <IconButton
+      id="address-shopping"
       label={label}
-      kind="shopping"
-      icon={<ShoppingCart id="address-shopping-icon" aria-hidden />}
-      activeTab={activeTab}
-      needsPage={false}
-      badge={count}
-    />
+      active={shoppingPanel}
+      aria-pressed={shoppingPanel}
+      className="relative"
+      onClick={() => void toggleShoppingPanel()}
+    >
+      <ShoppingCart id="address-shopping-icon" aria-hidden />
+      {count > 0 ? (
+        <span
+          id="address-shopping-badge"
+          className="pointer-events-none absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-sky-600 px-1 text-center text-[9px] font-semibold leading-4 text-white"
+          aria-hidden
+        >
+          {badgeText(count)}
+        </span>
+      ) : null}
+    </IconButton>
   );
 }

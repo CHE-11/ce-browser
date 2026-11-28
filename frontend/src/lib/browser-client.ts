@@ -2472,6 +2472,11 @@ export function toggleConsolePanel(open?: boolean) {
   return invoke<boolean>("toggle_console_panel", { open: open ?? null });
 }
 
+/** Opens or closes the shopping panel beside this window's pages. `open` forces a state. */
+export function toggleShoppingPanel(open?: boolean) {
+  return invoke<boolean>("toggle_shopping_panel", { open: open ?? null });
+}
+
 /** Opens the console in its own window and closes the docked one. */
 export function openConsoleWindow() {
   return invoke<void>("open_console_window");

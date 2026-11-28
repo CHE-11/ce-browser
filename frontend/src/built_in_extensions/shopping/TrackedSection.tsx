@@ -22,7 +22,7 @@ export function TrackedSection({
   return (
     <section id={id} className="flex flex-col gap-2">
       {/* Divider between the header and the content */}
-      <div id='divider' className="h-px w-full bg-zinc-800"></div>
+      <div id={`${id}-divider`} className="h-px w-full bg-zinc-800" />
       <h1 id={`${id}-title`} className="text-sm font-medium text-zinc-100 mt-2">Tracked Items</h1>
       {hits > 0 || errors > 0 ? (
         <div id={`${id}-summary`} className="flex items-center justify-between gap-2 text-xs text-zinc-400">

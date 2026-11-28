@@ -94,6 +94,11 @@ pub fn toggle_console(app: &AppHandle, window: &str, open: Option<bool>) -> Resu
     toggle_kind(app, window, tabs::SidePanel::Console, open, true)
 }
 
+/// Opens or closes the shopping panel in `window`. `open` forces a state. Returns whether it is open.
+pub fn toggle_shopping(app: &AppHandle, window: &str, open: Option<bool>) -> Result<bool, String> {
+    toggle_kind(app, window, tabs::SidePanel::Shopping, open, true)
+}
+
 fn toggle_kind(
     app: &AppHandle,
     window: &str,
@@ -134,6 +139,7 @@ fn panel_label(window: &str, kind: tabs::SidePanel) -> String {
         tabs::SidePanel::Automations => tabs::automation_panel_label(window),
         tabs::SidePanel::Scripting => tabs::scripting_panel_label(window),
         tabs::SidePanel::Console => tabs::console_panel_label(window),
+        tabs::SidePanel::Shopping => tabs::shopping_panel_label(window),
         tabs::SidePanel::Host | tabs::SidePanel::Agent | tabs::SidePanel::None => {
             tabs::agent_panel_label(window)
         }
@@ -163,6 +169,12 @@ fn ensure_kind(app: &AppHandle, window: &str, kind: tabs::SidePanel) -> Result<(
             &tabs::console_panel_label(window),
             "console-panel",
         ),
+        tabs::SidePanel::Shopping => ensure_view(
+            app,
+            window,
+            &tabs::shopping_panel_label(window),
+            "shopping-panel",
+        ),
         tabs::SidePanel::Host => Ok(()),
         tabs::SidePanel::None => Ok(()),
     }
@@ -176,6 +188,8 @@ fn saved_width(app: &AppHandle) -> f64 {
 const SCRIPTING_MIN: f64 = 480.0;
 /// The console keeps object trees readable without covering the page.
 const CONSOLE_MIN: f64 = 420.0;
+/// Deal lists and price history need a column at least as wide as the old shopping popover.
+const SHOPPING_MIN: f64 = 420.0;
 
 /// Saved column width, limited to what this panel may take in `window`.
 fn fitted_width(app: &AppHandle, window: &str, kind: tabs::SidePanel, width: f64) -> f64 {
@@ -208,6 +222,7 @@ fn panel_min(kind: tabs::SidePanel) -> f64 {
     match kind {
         tabs::SidePanel::Scripting => SCRIPTING_MIN,
         tabs::SidePanel::Console => CONSOLE_MIN,
+        tabs::SidePanel::Shopping => SHOPPING_MIN,
         _ => f64::from(settings::AGENT_PANEL_WIDTH_PX.0),
     }
 }
@@ -216,12 +231,14 @@ fn wide_column(kind: tabs::SidePanel) -> bool {
     kind == tabs::SidePanel::Automations
         || kind == tabs::SidePanel::Scripting
         || kind == tabs::SidePanel::Console
+        || kind == tabs::SidePanel::Shopping
 }
 
 fn wide_id(id: &str) -> bool {
     id == tabs::AUTOMATIONS_PANEL_ID
         || id == tabs::SCRIPTING_PANEL_ID
         || id == tabs::CONSOLE_PANEL_ID
+        || id == tabs::SHOPPING_PANEL_ID
 }
 
 /// Automations, scripting, and the console may cover half the area the page and the column share.
@@ -292,6 +309,8 @@ fn resize_limits(
         SCRIPTING_MIN
     } else if id == tabs::CONSOLE_PANEL_ID {
         CONSOLE_MIN
+    } else if id == tabs::SHOPPING_PANEL_ID {
+        SHOPPING_MIN
     } else {
         f64::from(settings::AGENT_PANEL_WIDTH_PX.0)
     };
@@ -881,6 +900,7 @@ fn builtin_kind(id: &str) -> Option<tabs::SidePanel> {
         tabs::AUTOMATIONS_PANEL_ID => Some(tabs::SidePanel::Automations),
         tabs::SCRIPTING_PANEL_ID => Some(tabs::SidePanel::Scripting),
         tabs::CONSOLE_PANEL_ID => Some(tabs::SidePanel::Console),
+        tabs::SHOPPING_PANEL_ID => Some(tabs::SidePanel::Shopping),
         _ => None,
     }
 }

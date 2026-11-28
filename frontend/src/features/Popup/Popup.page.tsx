@@ -37,7 +37,6 @@ import { PageControlsPopover } from "../../built_in_extensions/page-controls/Pag
 import { PasswordPopover } from "../../built_in_extensions/password/Password";
 import { PrintPdfPopover } from "../../built_in_extensions/print-to-pdf/PrintPdfPopover";
 import { ReadingPopover } from "../../built_in_extensions/reading/Reading";
-import { ShoppingPopover } from "../../built_in_extensions/shopping/ShoppingPopover";
 import { SelectionTranslatePopover } from "../../built_in_extensions/translate/SelectionTranslate";
 import { TranslatePopover } from "../../built_in_extensions/translate/Translate";
 import { WebpageMarkdownPopover } from "../../built_in_extensions/webpage-markdown/WebpageMarkdownPopover";
@@ -234,8 +233,6 @@ function PopupContent({ popup, params }: PopupPageProps) {
       return <TranslatePopover params={params} />;
     case "password":
       return <PasswordPopover />;
-    case "shopping":
-      return <ShoppingPopover params={params} />;
     case "reading":
       return <ReadingPopover params={params} />;
     case "extension-pin":

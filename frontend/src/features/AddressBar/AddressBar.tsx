@@ -884,6 +884,14 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
     };
   }, []);
 
+  function openCommandPalette() {
+    void openPopup(
+      "command-palette",
+      { x: 0, y: 0, width: window.innerWidth, height: 48 },
+      { placement: "bottom-center" },
+    );
+  }
+
   function openBookmarkEditor(anchor: HTMLElement) {
     const tab = activeRef.current;
     if (!tab || tab.url === "ce://newtab") {
@@ -1372,13 +1380,20 @@ export function AddressBar({ snapshot, bookmarks, downloads, history, extensions
           onMove={(from, dropIndex) => moveToolbar(fieldExtensions, from, dropIndex)}
         />
         {paletteKeys ? (
-          <kbd
+          <button
             id="address-command-palette-kbd"
+            type="button"
             title="Open the command palette"
-            className="shrink-0 rounded border border-zinc-600 bg-zinc-900/60 px-1.5 py-px font-sans text-[10px] leading-4 text-zinc-400"
+            aria-label="Open the command palette"
+            className={cn(
+              "shrink-0 cursor-pointer rounded border border-zinc-600 bg-zinc-900/60 px-1.5 py-px font-sans text-[10px] leading-4 text-zinc-400 hover:border-zinc-500 hover:bg-zinc-800 hover:text-zinc-200",
+              focusRing,
+            )}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={openCommandPalette}
           >
-            {paletteKeys}
-          </kbd>
+            <kbd id="address-command-palette-keys">{paletteKeys}</kbd>
+          </button>
         ) : null}
         <button
           id="address-star"

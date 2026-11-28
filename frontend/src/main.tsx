@@ -36,6 +36,7 @@ import { StoragePage } from "./features/Storage/Storage.page";
 import { SettingsPage } from "./features/Settings/Settings.page";
 import { StylesPage } from "./features/Styles/Styles.page";
 import { ShoppingPage } from "./built_in_extensions/shopping/Shopping.page";
+import { ShoppingPanelPage } from "./built_in_extensions/shopping/ShoppingPanel.page";
 import { WhatsNewPage } from "./features/WhatsNew/WhatsNew.page";
 import "./index.css";
 import { BookmarksPage } from "./features/Bookmarks/Bookmarks.page";
@@ -84,6 +85,8 @@ function App() {
       return <StylesPage />;
     case "shopping":
       return <ShoppingPage params={route.params} />;
+    case "shopping-panel":
+      return <ShoppingPanelPage />;
     case "extensions":
       return <ExtensionsPage />;
     case "print-editor":

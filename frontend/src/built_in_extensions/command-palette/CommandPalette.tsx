@@ -24,6 +24,7 @@ import {
   toggleAutomationPanel,
   toggleScriptingPanel,
   toggleConsolePanel,
+  toggleShoppingPanel,
   switchWorkspace,
   zoomTab,
 } from "@/lib/browser-client";
@@ -138,6 +139,7 @@ function toolReplacesPalette(id: string, hasTab: boolean) {
     case "clear-cache":
     case "wayback":
     case "light-dark":
+    case "shopping":
       return false;
     case "font-picker":
     case "theme-picker":
@@ -204,6 +206,7 @@ export function CommandPalette() {
       { id: "automations-panel", title: "Automations panel", hint: "Beside the page", group: "Action", keywords: "flows record macros", run: () => toggleAutomationPanel(true) },
       { id: "scripting-panel", title: "Scripting", hint: "Beside the page", group: "Action", keywords: "javascript typescript python css console editor", run: () => toggleScriptingPanel(true) },
       { id: "console-panel", title: "Console", hint: "Ctrl+Shift+J", group: "Action", keywords: "javascript repl devtools evaluate log", run: () => toggleConsolePanel(true) },
+      { id: "shopping-panel", title: "Shopping panel", hint: "Beside the page", group: "Action", keywords: "prices coupons deals track", run: () => toggleShoppingPanel(true) },
       { id: "automations", title: "Automations", hint: "ce://automations", group: "Action", keywords: "flows macros schedule datasets rpa", run: () => createTab("ce://automations") },
       {
         id: "vertical",
@@ -309,6 +312,9 @@ export function CommandPalette() {
         }
         if (tool.id === "network") {
           return openHere("network", `id=${active.id}`);
+        }
+        if (tool.id === "shopping") {
+          return toggleShoppingPanel(true);
         }
         const params =
           tool.id === "page-controls" ? `${tabParams(active)}&host=${encodeURIComponent(siteKey(active.url))}` : tabParams(active);
