@@ -1,10 +1,31 @@
 import { useState } from "react";
-import { Check, Copy, Crosshair, ExternalLink } from "lucide-react";
+import { Crosshair, ExternalLink } from "lucide-react";
 import { Button } from "@/components/Button";
 import { IconButton } from "@/components/IconButton";
 import { createTab, setCouponFeedback } from "@/lib/browser-client";
-import type { ShoppingDeals } from "@type/browser";
+import type { CouponSearch, ShoppingDeals } from "@type/browser";
+import { CouponList } from "./CouponList";
+import { CouponSearchStatus } from "./CouponSearchStatus";
 import { formatPrice, hostOf } from "./format";
+import type { CouponsState } from "./use-coupons";
+
+/** Coupons from a product deal search, shown in the same list as a store-wide search. */
+function dealCoupons(deals: ShoppingDeals | null): CouponSearch | null {
+  if (!deals) {
+    return null;
+  }
+  return {
+    store: deals.store,
+    coupons: deals.coupons,
+    sources: deals.sources,
+    summary: deals.summary,
+    aiAvailable: deals.aiAvailable,
+    checkedAt: deals.checkedAt,
+    cached: deals.cached,
+    searchNote: "",
+    pagesRead: 0,
+  };
+}
 
 function offerImage(image: string, page: string) {
   try {
@@ -21,6 +42,7 @@ export function DealList({
   onSearch,
   onTrack,
   onFeedback,
+  coupons,
   pricesOnly = false,
 }: {
   id: string;
@@ -28,23 +50,44 @@ export function DealList({
   busy: boolean;
   onSearch: (force: boolean) => void;
   onTrack?: (url: string) => void;
+  /** Receives deals after a code is marked, when coupons come from `deals`. */
   onFeedback?: (deals: ShoppingDeals) => void;
+  /** Store-wide coupon search and Try all codes for an open tab. Without it, coupons come from `deals`. */
+  coupons?: CouponsState;
   /** Skips coupons and opens on lower prices at other stores. */
   pricesOnly?: boolean;
 }) {
-  const [copied, setCopied] = useState("");
   const [focus, setFocus] = useState<"coupons" | "prices" | null>(pricesOnly ? "prices" : null);
   const [hidden, setHidden] = useState(false);
-  const minutes = deals?.checkedAt ? Math.max(0, Math.round((Date.now() - deals.checkedAt) / 60000)) : null;
-  const showing = Boolean(deals && focus && !hidden);
+  const couponSearch = coupons ? coupons.search : dealCoupons(deals);
+  const couponBusy = coupons ? coupons.busy : busy;
+  const checkedAt = focus === "coupons" ? couponSearch?.checkedAt : deals?.checkedAt;
+  const minutes = checkedAt ? Math.max(0, Math.round((Date.now() - checkedAt) / 60000)) : null;
+  const showingCoupons = Boolean(focus === "coupons" && couponSearch && !hidden);
+  const showingPrices = Boolean(focus === "prices" && deals && !hidden);
+  const showing = showingCoupons || showingPrices;
+  const searching = (focus === "coupons" && couponBusy) || (focus === "prices" && busy);
 
   const choose = (next: "coupons" | "prices") => {
-    const refresh = focus === next && Boolean(deals) && !hidden;
+    const current = next === "coupons" ? couponSearch : deals;
+    const refresh = focus === next && Boolean(current) && !hidden;
     setFocus(next);
     setHidden(false);
-    if (!deals || refresh) {
-      onSearch(Boolean(deals));
+    if (current && !refresh) {
+      return;
     }
+    if (next === "coupons" && coupons) {
+      coupons.find(Boolean(current));
+    } else {
+      onSearch(Boolean(current));
+    }
+  };
+
+  const markDealCoupon = (code: string, action: "tried" | "worked" | "failed") => {
+    if (!deals?.key) {
+      return;
+    }
+    void setCouponFeedback(deals.key, code, action).then((next) => onFeedback?.(next));
   };
 
   return (
@@ -52,8 +95,14 @@ export function DealList({
       <div id={`${id}-actions`} className="flex flex-col gap-2">
         <div id={`${id}-action-buttons`} className="flex w-full gap-2">
           {pricesOnly ? null : (
-            <Button id={`${id}-coupons-find`} className="flex-1" variant={focus === "coupons" ? "primary" : "secondary"} disabled={busy} onClick={() => choose("coupons")}>
-              {busy && focus === "coupons" ? "Searching…" : "Find Coupons"}
+            <Button
+              id={`${id}-coupons-find`}
+              className="flex-1"
+              variant={focus === "coupons" ? "primary" : "secondary"}
+              disabled={couponBusy || Boolean(coupons?.trying)}
+              onClick={() => choose("coupons")}
+            >
+              {couponBusy && focus === "coupons" ? "Searching…" : showingCoupons ? "Search again" : "Find Coupons"}
             </Button>
           )}
           <Button id={`${id}-prices-find`} className="flex-1" variant={focus === "prices" ? "primary" : "secondary"} disabled={busy} onClick={() => choose("prices")}>
@@ -63,7 +112,7 @@ export function DealList({
         {showing || minutes !== null ? (
           <div id={`${id}-action-meta`} className="flex items-center justify-between gap-2">
             {showing ? (
-              <Button id={`${id}-clear`} variant="ghost" disabled={busy} onClick={() => setHidden(true)}>
+              <Button id={`${id}-clear`} variant="ghost" disabled={Boolean(searching) || Boolean(coupons?.trying)} onClick={() => setHidden(true)}>
                 Clear results
               </Button>
             ) : (
@@ -77,85 +126,46 @@ export function DealList({
           </div>
         ) : null}
       </div>
-      {showing && deals && !deals.aiAvailable ? (
+      {focus === "coupons" && coupons && (coupons.busy || !hidden) ? (
+        <CouponSearchStatus id={`${id}-coupon-search`} live={coupons.busy} progress={coupons.searchProgress} log={coupons.searchLog} />
+      ) : null}
+      {showingCoupons && couponSearch ? (
+        coupons ? (
+          <CouponList
+            id={`${id}-coupon-results`}
+            search={couponSearch}
+            progress={coupons.progress}
+            trying={coupons.trying}
+            fieldFound={Boolean(coupons.field?.found)}
+            onTryAll={coupons.tryAll}
+            onCancel={coupons.cancel}
+            onMark={coupons.mark}
+          />
+        ) : (
+          <CouponList
+            id={`${id}-coupon-results`}
+            search={couponSearch}
+            progress={null}
+            trying={false}
+            fieldFound={false}
+            canTry={false}
+            onTryAll={() => undefined}
+            onCancel={() => undefined}
+            onMark={markDealCoupon}
+          />
+        )
+      ) : null}
+      {showingPrices && deals && !deals.aiAvailable ? (
         <p id={`${id}-ai-hint`} className="text-xs text-zinc-500">
           Add an AI provider in Settings for summaries.
         </p>
       ) : null}
-      {showing && deals?.summary ? (
+      {showingPrices && deals?.summary ? (
         <p id={`${id}-summary`} className="whitespace-pre-wrap text-sm text-zinc-200">
           {deals.summary}
         </p>
       ) : null}
-      {showing && deals && focus === "coupons" ? (
-        <>
-          <section id={`${id}-coupons`} className="flex flex-col gap-1">
-            <h3 id={`${id}-coupons-title`} className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              Coupons
-            </h3>
-            {deals.coupons.length === 0 ? (
-              <p id={`${id}-coupons-empty`} className="text-sm text-zinc-500">
-                No codes found in the search results.
-              </p>
-            ) : (
-              <ul id={`${id}-coupon-list`} className="flex flex-col gap-1">
-                {deals.coupons.map((coupon, index) => (
-                  <li id={`${id}-coupon-${index}`} key={coupon.code} className="rounded-md bg-zinc-900 px-2 py-1.5">
-                    <div id={`${id}-coupon-row-${index}`} className="flex items-center gap-2">
-                      <div id={`${id}-coupon-text-${index}`} className="min-w-0 flex-1">
-                        <p id={`${id}-coupon-code-${index}`} className="truncate font-mono text-sm text-zinc-100">
-                          {coupon.code}
-                          {coupon.worked ? " · worked" : coupon.failed ? " · failed" : coupon.triedAt ? " · tried" : ""}
-                        </p>
-                        <button
-                          id={`${id}-coupon-source-${index}`}
-                          type="button"
-                          className="block max-w-full truncate text-left text-xs text-zinc-400 hover:text-sky-300"
-                          title={coupon.source}
-                          onClick={() => void createTab(coupon.source)}
-                        >
-                          {coupon.description || coupon.expiry || "See source"} · {hostOf(coupon.source)}
-                        </button>
-                      </div>
-                      <button
-                        id={`${id}-coupon-copy-${index}`}
-                        type="button"
-                        className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-                        aria-label={`Copy ${coupon.code}`}
-                        onClick={() => void navigator.clipboard.writeText(coupon.code).then(() => setCopied(coupon.code))}
-                      >
-                        {copied === coupon.code ? <Check id={`${id}-coupon-copied-${index}`} className="size-3.5" /> : <Copy id={`${id}-coupon-copy-icon-${index}`} className="size-3.5" />}
-                      </button>
-                    </div>
-                    <div id={`${id}-coupon-feedback-${index}`} className="mt-1 flex gap-1">
-                      {(["tried", "worked", "failed"] as const).map((action) => (
-                        <button
-                          id={`${id}-coupon-${action}-${index}`}
-                          key={action}
-                          type="button"
-                          className="rounded px-1.5 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-                          onClick={() => {
-                            if (!deals.key) {
-                              return;
-                            }
-                            void setCouponFeedback(deals.key, coupon.code, action).then((next) => onFeedback?.(next));
-                          }}
-                        >
-                          {action}
-                        </button>
-                      ))}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-          <p id={`${id}-note`} className="text-[11px] text-zinc-500">
-            Codes come from web search results and may have expired.
-          </p>
-        </>
-      ) : null}
-      {showing && deals && focus === "prices" ? (
+      {showingPrices && deals ? (
         <>
           <section id={`${id}-offers`} className="flex flex-col gap-1">
             <h3 id={`${id}-offers-title`} className="text-xs font-semibold uppercase tracking-wide text-zinc-500">

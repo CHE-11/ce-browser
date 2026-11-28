@@ -10,6 +10,7 @@ mod bookmark_health;
 mod bookmarks;
 mod browsers;
 mod capture;
+mod coupons;
 mod debug;
 mod devtools;
 mod downloads;
@@ -2154,6 +2155,44 @@ fn set_coupon_feedback(
 }
 
 #[tauri::command]
+async fn find_coupons(
+    app: AppHandle,
+    id: u32,
+    force: Option<bool>,
+) -> Result<coupons::CouponSearch, String> {
+    blocking(move || coupons::find_coupons(&app, id, force.unwrap_or(false))).await
+}
+
+#[tauri::command]
+async fn try_coupons(
+    app: AppHandle,
+    id: u32,
+    codes: Vec<String>,
+) -> Result<coupons::CouponSearch, String> {
+    blocking(move || coupons::try_codes(&app, id, codes)).await
+}
+
+#[tauri::command]
+fn cancel_coupon_try() {
+    coupons::cancel();
+}
+
+#[tauri::command]
+fn set_store_coupon_feedback(
+    app: AppHandle,
+    store: String,
+    code: String,
+    action: String,
+) -> Result<coupons::CouponSearch, String> {
+    coupons::set_feedback(&app, &store, &code, &action)
+}
+
+#[tauri::command]
+async fn detect_coupon_field(app: AppHandle, id: u32) -> Result<coupons::CouponField, String> {
+    blocking(move || coupons::detect_field(&app, id)).await
+}
+
+#[tauri::command]
 fn ai_key_status(app: AppHandle, provider: String) -> secrets::AiKeyStatus {
     secrets::status(&app, &provider)
 }
@@ -3748,6 +3787,11 @@ pub fn run() {
             find_deals,
             find_deals_for_product,
             set_coupon_feedback,
+            find_coupons,
+            try_coupons,
+            cancel_coupon_try,
+            set_store_coupon_feedback,
+            detect_coupon_field,
             ai_key_status,
             set_ai_key,
             clear_ai_key,

@@ -357,6 +357,75 @@ export type Coupon = {
   triedAt: number;
   worked: boolean;
   failed: boolean;
+  /** How many pages list this code. */
+  sources: number;
+  /** Amount taken off the order total when the code was tried on the page. */
+  saving: number | null;
+  currency: string;
+  /** When the code was last applied on the page by `tryCoupons`. */
+  testedAt: number;
+};
+
+/** Store-wide coupon search from web results and coupon pages. */
+export type CouponSearch = {
+  /** Host of the store, without `www.`. */
+  store: string;
+  /** Worked codes first, failed codes last. */
+  coupons: Coupon[];
+  sources: SearchResult[];
+  summary: string;
+  aiAvailable: boolean;
+  checkedAt: number;
+  cached: boolean;
+  /** Pages read, and which engines were skipped. */
+  searchNote: string;
+  /** Coupon pages opened and read in full. */
+  pagesRead: number;
+};
+
+export type CouponSearchStage = "searching" | "reading" | "describing" | "done" | "error";
+
+/** One step of `findCoupons`, sent as `coupon-search-progress`. */
+export type CouponSearchProgress = {
+  tabId: number;
+  store: string;
+  stage: CouponSearchStage;
+  message: string;
+  /** Steps finished so far, out of `steps`. */
+  step: number;
+  steps: number;
+  /** Engine that answered, or the host of the page being read. */
+  source: string;
+  /** `ok`, `empty` or `blocked` for a finished step. Empty while the step runs. */
+  outcome: "" | "ok" | "empty" | "blocked";
+  /** Codes found so far. */
+  codes: number;
+  /** Search results kept so far. */
+  results: number;
+};
+
+export type CouponTryStatus = "trying" | "worked" | "failed" | "done" | "cancelled" | "error";
+
+/** One step of `tryCoupons`, sent as `coupon-try-progress`. */
+export type CouponTryProgress = {
+  tabId: number;
+  /** Zero-based position of `code` in the run. */
+  index: number;
+  total: number;
+  code: string;
+  status: CouponTryStatus;
+  saving: number | null;
+  bestCode: string;
+  bestSaving: number | null;
+  currency: string;
+  message: string;
+};
+
+export type CouponField = {
+  /** A coupon field, or a link that opens one, is on the page. */
+  found: boolean;
+  total: number | null;
+  currency: string;
 };
 
 export type Offer = {

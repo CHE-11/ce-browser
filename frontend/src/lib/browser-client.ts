@@ -51,6 +51,10 @@ import type {
   TrackedPricePatch,
   ReadingStats,
   ShoppingDeals,
+  CouponField,
+  CouponSearch,
+  CouponSearchProgress,
+  CouponTryProgress,
   SiteCookie,
   StoragePair,
   BrowseResult,
@@ -800,6 +804,34 @@ export function findDealsForProduct(url: string, title: string, force = false) {
 
 export function setCouponFeedback(key: string, code: string, action: "tried" | "worked" | "failed") {
   return invoke<ShoppingDeals>("set_coupon_feedback", { key, code, action });
+}
+
+export function findCoupons(id: number, force = false) {
+  return invoke<CouponSearch>("find_coupons", { id, force });
+}
+
+export function tryCoupons(id: number, codes: string[]) {
+  return invoke<CouponSearch>("try_coupons", { id, codes });
+}
+
+export function cancelCouponTry() {
+  return invoke<void>("cancel_coupon_try");
+}
+
+export function setStoreCouponFeedback(store: string, code: string, action: "tried" | "worked" | "failed") {
+  return invoke<CouponSearch>("set_store_coupon_feedback", { store, code, action });
+}
+
+export function detectCouponField(id: number) {
+  return invoke<CouponField>("detect_coupon_field", { id });
+}
+
+export function onCouponSearchProgress(handler: (progress: CouponSearchProgress) => void): Promise<UnlistenFn> {
+  return listen<CouponSearchProgress>("coupon-search-progress", (event) => handler(event.payload));
+}
+
+export function onCouponTryProgress(handler: (progress: CouponTryProgress) => void): Promise<UnlistenFn> {
+  return listen<CouponTryProgress>("coupon-try-progress", (event) => handler(event.payload));
 }
 
 export function aiKeyStatus(provider: string) {

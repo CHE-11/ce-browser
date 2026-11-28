@@ -130,6 +130,9 @@ Windows desktop browser built on Tauri 2 and WebView2. Each tab is its own page 
 - Password generator on this computer, with length and character types, copied to the clipboard
 - Price tracker reads a product price, stores it in `prices.json`, and marks a lower price or a stock change
 - Shopping searches the web for coupon codes and other prices for the product on the page, and the assistant picks them out; only codes and links that appear in the search results are shown
+- Find Coupons searches store-wide (promo, discount, free shipping, Reddit and coupon sites), opens coupon pages to read codes from the full page, and ranks codes by how many sites list them and by past results on that store
+- Find Coupons reads RetailMeNot, CouponFollow, Dealspotr, CouponBirds, SimplyCodes, CouponSolver and Reddit directly in a hidden browser page with your profile, and retries a search there when DuckDuckGo, Bing or Brave asks for a check; an engine that asks for a check rests for five minutes, and codes listed for other stores on a coupon page are left out
+- Try all codes on a cart or checkout page fills the coupon field with each code, reads the order total, marks each code worked or failed with its saving, and leaves the best code applied; it never submits the order
 - Reading stats: word count, minutes at 200 words a minute, and a reading-ease score
 
 ## Customization

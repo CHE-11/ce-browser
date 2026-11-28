@@ -18,6 +18,7 @@ import { checkedLabel, formatPrice, priceChange, siteDomain } from "@/built_in_e
 import { PriceSparkline } from "@/built_in_extensions/shopping/PriceSparkline";
 import { errorText } from "../use-page-tool";
 import { TrackedSection } from "./TrackedSection";
+import { useCoupons } from "./use-coupons";
 
 function samePage(item: ProductPrice, url: string) {
   if (!url || !item.url) {
@@ -45,6 +46,7 @@ export function ShoppingPanel() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [deals, setDeals] = useState<ShoppingDeals | null>(null);
+  const coupons = useCoupons(tab?.id, url);
 
   useEffect(() => {
     void listPrices()
@@ -100,15 +102,35 @@ export function ShoppingPanel() {
         <p id="shopping-panel-page" className="min-w-0 flex-1 truncate text-xs text-zinc-400">
           {tab ? tab.title || tab.url : "No tab open"}
         </p>
-        <IconButton
-          id="shopping-open-page"
-          label="Open Shopping page"
-          onClick={() => {
-            void createTab("ce://shopping");
-          }}
-        >
-          <ExternalLink id="shopping-open-page-icon" aria-hidden />
-        </IconButton>
+        <div className="flex items-center gap-2">
+          {current ? (
+            <IconButton
+              id="shopping-check"
+              label="Check now"
+              className="text-zinc-400"
+              onClick={() => void checkPrice(current.id).then(setItems).catch((reason: unknown) => setError(errorText(reason)))}
+            >
+              <Check id="shopping-check-icon" aria-hidden />
+            </IconButton>
+          ) : null}
+          <IconButton
+            id="shopping-track"
+            label={current ? "Untrack" : "Track"}
+            className={current ? "text-sky-400 hover:text-sky-300" : "text-zinc-500"}
+            onClick={track}
+          >
+            <Crosshair id="shopping-track-icon" aria-hidden />
+          </IconButton>
+          <IconButton
+            id="shopping-open-page"
+            label="Open Shopping page"
+            onClick={() => {
+              void createTab("ce://shopping");
+            }}
+          >
+            <ExternalLink id="shopping-open-page-icon" aria-hidden />
+          </IconButton>
+        </div>
       </header>
       <div id="shopping-body" className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto px-3 py-3">
         {productPage ? (
@@ -118,58 +140,46 @@ export function ShoppingPanel() {
               deals={deals}
               busy={busy}
               onSearch={search}
-              onFeedback={setDeals}
+              coupons={coupons}
               onTrack={(offerUrl) => {
                 void addPriceUrl(offerUrl)
                   .then(setItems)
                   .catch((reason: unknown) => setError(errorText(reason)));
               }}
             />
-            <div id="shopping-deals-divider" className="h-px w-full bg-zinc-800" />
+            {coupons.field?.found && !coupons.search && !coupons.busy ? (
+              <p id="shopping-coupon-field-hint" className="text-xs text-emerald-300">
+                This page has a coupon field. Find Coupons, then try them all here.
+              </p>
+            ) : null}
           </>
         ) : null}
 
-        {productPage ? (
-          <section id="shopping-product" className="flex flex-col gap-2 rounded-md bg-zinc-900 px-2 py-2">
-            <div id="shopping-product-row" className="flex items-start gap-2">
-              <div id="shopping-product-text" className="min-w-0 flex-1">
-                <p id="shopping-product-title" className="truncate text-sm">
-                  {current?.title || tab?.title || "This page"}
-                </p>
-                <p id="shopping-product-price" className="text-xs text-zinc-400">
-                  {current ? formatPrice(current.price, current.currency) : null}
-                  {change && change.amount < 0 ? ` · down ${formatPrice(Math.abs(change.amount), current?.currency || "")}` : ""}
-                  {current?.targetPrice ? ` · target ${formatPrice(current.targetPrice, current.currency)}` : ""}
-                </p>
-                {current ? (
-                  <p id="shopping-product-status" className="text-xs text-zinc-500">
-                    {checkedLabel(current)}
+        {(productPage && current && current.history.length > 1) ? (
+          <>
+            <div id="shopping-deals-divider" className="h-px w-full bg-zinc-800" />
+            <section id="shopping-product" className="flex flex-col gap-2 rounded-md bg-zinc-900 px-2 py-2">
+              <div id="shopping-product-row" className="flex items-start gap-2">
+                <div id="shopping-product-text" className="min-w-0 flex-1">
+                  <p id="shopping-product-title" className="truncate text-sm">
+                    {current?.title || tab?.title || "This page"}
                   </p>
-                ) : null}
+                  <p id="shopping-product-price" className="text-xs text-zinc-400">
+                    {current ? formatPrice(current.price, current.currency) : null}
+                    {change && change.amount < 0 ? ` · down ${formatPrice(Math.abs(change.amount), current?.currency || "")}` : ""}
+                    {current?.targetPrice ? ` · target ${formatPrice(current.targetPrice, current.currency)}` : ""}
+                  </p>
+                  {current ? (
+                    <p id="shopping-product-status" className="text-xs text-zinc-500">
+                      {checkedLabel(current)}
+                    </p>
+                  ) : null}
+                </div>
+                {current && current.history.length > 1 ? <PriceSparkline id="shopping-product-spark" history={current.history} width={88} height={32} /> : null}
+        
               </div>
-              {current && current.history.length > 1 ? <PriceSparkline id="shopping-product-spark" history={current.history} width={88} height={32} /> : null}
-              <div id="shopping-product-icons" className="flex shrink-0 items-center">
-                {current ? (
-                  <IconButton
-                    id="shopping-check"
-                    label="Check now"
-                    className="text-zinc-400"
-                    onClick={() => void checkPrice(current.id).then(setItems).catch((reason: unknown) => setError(errorText(reason)))}
-                  >
-                    <Check id="shopping-check-icon" aria-hidden />
-                  </IconButton>
-                ) : null}
-                <IconButton
-                  id="shopping-track"
-                  label={current ? "Untrack" : "Track"}
-                  className={current ? "text-sky-400 hover:text-sky-300" : "text-zinc-500"}
-                  onClick={track}
-                >
-                  <Crosshair id="shopping-track-icon" aria-hidden />
-                </IconButton>
-              </div>
-            </div>
-          </section>
+            </section>
+          </>
         ) : null}
         {domain ? (
           <TrackedSection id="shopping-tracked" items={onSite} error="" onCheck={(id) => void checkPrice(id).then(setItems).catch((reason: unknown) => setListError(errorText(reason)))} />
@@ -178,9 +188,9 @@ export function ShoppingPanel() {
             Open a site to see products tracked there.
           </p>
         )}
-        {listError || error ? (
+        {listError || error || coupons.error ? (
           <p id="shopping-error" className="text-xs text-amber-300">
-            {error || listError}
+            {error || coupons.error || listError}
           </p>
         ) : null}
       </div>

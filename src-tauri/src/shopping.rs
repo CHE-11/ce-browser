@@ -1,6 +1,8 @@
 //! Coupons and better prices for the product in a tab, from web search results read by the assistant.
 
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
@@ -17,7 +19,7 @@ const MAX_QUERIES: usize = 12;
 const CONFIRM_LIMIT: usize = 12;
 const FETCH_BATCH: usize = 4;
 const STORES: [&str; 6] = ["amazon", "walmart", "bestbuy", "target", "ebay", "newegg"];
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+pub(crate) const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(default, rename_all = "camelCase")]
@@ -37,6 +39,13 @@ pub struct Coupon {
     pub tried_at: u64,
     pub worked: bool,
     pub failed: bool,
+    /// How many pages list this code.
+    pub sources: u32,
+    /// Amount taken off the order total when the code was tried on the page.
+    pub saving: Option<f64>,
+    pub currency: String,
+    /// When the code was last applied on the page by `try_coupons`.
+    pub tested_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -89,26 +98,29 @@ const SHOPPING_FILE: &str = "shopping.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-struct ShoppingFile {
-    entries: Vec<ShoppingEntry>,
+pub(crate) struct ShoppingFile {
+    pub(crate) entries: Vec<ShoppingEntry>,
+    /// Store-wide coupon searches, keyed by store host.
+    pub(crate) stores: Vec<crate::coupons::StoreCoupons>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
-struct ShoppingEntry {
-    key: String,
-    checked_at: u64,
-    deals: ShoppingDeals,
-    feedback: Vec<CouponFeedback>,
+pub(crate) struct ShoppingEntry {
+    pub(crate) key: String,
+    pub(crate) checked_at: u64,
+    pub(crate) deals: ShoppingDeals,
+    pub(crate) feedback: Vec<CouponFeedback>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
-struct CouponFeedback {
-    code: String,
-    tried_at: u64,
-    worked: bool,
-    failed: bool,
+pub(crate) struct CouponFeedback {
+    pub(crate) code: String,
+    pub(crate) tried_at: u64,
+    pub(crate) worked: bool,
+    pub(crate) failed: bool,
+    pub(crate) saving: Option<f64>,
 }
 
 pub fn find_deals(app: &AppHandle, id: u32, force: bool) -> Result<ShoppingDeals, String> {
@@ -190,7 +202,7 @@ pub fn set_coupon_feedback(
                     code: code.to_string(),
                     tried_at: now,
                     worked: true,
-                    failed: false,
+                    ..CouponFeedback::default()
                 });
             }
         }
@@ -203,8 +215,8 @@ pub fn set_coupon_feedback(
                 entry.feedback.push(CouponFeedback {
                     code: code.to_string(),
                     tried_at: now,
-                    worked: false,
                     failed: true,
+                    ..CouponFeedback::default()
                 });
             }
         }
@@ -356,6 +368,7 @@ fn apply_feedback(
             coupon.tried_at = item.tried_at;
             coupon.worked = item.worked;
             coupon.failed = item.failed;
+            coupon.saving = item.saving.or(coupon.saving);
         }
     }
     deals.coupons.sort_by(|left, right| {
@@ -367,22 +380,22 @@ fn apply_feedback(
     deals
 }
 
-fn load_shopping(app: &AppHandle) -> ShoppingFile {
+pub(crate) fn load_shopping(app: &AppHandle) -> ShoppingFile {
     files::read_json(&paths::data_file(app, SHOPPING_FILE))
 }
 
-fn save_shopping(app: &AppHandle, file: &ShoppingFile) -> Result<(), String> {
+pub(crate) fn save_shopping(app: &AppHandle, file: &ShoppingFile) -> Result<(), String> {
     files::write_json(&paths::data_file(app, SHOPPING_FILE), file)
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
 }
 
-fn extract_coupons(sources: &[SearchResult]) -> Vec<Coupon> {
+pub(crate) fn extract_coupons(sources: &[SearchResult]) -> Vec<Coupon> {
     let mut out: Vec<Coupon> = Vec::new();
     for source in sources {
         let text = format!("{} {}", source.title, source.snippet);
@@ -408,7 +421,7 @@ fn extract_coupons(sources: &[SearchResult]) -> Vec<Coupon> {
     out
 }
 
-fn code_tokens(text: &str) -> Vec<String> {
+pub(crate) fn code_tokens(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut current = String::new();
     for character in text.chars() {
@@ -443,7 +456,7 @@ fn consider_code(out: &mut Vec<String>, token: &str) {
     out.push(token.to_string());
 }
 
-fn expiry_hint(title: &str, snippet: &str) -> String {
+pub(crate) fn expiry_hint(title: &str, snippet: &str) -> String {
     let text = format!("{title} {snippet}").to_ascii_lowercase();
     if text.contains("expired") {
         return "May be expired".into();
@@ -664,7 +677,7 @@ fn name_tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn page_name(app: &AppHandle, id: u32) -> Result<String, String> {
+pub(crate) fn page_name(app: &AppHandle, id: u32) -> Result<String, String> {
     let webview = tabs::page_view(app, id).ok_or("This page is not loaded yet.")?;
     let value = webview2::evaluate(
         &webview,
@@ -675,7 +688,7 @@ fn page_name(app: &AppHandle, id: u32) -> Result<String, String> {
     Ok(value.as_str().unwrap_or("").to_string())
 }
 
-fn store_host(url: &str) -> Option<String> {
+pub(crate) fn store_host(url: &str) -> Option<String> {
     let parsed = url::Url::parse(url).ok()?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return None;
@@ -685,7 +698,7 @@ fn store_host(url: &str) -> Option<String> {
 }
 
 /// Drops a trailing `| Store` segment and limits the length so the search stays focused.
-fn clean_name(title: &str) -> String {
+pub(crate) fn clean_name(title: &str) -> String {
     let first = title.split(" | ").next().unwrap_or(title);
     first
         .split_whitespace()
@@ -696,10 +709,10 @@ fn clean_name(title: &str) -> String {
         .collect()
 }
 
-struct Gathered {
-    sources: Vec<SearchResult>,
-    skipped: Vec<String>,
-    failure: Option<String>,
+pub(crate) struct Gathered {
+    pub(crate) sources: Vec<SearchResult>,
+    pub(crate) skipped: Vec<String>,
+    pub(crate) failure: Option<String>,
 }
 
 fn build_queries(
@@ -795,22 +808,50 @@ Reply with one JSON object {{\"queries\": [\"...\"]}} of up to 4 short web searc
     queries
 }
 
-fn gather(queries: &[String], region: &str) -> Gathered {
+pub(crate) fn gather(queries: &[String], region: &str) -> Gathered {
+    gather_with(queries, |query| search_query(query, region), |_, _| {}, |_| {})
+}
+
+/// One finished query, passed to the `after` callback of `gather_with`.
+pub(crate) struct QueryReport<'a> {
+    pub(crate) index: usize,
+    pub(crate) query: &'a str,
+    /// Engine that answered. `None` when every engine was blocked or had nothing relevant.
+    pub(crate) engine: Option<&'a str>,
+    pub(crate) results: &'a [SearchResult],
+    pub(crate) skipped: &'a [String],
+}
+
+/// `gather` with its own `search`, calling `before` as each query starts and `after` when it finishes.
+pub(crate) fn gather_with(
+    queries: &[String],
+    search: impl Fn(&str) -> Searched,
+    mut before: impl FnMut(usize, &str),
+    mut after: impl FnMut(QueryReport),
+) -> Gathered {
     let mut sources = Vec::new();
     let mut skipped = Vec::new();
     let mut failure = None;
-    for query in queries {
-        let (results, blocked) = search_query(query, region);
-        for name in blocked {
+    for (index, query) in queries.iter().enumerate() {
+        before(index, query);
+        let searched = search(query);
+        after(QueryReport {
+            index,
+            query,
+            engine: searched.engine,
+            results: &searched.results,
+            skipped: &searched.skipped,
+        });
+        for name in searched.skipped {
             if !skipped.iter().any(|kept| kept == &name) {
                 skipped.push(name);
             }
         }
-        if results.is_empty() {
+        if searched.results.is_empty() {
             failure = Some(engine_failure(&skipped));
             continue;
         }
-        for result in results {
+        for result in searched.results {
             if !sources
                 .iter()
                 .any(|kept: &SearchResult| kept.url == result.url)
@@ -826,7 +867,7 @@ fn gather(queries: &[String], region: &str) -> Gathered {
     }
 }
 
-fn engine_failure(skipped: &[String]) -> String {
+pub(crate) fn engine_failure(skipped: &[String]) -> String {
     if skipped.is_empty() {
         "The web search found nothing for this product.".into()
     } else if skipped.len() == 1 {
@@ -842,81 +883,197 @@ fn engine_failure(skipped: &[String]) -> String {
     }
 }
 
-/// The first engine that returns results wins. A blocked engine is skipped.
-fn search_query(query: &str, region: &str) -> (Vec<SearchResult>, Vec<String>) {
-    let attempts = [
-        ("DuckDuckGo", search_duckduckgo(query, region)),
-        ("Bing", search_bing(query)),
-        ("Brave", search_brave(query)),
-    ];
-    combine_engines(&attempts)
+pub(crate) struct Searched {
+    pub(crate) results: Vec<SearchResult>,
+    pub(crate) skipped: Vec<String>,
+    pub(crate) engine: Option<&'static str>,
 }
 
-fn combine_engines(
-    attempts: &[(&str, Result<Vec<SearchResult>, String>)],
-) -> (Vec<SearchResult>, Vec<String>) {
-    let mut skipped = Vec::new();
-    for (name, outcome) in attempts {
-        match outcome {
-            Ok(results) if !results.is_empty() => return (results.clone(), skipped),
-            Ok(_) => {}
-            Err(_) => skipped.push((*name).to_string()),
+pub(crate) type Attempt<'a> = (&'static str, &'a dyn Fn() -> Result<Vec<SearchResult>, String>);
+
+pub(crate) const DUCKDUCKGO: &str = "DuckDuckGo";
+pub(crate) const BING: &str = "Bing";
+pub(crate) const BRAVE: &str = "Brave";
+
+/// Asking an engine again while it shows a check keeps the block going, so it rests for a while.
+const ENGINE_REST: Duration = Duration::from_secs(300);
+
+fn resting() -> &'static Mutex<HashMap<&'static str, Instant>> {
+    static RESTING: std::sync::OnceLock<Mutex<HashMap<&'static str, Instant>>> =
+        std::sync::OnceLock::new();
+    RESTING.get_or_init(Default::default)
+}
+
+/// Runs `run` unless `key` asked for a check in the last few minutes.
+pub(crate) fn guarded(
+    key: &'static str,
+    run: impl Fn() -> Result<Vec<SearchResult>, String>,
+) -> impl Fn() -> Result<Vec<SearchResult>, String> {
+    move || {
+        let blocked_at = resting().lock().ok().and_then(|map| map.get(key).copied());
+        if blocked_at.is_some_and(|at| at.elapsed() < ENGINE_REST) {
+            return Err(format!("{key} is resting after a check."));
+        }
+        let outcome = run();
+        if let Err(error) = &outcome
+            && error.contains("asked for")
+            && let Ok(mut map) = resting().lock()
+        {
+            map.insert(key, Instant::now());
+        }
+        outcome
+    }
+}
+
+/// Engines are asked in order and the first with relevant results wins. A blocked engine is skipped.
+pub(crate) fn search_query(query: &str, region: &str) -> Searched {
+    let duckduckgo = guarded("duckduckgo-http", || search_duckduckgo(query, region));
+    let bing = guarded("bing-http", || search_bing(query));
+    let brave = guarded("brave-http", || search_brave(query));
+    combine_engines(
+        query,
+        &[(DUCKDUCKGO, &duckduckgo), (BING, &bing), (BRAVE, &brave)],
+    )
+}
+
+/// Engines can answer a bot with unrelated pages, so results must mention the query.
+pub(crate) fn combine_engines(query: &str, attempts: &[Attempt]) -> Searched {
+    let terms = query_terms(query);
+    let mut skipped: Vec<String> = Vec::new();
+    for (name, run) in attempts {
+        match run() {
+            Ok(results) => {
+                let kept: Vec<SearchResult> = results
+                    .into_iter()
+                    .filter(|result| relevant(result, &terms))
+                    .collect();
+                if !kept.is_empty() {
+                    skipped.retain(|skip| skip != name);
+                    return Searched {
+                        results: kept,
+                        skipped,
+                        engine: Some(name),
+                    };
+                }
+            }
+            Err(_) => {
+                if !skipped.iter().any(|skip| skip == name) {
+                    skipped.push((*name).to_string());
+                }
+            }
         }
     }
-    (Vec::new(), skipped)
+    Searched {
+        results: Vec::new(),
+        skipped,
+        engine: None,
+    }
+}
+
+const QUERY_STOP_WORDS: [&str; 22] = [
+    "com", "net", "org", "www", "http", "https", "coupon", "coupons", "code", "codes", "promo",
+    "discount", "free", "shipping", "reddit", "price", "buy", "the", "and", "for", "with", "deals",
+];
+
+/// Words a relevant result must contain. Empty for a bare identifier search, which is not filtered.
+fn query_terms(query: &str) -> Vec<String> {
+    let mut terms: Vec<String> = Vec::new();
+    for word in query.split_whitespace() {
+        if word.starts_with("-site:") || word.starts_with("site:") {
+            continue;
+        }
+        for token in word.split(|character: char| !character.is_ascii_alphanumeric()) {
+            let token = token.to_ascii_lowercase();
+            if token.len() >= 3
+                && !QUERY_STOP_WORDS.contains(&token.as_str())
+                && !terms.contains(&token)
+            {
+                terms.push(token);
+            }
+        }
+    }
+    if terms
+        .iter()
+        .all(|term| term.chars().all(|character| character.is_ascii_digit()))
+    {
+        return Vec::new();
+    }
+    terms
+}
+
+fn relevant(result: &SearchResult, terms: &[String]) -> bool {
+    if terms.is_empty() {
+        return true;
+    }
+    let blob = format!("{} {} {}", result.title, result.snippet, result.url).to_ascii_lowercase();
+    let needed = terms.len().div_ceil(3).max(1);
+    terms.iter().filter(|term| blob.contains(term.as_str())).count() >= needed
 }
 
 fn search_duckduckgo(query: &str, region: &str) -> Result<Vec<SearchResult>, String> {
-    let body = fetch_search(
-        SEARCH_URL,
-        query,
-        if region.is_empty() {
-            None
-        } else {
-            Some(("kl", region))
-        },
-    )?;
-    let results = parse_results(&body, RESULTS_PER_QUERY);
-    if results.is_empty() && body.contains("anomaly") {
-        return Err("DuckDuckGo asked for a captcha.".into());
-    }
-    Ok(results)
+    engine_results(DUCKDUCKGO, &fetch_search(&engine_url(DUCKDUCKGO, query, region))?)
 }
 
 fn search_bing(query: &str) -> Result<Vec<SearchResult>, String> {
-    let body = fetch_search(BING_URL, query, None)?;
-    let results = parse_bing(&body, RESULTS_PER_QUERY);
-    if results.is_empty() && blocked_page(&body) {
-        return Err("Bing asked for a check.".into());
-    }
-    Ok(results)
+    engine_results(BING, &fetch_search(&engine_url(BING, query, ""))?)
 }
 
 fn search_brave(query: &str) -> Result<Vec<SearchResult>, String> {
-    let body = fetch_search(BRAVE_URL, query, None)?;
-    let results = parse_brave(&body, RESULTS_PER_QUERY);
-    if results.is_empty() && blocked_page(&body) {
-        return Err("Brave asked for a check.".into());
+    engine_results(BRAVE, &fetch_search(&engine_url(BRAVE, query, ""))?)
+}
+
+/// Address of an engine's results page for `query`.
+pub(crate) fn engine_url(engine: &str, query: &str, region: &str) -> String {
+    let base = match engine {
+        DUCKDUCKGO => SEARCH_URL,
+        BING => BING_URL,
+        _ => BRAVE_URL,
+    };
+    let mut url = url::Url::parse(base).expect("search URLs are valid");
+    url.query_pairs_mut().append_pair("q", query);
+    if engine == DUCKDUCKGO && !region.is_empty() {
+        url.query_pairs_mut().append_pair("kl", region);
+    }
+    url.to_string()
+}
+
+/// Results from an engine's page. A check page with no results is an error.
+pub(crate) fn engine_results(engine: &str, body: &str) -> Result<Vec<SearchResult>, String> {
+    let results = match engine {
+        DUCKDUCKGO => parse_results(body, RESULTS_PER_QUERY),
+        BING => parse_bing(body, RESULTS_PER_QUERY),
+        _ => parse_brave(body, RESULTS_PER_QUERY),
+    };
+    let blocked = if engine == DUCKDUCKGO {
+        body.contains("anomaly") || blocked_page(body)
+    } else {
+        blocked_page(body)
+    };
+    if results.is_empty() && blocked {
+        return Err(format!("{engine} asked for a check."));
     }
     Ok(results)
 }
 
-fn fetch_search(url: &str, query: &str, extra: Option<(&str, &str)>) -> Result<String, String> {
-    let mut request = ureq::get(url)
+fn fetch_search(url: &str) -> Result<String, String> {
+    ureq::get(url)
         .timeout(Duration::from_secs(12))
         .set("User-Agent", USER_AGENT)
-        .query("q", query);
-    if let Some((key, value)) = extra {
-        request = request.query(key, value);
-    }
-    request
+        .set(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        .set("Accept-Language", "en-US,en;q=0.9")
         .call()
-        .map_err(|error| format!("Couldn't reach the web search. {error}"))?
+        .map_err(|error| match error {
+            ureq::Error::Status(403 | 429, _) => "The web search asked for a check.".to_string(),
+            error => format!("Couldn't reach the web search. {error}"),
+        })?
         .into_string()
         .map_err(|error| error.to_string())
 }
 
-fn blocked_page(body: &str) -> bool {
+pub(crate) fn blocked_page(body: &str) -> bool {
     let lower = body.to_ascii_lowercase();
     lower.contains("cf-challenge")
         || lower.contains("captcha")
@@ -924,13 +1081,32 @@ fn blocked_page(body: &str) -> bool {
         || lower.contains("just a moment")
 }
 
+/// The result address behind a Bing `/ck/a` tracking link, which carries it as `u=a1<base64url>`.
+fn bing_target(href: &str) -> Option<String> {
+    use base64::Engine;
+    let parsed = url::Url::parse(href).ok()?;
+    if !parsed.host_str().is_some_and(|host| host.ends_with("bing.com")) {
+        return Some(href.to_string());
+    }
+    let encoded = parsed
+        .query_pairs()
+        .find(|(key, _)| key == "u")
+        .map(|(_, value)| value.into_owned())?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(encoded.strip_prefix("a1")?.trim_end_matches('='))
+        .ok()?;
+    let target = String::from_utf8(bytes).ok()?;
+    (target.starts_with("http://") || target.starts_with("https://")).then_some(target)
+}
+
 fn parse_bing(html: &str, limit: usize) -> Vec<SearchResult> {
     parse_blocks(html, "class=\"b_algo\"", limit, |block| {
-        let href = first_href(block)?;
+        let heading = block.find("<h2").map(|index| &block[index..]).unwrap_or(block);
+        let href = bing_target(&first_href(heading)?)?;
         if store_host(&href).is_some_and(|host| host.contains("bing.com")) {
             return None;
         }
-        let title = anchor_text(block).unwrap_or_default();
+        let title = anchor_text(heading).unwrap_or_default();
         let snippet = paragraph_text(block);
         (!title.is_empty()).then_some(SearchResult {
             title,
@@ -1067,7 +1243,7 @@ fn rank_candidates(
         .collect()
 }
 
-fn skip_host(url: &str) -> bool {
+pub(crate) fn skip_host(url: &str) -> bool {
     store_host(url).is_some_and(|host| {
         [
             "reddit.com",
@@ -1230,7 +1406,7 @@ fn parse_results(html: &str, limit: usize) -> Vec<SearchResult> {
     out
 }
 
-fn attribute(tag: &str, name: &str) -> Option<String> {
+pub(crate) fn attribute(tag: &str, name: &str) -> Option<String> {
     for quote in ['"', '\''] {
         let needle = format!("{name}={quote}");
         if let Some(index) = tag.find(&needle) {
@@ -1264,7 +1440,7 @@ fn target_url(href: &str) -> Option<String> {
     matches!(parsed.scheme(), "http" | "https").then(|| parsed.to_string())
 }
 
-fn text(html: &str) -> String {
+pub(crate) fn text(html: &str) -> String {
     let mut out = String::new();
     let mut inside = false;
     for character in html.chars() {
@@ -1281,7 +1457,7 @@ fn text(html: &str) -> String {
         .join(" ")
 }
 
-fn decode_entities(text: &str) -> String {
+pub(crate) fn decode_entities(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(start) = rest.find('&') {
@@ -1326,7 +1502,7 @@ fn decode_entities(text: &str) -> String {
     out
 }
 
-fn parse_reply(reply: &str) -> Option<serde_json::Value> {
+pub(crate) fn parse_reply(reply: &str) -> Option<serde_json::Value> {
     let start = reply.find('{')?;
     let end = reply.rfind('}')?;
     if end <= start {
@@ -1337,7 +1513,7 @@ fn parse_reply(reply: &str) -> Option<serde_json::Value> {
         .filter(serde_json::Value::is_object)
 }
 
-fn field(value: &serde_json::Value, key: &str) -> String {
+pub(crate) fn field(value: &serde_json::Value, key: &str) -> String {
     value
         .get(key)
         .and_then(|item| item.as_str())
@@ -1346,7 +1522,7 @@ fn field(value: &serde_json::Value, key: &str) -> String {
         .to_string()
 }
 
-fn same_url(left: &str, right: &str) -> bool {
+pub(crate) fn same_url(left: &str, right: &str) -> bool {
     let left = left.trim().trim_end_matches('/');
     let right = right.trim().trim_end_matches('/');
     !left.is_empty() && left.eq_ignore_ascii_case(right)
@@ -1614,25 +1790,53 @@ mod tests {
             url: "https://other.test/mug".into(),
             snippet: "$9.99".into(),
         };
-        let (results, skipped) = combine_engines(&[
-            ("DuckDuckGo", Err("captcha".into())),
-            ("Bing", Ok(vec![hit])),
-            ("Brave", Err("captcha".into())),
-        ]);
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].url, "https://other.test/mug");
-        assert_eq!(skipped, vec!["DuckDuckGo".to_string()]);
+        let blocked = || Err("captcha".to_string());
+        let found = move || Ok(vec![hit.clone()]);
+        let searched = combine_engines(
+            "\"Blue Mug\" price",
+            &[("DuckDuckGo", &blocked), ("Bing", &found), ("Brave", &blocked)],
+        );
+        assert_eq!(searched.results.len(), 1);
+        assert_eq!(searched.results[0].url, "https://other.test/mug");
+        assert_eq!(searched.skipped, vec!["DuckDuckGo".to_string()]);
+        assert_eq!(searched.engine, Some("Bing"));
     }
 
     #[test]
     fn every_blocked_engine_is_named() {
-        let (results, skipped) = combine_engines(&[
-            ("DuckDuckGo", Err("captcha".into())),
-            ("Bing", Err("captcha".into())),
-            ("Brave", Err("captcha".into())),
-        ]);
-        assert!(results.is_empty());
-        assert_eq!(skipped, vec!["DuckDuckGo", "Bing", "Brave"]);
+        let blocked = || Err("captcha".to_string());
+        let searched = combine_engines(
+            "Blue Mug",
+            &[("DuckDuckGo", &blocked), ("Bing", &blocked), ("Brave", &blocked)],
+        );
+        assert!(searched.results.is_empty());
+        assert_eq!(searched.skipped, vec!["DuckDuckGo", "Bing", "Brave"]);
+        assert_eq!(searched.engine, None);
+    }
+
+    #[test]
+    fn unrelated_results_fall_through_to_the_next_engine() {
+        let junk = || {
+            Ok(vec![SearchResult {
+                title: "Changing your pickup location".into(),
+                url: "https://help.uber.com/riders".into(),
+                snippet: "Update where your driver meets you.".into(),
+            }])
+        };
+        let real = || {
+            Ok(vec![SearchResult {
+                title: "Katin USA Promo Codes".into(),
+                url: "https://coupons.test/katinusa".into(),
+                snippet: "Use code SAVE20.".into(),
+            }])
+        };
+        let searched = combine_engines(
+            "site:retailmenot.com katinusa.com",
+            &[("Bing", &junk), ("Brave", &real)],
+        );
+        assert_eq!(searched.engine, Some("Brave"));
+        assert_eq!(searched.results[0].url, "https://coupons.test/katinusa");
+        assert!(super::query_terms("0012345678905").is_empty());
     }
 
     #[test]
@@ -1643,6 +1847,11 @@ mod tests {
         assert_eq!(parsed[0].url, "https://other.test/mug");
         assert_eq!(parsed[0].title, "Blue Mug");
         assert!(parsed[0].snippet.contains("9.99"));
+
+        let tracked = r#"<li class="b_algo"><h2><a href="https://www.bing.com/ck/a?!&amp;&amp;p=abc&amp;u=a1aHR0cHM6Ly9vdGhlci50ZXN0L211Zw&amp;ntb=1">Blue Mug</a></h2><p>Blue Mug for $9.99</p></li>"#;
+        let parsed = parse_bing(tracked, 8);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].url, "https://other.test/mug");
 
         let brave = r#"<div class="snippet" data-type="web"><a href="https://other.test/mug"><div class="title">Blue Mug</div></a><div class="snippet-description">Blue Mug for $9.99</div></div>"#;
         let parsed = parse_brave(brave, 8);
